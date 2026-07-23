@@ -1,0 +1,20 @@
+{
+  "name": "email-services",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/email-services/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/email-services",
+        "tsConfig": "libs/email-services/tsconfig.lib.json",
+        "packageJson": "libs/email-services/package.json",
+        "main": "libs/email-services/src/index.ts",
+        "assets": ["libs/email-services/*.md"]
+      }
+    }
+  }
+}

@@ -12,7 +12,7 @@ export class UserController {
   constructor(private readonly userService: UserService) { }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.SUPER_ADMIN)
+  @Roles(USER_ROLE.ADMIN)
   @Patch('admin/update/:id')
   @UseInterceptors(FileInterceptor('profileImage'))
   @HttpCode(HttpStatus.OK)

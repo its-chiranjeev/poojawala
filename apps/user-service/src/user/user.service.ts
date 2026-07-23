@@ -87,7 +87,7 @@ export class UserService {
     }
 
     // Normal users cannot change their role or status
-    if (user.role !== USER_ROLE.SUPER_ADMIN) {
+    if (user.role !== USER_ROLE.ADMIN) {
       delete dto.role;
       delete dto.status;
     }

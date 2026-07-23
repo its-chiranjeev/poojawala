@@ -30,6 +30,8 @@ export class OtpDto {
   role!: USER_ROLE;
 }
 
+export class RegisterUserDto extends OtpDto {}
+
 export class RegisterNormalUserDto {
   @IsEmail()
   @IsNotEmpty()

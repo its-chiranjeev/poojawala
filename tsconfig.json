@@ -72,6 +72,12 @@
       ],
       "@likemyproduct/payment/*": [
         "libs/payment/src/*"
+      ],
+      "@likemyproduct/sms-services": [
+        "libs/sms-services/src"
+      ],
+      "@likemyproduct/sms-services/*": [
+        "libs/sms-services/src/*"
       ]
     }
   },

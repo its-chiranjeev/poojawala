@@ -10,10 +10,10 @@ import {
 import { USER_ROLE } from '@likemyproduct/entities';
 
 export class VerifyOtpDto {
+  @IsOptional()
   @IsEmail()
-  @IsNotEmpty()
   @Transform(({ value }) => value?.trim().toLowerCase())
-  email!: string;
+  email?: string;
 
   @IsOptional()
   @IsString()

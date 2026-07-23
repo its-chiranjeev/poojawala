@@ -5,6 +5,7 @@ import { EntitiesModule } from '@likemyproduct/entities';
 import { RepositoriesModule } from '@likemyproduct/repositories';
 import { CommonAuthModule } from '@likemyproduct/common';
 import { EmailServicesModule } from '@likemyproduct/email-services';
+import { SmsServicesModule } from '@likemyproduct/sms-services';
 import { S3Module } from '@likemyproduct/s3';
 
 @Module({
@@ -13,6 +14,7 @@ import { S3Module } from '@likemyproduct/s3';
     RepositoriesModule,
     CommonAuthModule,
     EmailServicesModule,
+    SmsServicesModule,
     S3Module,
   ],
   controllers: [AuthModuleController],

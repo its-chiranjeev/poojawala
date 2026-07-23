@@ -12,8 +12,9 @@ import {
 } from 'typeorm';
 
 export enum USER_ROLE {
-  USER = 'USER',
-  SUPER_ADMIN = 'SUPER_ADMIN',
+  CUSTOMER = 'CUSTOMER',
+  PUROHIT = 'PUROHIT',
+  ADMIN = 'ADMIN',
 }
 
 export enum USER_STATUS {
@@ -26,8 +27,8 @@ export enum USER_STATUS {
 
 @Entity('users')
 export class User {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
+  @PrimaryGeneratedColumn()
+  id!: number;
 
   // Basic Info
   @Index({ unique: true })
@@ -71,7 +72,7 @@ export class User {
   @Column({
     type: 'enum',
     enum: USER_ROLE,
-    default: USER_ROLE.USER,
+    default: USER_ROLE.CUSTOMER,
   })
   role!: USER_ROLE;
 

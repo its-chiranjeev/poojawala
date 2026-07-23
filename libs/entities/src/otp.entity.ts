@@ -10,8 +10,8 @@ import { USER_ROLE } from './user.entity';
 
 @Entity('otps')
 export class Otp {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
+  @PrimaryGeneratedColumn()
+  id!: number;
 
   @Index()
   @Column({ type: 'varchar', length: 150, nullable: true })
@@ -24,18 +24,14 @@ export class Otp {
   @Column({ type: 'varchar', length: 10 })
   otp!: string;
 
-  @Column({
-    type: 'enum',
-    enum: USER_ROLE,
-    default: USER_ROLE.USER,
-  })
-  role!: USER_ROLE;
-
-  @Column({ type: 'boolean', default: false })
-  isVerified!: boolean;
+  @Column({ type: 'enum', enum: USER_ROLE, nullable: true })
+  role?: USER_ROLE;
 
   @Column({ type: 'timestamp' })
   expiresAt!: Date;
+
+  @Column({ type: 'boolean', default: false })
+  isVerified!: boolean;
 
   @CreateDateColumn()
   createdAt!: Date;
@@ -43,3 +39,4 @@ export class Otp {
   @UpdateDateColumn()
   updatedAt!: Date;
 }
+

@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { AuthModuleService } from './auth-module.service';
 import { JwtAuthGuard, CsrfGuard } from '@likemyproduct/common';
-import { LoginDto, VerifyOtpDto, RegisterSuperAdminDto, RegisterNormalUserDto, OtpDto } from '@likemyproduct/dtos';
+import { LoginDto, VerifyOtpDto, RegisterSuperAdminDto, RegisterNormalUserDto, OtpDto, RegisterUserDto } from '@likemyproduct/dtos';
 import type { Response } from 'express';
 import * as crypto from 'crypto';
 import { S3Service } from '@likemyproduct/s3';
@@ -25,6 +25,24 @@ export class AuthModuleController {
     private readonly authModuleService: AuthModuleService,
     private readonly s3Service: S3Service,
   ) { }
+
+  @Post('generate-otp')
+  @HttpCode(HttpStatus.OK)
+  async generateOtp(
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    dto: RegisterUserDto,
+  ) {
+    return this.authModuleService.generateOtpService(dto);
+  }
+
+  @Post('verify-otp')
+  @HttpCode(HttpStatus.OK)
+  async verifyOtp(
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    dto: VerifyOtpDto,
+  ) {
+    return this.authModuleService.verifyOtpService(dto);
+  }
 
   private setAuthCookies(res: Response, accessToken: string, refreshToken: string, csrfToken: string) {
     const isProd = process.env.NODE_ENV === 'production';

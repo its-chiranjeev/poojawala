@@ -18,9 +18,11 @@ import {
   VerifyOtpDto,
   OtpDto,
   RegisterNormalUserDto,
+  RegisterUserDto,
 } from '@likemyproduct/dtos';
 import { DataSource } from 'typeorm';
 import { EmailService } from '@likemyproduct/email-services';
+import { SmsService } from '@likemyproduct/sms-services';
 
 @Injectable()
 export class AuthModuleService {
@@ -30,6 +32,7 @@ export class AuthModuleService {
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
+    private readonly smsService: SmsService,
   ) { }
 
   async issueAuthTokens(user: User) {
@@ -105,21 +108,13 @@ export class AuthModuleService {
     return Buffer.from(value).toString('base64url');
   }
 
-  async generateOtpService(dto: OtpDto) {
-    if (!dto.email && !dto.phone) {
-      throw new BadRequestException(
-        'At least email or phone number must be provided',
-      );
+  async generateOtpService(dto: RegisterUserDto) {
+    if (!dto.phone) {
+      throw new BadRequestException('Phone number is required');
     }
 
-    // 1. Verify if user already exists by email
-    if (dto.email) {
-      const existingUserByEmail = await this.userRepository.findByEmail(
-        dto.email,
-      );
-      if (existingUserByEmail) {
-        throw new ConflictException('Email already in use');
-      }
+    if (![USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN].includes(dto.role)) {
+      throw new BadRequestException('Invalid role');
     }
 
     // 2. Verify if user already exists by phone
@@ -130,68 +125,65 @@ export class AuthModuleService {
       if (existingUserByPhone) {
         throw new ConflictException('Phone number already in use');
       }
+      const verifyAccount = await this.otpRepository.findOne({
+        where: { phone: dto.phone },
+      });
+      if (verifyAccount) {
+        await this.otpRepository.delete(verifyAccount.id);
+      }
     }
 
-    // 3. Generate a 6-digit numeric OTP
+    // 5. Generate a 6-digit numeric OTP
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    if (dto.email) {
-      await this.emailService.sendOtpEmail(dto.email, otpCode);
+    if (dto.phone) {
+      await this.smsService.sendOtpSms(dto.phone, otpCode);
     }
 
-    // 4. Save OTP to database inside a transaction (valid for 5 minutes)
+    // 6. Save OTP to database
     const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + 5);
+    expiresAt.setMinutes(expiresAt.getMinutes() + 10); // OTP expires in 10 minutes
 
-    await this.dataSource.transaction(async (manager) => {
-      if (dto.email) {
-        await manager.delete(Otp, { email: dto.email });
-      }
-      if (dto.phone) {
-        await manager.delete(Otp, { phone: dto.phone });
-      }
-      const newOtp = manager.create(Otp, {
-        ...(dto.email && { email: dto.email }),
-        ...(dto.phone && { phone: dto.phone }),
-        otp: otpCode,
-        expiresAt,
-        role: dto.role,
-        isVerified: false,
-      });
-      await manager.save(Otp, newOtp);
-    });
-
-    return {
-      message: 'OTP has been generated and saved successfully.',
-      email: dto.email,
-      phone: dto.phone,
+    const newOtp = this.otpRepository.create({
+      ...(dto.email && { email: dto.email }),
+      ...(dto.phone && { phone: dto.phone }),
       otp: otpCode,
       expiresAt,
+      role: dto.role,
+      isVerified: false,
+    });
+
+    await this.otpRepository.save(newOtp);
+
+    return {
+      message: 'OTP has been sent.',
+      email: dto.email,
+      phone: dto.phone,
     };
   }
 
-  // async verifyOtpService(dto: VerifyOtpDto) {
-  //   const otpRecord = await this.otpRepository.findOne({
-  //     where: {
-  //       email: dto.email,
-  //       otp: dto.otp,
-  //       isVerified: false,
-  //     },
-  //   });
+  async verifyOtpService(dto: VerifyOtpDto) {
+    const otpRecord = await this.otpRepository.findOne({
+      where: {
+        phone: dto.phone,
+        otp: dto.otp,
+        isVerified: false,
+      },
+    });
 
-  //   if (!otpRecord) {
-  //     throw new BadRequestException('Invalid OTP code or email');
-  //   }
+    if (!otpRecord) {
+      throw new BadRequestException('Invalid OTP code or phone');
+    }
 
-  //   if (otpRecord.expiresAt < new Date()) {
-  //     throw new BadRequestException('OTP has expired');
-  //   }
+    if (otpRecord.expiresAt < new Date()) {
+      throw new BadRequestException('OTP has expired');
+    }
 
-  //   await this.otpRepository.update(otpRecord.id, { isVerified: true });
-  //   return {
-  //     message: 'OTP verified successfully',
-  //   };
-  // }
+    await this.otpRepository.update(otpRecord.id, { isVerified: true });
+    return {
+      message: 'OTP verified successfully',
+    };
+  }
 
   async logoutService(userId: string | number) {
     await this.userRepository.update(userId, {
@@ -324,7 +316,7 @@ export class AuthModuleService {
       firstName: dto.firstName,
       lastName: dto.lastName,
       hashedPassword: hashedPassword,
-      role: USER_ROLE.SUPER_ADMIN,
+      role: USER_ROLE.ADMIN,
     });
 
     const savedUser = await this.userRepository.save(newUser);
@@ -380,7 +372,7 @@ export class AuthModuleService {
         firstName: dto.firstName,
         lastName: dto.lastName,
         hashedPassword: hashedPassword,
-        role: USER_ROLE.USER,
+        role: USER_ROLE.CUSTOMER,
         status: USER_STATUS.ACTIVE,
       });
 
