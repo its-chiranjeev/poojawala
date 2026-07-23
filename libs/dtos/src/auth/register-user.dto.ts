@@ -33,10 +33,10 @@ export class OtpDto {
 export class RegisterUserDto extends OtpDto {}
 
 export class RegisterNormalUserDto {
+  @IsOptional()
   @IsEmail()
-  @IsNotEmpty()
   @Transform(({ value }) => value?.trim().toLowerCase())
-  email!: string;
+  email?: string;
 
   @IsOptional()
   @IsString()

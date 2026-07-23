@@ -32,8 +32,8 @@ export class User {
 
   // Basic Info
   @Index({ unique: true })
-  @Column({ type: 'varchar', length: 150 })
-  email!: string;
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  email?: string;
 
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 100 })

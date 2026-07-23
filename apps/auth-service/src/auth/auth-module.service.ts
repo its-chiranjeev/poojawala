@@ -330,29 +330,48 @@ export class AuthModuleService {
   }
 
   async registerUserService(dto: RegisterNormalUserDto) {
-    // 1. Verify OTP
+    if (!dto.email && !dto.phone) {
+      throw new BadRequestException(
+        'At least email or phone number must be provided',
+      );
+    }
+
+    // 1. Verify OTP record
+    const otpWhere: any[] = [];
+    if (dto.phone) otpWhere.push({ phone: dto.phone, otp: dto.otp });
+    if (dto.email) otpWhere.push({ email: dto.email, otp: dto.otp });
+
     const otpRecord = await this.otpRepository.findOne({
-      where: {
-        email: dto.email,
-        otp: dto.otp,
-        isVerified: false,
-      },
+      where: otpWhere,
     });
 
     if (!otpRecord) {
-      throw new BadRequestException('Invalid OTP code or email');
+      throw new BadRequestException('Invalid OTP code or contact details');
     }
 
     if (otpRecord.expiresAt < new Date()) {
       throw new BadRequestException('OTP has expired');
     }
 
-    // 2. Check if user already exists
-    const existingUser = await this.userRepository.findByEmail(dto.email);
-    if (existingUser) {
-      throw new ConflictException('Email already in use');
+    // 2. Check if user already exists by email
+    if (dto.email) {
+      const existingUserByEmail = await this.userRepository.findByEmail(dto.email);
+      if (existingUserByEmail) {
+        throw new ConflictException('Email already in use');
+      }
     }
 
+    // 3. Check if user already exists by phone
+    if (dto.phone) {
+      const existingUserByPhone = await this.userRepository.findOne({
+        where: { phone: dto.phone },
+      });
+      if (existingUserByPhone) {
+        throw new ConflictException('Phone number already in use');
+      }
+    }
+
+    // 4. Check if username already in use
     const existingUsername = await this.userRepository.findOne({
       where: { username: dto.username },
     });
@@ -362,29 +381,29 @@ export class AuthModuleService {
 
     // Run database writes inside a transaction
     const savedUser = await this.dataSource.transaction(async (manager) => {
-      // 3. Hash password and save user
+      // 5. Hash password and save user
       const hashedPassword = await bcrypt.hash(dto.password, 10);
 
       const newUser = manager.create(User, {
-        email: dto.email.toLowerCase(),
+        ...(dto.email && { email: dto.email.toLowerCase() }),
         username: dto.username,
         ...(dto.phone && { phone: dto.phone }),
         firstName: dto.firstName,
         lastName: dto.lastName,
         hashedPassword: hashedPassword,
-        role: USER_ROLE.CUSTOMER,
+        role: otpRecord.role || USER_ROLE.CUSTOMER,
         status: USER_STATUS.ACTIVE,
       });
 
       const saved = await manager.save(User, newUser);
 
-      // 4. Delete OTP record after verification
+      // 6. Delete OTP record after verification
       await manager.delete(Otp, { id: otpRecord.id });
 
       return saved;
     });
 
-    // 5. Issue Auth Tokens
+    // 7. Issue Auth Tokens
     const data = await this.issueAuthTokens(savedUser);
 
     return {

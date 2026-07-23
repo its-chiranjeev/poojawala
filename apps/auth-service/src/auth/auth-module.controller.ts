@@ -122,12 +122,6 @@ export class AuthModuleController {
     };
   }
 
-  @Post('send-otp')
-  @HttpCode(HttpStatus.OK)
-  async sendOtp(@Body(new ValidationPipe()) dto: OtpDto) {
-    return this.authModuleService.generateOtpService(dto);
-  }
-
   // [EXISTING CODE]
   // @Post('register-user')
   // @HttpCode(HttpStatus.CREATED)
