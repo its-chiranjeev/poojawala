@@ -19,4 +19,4 @@ import { ConfigModule } from '@nestjs/config';
   controllers: [UserManagementController],
   providers: [UserManagementService],
 })
-export class UserManagementModule {}
+export class UserManagementModule { }

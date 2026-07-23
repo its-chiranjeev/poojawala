@@ -1,0 +1,33 @@
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  JoinColumn,
+  Unique,
+} from 'typeorm';
+import { Payment } from './payment.entity';
+import { Booking } from './booking.entity';
+
+@Entity('payment_bookings')
+@Unique(['paymentId', 'bookingId'])
+export class PaymentBooking {
+  @PrimaryGeneratedColumn()
+  id!: number;
+
+  @Column({ type: 'int' })
+  paymentId!: number;
+
+  @ManyToOne(() => Payment, (payment) => payment.paymentBookings, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'payment_id' })
+  payment!: Payment;
+
+  @Column({ type: 'int' })
+  bookingId!: number;
+
+  @ManyToOne(() => Booking, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'booking_id' })
+  booking!: Booking;
+}

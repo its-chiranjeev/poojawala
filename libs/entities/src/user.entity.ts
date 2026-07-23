@@ -10,6 +10,10 @@ import {
   OneToOne,
   JoinColumn,
 } from 'typeorm';
+import { CustomerAddress } from './customer-address.entity';
+import { CustomerFavorite } from './customer-favorite.entity';
+import { Booking } from './booking.entity';
+import { Review } from './review.entity';
 
 export enum USER_ROLE {
   CUSTOMER = 'CUSTOMER',
@@ -82,6 +86,18 @@ export class User {
     default: USER_STATUS.ACTIVE,
   })
   status!: USER_STATUS;
+
+  @OneToMany(() => CustomerAddress, (address) => address.customer)
+  addresses!: CustomerAddress[];
+
+  @OneToMany(() => CustomerFavorite, (favorite) => favorite.customer)
+  favorites!: CustomerFavorite[];
+
+  @OneToMany(() => Booking, (booking) => booking.customer)
+  bookings!: Booking[];
+
+  @OneToMany(() => Review, (review) => review.customer)
+  reviews!: Review[];
 
   // Timestamps
   @CreateDateColumn()

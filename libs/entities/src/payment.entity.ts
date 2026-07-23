@@ -1,0 +1,126 @@
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+  OneToMany,
+  JoinColumn,
+} from 'typeorm';
+import { Booking } from './booking.entity';
+import { User } from './user.entity';
+import { PaymentBooking } from './payment-booking.entity';
+
+export enum PAYMENT_TYPE {
+  BOOKING_PAYMENT = 'BOOKING_PAYMENT',
+  PUROHIT_PAYOUT = 'PUROHIT_PAYOUT',
+  CUSTOMER_REFUND = 'CUSTOMER_REFUND',
+  DONATION = 'DONATION',
+}
+
+export enum PAYMENT_METHOD {
+  UPI = 'UPI',
+  CARD = 'CARD',
+  NETBANKING = 'NETBANKING',
+  WALLET = 'WALLET',
+  BANK_TRANSFER = 'BANK_TRANSFER',
+}
+
+export enum PAYMENT_STATUS {
+  CREATED = 'CREATED',
+  PENDING = 'PENDING',
+  SUCCESS = 'SUCCESS',
+  FAILED = 'FAILED',
+}
+
+@Entity('payments')
+export class Payment {
+  @PrimaryGeneratedColumn()
+  id!: number;
+
+  @Column({
+    type: 'enum',
+    enum: PAYMENT_TYPE,
+    default: PAYMENT_TYPE.BOOKING_PAYMENT,
+  })
+  paymentType!: PAYMENT_TYPE;
+
+  @Column({ type: 'int', nullable: true })
+  bookingId?: number;
+
+  @ManyToOne(() => Booking, (booking) => booking.payments, {
+    onDelete: 'SET NULL',
+    nullable: true,
+  })
+  @JoinColumn({ name: 'booking_id' })
+  booking?: Booking;
+
+  @Column({ type: 'int' })
+  createdById!: number;
+
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'created_by_id' })
+  createdBy!: User;
+
+  @Column({ type: 'int', nullable: true })
+  payerId?: number;
+
+  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'payer_id' })
+  payer?: User;
+
+  @Column({ type: 'int', nullable: true })
+  payeeId?: number;
+
+  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'payee_id' })
+  payee?: User;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  amount!: number;
+
+  @Column({ type: 'varchar', length: 5, default: 'INR' })
+  currency!: string;
+
+  @Column({
+    type: 'enum',
+    enum: PAYMENT_METHOD,
+    nullable: true,
+  })
+  paymentMethod?: PAYMENT_METHOD;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  razorpayOrderId?: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  razorpayPaymentId?: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  razorpayRefundId?: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  bankTransferReference?: string;
+
+  @Column({
+    type: 'enum',
+    enum: PAYMENT_STATUS,
+    default: PAYMENT_STATUS.CREATED,
+  })
+  status!: PAYMENT_STATUS;
+
+  @Column({ type: 'text', nullable: true })
+  failureReason?: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  paidAt?: Date;
+
+  @OneToMany(() => PaymentBooking, (paymentBooking) => paymentBooking.payment)
+  paymentBookings!: PaymentBooking[];
+
+  @CreateDateColumn()
+  createdAt!: Date;
+
+  @UpdateDateColumn()
+  updatedAt!: Date;
+}
