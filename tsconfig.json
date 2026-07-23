@@ -1,0 +1,84 @@
+{
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "resolvePackageJsonExports": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2023",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "noFallthroughCasesInSwitch": false,
+    "paths": {
+      "@likemyproduct/common": [
+        "libs/common/src"
+      ],
+      "@likemyproduct/common/*": [
+        "libs/common/src/*"
+      ],
+      "@likemyproduct/database": [
+        "libs/database/src"
+      ],
+      "@likemyproduct/database/*": [
+        "libs/database/src/*"
+      ],
+      "@likemyproduct/dtos": [
+        "libs/dtos/src"
+      ],
+      "@likemyproduct/dtos/*": [
+        "libs/dtos/src/*"
+      ],
+      "@likemyproduct/entities": [
+        "libs/entities/src"
+      ],
+      "@likemyproduct/entities/*": [
+        "libs/entities/src/*"
+      ],
+      "@likemyproduct/repositories": [
+        "libs/repositories/src"
+      ],
+      "@likemyproduct/repositories/*": [
+        "libs/repositories/src/*"
+      ],
+      "@likemyproduct/email-services": [
+        "libs/email-services/src/index.ts"
+      ],
+      "@likemyproduct/s3": [
+        "libs/s3/src"
+      ],
+      "@likemyproduct/s3/*": [
+        "libs/s3/src/*"
+      ],
+      "@likemyproduct/gateway": [
+        "libs/gateway/src"
+      ],
+      "@likemyproduct/gateway/*": [
+        "libs/gateway/src/*"
+      ],
+      "@likemyproduct/payment": [
+        "libs/payment/src"
+      ],
+      "@likemyproduct/payment/*": [
+        "libs/payment/src/*"
+      ]
+    }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.spec.ts",
+    "apps/**/test/**/*"
+  ]
+}
