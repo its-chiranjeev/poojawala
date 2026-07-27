@@ -13,6 +13,7 @@ import { DataSource, QueryRunner, Not } from 'typeorm';
 import { last, single } from 'rxjs';
 import {
   UserRepository,
+  OtpRepository,
 } from '@likemyproduct/repositories';
 import {
   USER_ROLE,
@@ -20,8 +21,9 @@ import {
 } from '@likemyproduct/entities';
 import { AuthModuleService } from 'apps/auth-service/src/auth/auth-module.service';
 import { S3Service } from '@likemyproduct/s3';
+import { EmailService } from '@likemyproduct/email-services';
 import {
-  UpdateUserDto,
+  UpdateUserDto, RegisterNormalUserDto,
 } from '@likemyproduct/dtos';
 
 @Injectable()
@@ -31,6 +33,8 @@ export class UserService {
     private readonly dataSource: DataSource,
     private readonly authModuleService: AuthModuleService,
     private readonly s3Service: S3Service,
+    private readonly otpRepository: OtpRepository,
+    private readonly emailService: EmailService,
   ) { }
 
   async updateProfileByAdmin(
@@ -124,4 +128,99 @@ export class UserService {
       data: safeUser,
     };
   }
+
+  async registerUser(dto: RegisterNormalUserDto) {
+  const existingUser = await this.userRepository.findByEmail(dto.email!);
+
+  if (existingUser) {
+    throw new ConflictException('Email already in use');
+  }
+
+  const otpRecord = await this.otpRepository.findOne({
+    where: { email: dto.email! },
+  });
+
+  if (!otpRecord) {
+    throw new NotFoundException('OTP not found');
+  }
+
+  if (!otpRecord.isVerified) {
+    throw new BadRequestException('Please verify your OTP first');
+  }
+
+  if (otpRecord.expiresAt < new Date()) {
+    throw new BadRequestException('OTP has expired');
+  }
+
+  // Next: Hash password and create the user
+}
+
+async generateOtp(email: string) {
+  const existingUser = await this.userRepository.findByEmail(email);
+
+  if (existingUser) {
+    throw new ConflictException('User already exists');
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+  const expiresAt = new Date();
+  expiresAt.setMinutes(expiresAt.getMinutes() + 10);
+
+  let otpRecord = await this.otpRepository.findOne({
+    where: { email },
+  });
+
+  if (otpRecord) {
+    otpRecord.otp = otp;
+    otpRecord.expiresAt = expiresAt;
+    otpRecord.isVerified = false;
+  } else {
+    otpRecord = this.otpRepository.create({
+      email,
+      otp,
+      expiresAt,
+      isVerified: false,
+    });
+  }
+
+  await this.otpRepository.save(otpRecord);
+
+  await this.emailService.sendOtpEmail(email, otp);
+
+  return {
+    success: true,
+    message: 'OTP sent successfully',
+  };
+}
+
+async verifyOtp(email: string, otp: string) {
+  const otpRecord = await this.otpRepository.findOne({
+    where: { email },
+  });
+
+  if (!otpRecord) {
+    throw new NotFoundException('OTP not found');
+  }
+
+  if (otpRecord.isVerified) {
+    throw new BadRequestException('OTP already verified');
+  }
+
+  if (otpRecord.expiresAt < new Date()) {
+    throw new BadRequestException('OTP has expired');
+  }
+
+  if (otpRecord.otp !== otp) {
+    throw new BadRequestException('Invalid OTP');
+  }
+
+  otpRecord.isVerified = true;
+
+  await this.otpRepository.save(otpRecord);
+
+  return {
+    success: true,
+    message: 'OTP verified successfully',
+  };
 }
