@@ -129,7 +129,7 @@ export class AuthModuleController {
   //   return this.authModuleService.registerUserService(dto);
   // }
 
-  @Post('register-user')
+ /* @Post('register-user')
   @HttpCode(HttpStatus.CREATED)
   async registerUser(
     @Body(new ValidationPipe()) dto: RegisterNormalUserDto,
@@ -154,7 +154,7 @@ export class AuthModuleController {
       csrfToken,
       user: result.user,
     };
-  }
+  }*/
 
   // [EXISTING CODE]
   // @Post('login')
