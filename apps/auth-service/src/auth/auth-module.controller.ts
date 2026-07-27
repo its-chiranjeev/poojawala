@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { AuthModuleService } from './auth-module.service';
 import { JwtAuthGuard, CsrfGuard } from '@likemyproduct/common';
-import { LoginDto, VerifyOtpDto, RegisterSuperAdminDto, RegisterNormalUserDto, OtpDto, RegisterUserDto } from '@likemyproduct/dtos';
+import { LoginDto, VerifyOtpDto, RegisterSuperAdminDto, RegisterNormalUserDto, OtpDto, RegisterUserDto ,resetPasswordDto,forgotPasswordDto} from '@likemyproduct/dtos';
 import type { Response } from 'express';
 import * as crypto from 'crypto';
 import { S3Service } from '@likemyproduct/s3';
@@ -257,5 +257,24 @@ export class AuthModuleController {
       message: 'Profile fetched successfully',
       data: safeUser,
     };
+  }
+
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  async forgotPassword(
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    dto: forgotPasswordDto,
+  ) {
+    return this.authModuleService.forgotPasswordService(dto);
+  }
+
+  @Patch('reset-password')
+  @HttpCode(HttpStatus.OK)
+  async resetPassword(
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    dto: resetPasswordDto,
+  ) {
+    return this.authModuleService.resetPasswordService(dto);
   }
 }

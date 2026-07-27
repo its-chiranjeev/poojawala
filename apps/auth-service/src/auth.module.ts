@@ -5,12 +5,15 @@ import { AuthService } from './auth.service';
 import { DatabaseModule } from '@likemyproduct/database';
 import { EntitiesModule } from '@likemyproduct/entities';
 import { AuthModuleModule } from './auth/auth-module.module';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { User } from '@likemyproduct/entities';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    TypeOrmModule.forFeature([User]),
     DatabaseModule,
     EntitiesModule,
     AuthModuleModule,

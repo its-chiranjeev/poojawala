@@ -19,10 +19,13 @@ import {
   OtpDto,
   RegisterNormalUserDto,
   RegisterUserDto,
+  resetPasswordDto,
+  forgotPasswordDto
 } from '@likemyproduct/dtos';
 import { DataSource } from 'typeorm';
 import { EmailService } from '@likemyproduct/email-services';
 import { SmsService } from '@likemyproduct/sms-services';
+import { MoreThan } from 'typeorm';
 
 @Injectable()
 export class AuthModuleService {
@@ -329,7 +332,7 @@ export class AuthModuleService {
     };
   }
 
-  async registerUserService(dto: RegisterNormalUserDto) {
+ /* async registerUserService(dto: RegisterNormalUserDto) {
     if (!dto.email && !dto.phone) {
       throw new BadRequestException(
         'At least email or phone number must be provided',
@@ -410,5 +413,164 @@ export class AuthModuleService {
       message: 'User registration successful',
       ...data,
     };
+  }*/
+
+  async forgotPasswordService(dto: forgotPasswordDto) {
+  // 1. Validate input
+  if (!dto.email && !dto.phone) {
+    throw new BadRequestException(
+      'Either phone or email must be provided',
+    );
   }
+
+  let user;
+
+  // 2. Find user
+  if (dto.phone) {
+    user = await this.userRepository.findOne({
+      where: { phone: dto.phone },
+    });
+
+    if (!user) {
+      throw new NotFoundException(
+        'User with this phone number not found',
+      );
+    }
+  } else {
+    user = await this.userRepository.findByEmail(dto.email!);
+
+    if (!user) {
+      throw new NotFoundException(
+        'User with this email not found',
+      );
+    }
+  }
+
+  if(user.isVerified === false){
+    throw new BadRequestException(
+      'User is not verified. Please verify your account first.',
+    );
+  }
+
+  // 3. Delete previous OTP
+ /* const whereCondition = dto.email
+    ? { email: dto.email }
+    : { phone: dto.phone };
+
+  await this.otpRepository.delete(whereCondition);*/
+
+  // 4. Generate OTP
+  const otpCode = Math.floor(
+    100000 + Math.random() * 900000,
+  ).toString();
+
+  
+  // 5. Expiry
+  const expiresAt = new Date();
+  expiresAt.setMinutes(expiresAt.getMinutes() + 2);
+
+  // 6. Save OTP
+  const newOtp = this.otpRepository.create({
+    email: dto.email,
+    phone: dto.phone,
+    otp: otpCode,
+    expiresAt,
+    role: user.role,
+    isVerified: false,
+  });
+
+  await this.otpRepository.save(newOtp);
+
+  // 7. Send OTP
+  if (dto.phone) {
+    await this.smsService.sendOtpSms(dto.phone, otpCode);
+
+    return {
+      message: 'OTP has been sent to your phone.',
+    };
+  }
+
+  await this.emailService.sendOtpEmail(dto.email!, otpCode);
+
+  return {
+    message: 'OTP has been sent to your email.',
+  };
+}
+
+
+async resetPasswordService(dto: resetPasswordDto) {
+  // 1. Validate input
+  if (!dto.phone && !dto.email) {
+    throw new BadRequestException(
+      'Either phone or email must be provided',
+    );
+  }
+
+  // 2. Find user
+  let user;
+
+  if (dto.phone) {
+    user = await this.userRepository.findOne({
+      where: { phone: dto.phone },
+    });
+  } else {
+    user = await this.userRepository.findByEmail(dto.email!);
+  }
+
+  if (!user) {
+    throw new NotFoundException('User not found');
+  }
+
+  // 3. Find OTP
+ const otp = await this.otpRepository.findOne({
+  where: dto.email
+    ? {
+        email: dto.email,
+        expiresAt: MoreThan(new Date()),
+      }
+    : {
+        phone: dto.phone,
+        expiresAt: MoreThan(new Date()),
+      },
+});
+
+  if (!otp) {
+    throw new BadRequestException('OTP is invalid or has expired');
+  }
+
+  // 4. Check OTP
+  if (otp.otp !== dto.otp) {
+    throw new BadRequestException('Invalid OTP');
+  }
+
+  // 5. Check expiry
+ /* if (otp.expiresAt < new Date()) {
+    throw new BadRequestException('OTP has expired');
+  }*/
+
+  const isSamePassword = await bcrypt.compare(
+  dto.password,
+  user.hashedPassword,
+);
+
+if (isSamePassword) {
+  throw new BadRequestException(
+    'New password cannot be same as old password',
+  );
+}
+
+  // 6. Hash new password
+  user.hashedPassword = await bcrypt.hash(dto.password, 10);
+  user.hashedRefreshToken = undefined; // Invalidate existing refresh tokens
+  user.tokenVersion += 1; // Increment token version to invalidate existing tokens
+
+  await this.userRepository.save(user);
+
+  // 7. Delete OTP
+  await this.otpRepository.delete(otp.id);
+
+  return {
+    message: 'Password reset successfully',
+  };
+}
 }

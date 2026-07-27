@@ -1,7 +1,10 @@
-import { Controller, Get } from '@nestjs/common';
+import { Body, Controller, Get,Post } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { LoginDto } from '@likemyproduct/dtos';
+import passport from 'passport';
+import { promises } from 'dns';
 
-@Controller()
+@Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
@@ -9,4 +12,6 @@ export class AuthController {
   getHello(): string {
     return this.authService.getHello();
   }
+
+ 
 }
