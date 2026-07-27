@@ -11,6 +11,7 @@ import { USER_ROLE } from './user.entity';
 export enum OTP_TYPE {
   USER_REGISTRATION = 'USER_REGISTRATION',
   RESET_PASSWORD = 'RESET_PASSWORD',
+  RESEND_OTP = 'RESEND_OTP',
 }
 
 @Entity('otps')
