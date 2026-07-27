@@ -6,8 +6,12 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  IsPhoneNumber,
+  ValidateIf
 } from 'class-validator';
 import { USER_ROLE } from '@likemyproduct/entities';
+
+import { OTP_TYPE } from '@likemyproduct/entities';
 
 export class VerifyOtpDto {
   @IsOptional()
@@ -25,4 +29,21 @@ export class VerifyOtpDto {
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
   otp!: string;
+}
+
+
+
+export class ResendOtpDto {
+  @ValidateIf((o) => !o.phone)
+  @IsEmail()
+  @IsOptional()
+  email?: string;
+
+  @ValidateIf((o) => !o.email)
+  @IsPhoneNumber()
+  @IsOptional()
+  phone?: string;
+
+  @IsEnum(OTP_TYPE)
+  otpType: OTP_TYPE;
 }

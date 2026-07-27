@@ -76,6 +76,44 @@ export class RegisterNormalUserDto {
   confirmPassword!: string;
 }
 
+export class resetPasswordDto {
+  @IsOptional()
+  @IsEmail()
+  @Transform(({ value }) => value?.trim().toLowerCase())
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  @MaxLength(15)
+  phone?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => value?.trim())
+  otp!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => value?.trim())
+  password!: string;
+
+  
+}
+
+export class forgotPasswordDto {
+  @IsOptional()
+  @IsEmail()
+  @Transform(({ value }) => value?.trim().toLowerCase())
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  @MaxLength(15)
+  phone?: string;
+}
+
 export function Match(property: string, validationOptions?: ValidationOptions) {
   return function (object: Object, propertyName: string) {
     registerDecorator({
