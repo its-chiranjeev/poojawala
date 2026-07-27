@@ -8,6 +8,11 @@ import {
 } from 'typeorm';
 import { USER_ROLE } from './user.entity';
 
+export enum OTP_TYPE {
+  USER_REGISTRATION = 'USER_REGISTRATION',
+  RESET_PASSWORD = 'RESET_PASSWORD',
+}
+
 @Entity('otps')
 export class Otp {
   @PrimaryGeneratedColumn()
@@ -26,6 +31,14 @@ export class Otp {
 
   @Column({ type: 'enum', enum: USER_ROLE, nullable: true })
   role?: USER_ROLE;
+
+   @Column({
+    type: 'enum',
+    enum: OTP_TYPE,
+    nullable: true,
+  })
+  otpType?: OTP_TYPE;
+
 
   @Column({ type: 'timestamp' })
   expiresAt!: Date;
