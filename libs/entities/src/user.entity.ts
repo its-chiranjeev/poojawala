@@ -59,6 +59,13 @@ export class User {
   @Column({ type: 'varchar', length: 255, nullable: true })
   profileImage?: string;
 
+  @Column({ type: 'timestamp', nullable: true })
+dob?: Date;
+
+@Column({ type: 'varchar', length: 255, nullable: true })
+birthPlace?: string;
+
+
   // Authentication
   @Column({ type: 'varchar', length: 255 })
   hashedPassword!: string;
