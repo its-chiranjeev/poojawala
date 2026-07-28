@@ -63,5 +63,13 @@ export class UserController {
   ) {
     return this.userService.verifyOtp(email, otp);
   }
+  @Patch(':id/status')
+  @Roles(USER_ROLE.ADMIN)
+  updatePurohitStatus(
+    @Param('id') id: string,
+    @Body('status') status: USER_STATUS,
+  ) {
+    return this.userService.updatePurohitStatus(id, status);
+  }
 }
 

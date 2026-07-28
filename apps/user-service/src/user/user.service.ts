@@ -128,18 +128,10 @@ export class UserService {
       data: safeUser,
     };
   }
-
+  
   async registerUser(dto: RegisterNormalUserDto) {
     return this.authModuleService.registerUserService(dto);
   }
-  // async registerUser(dto: RegisterNormalUserDto) {
-  //   console.log('CUSTOM REGISTER CALLED');
-
-  //   return {
-  //     success: true,
-  //     message: 'Custom register reached',
-  //   };
-  // }
 
   async generateOtp(email: string, role: USER_ROLE) {
     const existingUser = await this.userRepository.findByEmail(email);
@@ -210,6 +202,45 @@ export class UserService {
     return {
       success: true,
       message: 'OTP verified successfully',
+    };
+  }
+
+  // purohit status accept/reject 
+  async updatePurohitStatus(id: string, status: USER_STATUS) {
+    const user = await this.userRepository.findById(id);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (user.role !== USER_ROLE.PUROHIT) {
+      throw new BadRequestException('Only Purohit status can be updated');
+    }
+
+    // Cannot change back to PENDING
+    if (status === USER_STATUS.PENDING) {
+      throw new BadRequestException(
+        'Cannot change status back to PENDING',
+      );
+    }
+
+    // Already in same status
+    if (user.status === status) {
+      throw new BadRequestException(`Purohit is already ${status}`);
+    }
+
+    // Allowed:
+    // PENDING -> ACTIVE
+    // PENDING -> REJECTED
+    // ACTIVE -> REJECTED
+    // REJECTED -> ACTIVE
+    user.status = status;
+
+    await this.userRepository.save(user);
+
+    return {
+      success: true,
+      message: `Purohit status updated to ${status} successfully`,
     };
   }
 }

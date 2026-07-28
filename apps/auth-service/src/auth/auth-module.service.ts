@@ -392,7 +392,11 @@ export class AuthModuleService {
         lastName: dto.lastName,
         hashedPassword: hashedPassword,
         role: otpRecord.role || USER_ROLE.CUSTOMER,
-        status: USER_STATUS.ACTIVE,
+        // status: USER_STATUS.ACTIVE,
+        status:
+          otpRecord.role === USER_ROLE.PUROHIT
+            ? USER_STATUS.PENDING
+            : USER_STATUS.ACTIVE,
       });
 
       const saved = await manager.save(User, newUser);
