@@ -50,8 +50,9 @@ export class UserController {
   @HttpCode(HttpStatus.OK)
   async generateOtp(
     @Body('email') email: string,
+    @Body('role') role: USER_ROLE,
   ) {
-    return this.userService.generateOtp(email);
+    return this.userService.generateOtp(email, role);
   }
   
   @Post('verify-otp')
