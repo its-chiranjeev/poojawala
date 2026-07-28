@@ -3,7 +3,7 @@ import { Body, Controller, Query, Get, Put, Patch, Delete, Param, ParseIntPipe, 
 import { UserService } from "./user.service";
 import { AuthGuard } from "@nestjs/passport";
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@likemyproduct/common";
-import { UpdateUserDto } from "@likemyproduct/dtos";
+import { UpdateUserDto, RegisterNormalUserDto, } from "@likemyproduct/dtos";
 import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
 import { filter } from 'rxjs';
 
@@ -35,6 +35,33 @@ export class UserController {
   ) {
     const userId = req.user.id;
     return this.userService.updateProfileByUser(userId, dto, file);
+  }
+
+  @Post('register')
+  @HttpCode(HttpStatus.CREATED)
+  async registerUser(
+    @Body(new ValidationPipe({ whitelist: true }))
+    dto: RegisterNormalUserDto,
+  ) {
+    return this.userService.registerUser(dto);
+  }
+
+  @Post('generate-otp')
+  @HttpCode(HttpStatus.OK)
+  async generateOtp(
+    @Body('email') email: string,
+    @Body('role') role: USER_ROLE,
+  ) {
+    return this.userService.generateOtp(email, role);
+  }
+  
+  @Post('verify-otp')
+  @HttpCode(HttpStatus.OK)
+  async verifyOtp(
+    @Body('email') email: string,
+    @Body('otp') otp: string,
+  ) {
+    return this.userService.verifyOtp(email, otp);
   }
 }
 
