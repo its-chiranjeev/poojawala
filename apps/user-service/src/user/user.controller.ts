@@ -36,5 +36,17 @@ export class UserController {
     const userId = req.user.id;
     return this.userService.updateProfileByUser(userId, dto, file);
   }
+
+
+  // Block the user by admin
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @Patch('admin/block/:id')
+  @HttpCode(HttpStatus.OK)
+  async blockUser(
+    @Param('id') id: number,
+  ) {
+    return this.userService.blockUser(id);
+  }
 }
 

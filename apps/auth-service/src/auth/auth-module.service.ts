@@ -211,9 +211,12 @@ export class AuthModuleService {
     }
 
     if (
-      user.status === USER_STATUS.BLOCKED ||
-      user.status === USER_STATUS.INACTIVE
+      user.status === USER_STATUS.BLOCKED
+     
     ) {
+      user.hashedRefreshToken = undefined; // Invalidate existing refresh tokens
+     
+      await this.userRepository.save(user);
       throw new ForbiddenException('User is blocked');
     }
     const data = await this.issueAuthTokens(user);
