@@ -29,7 +29,7 @@ export class PlatformSetting {
   updatedById?: number;
 
   @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'updated_by_id' })
+  @JoinColumn({ name: 'updatedById' })
   updatedBy?: User;
 
   @CreateDateColumn()

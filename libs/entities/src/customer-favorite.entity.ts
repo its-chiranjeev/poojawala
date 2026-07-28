@@ -20,7 +20,7 @@ export class CustomerFavorite {
   customerId!: number;
 
   @ManyToOne(() => User, (user) => user.favorites, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'customer_id' })
+  @JoinColumn({ name: 'customerId' })
   customer!: User;
 
   @Column({ type: 'int' })
@@ -29,7 +29,7 @@ export class CustomerFavorite {
   @ManyToOne(() => PurohitProfile, (purohit) => purohit.favoritedBy, {
     onDelete: 'CASCADE',
   })
-  @JoinColumn({ name: 'purohit_id' })
+  @JoinColumn({ name: 'purohitId' })
   purohit!: PurohitProfile;
 
   @CreateDateColumn()

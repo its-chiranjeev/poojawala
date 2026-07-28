@@ -67,7 +67,7 @@ export class CmsContent {
   createdById!: number;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'created_by_id' })
+  @JoinColumn({ name: 'createdById' })
   createdBy!: User;
 
   @CreateDateColumn()

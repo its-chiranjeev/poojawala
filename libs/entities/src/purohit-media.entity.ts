@@ -24,7 +24,7 @@ export class PurohitMedia {
   @ManyToOne(() => PurohitProfile, (profile) => profile.media, {
     onDelete: 'CASCADE',
   })
-  @JoinColumn({ name: 'purohit_id' })
+  @JoinColumn({ name: 'purohitId' })
   purohit!: PurohitProfile;
 
   @Column({

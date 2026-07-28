@@ -53,28 +53,28 @@ export class Payment {
     onDelete: 'SET NULL',
     nullable: true,
   })
-  @JoinColumn({ name: 'booking_id' })
+  @JoinColumn({ name: 'bookingId' })
   booking?: Booking;
 
   @Column({ type: 'int' })
   createdById!: number;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'created_by_id' })
+  @JoinColumn({ name: 'createdById' })
   createdBy!: User;
 
   @Column({ type: 'int', nullable: true })
   payerId?: number;
 
   @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'payer_id' })
+  @JoinColumn({ name: 'payerId' })
   payer?: User;
 
   @Column({ type: 'int', nullable: true })
   payeeId?: number;
 
   @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'payee_id' })
+  @JoinColumn({ name: 'payeeId' })
   payee?: User;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })

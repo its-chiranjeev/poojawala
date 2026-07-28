@@ -1,3 +1,4 @@
+
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -7,6 +8,7 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  DeleteDateColumn,
 } from 'typeorm';
 import { User } from './user.entity';
 import { Booking } from './booking.entity';
@@ -26,7 +28,7 @@ export class CustomerAddress {
   customerId!: number;
 
   @ManyToOne(() => User, (user) => user.addresses, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'customer_id' })
+  @JoinColumn({ name: 'customerId' })
   customer!: User;
 
   @Column({
@@ -35,6 +37,23 @@ export class CustomerAddress {
     default: VENUE_TYPE.HOME,
   })
   venueType!: VENUE_TYPE;
+
+
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
+  latitude?: number;
+
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
+  longitude?: number;
 
   @Column({ type: 'varchar', length: 50 })
   addressLabel!: string;
@@ -51,22 +70,6 @@ export class CustomerAddress {
   @Column({ type: 'boolean', default: false })
   isDefault!: boolean;
 
-  @Column({
-  type: 'decimal',
-  precision: 10,
-  scale: 7,
-  nullable: true,
-})
-latitude?: number;
-
-@Column({
-  type: 'decimal',
-  precision: 10,
-  scale: 7,
-  nullable: true,
-})
-longitude?: number;
-
   @OneToMany(() => Booking, (booking) => booking.customerAddress)
   bookings!: Booking[];
 
@@ -75,4 +78,88 @@ longitude?: number;
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @DeleteDateColumn()
+  deletedAt?: Date;
 }
+
+// import {
+//   Entity,
+//   PrimaryGeneratedColumn,
+//   Column,
+//   CreateDateColumn,
+//   UpdateDateColumn,
+//   ManyToOne,
+//   OneToMany,
+//   JoinColumn,
+// } from 'typeorm';
+// import { User } from './user.entity';
+// import { Booking } from './booking.entity';
+
+// export enum VENUE_TYPE {
+//   HOME = 'HOME',
+//   TEMPLE = 'TEMPLE',
+//   ONLINE = 'ONLINE',
+// }
+
+// @Entity('customer_addresses')
+// export class CustomerAddress {
+//   @PrimaryGeneratedColumn()
+//   id!: number;
+
+//   @Column({ type: 'int' })
+//   customerId!: number;
+
+//   @ManyToOne(() => User, (user) => user.addresses, { onDelete: 'CASCADE' })
+//   @JoinColumn({ name: 'customer_id' })
+//   customer!: User;
+
+//   @Column({
+//     type: 'enum',
+//     enum: VENUE_TYPE,
+//     default: VENUE_TYPE.HOME,
+//   })
+//   venueType!: VENUE_TYPE;
+
+//   @Column({ type: 'varchar', length: 50 })
+//   addressLabel!: string;
+
+//   @Column({ type: 'text' })
+//   fullAddress!: string;
+
+//   @Column({ type: 'varchar', length: 100 })
+//   city!: string;
+
+//   @Column({ type: 'varchar', length: 10 })
+//   pincode!: string;
+
+//   @Column({ type: 'boolean', default: false })
+//   isDefault!: boolean;
+
+//   @Column({
+//   type: 'decimal',
+//   precision: 10,
+//   scale: 7,
+//   nullable: true,
+// })
+// latitude?: number;
+
+// @Column({
+//   type: 'decimal',
+//   precision: 10,
+//   scale: 7,
+//   nullable: true,
+// })
+// longitude?: number;
+
+//   @OneToMany(() => Booking, (booking) => booking.customerAddress)
+//   bookings!: Booking[];
+
+//   @CreateDateColumn()
+//   createdAt!: Date;
+
+//   @UpdateDateColumn()
+//   updatedAt!: Date;
+// }
+
+

@@ -23,14 +23,14 @@ export class Review {
   bookingId!: number;
 
   @OneToOne(() => Booking, (booking) => booking.review, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'booking_id' })
+  @JoinColumn({ name: 'bookingId' })
   booking!: Booking;
 
   @Column({ type: 'int' })
   customerId!: number;
 
   @ManyToOne(() => User, (user) => user.reviews, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'customer_id' })
+  @JoinColumn({ name: 'customerId' })
   customer!: User;
 
   @Column({ type: 'int' })
@@ -39,7 +39,7 @@ export class Review {
   @ManyToOne(() => PurohitProfile, (purohit) => purohit.reviews, {
     onDelete: 'CASCADE',
   })
-  @JoinColumn({ name: 'purohit_id' })
+  @JoinColumn({ name: 'purohitId' })
   purohit!: PurohitProfile;
 
   @Column({ type: 'int' })

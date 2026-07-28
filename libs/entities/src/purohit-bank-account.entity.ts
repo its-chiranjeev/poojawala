@@ -31,7 +31,7 @@ export class PurohitBankAccount {
   @ManyToOne(() => PurohitProfile, (profile) => profile.bankAccounts, {
     onDelete: 'CASCADE',
   })
-  @JoinColumn({ name: 'purohit_id' })
+  @JoinColumn({ name: 'purohitId' })
   purohit!: PurohitProfile;
 
   @Column({ type: 'varchar', length: 100 })

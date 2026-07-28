@@ -58,14 +58,14 @@ export class Booking {
   customerId!: number;
 
   @ManyToOne(() => User, (user) => user.bookings, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'customer_id' })
+  @JoinColumn({ name: 'customerId' })
   customer!: User;
 
   @Column({ type: 'int' })
   serviceId!: number;
 
   @ManyToOne(() => Service, (service) => service.bookings, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'service_id' })
+  @JoinColumn({ name: 'serviceId' })
   service!: Service;
 
   @Column({ type: 'int', nullable: true })
@@ -75,7 +75,7 @@ export class Booking {
     onDelete: 'SET NULL',
     nullable: true,
   })
-  @JoinColumn({ name: 'purohit_id' })
+  @JoinColumn({ name: 'purohitId' })
   purohit?: PurohitProfile;
 
   @Column({ type: 'int', nullable: true })
@@ -85,7 +85,7 @@ export class Booking {
     onDelete: 'SET NULL',
     nullable: true,
   })
-  @JoinColumn({ name: 'customer_address_id' })
+  @JoinColumn({ name: 'customerAddressId' })
   customerAddress?: CustomerAddress;
 
   @Column({ type: 'jsonb', nullable: true })

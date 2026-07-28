@@ -21,13 +21,13 @@ export class PaymentBooking {
   @ManyToOne(() => Payment, (payment) => payment.paymentBookings, {
     onDelete: 'CASCADE',
   })
-  @JoinColumn({ name: 'payment_id' })
+  @JoinColumn({ name: 'paymentId' })
   payment!: Payment;
 
   @Column({ type: 'int' })
   bookingId!: number;
 
   @ManyToOne(() => Booking, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'booking_id' })
+  @JoinColumn({ name: 'bookingId' })
   booking!: Booking;
 }

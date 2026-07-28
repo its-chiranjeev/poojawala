@@ -49,21 +49,21 @@ export class Complaint {
     onDelete: 'SET NULL',
     nullable: true,
   })
-  @JoinColumn({ name: 'booking_id' })
+  @JoinColumn({ name: 'bookingId' })
   booking?: Booking;
 
   @Column({ type: 'int' })
   raisedById!: number;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'raised_by_id' })
+  @JoinColumn({ name: 'raisedById' })
   raisedBy!: User;
 
   @Column({ type: 'int', nullable: true })
   raisedAgainstId?: number;
 
   @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'raised_against_id' })
+  @JoinColumn({ name: 'raisedAgainstId' })
   raisedAgainst?: User;
 
   @Column({
@@ -96,7 +96,7 @@ export class Complaint {
   resolvedById?: number;
 
   @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'resolved_by_id' })
+  @JoinColumn({ name: 'resolvedById' })
   resolvedBy?: User;
 
   @Column({ type: 'timestamp', nullable: true })
@@ -106,7 +106,7 @@ export class Complaint {
   linkedPaymentId?: number;
 
   @ManyToOne(() => Payment, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'linked_payment_id' })
+  @JoinColumn({ name: 'linkedPaymentId' })
   linkedPayment?: Payment;
 
   @CreateDateColumn()

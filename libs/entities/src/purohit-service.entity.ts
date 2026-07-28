@@ -23,7 +23,7 @@ export class PurohitService {
   @ManyToOne(() => PurohitProfile, (profile) => profile.purohitServices, {
     onDelete: 'CASCADE',
   })
-  @JoinColumn({ name: 'purohit_id' })
+  @JoinColumn({ name: 'purohitId' })
   purohit!: PurohitProfile;
 
   @Column({ type: 'int' })
@@ -32,7 +32,7 @@ export class PurohitService {
   @ManyToOne(() => Service, (service) => service.purohitServices, {
     onDelete: 'CASCADE',
   })
-  @JoinColumn({ name: 'service_id' })
+  @JoinColumn({ name: 'serviceId' })
   service!: Service;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })

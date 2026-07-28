@@ -19,21 +19,21 @@ export class CouponUsage {
   couponId!: number;
 
   @ManyToOne(() => Coupon, (coupon) => coupon.usages, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'coupon_id' })
+  @JoinColumn({ name: 'couponId' })
   coupon!: Coupon;
 
   @Column({ type: 'int' })
   customerId!: number;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'customer_id' })
+  @JoinColumn({ name: 'customerId' })
   customer!: User;
 
   @Column({ type: 'int' })
   bookingId!: number;
 
   @ManyToOne(() => Booking, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'booking_id' })
+  @JoinColumn({ name: 'bookingId' })
   booking!: Booking;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
