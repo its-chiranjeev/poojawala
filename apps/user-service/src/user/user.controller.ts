@@ -6,6 +6,8 @@ import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@likemyproduct/commo
 import { UpdateUserDto } from "@likemyproduct/dtos";
 import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
 import { filter } from 'rxjs';
+import { GetAllUsersDto } from "@likemyproduct/dtos/user/get-all-users.dto";
+import { CreateCustomerAddressDto } from "@likemyproduct/dtos/user/add-customer-address.dto";
 
 @Controller('users')
 export class UserController {
@@ -36,5 +38,34 @@ export class UserController {
     const userId = req.user.id;
     return this.userService.updateProfileByUser(userId, dto, file);
   }
-}
 
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @Get('get')
+  async getAllUsers(
+    @Query(new ValidationPipe({ transform: true }))
+    query: GetAllUsersDto,
+  ) {
+    return this.userService.getAllUsers(query);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @Get('get/:id')
+  @HttpCode(HttpStatus.OK)
+  async getUserById(@Param('id') id: string) {
+    return this.userService.getUserById(id);
+  }
+
+  @UseGuards(JwtAuthGuard, CsrfGuard)
+  @Post('addresses')
+  @HttpCode(HttpStatus.CREATED)
+  async addAddress(
+    @Req() req: any,
+    @Body(new ValidationPipe({ whitelist: true }))
+    dto: CreateCustomerAddressDto,
+  ) {
+    const userId = req.user.id;
+    return this.userService.addAddress(userId as number, dto);
+  }
+}

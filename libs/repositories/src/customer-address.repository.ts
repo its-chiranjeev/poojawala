@@ -12,4 +12,18 @@ export class CustomerAddressRepository extends BaseRepository<CustomerAddress> {
   ) {
     super(repo);
   }
+
+  async clearDefaultAddress(customerId: number): Promise<void> {
+    await this.repo.update(
+      { customerId, isDefault: true },
+      { isDefault: false },
+    );
+  }
+
+  async createAddress(
+    payload: Partial<CustomerAddress>,
+  ): Promise<CustomerAddress> {
+    const address = this.repo.create(payload);
+    return await this.repo.save(address);
+  }
 }
