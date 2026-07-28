@@ -214,7 +214,7 @@ export class AuthModuleService {
       user.status === USER_STATUS.BLOCKED
      
     ) {
-      user.hashedRefreshToken = undefined; // Invalidate existing refresh tokens
+      user.hashedRefreshToken = null; // Invalidate existing refresh tokens
      
       await this.userRepository.save(user);
       throw new ForbiddenException('User is blocked');
@@ -569,7 +569,7 @@ if (isSamePassword) {
 
   // 6. Hash new password
   user.hashedPassword = await bcrypt.hash(dto.password, 10);
-  user.hashedRefreshToken = undefined; // Invalidate existing refresh tokens
+  user.hashedRefreshToken = null; // Invalidate existing refresh tokens
   user.tokenVersion += 1; // Increment token version to invalidate existing tokens
 
   await this.userRepository.save(user);

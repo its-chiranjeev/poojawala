@@ -64,7 +64,7 @@ export class User {
   hashedPassword!: string;
 
   @Column({ type: 'varchar', nullable: true })
-  hashedRefreshToken?: string;
+  hashedRefreshToken?: string | null;
 
   @Column({ type: 'timestamp', nullable: true })
   lastLoginAt?: Date;
