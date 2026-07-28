@@ -14,10 +14,11 @@ import {
 } from '@nestjs/common';
 import { AuthModuleService } from './auth-module.service';
 import { JwtAuthGuard, CsrfGuard } from '@likemyproduct/common';
-import { LoginDto, VerifyOtpDto, RegisterSuperAdminDto, RegisterNormalUserDto, OtpDto, RegisterUserDto } from '@likemyproduct/dtos';
+import { LoginDto, VerifyOtpDto, RegisterSuperAdminDto, RegisterNormalUserDto, OtpDto, RegisterUserDto ,resetPasswordDto,forgotPasswordDto} from '@likemyproduct/dtos';
 import type { Response } from 'express';
 import * as crypto from 'crypto';
 import { S3Service } from '@likemyproduct/s3';
+import { ResendOtpDto } from '@likemyproduct/dtos';
 
 @Controller('auth')
 export class AuthModuleController {
@@ -129,7 +130,7 @@ export class AuthModuleController {
   //   return this.authModuleService.registerUserService(dto);
   // }
 
-  @Post('register-user')
+ /* @Post('register-user')
   @HttpCode(HttpStatus.CREATED)
   async registerUser(
     @Body(new ValidationPipe()) dto: RegisterNormalUserDto,
@@ -154,7 +155,7 @@ export class AuthModuleController {
       csrfToken,
       user: result.user,
     };
-  }
+  }*/
 
   // [EXISTING CODE]
   // @Post('login')
@@ -257,5 +258,33 @@ export class AuthModuleController {
       message: 'Profile fetched successfully',
       data: safeUser,
     };
+  }
+
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  async forgotPassword(
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    dto: forgotPasswordDto,
+  ) {
+    return this.authModuleService.forgotPasswordService(dto);
+  }
+
+  @Patch('reset-password')
+  @HttpCode(HttpStatus.OK)
+  async resetPassword(
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    dto: resetPasswordDto,
+  ) {
+    return this.authModuleService.resetPasswordService(dto);
+  }
+
+  @Post('resend-otp')
+  @HttpCode(HttpStatus.OK)
+  async resendOtp(
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    dto: ResendOtpDto,
+  ) {
+    return this.authModuleService.resendOtpService(dto);
   }
 }

@@ -124,4 +124,26 @@ export class UserService {
       data: safeUser,
     };
   }
+
+   async blockUser(id: number) {
+    const user = await this.userRepository.findById(id);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (user.status === USER_STATUS.BLOCKED) {
+      throw new BadRequestException('User is already blocked');
+    }
+
+    user.status = USER_STATUS.BLOCKED;
+    user.hashedRefreshToken = null; // Invalidate existing refresh tokens
+    user.tokenVersion += 1; // Increment token version to invalidate existing tokens
+
+    await this.userRepository.save(user);
+
+    return {
+      success: true,
+      message: 'User blocked successfully',
+    };
+  }
 }
