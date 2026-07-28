@@ -14,6 +14,7 @@ import { CustomerAddress } from './customer-address.entity';
 import { CustomerFavorite } from './customer-favorite.entity';
 import { Booking } from './booking.entity';
 import { Review } from './review.entity';
+import { PurohitServiceArea } from './purohit-service-area.entity';
 
 export enum USER_ROLE {
   CUSTOMER = 'CUSTOMER',
@@ -105,6 +106,9 @@ birthPlace?: string;
 
   @OneToMany(() => Review, (review) => review.customer)
   reviews!: Review[];
+
+@OneToMany(() => PurohitServiceArea, (serviceArea) => serviceArea.purohit)
+serviceAreas!: PurohitServiceArea[];
 
   // Timestamps
   @CreateDateColumn()
