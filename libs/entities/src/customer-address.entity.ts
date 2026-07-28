@@ -51,6 +51,22 @@ export class CustomerAddress {
   @Column({ type: 'boolean', default: false })
   isDefault!: boolean;
 
+  @Column({
+  type: 'decimal',
+  precision: 10,
+  scale: 7,
+  nullable: true,
+})
+latitude?: number;
+
+@Column({
+  type: 'decimal',
+  precision: 10,
+  scale: 7,
+  nullable: true,
+})
+longitude?: number;
+
   @OneToMany(() => Booking, (booking) => booking.customerAddress)
   bookings!: Booking[];
 
