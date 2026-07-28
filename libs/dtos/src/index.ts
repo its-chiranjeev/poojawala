@@ -6,3 +6,6 @@ export * from './auth/register-user.dto';
 export * from './auth/verify-otp.dto';
 export * from './multer/multer.dto';
 export * from './auth/update-user.dto';
+export * from './booking/create-booking.dto';
+export * from './booking/update-booking.dto';
+export * from './booking/booking-query.dto';
