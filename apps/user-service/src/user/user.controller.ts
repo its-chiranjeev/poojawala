@@ -6,6 +6,10 @@ import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@likemyproduct/commo
 import { UpdateUserDto } from "@likemyproduct/dtos";
 import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
 import { filter } from 'rxjs';
+import { GetAllUsersDto } from "@likemyproduct/dtos/user/get-all-users.dto";
+import { CreateCustomerAddressDto } from "@likemyproduct/dtos/user/add-customer-address.dto";
+import { CreatePurohitServiceAreaDto } from "@likemyproduct/dtos/user/add-prohit-address.dto";
+import { UpdatePurohitServiceAreaDto } from "@likemyproduct/dtos/user/update-progit-address.dto";
 
 @Controller('users')
 export class UserController {
@@ -48,5 +52,68 @@ export class UserController {
   ) {
     return this.userService.blockUser(id);
   }
-}
 
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @Get('get')
+  async getAllUsers(
+    @Query(new ValidationPipe({ transform: true }))
+    query: GetAllUsersDto,
+  ) {
+    return this.userService.getAllUsers(query);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @Get('get/:id')
+  @HttpCode(HttpStatus.OK)
+  async getUserById(@Param('id') id: string) {
+    return this.userService.getUserById(id);
+  }
+
+  @UseGuards(JwtAuthGuard, CsrfGuard)
+  @Post('addresses')
+  @HttpCode(HttpStatus.CREATED)
+  async addAddress(
+    @Req() req: any,
+    @Body(new ValidationPipe({ whitelist: true }))
+    dto: CreateCustomerAddressDto,
+  ) {
+    const userId = req.user.id;
+    return this.userService.addAddress(userId as number, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, CsrfGuard)
+  @Post('purohit/add-address')
+  async addServiceArea(
+    @Req() req: any,
+    @Body() dto: CreatePurohitServiceAreaDto,
+  ) {
+    return this.userService.addServiceArea(req.user.id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, CsrfGuard)
+  @Patch('purohit/update-address/:id')
+  async updateServiceArea(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdatePurohitServiceAreaDto,
+  ) {
+    return this.userService.updateServiceArea(req.user.id, id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, CsrfGuard)
+  @Get('purohit/addresses')
+  async getMyServiceAreas(@Req() req: any) {
+    return this.userService.getMyServiceAreas(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard, CsrfGuard)
+  @Delete('purohit/address/:id')
+  async deleteServiceArea(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.userService.deleteServiceArea(req.user.id, id);
+  }
+}
