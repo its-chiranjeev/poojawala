@@ -43,12 +43,14 @@ export class RegisterNormalUserDto {
   @Transform(({ value }) => value?.trim())
   @MaxLength(15)
   phone?: string;
-
+  
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
   otp!: string;
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
@@ -68,7 +70,8 @@ export class RegisterNormalUserDto {
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
   password!: string;
-
+  
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim())

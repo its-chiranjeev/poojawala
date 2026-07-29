@@ -44,4 +44,13 @@ export class UserRepository extends BaseRepository<User> {
   async softDeleteUser(id: string | number) {
     return this.repo.softDelete(id);
   }
+
+  async findApprovedPurohits() {
+    return this.repo.find({
+      where: {
+        role: USER_ROLE.PUROHIT,
+        status: USER_STATUS.ACTIVE,
+      },
+    });
+  }
 }

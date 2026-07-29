@@ -1,9 +1,11 @@
 import { FileInterceptor } from "@nestjs/platform-express";
-import { Body, Controller, Query, Get, Put, Patch, Delete, Param, ParseIntPipe, HttpCode, HttpStatus, Post, Req, UnauthorizedException, UseGuards, UseInterceptors, ValidationPipe, UploadedFile, UnprocessableEntityException } from "@nestjs/common";
+import { Body, Controller, Res, Query, Get, Put, Patch, Delete, Param, ParseIntPipe, HttpCode, HttpStatus, Post, Req, UnauthorizedException, UseGuards, UseInterceptors, ValidationPipe, UploadedFile, UnprocessableEntityException } from "@nestjs/common";
 import { UserService } from "./user.service";
+import type { Response } from 'express';
+import * as crypto from 'crypto';
 import { AuthGuard } from "@nestjs/passport";
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@likemyproduct/common";
-import { UpdateUserDto } from "@likemyproduct/dtos";
+import { UpdateUserDto, RegisterNormalUserDto, } from "@likemyproduct/dtos";
 import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
 import { filter } from 'rxjs';
 
@@ -47,6 +49,97 @@ export class UserController {
     @Param('id') id: number,
   ) {
     return this.userService.blockUser(id);
+  }
+
+  @Post('register')
+  @HttpCode(HttpStatus.CREATED)
+  async registerUser(
+    @Body(new ValidationPipe({ whitelist: true }))
+    dto: RegisterNormalUserDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.userService.registerUser(dto);
+
+    const csrfToken = crypto.randomUUID();
+
+    this.setAuthCookies(
+      res,
+      result.tokens.accessToken,
+      result.tokens.refreshToken,
+      csrfToken,
+    );
+
+    return {
+      success: true,
+      statusCode: HttpStatus.CREATED,
+      message: result.message,
+      csrfToken,
+      user: result.user,
+    };
+  }
+
+  @Post('generate-otp')
+  @HttpCode(HttpStatus.OK)
+  async generateOtp(
+    @Body('email') email: string,
+    @Body('role') role: USER_ROLE,
+  ) {
+    return this.userService.generateOtp(email, role);
+  }
+  
+  @Post('verify-otp')
+  @HttpCode(HttpStatus.OK)
+  async verifyOtp(
+    @Body('email') email: string,
+    @Body('otp') otp: string,
+  ) {
+    return this.userService.verifyOtp(email, otp);
+  }
+  @Patch(':id/status')
+  @Roles(USER_ROLE.ADMIN)
+  updatePurohitStatus(
+    @Param('id') id: string,
+    @Body('status') status: USER_STATUS,
+  ) {
+    return this.userService.updatePurohitStatus(id, status);
+  }
+  @Get('purohits')
+  @Roles(USER_ROLE.ADMIN)
+  getApprovedPurohits() {
+    return this.userService.getApprovedPurohits();
+  }
+  
+  private setAuthCookies(
+    res: Response,
+    accessToken: string,
+    refreshToken: string,
+    csrfToken: string,
+  ) {
+    const isProd = process.env.NODE_ENV === 'production';
+
+    res.cookie('accessToken', accessToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'lax',
+      maxAge: 15 * 60 * 1000,
+      path: '/',
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+
+    res.cookie('csrf-token', csrfToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
   }
 }
 
