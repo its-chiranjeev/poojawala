@@ -14,6 +14,7 @@ import { last, single } from 'rxjs';
 import {
   UserRepository,
   OtpRepository,
+  PurohitProfileRepository,
 } from '@likemyproduct/repositories';
 import {
   USER_ROLE,
@@ -30,6 +31,7 @@ import {
 export class UserService {
   constructor(
     private readonly userRepository: UserRepository,
+    private readonly purohitProfileRepository: PurohitProfileRepository,
     private readonly dataSource: DataSource,
     private readonly authModuleService: AuthModuleService,
     private readonly s3Service: S3Service,
@@ -237,10 +239,38 @@ export class UserService {
     user.status = status;
 
     await this.userRepository.save(user);
+    const existingProfile = await this.purohitProfileRepository.findOne({
+      where: { userId: user.id },
+    });
+
+    if (status === USER_STATUS.ACTIVE) {
+      if (!existingProfile) {
+        const profile = this.purohitProfileRepository.create({
+          userId: user.id,
+        });
+
+        await this.purohitProfileRepository.save(profile);
+      }
+    }
+
+    if (status === USER_STATUS.REJECTED) {
+      if (existingProfile) {
+        await this.purohitProfileRepository.delete(existingProfile.id);
+      }
+    }
 
     return {
       success: true,
       message: `Purohit status updated to ${status} successfully`,
+    };
+  }
+  async getApprovedPurohits() {
+    const purohits = await this.userRepository.findApprovedPurohits();
+
+    return {
+      success: true,
+      message: 'Purohits fetched successfully',
+      data: purohits,
     };
   }
 }

@@ -71,5 +71,10 @@ export class UserController {
   ) {
     return this.userService.updatePurohitStatus(id, status);
   }
+  @Get('purohits')
+  @Roles(USER_ROLE.ADMIN)
+  getApprovedPurohits() {
+    return this.userService.getApprovedPurohits();
+  }
 }
 
