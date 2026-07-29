@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -53,6 +54,27 @@ export class CreateServiceDto {
   requiresVenue!: boolean;
 
   @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  isActive?: boolean;
+}
+
+export class CreatePurohitServiceDto {
+
+
+  @IsInt()
+  @Min(1)
+  serviceId: number;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  customPrice: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  durationMinutes?: number;
+
+  @IsOptional()
   @IsBoolean()
   isActive?: boolean;
 }

@@ -13,11 +13,13 @@ import {
   UploadedFiles,
   UseGuards,
   UseInterceptors,
+  Req,
+  Request
 } from '@nestjs/common';
 import { ServiceService } from './service.service';
-import { JwtAuthGuard, Roles, RolesGuard } from '@likemyproduct/common';
+import { JwtAuthGuard, Roles, RolesGuard,CsrfGuard } from '@likemyproduct/common';
 import { USER_ROLE } from '@likemyproduct/entities';
-import { CreateServiceDto } from '@likemyproduct/dtos/service/create.service.dto';
+import { CreateServiceDto, CreatePurohitServiceDto } from '@likemyproduct/dtos/service/create.service.dto';
 import { UpdateServiceDto } from '@likemyproduct/dtos/service/update.service.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { GetServicesQueryDto } from '@likemyproduct/dtos/service/get.services.query.dto';
@@ -89,4 +91,24 @@ export class ServiceController {
   async deleteService(@Param('id', ParseIntPipe) id: number) {
     return this.serviceService.deleteService(id);
   }
+
+
+
+  //purohit add service
+  @Post('add-service')
+  @Roles(USER_ROLE.PUROHIT)
+  @UseGuards(JwtAuthGuard, RolesGuard,CsrfGuard)
+  @HttpCode(HttpStatus.CREATED)
+  
+   async addService(
+  @Req() req: Request,
+  @Body() dto: CreatePurohitServiceDto,
+)  {
+    
+    const user = (req as any).user;
+
+  return this.serviceService.addService(dto, user.id);
+  }
+
+
 }

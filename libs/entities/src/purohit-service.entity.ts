@@ -11,6 +11,7 @@ import {
 import { PurohitProfile } from './purohit-profile.entity';
 import { Service } from './service.entity';
 
+
 @Entity('purohit_services')
 @Unique(['purohitId', 'serviceId'])
 export class PurohitService {
