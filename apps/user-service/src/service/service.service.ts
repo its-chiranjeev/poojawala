@@ -1,7 +1,7 @@
-import { CreateServiceDto } from '@likemyproduct/dtos/service/create.service.dto';
+import { CreateServiceDto,CreatePurohitServiceDto } from '@likemyproduct/dtos/service/create.service.dto';
 import { GetServicesQueryDto } from '@likemyproduct/dtos/service/get.services.query.dto';
 import { UpdateServiceDto } from '@likemyproduct/dtos/service/update.service.dto';
-import { ServiceRepository } from '@likemyproduct/repositories';
+import { ServiceRepository ,PurohitServiceRepository} from '@likemyproduct/repositories';
 import { S3Service } from '@likemyproduct/s3';
 import {
   BadRequestException,
@@ -12,11 +12,13 @@ import {
 } from '@nestjs/common';
 import { QueryFailedError } from 'typeorm';
 
+
 @Injectable()
 export class ServiceService {
   constructor(
     private readonly serviceRepository: ServiceRepository,
     private readonly s3Service: S3Service,
+    private readonly PurohitServiceRepository: PurohitServiceRepository,
   ) {}
 
   async findAllServices(query: GetServicesQueryDto) {
@@ -192,5 +194,32 @@ export class ServiceService {
         'Something went wrong while deleting the service.',
       );
     }
+  }
+
+  async addService(dto: CreatePurohitServiceDto, userId: number) {
+    console.log('User ID:', userId); // Log the user ID
+    // Implementation for adding service
+
+    const service = await this.serviceRepository.findOne({
+      where: { id: dto.serviceId },
+    });
+
+    if (!service) {
+      throw new NotFoundException('Service not found');
+    }
+    
+
+   const purohitService = this.PurohitServiceRepository.create({
+      ...dto,
+      purohitId: userId, // Assuming you have a field to link the service to the purohit
+    });
+
+    const savedService = await this.PurohitServiceRepository.save(purohitService);
+
+    return {
+      success: true,
+      message: 'Service added successfully',
+      data: savedService,
+    };
   }
 }
