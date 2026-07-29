@@ -9,3 +9,7 @@ export * from './auth/update-user.dto';
 export * from './booking/create-booking.dto';
 export * from './booking/update-booking.dto';
 export * from './booking/booking-query.dto';
+export * from './booking/cancel-booking.dto';
+export * from './booking/respond-booking.dto';
+export * from './booking/assign-booking.dto';
+export * from './booking/update-booking-status.dto';

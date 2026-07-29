@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import {IsDateString, IsInt, IsNumber, IsObject, IsOptional, IsString, MaxLength, Min, } from 'class-validator';
+import { IsDateString, IsInt, IsNumber, IsObject, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class UpdateBookingDto {
   @IsOptional()
@@ -34,6 +34,7 @@ export class UpdateBookingDto {
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({maxDecimalPlaces: 2})
+  @Min(0)
   donationAmount?: number;
 }
