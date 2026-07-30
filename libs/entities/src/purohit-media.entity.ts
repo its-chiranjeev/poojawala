@@ -14,6 +14,12 @@ export enum PUROHIT_MEDIA_TYPE {
   VIDEO = 'VIDEO',
 }
 
+export enum PUROHIT_MEDIA_VERIFICATION_STATUS {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+}
+
 @Entity('purohit_media')
 export class PurohitMedia {
   @PrimaryGeneratedColumn()
@@ -33,6 +39,23 @@ export class PurohitMedia {
     enum: PUROHIT_MEDIA_TYPE,
   })
   mediaType!: PUROHIT_MEDIA_TYPE;
+
+@Column({
+  type: 'varchar',
+  length: 100,
+  nullable: true,
+})
+documentType?: string;
+
+ @Column({ type: 'text', nullable: true })
+  rejectionReason?: string;
+
+  @Column({
+  type: 'enum',
+  enum: PUROHIT_MEDIA_VERIFICATION_STATUS,
+  default: PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING,
+})
+verificationStatus!: PUROHIT_MEDIA_VERIFICATION_STATUS;
 
   @Column({ type: 'varchar', length: 255 })
   mediaUrl!: string;
