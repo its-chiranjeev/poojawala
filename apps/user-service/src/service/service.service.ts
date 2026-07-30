@@ -1,11 +1,12 @@
 import { CreateServiceDto,CreatePurohitServiceDto } from '@likemyproduct/dtos/service/create.service.dto';
 import { GetServicesQueryDto } from '@likemyproduct/dtos/service/get.services.query.dto';
-import { UpdateServiceDto } from '@likemyproduct/dtos/service/update.service.dto';
-import { ServiceRepository ,PurohitServiceRepository} from '@likemyproduct/repositories';
+import { UpdateServiceDto ,UpdatePurohitServiceDto} from '@likemyproduct/dtos/service/update.service.dto';
+import { ServiceRepository ,PurohitServiceRepository,PurohitProfileRepository} from '@likemyproduct/repositories';
 import { S3Service } from '@likemyproduct/s3';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -19,6 +20,7 @@ export class ServiceService {
     private readonly serviceRepository: ServiceRepository,
     private readonly s3Service: S3Service,
     private readonly PurohitServiceRepository: PurohitServiceRepository,
+    private readonly PurohitProfileRepository: PurohitProfileRepository,
   ) {}
 
   async findAllServices(query: GetServicesQueryDto) {
@@ -207,11 +209,18 @@ export class ServiceService {
     if (!service) {
       throw new NotFoundException('Service not found');
     }
-    
+
+    const purohitProfile = await this.PurohitProfileRepository.findOne({
+      where: { userId: userId },
+    });
+
+    if (!purohitProfile) {
+      throw new NotFoundException('Purohit profile not found');
+    }    
 
    const purohitService = this.PurohitServiceRepository.create({
       ...dto,
-      purohitId: userId, // Assuming you have a field to link the service to the purohit
+      purohitId: purohitProfile.id, // Assuming you have a field to link the service to the purohit
     });
 
     const savedService = await this.PurohitServiceRepository.save(purohitService);
@@ -221,5 +230,90 @@ export class ServiceService {
       message: 'Service added successfully',
       data: savedService,
     };
+  }
+
+  async getPurohitServices(userId: number) {
+    const purohitProfile = await this.PurohitProfileRepository.findOne({
+      where: { userId: userId },
+    });
+
+    if (!purohitProfile) {
+      throw new NotFoundException('Purohit profile not found');
+    }
+
+    const services = await this.PurohitServiceRepository.findAndCount({
+      where: { purohitId: purohitProfile.id },
+      relations: ['service'], // Assuming you have a relation to the Service entity
+    });
+
+    return {
+      success: true,
+      message: 'Purohit services fetched successfully',
+      data: services,
+    };
+  }
+
+
+  async deletePurohitService(Id: number, userId: number) {
+   
+
+    const purohitService = await this.PurohitServiceRepository.findOne({
+      where: { id: Id },
+    });
+
+    if (!purohitService) {
+      throw new NotFoundException('Purohit service not found');
+    }
+
+    const purohitProfile = await this.PurohitProfileRepository.findOne({
+      where: { userId: userId },
+    });
+
+    if (!purohitProfile) {
+      throw new NotFoundException('Purohit profile not found');
+    }
+
+    if (purohitService.purohitId !== purohitProfile.id) {
+      throw new ForbiddenException('You are not authorized to delete this service');
+    }
+    await this.PurohitServiceRepository.delete(Id);
+
+    return {
+      success: true,
+      message: 'Purohit service deleted successfully',
+    };
+  }
+
+  async updatePurohitService(Id: number, dto: UpdatePurohitServiceDto, userId: number) {
+    const purohitService = await this.PurohitServiceRepository.findOne({
+      where: { id: Id },
+    });
+
+    if (!purohitService) {
+      throw new NotFoundException('Purohit service not found');
+    }
+
+    const purohitProfile = await this.PurohitProfileRepository.findOne({
+      where: { userId: userId },
+    });
+
+    if (!purohitProfile) {
+      throw new NotFoundException('Purohit profile not found');
+    }
+
+    if (purohitService.purohitId !== purohitProfile.id) {
+      throw new ForbiddenException('You are not authorized to update this service');
+    }
+
+    Object.assign(purohitService, dto);
+
+    const updatedService = await this.PurohitServiceRepository.save(purohitService);
+
+    return {
+      success: true,
+      message: 'Purohit service updated successfully',
+      data: updatedService,
+    };
+
   }
 }
