@@ -7,6 +7,7 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  DeleteDateColumn,
 } from 'typeorm';
 import { Booking } from './booking.entity';
 import { User } from './user.entity';
@@ -123,4 +124,7 @@ export class Payment {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @DeleteDateColumn()
+    deletedAt?: Date;
 }

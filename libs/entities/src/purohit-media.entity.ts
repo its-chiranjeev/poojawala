@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
+  DeleteDateColumn,
 } from 'typeorm';
 import { PurohitProfile } from './purohit-profile.entity';
 
@@ -41,4 +42,7 @@ export class PurohitMedia {
 
   @CreateDateColumn()
   createdAt!: Date;
+
+  @DeleteDateColumn()
+  deletedAt?: Date;
 }

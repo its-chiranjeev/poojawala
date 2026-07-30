@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  DeleteDateColumn,
 } from 'typeorm';
 import { USER_ROLE } from './user.entity';
 
@@ -52,5 +53,8 @@ export class Otp {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @DeleteDateColumn()
+  deletedAt?: Date;
 }
 

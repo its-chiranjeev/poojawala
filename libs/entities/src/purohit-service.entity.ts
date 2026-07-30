@@ -7,6 +7,7 @@ import {
   ManyToOne,
   JoinColumn,
   Unique,
+  DeleteDateColumn,
 } from 'typeorm';
 import { PurohitProfile } from './purohit-profile.entity';
 import { Service } from './service.entity';
@@ -49,4 +50,7 @@ export class PurohitService {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @DeleteDateColumn()
+  deletedAt?: Date;
 }

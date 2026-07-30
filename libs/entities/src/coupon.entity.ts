@@ -8,6 +8,7 @@ import {
   OneToMany,
   JoinColumn,
   Index,
+  DeleteDateColumn,
 } from 'typeorm';
 import { User } from './user.entity';
 import { CouponUsage } from './coupon-usage.entity';
@@ -78,4 +79,7 @@ export class Coupon {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @DeleteDateColumn()
+  deletedAt?: Date;
 }

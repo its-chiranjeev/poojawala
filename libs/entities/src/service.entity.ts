@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   Index,
   OneToMany,
+  DeleteDateColumn,
 } from 'typeorm';
 import { PurohitService } from './purohit-service.entity';
 import { Booking } from './booking.entity';
@@ -63,4 +64,7 @@ export class Service {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @DeleteDateColumn()
+  deletedAt?: Date;
 }

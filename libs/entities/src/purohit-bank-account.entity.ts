@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  DeleteDateColumn,
 } from 'typeorm';
 import { PurohitProfile } from './purohit-profile.entity';
 
@@ -68,4 +69,7 @@ export class PurohitBankAccount {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @DeleteDateColumn()
+  deletedAt?: Date;
 }

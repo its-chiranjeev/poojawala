@@ -9,6 +9,7 @@ import {
   OneToOne,
   JoinColumn,
   Index,
+  DeleteDateColumn,
 } from 'typeorm';
 import { User } from './user.entity';
 import { Service } from './service.entity';
@@ -184,4 +185,7 @@ export class Booking {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @DeleteDateColumn()
+  deletedAt?: Date;
 }

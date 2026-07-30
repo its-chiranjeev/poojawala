@@ -7,6 +7,7 @@ import {
   ManyToOne,
   JoinColumn,
   Index,
+  DeleteDateColumn,
 } from 'typeorm';
 import { User } from './user.entity';
 
@@ -75,4 +76,7 @@ export class CmsContent {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @DeleteDateColumn()
+  deletedAt?: Date;
 }

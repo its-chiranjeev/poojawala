@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
+  DeleteDateColumn,
 } from 'typeorm';
 import { Coupon } from './coupon.entity';
 import { User } from './user.entity';
@@ -41,4 +42,7 @@ export class CouponUsage {
 
   @CreateDateColumn()
   createdAt!: Date;
+
+  @DeleteDateColumn()
+  deletedAt?: Date;
 }

@@ -6,6 +6,7 @@ import {
   ManyToOne,
   JoinColumn,
   Unique,
+  DeleteDateColumn,
 } from 'typeorm';
 import { User } from './user.entity';
 import { PurohitProfile } from './purohit-profile.entity';
@@ -34,4 +35,7 @@ export class CustomerFavorite {
 
   @CreateDateColumn()
   createdAt!: Date;
+
+  @DeleteDateColumn()
+  deletedAt?: Date;
 }

@@ -5,6 +5,7 @@ import {
   ManyToOne,
   JoinColumn,
   Unique,
+  DeleteDateColumn,
 } from 'typeorm';
 import { Payment } from './payment.entity';
 import { Booking } from './booking.entity';
@@ -30,4 +31,7 @@ export class PaymentBooking {
   @ManyToOne(() => Booking, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'bookingId' })
   booking!: Booking;
+
+    @DeleteDateColumn()
+  deletedAt?: Date;
 }
