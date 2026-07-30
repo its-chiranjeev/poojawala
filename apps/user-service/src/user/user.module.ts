@@ -8,6 +8,7 @@ import { CommonAuthModule } from '@likemyproduct/common';
 import { AuthModuleModule } from 'apps/auth-service/src/auth/auth-module.module';
 import { S3Module } from '@likemyproduct/s3';
 
+
 @Module({
   imports: [
     EntitiesModule,
