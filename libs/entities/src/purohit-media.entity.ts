@@ -34,6 +34,13 @@ export class PurohitMedia {
   })
   mediaType!: PUROHIT_MEDIA_TYPE;
 
+@Column({
+  type: 'varchar',
+  length: 100,
+  nullable: true,
+})
+documentType?: string;
+
   @Column({ type: 'varchar', length: 255 })
   mediaUrl!: string;
 
