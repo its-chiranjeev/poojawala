@@ -16,6 +16,7 @@ export class BookingController {
   ) {}
 
   @Post('add')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(USER_ROLE.CUSTOMER)
   createBooking(
     @Req() req: AuthenticatedRequest,
@@ -40,6 +41,7 @@ export class BookingController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(USER_ROLE.CUSTOMER)
   updateBooking(
     @Req() req: AuthenticatedRequest,
@@ -55,6 +57,7 @@ export class BookingController {
   }
 
   @Patch(':id/cancel')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles( USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN )
   cancelBooking(
     @Req() req: AuthenticatedRequest,
@@ -69,6 +72,7 @@ export class BookingController {
   }
 
   @Patch(':id/respond')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(USER_ROLE.PUROHIT)
   respondToBooking(
     @Req() req: AuthenticatedRequest,
@@ -83,6 +87,7 @@ export class BookingController {
   }
 
   @Patch(':id/assign')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(USER_ROLE.ADMIN)
   assignBooking(
     @Req() req: AuthenticatedRequest,
@@ -97,19 +102,20 @@ export class BookingController {
   }
 
   @Get('available')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(USER_ROLE.PUROHIT)
   getAvailableBookings(
     @Req() req: AuthenticatedRequest,
     @Query() query: BookingQueryDto,
   ) {
-    return this.bookingService
-      .getAvailableBookings(
+    return this.bookingService.getAvailableBookings(
         req.user,
         query,
       );
   }
 
   @Patch(':id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   updateBookingStatus(
     @Req() req: AuthenticatedRequest,
