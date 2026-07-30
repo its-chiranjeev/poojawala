@@ -120,10 +120,10 @@ export class RegisterNormalUserDto {
   languages?: string[];
 
   @IsOptional()
-  isOnlineAvailable?: boolean;
+  isOnlineAvailable?: string;
 
   @IsOptional()
-  isOfflineAvailable?: boolean;
+  isOfflineAvailable?: string;
 
   @IsOptional()
   specializations?: string[];

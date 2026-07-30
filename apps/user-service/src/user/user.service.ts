@@ -16,13 +16,18 @@ import {
   UserRepository,
   OtpRepository,
   PurohitProfileRepository,
+  PurohitMediaRepository,
 } from '@likemyproduct/repositories';
 import {
   PurohitProfile,
+  PurohitMedia,
+  PUROHIT_VERIFICATION_STATUS,
+  PUROHIT_MEDIA_TYPE,
   User,
   Otp,
   USER_ROLE,
   USER_STATUS,
+   OTP_TYPE,
 } from '@likemyproduct/entities';
 import { S3Service } from '@likemyproduct/s3';
 import { EmailService } from '@likemyproduct/email-services';
@@ -41,6 +46,7 @@ export class UserService {
     private readonly otpRepository: OtpRepository,
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
+    private readonly purohitMediaRepository: PurohitMediaRepository,
   ) { }
 
   async updateProfileByAdmin(
@@ -146,10 +152,10 @@ export class UserService {
   async registerUser(
     dto: RegisterNormalUserDto,
     files: {
-      aadhaarDocUrl?: Express.Multer.File[];
-      panDocUrl?: Express.Multer.File[];
-      certificateUrl?: Express.Multer.File[];
-      templeAffiliationProofUrl?: Express.Multer.File[];
+      aadhaarDoc?: Express.Multer.File[];
+      panDoc?: Express.Multer.File[];
+      certificate?: Express.Multer.File[];
+      templeAffiliationProof?: Express.Multer.File[];
     },
   ) {
     return this.registerUserService(dto, files);
@@ -176,6 +182,7 @@ export class UserService {
       otpRecord.expiresAt = expiresAt;
       otpRecord.isVerified = false;
       otpRecord.role = role;
+      otpRecord.otpType = OTP_TYPE.USER_REGISTRATION;
     } else {
       otpRecord = this.otpRepository.create({
         email,
@@ -183,6 +190,7 @@ export class UserService {
         expiresAt,
         isVerified: false,
         role,
+        otpType: OTP_TYPE.USER_REGISTRATION,
       });
     }
 
@@ -221,7 +229,7 @@ export class UserService {
 
     await this.otpRepository.save(otpRecord);
     
-    console.log('Verified OTP:', otpRecord);
+    
 
     return {
       success: true,
@@ -230,77 +238,89 @@ export class UserService {
   }
   
   // purohit status accept/reject 
-  async updatePurohitStatus(id: string, status: USER_STATUS) {
-    const user = await this.userRepository.findById(id);
+  // async updatePurohitStatus(id: string, status: USER_STATUS, rejectionReason?: string,) {
+  //   const user = await this.userRepository.findById(id);
 
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
+  //   if (!user) {
+  //     throw new NotFoundException('User not found');
+  //   }
 
-    // if (user.status === USER_STATUS.BLOCKED) {
-    //   throw new BadRequestException('User is already blocked');
-    // }
+  //     // if (user.status === USER_STATUS.BLOCKED) {
+  //     //   throw new BadRequestException('User is already blocked');
+  //     // }
 
-    // user.status = USER_STATUS.BLOCKED;
-    // user.hashedRefreshToken = null; // Invalidate existing refresh tokens
-    // user.tokenVersion += 1; // Increment token version to invalidate existing tokens
+  //     // user.status = USER_STATUS.BLOCKED;
+  //     // user.hashedRefreshToken = null; // Invalidate existing refresh tokens
+  //     // user.tokenVersion += 1; // Increment token version to invalidate existing tokens
 
-    // await this.userRepository.save(user);
+  //     // await this.userRepository.save(user);
 
-    // return {
-    //     success: true,
-    //     message: 'User blocked successfully',
-    // };
-      if (user.role !== USER_ROLE.PUROHIT) {
-        throw new BadRequestException('Only Purohit status can be updated');
-      }
+  //     // return {
+  //     //     success: true,
+  //     //     message: 'User blocked successfully',
+  //     // };
+  //     if (user.role !== USER_ROLE.PUROHIT) {
+  //       throw new BadRequestException('Only Purohit status can be updated');
+  //     }
 
-      // Cannot change back to PENDING
-      if (status === USER_STATUS.PENDING) {
-        throw new BadRequestException(
-          'Cannot change status back to PENDING',
-        );
-      }
+  //     // Cannot change back to PENDING
+  //     if (status === USER_STATUS.PENDING) {
+  //       throw new BadRequestException(
+  //         'Cannot change status back to PENDING',
+  //       );
+  //     }
 
-      // Already in same status
-      if (user.status === status) {
-        throw new BadRequestException(`Purohit is already ${status}`);
-      }
+  //     // Already in same status
+  //     if (user.status === status) {
+  //       throw new BadRequestException(`Purohit is already ${status}`);
+  //     }
 
-      // Allowed:
-      // PENDING -> ACTIVE
-      // PENDING -> REJECTED
-      // ACTIVE -> REJECTED
-      // REJECTED -> ACTIVE
-      user.status = status;
+  //     if (
+  //       status === USER_STATUS.REJECTED &&
+  //       !rejectionReason?.trim()
+  //     ) {
+  //       throw new BadRequestException(
+  //         'Rejection reason is required',
+  //       );
+  //     }
 
-      await this.userRepository.save(user);
-      const existingProfile = await this.purohitProfileRepository.findOne({
-        where: { userId: user.id },
-      });
-    
+  //     // Allowed:
+  //     // PENDING -> ACTIVE
+  //     // PENDING -> REJECTED
+  //     // ACTIVE -> REJECTED
+  //     // REJECTED -> ACTIVE
+  //     user.status = status;
 
-    if (status === USER_STATUS.ACTIVE) {
-      if (!existingProfile) {
-        const profile = this.purohitProfileRepository.create({
-          userId: user.id,
-        });
+  //     await this.userRepository.save(user);
+  //     const existingProfile = await this.purohitProfileRepository.findOne({
+  //       where: { userId: user.id },
+  //     });
 
-        await this.purohitProfileRepository.save(profile);
-      }
-    }
+  //     if (!existingProfile) {
+  //       throw new NotFoundException('Purohit profile not found');
+  //     }
 
-    if (status === USER_STATUS.REJECTED) {
-      if (existingProfile) {
-        await this.purohitProfileRepository.delete(existingProfile.id);
-      }
-    }
+  //     if (status === USER_STATUS.ACTIVE) {
+  //       existingProfile.verificationStatus =
+  //         PUROHIT_VERIFICATION_STATUS.APPROVED;
 
-    return {
-      success: true,
-      message: `Purohit status updated to ${status} successfully`,
-    };
-  }
+  //       existingProfile.rejectionReason = undefined;
+  //     }
+
+  //     if (status === USER_STATUS.REJECTED) {
+  //       existingProfile.verificationStatus =
+  //         PUROHIT_VERIFICATION_STATUS.REJECTED;
+
+  //       existingProfile.rejectionReason = rejectionReason;
+  //     }
+
+  //   await this.purohitProfileRepository.save(existingProfile);
+
+  //   return {
+  //     success: true,
+  //     message: `Purohit status updated to ${status} successfully`,
+  //   };
+  // }
 
   async getApprovedPurohits() {
     const purohits = await this.userRepository.findApprovedPurohits();
@@ -315,10 +335,10 @@ export class UserService {
   async registerUserService(
     dto: RegisterNormalUserDto,
     files: {
-      aadhaarDocUrl?: Express.Multer.File[];
-      panDocUrl?: Express.Multer.File[];
-      certificateUrl?: Express.Multer.File[];
-      templeAffiliationProofUrl?: Express.Multer.File[];
+      aadhaarDoc?: Express.Multer.File[];
+      panDoc?: Express.Multer.File[];
+      certificate?: Express.Multer.File[];
+      templeAffiliationProof?: Express.Multer.File[];
     },
   ) {
     if (!dto.email && !dto.phone) {
@@ -330,7 +350,7 @@ export class UserService {
     // 1. Verify OTP record
     // const otpWhere: any[] = [];
 
-    console.log('Register Email:', dto.email);
+    
 
     const otpRecord = await this.otpRepository.findOne({
       where: {
@@ -338,7 +358,7 @@ export class UserService {
         isVerified: true,
       },
     });
-    console.log('OTP Record:', otpRecord);
+    
 
     // const otpRecord = await this.otpRepository.findOne({
     //   where: otpWhere,
@@ -350,6 +370,49 @@ export class UserService {
 
     if (otpRecord.expiresAt < new Date()) {
       throw new BadRequestException('OTP has expired');
+    }
+    if (otpRecord.role === USER_ROLE.CUSTOMER) {
+      const purohitFields = [
+        'bio',
+        'qualification',
+        'experienceYears',
+        'aadhaarNumber',
+        'city',
+        'languages',
+        'isOnlineAvailable',
+        'isOfflineAvailable',
+        'specializations',
+        'aadhaarDoc',
+        'panDoc',
+        'certificate',
+        'templeAffiliationProof',
+      ];
+
+      for (const field of purohitFields) {
+        const value = dto[field];
+
+        if (
+          value !== undefined &&
+          value !== null &&
+          (typeof value !== 'string' || value.trim() !== '') &&
+          (!Array.isArray(value) || value.length > 0)
+        ) {
+          throw new BadRequestException(
+            `${field} is not allowed for CUSTOMER registration`,
+          );
+        }
+      }
+
+      if (
+        files.aadhaarDoc?.length ||
+        files.panDoc?.length ||
+        files.certificate?.length ||
+        files.templeAffiliationProof?.length
+      ) {
+        throw new BadRequestException(
+          'Purohit documents are not allowed for CUSTOMER registration',
+        );
+      }
     }
     
     if (otpRecord.role === USER_ROLE.PUROHIT) {
@@ -380,26 +443,26 @@ export class UserService {
         }
       }
 
-      if (!files.aadhaarDocUrl?.length && !dto.aadhaarDoc) {
+      if (!files.aadhaarDoc?.length && !dto.aadhaarDoc) {
         throw new BadRequestException(
           'Aadhaar document or URL is required',
         );
       }
 
-      if (!files.panDocUrl?.length && !dto.panDoc) {
+      if (!files.panDoc?.length && !dto.panDoc) {
         throw new BadRequestException(
           'PAN document or URL is required',
         );
       }
 
-      if (!files.certificateUrl?.length && !dto.certificate) {
+      if (!files.certificate?.length && !dto.certificate) {
         throw new BadRequestException(
           'Certificate or URL is required',
         );
       }
 
       if (
-        !files.templeAffiliationProofUrl?.length &&
+        !files.templeAffiliationProof?.length &&
         !dto.templeAffiliationProof
       ) {
         throw new BadRequestException(
@@ -427,21 +490,28 @@ export class UserService {
     }
 
     // 4. Check if username already in use
+    if (dto.username) {
     const existingUsername = await this.userRepository.findOne({
       where: { username: dto.username },
     });
+
     if (existingUsername) {
       throw new ConflictException('Username already in use');
     }
+  }
 
     // Run database writes inside a transaction
     const savedUser = await this.dataSource.transaction(async (manager) => {
       // 5. Hash password and save user
       const hashedPassword = await bcrypt.hash(dto.password, 10);
 
+      const username =
+        dto.username ??
+        `user${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
       const newUser = manager.create(User, {
         ...(dto.email && { email: dto.email.toLowerCase() }),
-        username: dto.username,
+        username,
         ...(dto.phone && { phone: dto.phone }),
         firstName: dto.firstName,
         lastName: dto.lastName,
@@ -456,40 +526,45 @@ export class UserService {
 
       const saved = await manager.save(User, newUser);
 
-      const aadhaarDocUrl = files.aadhaarDocUrl?.length
+      const aadhaarDocUrl = files.aadhaarDoc?.length
   ? await this.s3Service.uploadFileHelper(
       saved.id,
       'aadhaarDoc',
-      files.aadhaarDocUrl,
+      files.aadhaarDoc,
     )
   : dto.aadhaarDoc;
 
-    const panDocUrl = files.panDocUrl?.length
+    const panDocUrl = files.panDoc?.length
       ? await this.s3Service.uploadFileHelper(
           saved.id,
           'panDoc',
-          files.panDocUrl,
+          files.panDoc,
         )
       : dto.panDoc;
 
-    const certificateUrl = files.certificateUrl?.length
+    const certificateUrl = files.certificate?.length
       ? await this.s3Service.uploadFileHelper(
           saved.id,
           'certificate',
-          files.certificateUrl,
+          files.certificate,
         )
       : dto.certificate;
 
     const templeAffiliationProofUrl =
-      files.templeAffiliationProofUrl?.length
+      files.templeAffiliationProof?.length
         ? await this.s3Service.uploadFileHelper(
             saved.id,
             'templeAffiliationProof',
-            files.templeAffiliationProofUrl,
+            files.templeAffiliationProof,
           )
         : dto.templeAffiliationProof;
 
         if (otpRecord.role === USER_ROLE.PUROHIT) {
+          const isOnlineAvailable =
+            dto.isOnlineAvailable === 'true';
+
+          const isOfflineAvailable =
+            dto.isOfflineAvailable === 'true';
           const profile = manager.create(PurohitProfile, {
             userId: saved.id,
             bio: dto.bio,
@@ -505,11 +580,41 @@ export class UserService {
             city: dto.city,
             languages: dto.languages,
             specializations: dto.specializations,
-            isOnlineAvailable: dto.isOnlineAvailable,
-            isOfflineAvailable: dto.isOfflineAvailable,
+            isOnlineAvailable,
+            isOfflineAvailable,
           });
 
           await manager.save(profile);
+
+          await manager.save(PurohitMedia, [
+            manager.create(PurohitMedia, {
+              purohitId: profile.id,
+              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+              documentType: 'AADHAAR',
+              mediaUrl: aadhaarDocUrl!,
+            }),
+
+            manager.create(PurohitMedia, {
+              purohitId: profile.id,
+              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+              documentType: 'PAN',
+              mediaUrl: panDocUrl!,
+            }),
+
+            manager.create(PurohitMedia, {
+              purohitId: profile.id,
+              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+              documentType: 'CERTIFICATE',
+              mediaUrl: certificateUrl!,
+            }),
+
+            manager.create(PurohitMedia, {
+              purohitId: profile.id,
+              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+              documentType: 'TEMPLE_PROOF',
+              mediaUrl: templeAffiliationProofUrl!,
+            }),
+          ]);
         }
   
 

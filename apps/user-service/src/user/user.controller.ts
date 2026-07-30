@@ -55,19 +55,19 @@ export class UserController {
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(
     FileFieldsInterceptor([
-      { name: 'aadhaarDocUrl', maxCount: 1 },
-      { name: 'panDocUrl', maxCount: 1 },
-      { name: 'certificateUrl', maxCount: 1 },
-      { name: 'templeAffiliationProofUrl', maxCount: 1 },
+      { name: 'aadhaarDoc', maxCount: 1 },
+      { name: 'panDoc', maxCount: 1 },
+      { name: 'certificate', maxCount: 1 },
+      { name: 'templeAffiliationProof', maxCount: 1 },
     ]),
   )
   async registerUser(
     @UploadedFiles()
     files: {
-      aadhaarDocUrl?: Express.Multer.File[];
-      panDocUrl?: Express.Multer.File[];
-      certificateUrl?: Express.Multer.File[];
-      templeAffiliationProofUrl?: Express.Multer.File[];
+      aadhaarDoc?: Express.Multer.File[];
+      panDoc?: Express.Multer.File[];
+      certificate?: Express.Multer.File[];
+      templeAffiliationProof?: Express.Multer.File[];
     },
     @Body(new ValidationPipe({ whitelist: true }))
     dto: RegisterNormalUserDto,
@@ -110,14 +110,20 @@ export class UserController {
   ) {
     return this.userService.verifyOtp(email, otp);
   }
-  @Patch(':id/status')
-  @Roles(USER_ROLE.ADMIN)
-  updatePurohitStatus(
-    @Param('id') id: string,
-    @Body('status') status: USER_STATUS,
-  ) {
-    return this.userService.updatePurohitStatus(id, status);
-  }
+  // @Patch(':id/status')
+  // @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  // @Roles(USER_ROLE.ADMIN)
+  // updatePurohitStatus(
+  //   @Param('id') id: string,
+  //   @Body('status') status: USER_STATUS,
+  //   @Body('rejectionReason') rejectionReason?: string,
+  // ) {
+  //   return this.userService.updatePurohitStatus(
+  //     id,
+  //     status,
+  //     rejectionReason,
+  //   );
+  // }
   @Get('purohits')
   @Roles(USER_ROLE.ADMIN)
   getApprovedPurohits() {
