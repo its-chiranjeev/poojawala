@@ -95,6 +95,9 @@ birthPlace?: string;
   })
   status!: USER_STATUS;
 
+  @Column({ type: 'text', nullable: true })
+  rejectionReason?: string;
+
   @OneToMany(() => CustomerAddress, (address) => address.customer)
   addresses!: CustomerAddress[];
 
