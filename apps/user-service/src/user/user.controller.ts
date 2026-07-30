@@ -6,6 +6,7 @@ import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@likemyproduct/commo
 import { UpdateUserDto } from "@likemyproduct/dtos";
 import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
 import { filter } from 'rxjs';
+import { UpsertPlatformSettingDto } from "@likemyproduct/dtos/Platform setting/Platform.dto";
 
 @Controller('users')
 export class UserController {
@@ -48,5 +49,48 @@ export class UserController {
   ) {
     return this.userService.blockUser(id);
   }
+
+
+ @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+@Roles(USER_ROLE.ADMIN)
+@Patch('platform-upsert')
+@HttpCode(HttpStatus.OK)
+async upsertPlatformSetting(
+  @Req() req: Request,
+  @Body(new ValidationPipe({ whitelist: true }))
+  dto: UpsertPlatformSettingDto,
+) {
+  const user = (req as any).user;
+
+  return this.userService.upsertPlatformSetting(dto, user.id);
+}
+
+@UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+@Roles(USER_ROLE.ADMIN)
+@Get('platform-setting')
+@HttpCode(HttpStatus.OK)
+async getPlatformSetting(
+  @Req() req: Request,
+) {
+  const user = (req as any).user;
+
+  return this.userService.getPlatformSetting(user.id);  
+  
+}
+
+
+
+@UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+@Roles(USER_ROLE.ADMIN)
+@Delete('platform-setting/:id')
+@HttpCode(HttpStatus.OK)
+async deletePlatformSetting(
+  @Param('id', ParseIntPipe) id: number,
+  @Req() req: Request,
+) {
+  const user = (req as any).user;
+
+  return this.userService.deletePlatformSetting(id, user.id); 
+}
 }
 

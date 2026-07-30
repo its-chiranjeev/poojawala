@@ -5,6 +5,7 @@ import {
   IsString,
   Max,
   Min,
+  IsInt
 } from 'class-validator';
 
 export class UpdateServiceDto {
@@ -61,3 +62,21 @@ export class UpdateServiceDto {
   @IsBoolean()
   isActive?: boolean;
 }
+
+export class UpdatePurohitServiceDto{
+  @IsOptional()
+ @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  customPrice: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  durationMinutes?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
+} 
+ 

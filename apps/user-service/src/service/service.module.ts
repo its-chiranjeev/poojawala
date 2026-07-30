@@ -5,10 +5,14 @@ import { Service } from '@likemyproduct/entities';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ServiceRepository } from '@likemyproduct/repositories';
 import { S3Module } from '@likemyproduct/s3';
+import { PurohitServiceRepository } from '@likemyproduct/repositories';
+import { PurohitService } from '@likemyproduct/entities';
+import { PurohitProfileRepository } from '@likemyproduct/repositories';
+import { PurohitProfile } from '@likemyproduct/entities';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Service]), S3Module],
+  imports: [TypeOrmModule.forFeature([Service, PurohitService, PurohitProfile]), S3Module],
   controllers: [ServiceController],
-  providers: [ServiceService, ServiceRepository],
+  providers: [ServiceService, ServiceRepository, PurohitServiceRepository, PurohitProfileRepository],
 })
 export class ServiceModule {}

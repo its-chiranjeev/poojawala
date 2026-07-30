@@ -12,7 +12,7 @@ import { randomUUID } from 'crypto';
 import { DataSource, QueryRunner, Not } from 'typeorm';
 import { last, single } from 'rxjs';
 import {
-  UserRepository,
+  UserRepository, PlatformSettingRepository
 } from '@likemyproduct/repositories';
 import {
   USER_ROLE,
@@ -23,7 +23,7 @@ import { S3Service } from '@likemyproduct/s3';
 import {
   UpdateUserDto,
 } from '@likemyproduct/dtos';
-
+import { UpsertPlatformSettingDto } from '@likemyproduct/dtos/Platform setting/Platform.dto';
 @Injectable()
 export class UserService {
   constructor(
@@ -31,6 +31,7 @@ export class UserService {
     private readonly dataSource: DataSource,
     private readonly authModuleService: AuthModuleService,
     private readonly s3Service: S3Service,
+    private readonly platformSettingRepository: PlatformSettingRepository,
   ) { }
 
   async updateProfileByAdmin(
@@ -146,4 +147,70 @@ export class UserService {
       message: 'User blocked successfully',
     };
   }
+
+
+ async upsertPlatformSetting(
+  dto: UpsertPlatformSettingDto,
+  userId: number,
+) {
+  const existingSetting = await this.platformSettingRepository.findOne({
+    where: { key: dto.key },
+  });
+
+  if (existingSetting) {
+    existingSetting.value = dto.value;
+    existingSetting.description = dto.description;
+    existingSetting.updatedById = userId;
+
+    const updatedSetting =
+      await this.platformSettingRepository.save(existingSetting);
+
+    return {
+      success: true,
+      message: 'Platform setting updated successfully',
+      data: updatedSetting,
+    };
+  }
+
+  const newSetting = this.platformSettingRepository.create({
+    ...dto,
+    updatedById: userId,
+  });
+
+  const savedSetting = await this.platformSettingRepository.save(newSetting);
+
+  return {
+    success: true,
+    message: 'Platform setting created successfully',
+    data: savedSetting,
+  };
+}
+
+async getPlatformSetting(userId: number) {
+  const settings = await this.platformSettingRepository.findAndCount();
+
+  return {
+    success: true,
+    message: 'Platform settings retrieved successfully',
+    data: settings,
+  };
+}
+
+
+async deletePlatformSetting(id: number, userId: number) {
+  const setting = await this.platformSettingRepository.findOne({
+    where: { id },
+  });
+
+  if (!setting) {
+    throw new NotFoundException('Platform setting not found');
+  }
+
+  await this.platformSettingRepository.delete(id);
+
+  return {
+    success: true,
+    message: 'Platform setting deleted successfully',
+  };
+}
 }
