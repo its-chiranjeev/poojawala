@@ -18,6 +18,7 @@ import {
   PurohitProfileRepository,
 } from '@likemyproduct/repositories';
 import {
+  PurohitProfile,
   User,
   Otp,
   USER_ROLE,
@@ -138,8 +139,20 @@ export class UserService {
     const user = await this.userRepository.findById(id);
    }
   
-  async registerUser(dto: RegisterNormalUserDto) {
-    return this.registerUserService(dto);
+  // async registerUser(dto: RegisterNormalUserDto) {
+  //   return this.registerUserService(dto);
+  // }
+
+  async registerUser(
+    dto: RegisterNormalUserDto,
+    files: {
+      aadhaarDocUrl?: Express.Multer.File[];
+      panDocUrl?: Express.Multer.File[];
+      certificateUrl?: Express.Multer.File[];
+      templeAffiliationProofUrl?: Express.Multer.File[];
+    },
+  ) {
+    return this.registerUserService(dto, files);
   }
 
   async generateOtp(email: string, role: USER_ROLE) {
@@ -207,13 +220,15 @@ export class UserService {
     otpRecord.isVerified = true;
 
     await this.otpRepository.save(otpRecord);
+    
+    console.log('Verified OTP:', otpRecord);
 
     return {
       success: true,
       message: 'OTP verified successfully',
     };
   }
-
+  
   // purohit status accept/reject 
   async updatePurohitStatus(id: string, status: USER_STATUS) {
     const user = await this.userRepository.findById(id);
@@ -297,7 +312,15 @@ export class UserService {
     };
   }
 
-  async registerUserService(dto: RegisterNormalUserDto) {
+  async registerUserService(
+    dto: RegisterNormalUserDto,
+    files: {
+      aadhaarDocUrl?: Express.Multer.File[];
+      panDocUrl?: Express.Multer.File[];
+      certificateUrl?: Express.Multer.File[];
+      templeAffiliationProofUrl?: Express.Multer.File[];
+    },
+  ) {
     if (!dto.email && !dto.phone) {
       throw new BadRequestException(
         'At least email or phone number must be provided',
@@ -305,20 +328,84 @@ export class UserService {
     }
 
     // 1. Verify OTP record
-    const otpWhere: any[] = [];
-    if (dto.phone) otpWhere.push({ phone: dto.phone, otp: dto.otp });
-    if (dto.email) otpWhere.push({ email: dto.email, otp: dto.otp });
+    // const otpWhere: any[] = [];
+
+    console.log('Register Email:', dto.email);
 
     const otpRecord = await this.otpRepository.findOne({
-      where: otpWhere,
+      where: {
+        email: dto.email,
+        isVerified: true,
+      },
     });
+    console.log('OTP Record:', otpRecord);
+
+    // const otpRecord = await this.otpRepository.findOne({
+    //   where: otpWhere,
+    // });
 
     if (!otpRecord) {
-      throw new BadRequestException('Invalid OTP code or contact details');
+      throw new BadRequestException('Please verify your OTP first');
     }
 
     if (otpRecord.expiresAt < new Date()) {
       throw new BadRequestException('OTP has expired');
+    }
+    
+    if (otpRecord.role === USER_ROLE.PUROHIT) {
+      const requiredFields = [
+        'bio',
+        'qualification',
+        'experienceYears',
+        'aadhaarNumber',
+        'city',
+        'languages',
+        'isOnlineAvailable',
+        'isOfflineAvailable',
+        'specializations',
+      ];
+
+      for (const field of requiredFields) {
+        const value = dto[field];
+
+        if (
+          value === undefined ||
+          value === null ||
+          (typeof value === 'string' && value.trim() === '') ||
+          (Array.isArray(value) && value.length === 0)
+        ) {
+          throw new BadRequestException(
+            `${field} is required for Purohit registration`,
+          );
+        }
+      }
+
+      if (!files.aadhaarDocUrl?.length && !dto.aadhaarDoc) {
+        throw new BadRequestException(
+          'Aadhaar document or URL is required',
+        );
+      }
+
+      if (!files.panDocUrl?.length && !dto.panDoc) {
+        throw new BadRequestException(
+          'PAN document or URL is required',
+        );
+      }
+
+      if (!files.certificateUrl?.length && !dto.certificate) {
+        throw new BadRequestException(
+          'Certificate or URL is required',
+        );
+      }
+
+      if (
+        !files.templeAffiliationProofUrl?.length &&
+        !dto.templeAffiliationProof
+      ) {
+        throw new BadRequestException(
+          'Temple affiliation proof or URL is required',
+        );
+}
     }
 
     // 2. Check if user already exists by email
@@ -368,6 +455,63 @@ export class UserService {
       });
 
       const saved = await manager.save(User, newUser);
+
+      const aadhaarDocUrl = files.aadhaarDocUrl?.length
+  ? await this.s3Service.uploadFileHelper(
+      saved.id,
+      'aadhaarDoc',
+      files.aadhaarDocUrl,
+    )
+  : dto.aadhaarDoc;
+
+    const panDocUrl = files.panDocUrl?.length
+      ? await this.s3Service.uploadFileHelper(
+          saved.id,
+          'panDoc',
+          files.panDocUrl,
+        )
+      : dto.panDoc;
+
+    const certificateUrl = files.certificateUrl?.length
+      ? await this.s3Service.uploadFileHelper(
+          saved.id,
+          'certificate',
+          files.certificateUrl,
+        )
+      : dto.certificate;
+
+    const templeAffiliationProofUrl =
+      files.templeAffiliationProofUrl?.length
+        ? await this.s3Service.uploadFileHelper(
+            saved.id,
+            'templeAffiliationProof',
+            files.templeAffiliationProofUrl,
+          )
+        : dto.templeAffiliationProof;
+
+        if (otpRecord.role === USER_ROLE.PUROHIT) {
+          const profile = manager.create(PurohitProfile, {
+            userId: saved.id,
+            bio: dto.bio,
+            qualification: dto.qualification,
+            experienceYears: dto.experienceYears,
+            aadhaarNumber: dto.aadhaarNumber,
+
+            aadhaarDocUrl,
+            panDocUrl,
+            certificateUrl,
+            templeAffiliationProofUrl,
+
+            city: dto.city,
+            languages: dto.languages,
+            specializations: dto.specializations,
+            isOnlineAvailable: dto.isOnlineAvailable,
+            isOfflineAvailable: dto.isOfflineAvailable,
+          });
+
+          await manager.save(profile);
+        }
+  
 
       // 6. Delete OTP record after verification
       await manager.delete(Otp, { id: otpRecord.id });

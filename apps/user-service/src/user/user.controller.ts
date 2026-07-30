@@ -1,5 +1,5 @@
-import { FileInterceptor } from "@nestjs/platform-express";
-import { Body, Controller, Res, Query, Get, Put, Patch, Delete, Param, ParseIntPipe, HttpCode, HttpStatus, Post, Req, UnauthorizedException, UseGuards, UseInterceptors, ValidationPipe, UploadedFile, UnprocessableEntityException } from "@nestjs/common";
+import { FileInterceptor, FileFieldsInterceptor } from "@nestjs/platform-express";
+import { Body, Controller, UploadedFiles, Res, Query, Get, Put, Patch, Delete, Param, ParseIntPipe, HttpCode, HttpStatus, Post, Req, UnauthorizedException, UseGuards, UseInterceptors, ValidationPipe, UploadedFile, UnprocessableEntityException } from "@nestjs/common";
 import { UserService } from "./user.service";
 import type { Response } from 'express';
 import * as crypto from 'crypto';
@@ -53,12 +53,27 @@ export class UserController {
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'aadhaarDocUrl', maxCount: 1 },
+      { name: 'panDocUrl', maxCount: 1 },
+      { name: 'certificateUrl', maxCount: 1 },
+      { name: 'templeAffiliationProofUrl', maxCount: 1 },
+    ]),
+  )
   async registerUser(
+    @UploadedFiles()
+    files: {
+      aadhaarDocUrl?: Express.Multer.File[];
+      panDocUrl?: Express.Multer.File[];
+      certificateUrl?: Express.Multer.File[];
+      templeAffiliationProofUrl?: Express.Multer.File[];
+    },
     @Body(new ValidationPipe({ whitelist: true }))
     dto: RegisterNormalUserDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.userService.registerUser(dto);
+    const result = await this.userService.registerUser(dto, files);
 
     const csrfToken = crypto.randomUUID();
 
