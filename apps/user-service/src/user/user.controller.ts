@@ -3,7 +3,7 @@ import { Body, Controller, Query, Get, Put, Patch, Delete, Param, ParseIntPipe, 
 import { UserService } from "./user.service";
 import { AuthGuard } from "@nestjs/passport";
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@likemyproduct/common";
-import { UpdateUserDto } from "@likemyproduct/dtos";
+import { UpdateUserDto , VerifyPurohitDto } from "@likemyproduct/dtos";
 import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
 import { filter } from 'rxjs';
 
@@ -47,6 +47,27 @@ export class UserController {
     @Param('id') id: number,
   ) {
     return this.userService.blockUser(id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @Patch('purohits/:id/verification')
+  @HttpCode(HttpStatus.OK)
+  async verifyPurohitByAdmin(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) purohitUserId: number,
+    @Body(new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }))
+    dto: VerifyPurohitDto,
+  ) {
+    return this.userService.verifyPurohitByAdmin(
+      req.user.id,
+      purohitUserId,
+      dto,
+    );
   }
 }
 

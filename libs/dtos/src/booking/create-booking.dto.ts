@@ -19,7 +19,7 @@ export class CreateBookingDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  customerAddressId?: number;
+  customerAddressId!: number;
 
   @IsDateString()
   scheduledAt!: string;
