@@ -12,4 +12,7 @@ export class PurohitServiceRepository extends BaseRepository<PurohitService> {
   ) {
     super(repo);
   }
+  async softDelete(criteria: any) {
+    return this.repo.softDelete(criteria);
+  }
 }

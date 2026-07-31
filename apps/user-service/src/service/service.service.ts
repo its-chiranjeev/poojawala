@@ -1,7 +1,7 @@
-import { CreateServiceDto,CreatePurohitServiceDto,PurohitServiceItemDto } from '@likemyproduct/dtos/service/create.service.dto';
+import { CreateServiceDto, CreatePurohitServiceDto, PurohitServiceItemDto } from '@likemyproduct/dtos/service/create.service.dto';
 import { GetServicesQueryDto } from '@likemyproduct/dtos/service/get.services.query.dto';
-import { UpdateServiceDto ,UpdatePurohitServiceDto} from '@likemyproduct/dtos/service/update.service.dto';
-import { ServiceRepository ,PurohitServiceRepository,PurohitProfileRepository} from '@likemyproduct/repositories';
+import { UpdateServiceDto, UpdatePurohitServiceDto } from '@likemyproduct/dtos/service/update.service.dto';
+import { ServiceRepository, PurohitServiceRepository, PurohitProfileRepository } from '@likemyproduct/repositories';
 import { S3Service } from '@likemyproduct/s3';
 import {
   BadRequestException,
@@ -15,6 +15,7 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { QueryFailedError } from 'typeorm';
 
+// 177 87 
 
 @Injectable()
 export class ServiceService {
@@ -23,7 +24,7 @@ export class ServiceService {
     private readonly s3Service: S3Service,
     private readonly PurohitServiceRepository: PurohitServiceRepository,
     private readonly PurohitProfileRepository: PurohitProfileRepository,
-  ) {}
+  ) { }
 
   async findAllServices(query: GetServicesQueryDto) {
     const result = await this.serviceRepository.findAllServices(query);
@@ -80,6 +81,16 @@ export class ServiceService {
     });
 
     const savedService = await this.serviceRepository.save(service);
+
+    if (savedService.iconUrl) {
+      try {
+        savedService.iconUrl = await this.s3Service.getDownloadUrl(
+          savedService.iconUrl,
+        );
+      } catch (e) {
+        console.error('Failed to generate signed URL:', e);
+      }
+    }
 
     return {
       success: true,
@@ -156,11 +167,21 @@ export class ServiceService {
 
   async findServiceById(id: number) {
     const service = await this.serviceRepository.findById(id);
-
+  
     if (!service) {
       throw new NotFoundException('Service not found');
     }
-
+  
+    if (service.iconUrl) {
+      try {
+        service.iconUrl = await this.s3Service.getDownloadUrl(
+          service.iconUrl,
+        );
+      } catch (e) {
+        console.error('Failed to generate pre-signed URL for icon:', e);
+      }
+    }
+  
     return {
       success: true,
       message: 'Service fetched successfully',
@@ -200,91 +221,91 @@ export class ServiceService {
     }
   }
 
- async addService(dto: CreatePurohitServiceDto, userId: number) {
-  
-  const purohitProfile = await this.PurohitProfileRepository.findOne({
-    where: { userId },
-  });
+  async addService(dto: CreatePurohitServiceDto, userId: number) {
 
-  if (!purohitProfile) {
-    throw new NotFoundException('Purohit profile not found');
-  }
-
-const added: any[] = [];
-const failed: any[] = [];
-
-  for (const item of dto.services) {
-    // Validate each item
-    
-   const serviceDto = new PurohitServiceItemDto();
-
-serviceDto.serviceId = Number(item.serviceId);
-serviceDto.customPrice = Number(item.customPrice);
-serviceDto.durationMinutes = item.durationMinutes
-  ? Number(item.durationMinutes)
-  : undefined;
-serviceDto.isActive = item.isActive;
-
-const errors = await validate(serviceDto);
-   
-    if (errors.length > 0) {
-      failed.push({
-        serviceId: item.serviceId,
-        reason: errors.flatMap(error =>
-          Object.values(error.constraints ?? {}),
-        ),
-      });
-      continue;
-    }
-
-    // Check if master service exists
-    const service = await this.serviceRepository.findOne({
-      where: { id: serviceDto.serviceId },
+    const purohitProfile = await this.PurohitProfileRepository.findOne({
+      where: { userId },
     });
 
-    if (!service) {
-      failed.push({
-        serviceId: serviceDto.serviceId,
-        reason: ['Service not found'],
-      });
-      continue;
+    if (!purohitProfile) {
+      throw new NotFoundException('Purohit profile not found');
     }
 
-    // Check duplicate
-    const existing = await this.PurohitServiceRepository.findOne({
-      where: {
+    const added: any[] = [];
+    const failed: any[] = [];
+
+    for (const item of dto.services) {
+      // Validate each item
+
+      const serviceDto = new PurohitServiceItemDto();
+
+      serviceDto.serviceId = Number(item.serviceId);
+      serviceDto.customPrice = Number(item.customPrice);
+      serviceDto.durationMinutes = item.durationMinutes
+        ? Number(item.durationMinutes)
+        : undefined;
+      serviceDto.isActive = item.isActive;
+
+      const errors = await validate(serviceDto);
+
+      if (errors.length > 0) {
+        failed.push({
+          serviceId: item.serviceId,
+          reason: errors.flatMap(error =>
+            Object.values(error.constraints ?? {}),
+          ),
+        });
+        continue;
+      }
+
+      // Check if master service exists
+      const service = await this.serviceRepository.findOne({
+        where: { id: serviceDto.serviceId },
+      });
+
+      if (!service) {
+        failed.push({
+          serviceId: serviceDto.serviceId,
+          reason: ['Service not found'],
+        });
+        continue;
+      }
+
+      // Check duplicate
+      const existing = await this.PurohitServiceRepository.findOne({
+        where: {
+          purohitId: purohitProfile.id,
+          serviceId: serviceDto.serviceId,
+        },
+      });
+
+      if (existing) {
+        failed.push({
+          serviceId: serviceDto.serviceId,
+          reason: ['Service already added'],
+        });
+        continue;
+      }
+
+      // Save
+      const entity = this.PurohitServiceRepository.create({
+        ...serviceDto,
         purohitId: purohitProfile.id,
-        serviceId: serviceDto.serviceId,
-      },
-    });
-
-    if (existing) {
-      failed.push({
-        serviceId: serviceDto.serviceId,
-        reason: ['Service already added'],
       });
-      continue;
+
+      const saved = await this.PurohitServiceRepository.save(entity);
+      added.push(saved);
     }
 
-    // Save
-    const entity = this.PurohitServiceRepository.create({
-      ...serviceDto,
-      purohitId: purohitProfile.id,
-    });
-
-    const saved = await this.PurohitServiceRepository.save(entity);
-    added.push(saved);
+    return {
+      success: added.length > 0,
+      message: `${added.length} service(s) added, ${failed.length} failed.`,
+      data: {
+        added,
+        failed,
+      },
+    };
   }
-
-  return {
-    success: added.length > 0,
-    message: `${added.length} service(s) added, ${failed.length} failed.`,
-    data: {
-      added,
-      failed,
-    },
-  };
-}
 
   async getPurohitServices(userId: number) {
     const purohitProfile = await this.PurohitProfileRepository.findOne({
@@ -309,7 +330,7 @@ const errors = await validate(serviceDto);
 
 
   async deletePurohitService(Id: number, userId: number) {
-   
+
 
     const purohitService = await this.PurohitServiceRepository.findOne({
       where: { id: Id },
@@ -330,7 +351,8 @@ const errors = await validate(serviceDto);
     if (purohitService.purohitId !== purohitProfile.id) {
       throw new ForbiddenException('You are not authorized to delete this service');
     }
-    await this.PurohitServiceRepository.delete(Id);
+
+    await this.PurohitServiceRepository.softDelete(Id);
 
     return {
       success: true,
@@ -339,6 +361,7 @@ const errors = await validate(serviceDto);
   }
 
   async updatePurohitService(Id: number, dto: UpdatePurohitServiceDto, userId: number) {
+    console.log(dto)
     const purohitService = await this.PurohitServiceRepository.findOne({
       where: { id: Id },
     });
@@ -369,5 +392,33 @@ const errors = await validate(serviceDto);
       data: updatedService,
     };
 
+  }
+
+  async getPurohitServiceById(id: number, userId: number) {
+    const purohitProfile = await this.PurohitProfileRepository.findOne({
+      where: { userId },
+    });
+
+    if (!purohitProfile) {
+      throw new NotFoundException('Purohit profile not found');
+    }
+
+    const purohitService = await this.PurohitServiceRepository.findOne({
+      where: {
+        id,
+        purohitId: purohitProfile.id,
+      },
+      relations: ['service'],
+    });
+
+    if (!purohitService) {
+      throw new NotFoundException('Purohit service not found');
+    }
+
+    return {
+      success: true,
+      message: 'Purohit service fetched successfully',
+      data: purohitService,
+    };
   }
 }
