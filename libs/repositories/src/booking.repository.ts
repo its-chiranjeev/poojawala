@@ -430,4 +430,27 @@ export class BookingRepository extends BaseRepository<Booking> {
       booking,
     );
   }
+
+  async softDeleteBooking(
+    bookingId: number,
+  ): Promise<void> {
+    await this.repo.softDelete(bookingId);
+  }
+
+  async findBookingByIdIncludingDeleted(
+    bookingId: number,
+  ): Promise<Booking | null> {
+    return this.repo.findOne({
+      where: {
+        id: bookingId,
+      },
+      withDeleted: true,
+    });
+  }
+
+  async restoreBooking(
+    bookingId: number,
+  ): Promise<void> {
+    await this.repo.restore(bookingId);
+  }
 }

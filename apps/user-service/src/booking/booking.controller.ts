@@ -1,22 +1,22 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, Req, UseGuards, } from '@nestjs/common';
+import { Body, Controller, Get, Delete, Param, ParseIntPipe, Patch, Post, Query, Req, UseGuards, UseInterceptors, UploadedFiles, BadRequestException } from '@nestjs/common';
 import { BookingService } from './booking.service';
-import { CreateBookingDto, UpdateBookingDto, BookingQueryDto, CancelBookingDto, RespondBookingDto, AssignBookingDto, UpdateBookingStatusDto } from '@likemyproduct/dtos';
+import { CreateBookingDto, UpdateBookingDto, BookingQueryDto, CancelBookingDto, RespondBookingDto, AssignBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto } from '@likemyproduct/dtos';
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@likemyproduct/common';
 import { USER_ROLE, User } from '@likemyproduct/entities';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 
-interface AuthenticatedRequest extends Request {
-  user: User;
-}
+interface AuthenticatedRequest extends Request {user: User}
 
 @Controller('bookings')
 @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
 export class BookingController {
   constructor(
     private readonly bookingService: BookingService,
-  ) {}
+    ) {}
 
   @Post('add')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.CUSTOMER)
   createBooking(
     @Req() req: AuthenticatedRequest,
@@ -28,7 +28,7 @@ export class BookingController {
     );
   }
   @Get('all')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
   getBookings(
     @Req() req: AuthenticatedRequest,
@@ -41,7 +41,7 @@ export class BookingController {
   }
 
   @Patch(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.CUSTOMER)
   updateBooking(
     @Req() req: AuthenticatedRequest,
@@ -57,7 +57,7 @@ export class BookingController {
   }
 
   @Patch(':id/cancel')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles( USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN )
   cancelBooking(
     @Req() req: AuthenticatedRequest,
@@ -71,8 +71,34 @@ export class BookingController {
     );
   }
 
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  softDeleteBooking(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseIntPipe)
+    bookingId: number,
+  ) {
+    return this.bookingService.softDeleteBooking(
+      req.user,
+      bookingId,
+    );
+  }
+
+  @Patch(':id/restore')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  restoreBooking(
+    @Param('id', ParseIntPipe)
+    bookingId: number,
+  ) {
+    return this.bookingService.restoreBooking(
+      bookingId,
+    );
+  }
+
   @Patch(':id/respond')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.PUROHIT)
   respondToBooking(
     @Req() req: AuthenticatedRequest,
@@ -87,7 +113,7 @@ export class BookingController {
   }
 
   @Patch(':id/assign')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   assignBooking(
     @Req() req: AuthenticatedRequest,
@@ -102,7 +128,7 @@ export class BookingController {
   }
 
   @Get('available')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.PUROHIT)
   getAvailableBookings(
     @Req() req: AuthenticatedRequest,
@@ -115,7 +141,7 @@ export class BookingController {
   }
 
   @Patch(':id/status')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   updateBookingStatus(
     @Req() req: AuthenticatedRequest,
@@ -128,8 +154,74 @@ export class BookingController {
       dto,
     );
   }
+
+  @Post(':id/completion-otp')
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
+  generateCompletionOtp(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseIntPipe)
+    bookingId: number,
+  ) {
+    return this.bookingService.generateCompletionOtp(
+      req.user,
+      bookingId,
+    );
+  }
+
+  @Post(':id/verify-completion-otp')
+  @Roles(USER_ROLE.CUSTOMER)
+  verifyCompletionOtp(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseIntPipe)
+    bookingId: number,
+    @Body()
+    dto: VerifyCompletionOtpDto,
+  ) {
+    return this.bookingService.verifyCompletionOtp(
+      req.user,
+      bookingId,
+      dto,
+    );
+  }
+
+ @Post(':id/completion-proof')
+  @Roles(USER_ROLE.PUROHIT,USER_ROLE.ADMIN)
+  @UseInterceptors(
+    FilesInterceptor('files', 5, {
+      storage: memoryStorage(),
+      limits: {fileSize: 5 * 1024 * 1024,},
+      fileFilter: (
+        request,
+        file,
+        callback,
+      ) => {
+        const allowedMimeTypes = ['image/jpeg','image/png','image/webp'];
+        if (!allowedMimeTypes.includes(file.mimetype)) {
+          return callback(
+            new BadRequestException('Only JPG, PNG and WEBP images are allowed'),
+            false,
+          );
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  uploadCompletionProof(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseIntPipe)
+    bookingId: number,
+    @UploadedFiles()
+    files: Express.Multer.File[],
+  ) {
+    return this.bookingService.uploadCompletionProof(
+        req.user,
+        bookingId,
+        files,
+      );
+  }
+
   @Get(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
   getBookingById(
     @Req() req: AuthenticatedRequest,

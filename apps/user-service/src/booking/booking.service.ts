@@ -1,70 +1,103 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { DataSource, EntityManager, Repository  } from 'typeorm';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ConflictException, InternalServerErrorException, Logger } from '@nestjs/common';
+import * as crypto from 'crypto';
+import { randomInt } from 'crypto';
+import * as path from 'path';
+import { Cron } from '@nestjs/schedule';
+import { DataSource, EntityManager, Repository, QueryFailedError  } from 'typeorm';
 import { ASSIGNMENT_TYPE, Booking, BOOKING_PAYMENT_STATUS, BOOKING_STATUS, CustomerAddress, Service, USER_ROLE, User , CANCELLED_BY, PurohitProfile, USER_STATUS, PUROHIT_VERIFICATION_STATUS, PurohitService, PurohitServiceArea } from '@likemyproduct/entities';
 import { BookingRepository } from '@likemyproduct/repositories';
-import { BookingQueryDto, CreateBookingDto, UpdateBookingDto, CancelBookingDto, RespondBookingDto, PUROHIT_BOOKING_ACTION, AssignBookingDto, UpdateBookingStatusDto } from '@likemyproduct/dtos';
+import { BookingQueryDto, CreateBookingDto, UpdateBookingDto, CancelBookingDto, RespondBookingDto, PUROHIT_BOOKING_ACTION, AssignBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto } from '@likemyproduct/dtos';
+import { S3Service } from '@likemyproduct/s3';
+import { SmsService } from '@likemyproduct/sms-services';
+import { EmailService } from '@likemyproduct/email-services';
 
 @Injectable()
 export class BookingService {
+    private readonly logger = new Logger(BookingService.name);
   constructor(
     private readonly bookingRepository: BookingRepository,
-    private readonly dataSource: DataSource
+    private readonly dataSource: DataSource,
+    private readonly s3Service: S3Service,
+    private readonly smsService: SmsService,
+    private readonly emailService: EmailService,
     ) {}
+
+    @Cron('0 * * * * *', {
+    name: 'change-auto-bookings-to-manual',
+  })
+
+  async changeAutoBookingsToManualCron():
+    Promise<void> {
+    this.logger.log('AUTO to MANUAL booking cron started');
+
+    try {
+      const affectedBookings = await this.changeBookingsToManual();
+      this.logger.log(`AUTO to MANUAL cron completed. Updated bookings: ${affectedBookings}`);
+    } catch (error) {
+      this.logger.error('Failed to change AUTO bookings to MANUAL',
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  async changeBookingsToManual(): Promise<number> {
+    const bookingRepository =
+      this.dataSource.getRepository(Booking);
+
+    const result = await bookingRepository
+      .createQueryBuilder()
+      .update(Booking)
+      .set({
+        assignmentType: ASSIGNMENT_TYPE.MANUAL,
+      })
+      .where(
+        '"status" = :status',
+        {
+          status: BOOKING_STATUS.PENDING,
+        },
+      )
+      .andWhere(
+        '"assignmentType" = :assignmentType',
+        {
+          assignmentType: ASSIGNMENT_TYPE.AUTO,
+        },
+      )
+      .andWhere('"purohitId" IS NULL')
+      .andWhere(
+        `"createdAt" <=
+        (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+        - INTERVAL '5 minutes'`,
+      )
+      .execute();
+
+    return result.affected ?? 0;
+  }
 
   async createBooking(
     user: User,
     dto: CreateBookingDto,
   ): Promise<Booking> {
-    /*
-    * Initial role validation from authenticated user.
-    */
     if (user.role !== USER_ROLE.CUSTOMER) {
       throw new ForbiddenException('Only customers can create bookings');
     }
 
     /*
-    * Validate scheduled date format.
+    * Fixed booking configuration.
+    * No .env variables are required.
     */
+    const minimumLeadTimeMinutes = 120;
+    const maximumAdvanceDays = 180;
+    const conflictWindowMinutes = 120;
     const scheduledAt = new Date(dto.scheduledAt);
 
     if (Number.isNaN(scheduledAt.getTime())) {
       throw new BadRequestException('Invalid scheduled date and time');
     }
 
-    /*
-    * Booking must be created at least 2 hours in advance.
-    *
-    * Add to .env:
-    * BOOKING_MIN_LEAD_TIME_MINUTES=120
-    */
-    const minimumLeadTimeMinutes = Number(
-      process.env['BOOKING_MIN_LEAD_TIME_MINUTES'] ?? 120,
-    );
-
-    if (!Number.isFinite(minimumLeadTimeMinutes) || minimumLeadTimeMinutes < 0) {
-      throw new BadRequestException('Invalid booking minimum lead-time configuration');
-    }
-
-    const minimumScheduledAt = new Date(
-      Date.now() + minimumLeadTimeMinutes * 60 * 1000,
-    );
+    const minimumScheduledAt = new Date(Date.now() + minimumLeadTimeMinutes * 60 * 1000);
 
     if (scheduledAt < minimumScheduledAt) {
       throw new BadRequestException(`Booking must be scheduled at least ${minimumLeadTimeMinutes} minutes in advance`);
-    }
-
-    /*
-    * Prevent bookings too far into the future.
-    *
-    * Add to .env:
-    * BOOKING_MAX_ADVANCE_DAYS=180
-    */
-    const maximumAdvanceDays = Number(
-      process.env['BOOKING_MAX_ADVANCE_DAYS'] ?? 180,
-    );
-
-    if (!Number.isFinite(maximumAdvanceDays) || maximumAdvanceDays <= 0) {
-      throw new BadRequestException('Invalid maximum booking advance-days configuration');
     }
 
     const maximumScheduledAt = new Date(
@@ -75,416 +108,427 @@ export class BookingService {
       throw new BadRequestException(`Booking cannot be scheduled more than ${maximumAdvanceDays} days in advance`);
     }
 
-    return this.dataSource.transaction(async (manager) => {
-      const userRepository = manager.getRepository(User);
-      const serviceRepository = manager.getRepository(Service);
-      const addressRepository = manager.getRepository(CustomerAddress);
-      const bookingRepository = manager.getRepository(Booking);
-      const purohitProfileRepository = manager.getRepository(PurohitProfile);
-
-      /*
-      * Reload customer from database.
-      *
-      * This prevents an inactive, blocked or deleted customer
-      * from creating a booking using an old JWT.
-      */
-      const customer = await userRepository.findOne({
-        where: {
-          id: user.id,
-          role: USER_ROLE.CUSTOMER,
-          status: USER_STATUS.ACTIVE,
-        },
-      });
-
-      if (!customer) {
-        throw new ForbiddenException('Only active customers can create bookings');
-      }
-
-      /*
-      * Validate selected service.
-      */
-      const service = await serviceRepository.findOne({
-        where: {
-          id: dto.serviceId,
-        },
-      });
-
-      if (!service) {
-        throw new NotFoundException('Service not found');
-      }
-
-      if (!service.isActive) {
-        throw new BadRequestException('Service is currently inactive');
-      }
-
-      /*
-      * Current flow is for offline bookings, so address
-      * is required.
-      */
-      if (!dto.customerAddressId) {
-        throw new BadRequestException('Customer address is required for booking');
-      }
-
-      /*
-      * Validate that the address belongs to this customer.
-      *
-      * TypeORM automatically ignores soft-deleted addresses
-      * unless withDeleted is explicitly enabled.
-      */
-      const customerAddress =
-        await addressRepository.findOne({
-          where: {
-            id: dto.customerAddressId,
-            customerId: customer.id,
-          },
-        });
-
-      if (!customerAddress) {
-        throw new NotFoundException('Customer address not found or does not belong to you');
-      }
-
-      const customerPincode = customerAddress.pincode?.trim();
-
-      if (!customerPincode) {
-        throw new BadRequestException('A valid pincode is required in the selected customer address');
-      }
-
-      /*
-      * Validate coordinates.
-      *
-      * They are not currently used for radius filtering because
-      * PurohitServiceArea has no serviceRadiusKm column, but
-      * validating them now keeps address data ready for future
-      * distance matching.
-      */
-      const customerLatitude = Number(customerAddress.latitude);
-      const customerLongitude = Number(customerAddress.longitude);
-
-      if (!Number.isFinite(customerLatitude) || customerLatitude < -90 || customerLatitude > 90
-      ) {
-        throw new BadRequestException('Selected customer address does not have a valid latitude');
-      }
-
-      if (!Number.isFinite(customerLongitude) || customerLongitude < -180 || customerLongitude > 180
-      ) {
-        throw new BadRequestException('Selected customer address does not have a valid longitude');
-      }
-
-      /*
-      * Validate service pricing.
-      */
-      const minPrice = Number(service.minPrice);
-      const maxPrice = Number(service.maxPrice);
-
-      const commissionPercentage = Number(service.commissionPercentage);
-
-      if (!Number.isFinite(minPrice) || minPrice <= 0) {
-        throw new BadRequestException('A valid minimum price is not configured for this service');
-      }
-
-      if (!Number.isFinite(maxPrice) || maxPrice < minPrice) {
-        throw new BadRequestException('A valid maximum price is not configured for this service');
-      }
-
-      if (!Number.isFinite(commissionPercentage) || commissionPercentage < 0 || commissionPercentage > 100) {
-        throw new BadRequestException('A valid commission percentage is not configured for this service');
-      }
-
-      const donationAmount = Number(dto.donationAmount ?? 0);
-
-      if (!Number.isFinite(donationAmount) ||  donationAmount < 0) {
-        throw new BadRequestException('Donation amount must be zero or greater');
-      }
-
-      /*
-      * Currently coupons are not implemented.
-      *
-      * Do not silently store a coupon without validating and
-      * applying it.
-      */
-      const couponCode =
-        dto.couponCode?.trim();
-
-      if (couponCode) {
-        throw new BadRequestException('Coupon functionality is not currently available');
-      }
-
-      /*
-      * Prevent duplicate active bookings for exactly the same
-      * customer, service and scheduled time.
-      */
-      const duplicateBooking =
-        await bookingRepository
-          .createQueryBuilder('booking')
-          .where(
-            'booking.customerId = :customerId',
-            {
-              customerId: customer.id,
-            },
-          )
-          .andWhere(
-            'booking.serviceId = :serviceId',
-            {
-              serviceId: service.id,
-            },
-          )
-          .andWhere(
-            'booking.scheduledAt = :scheduledAt',
-            {
-              scheduledAt,
-            },
-          )
-          .andWhere(
-            'booking.status IN (:...statuses)',
-            {
-              statuses: [
-                BOOKING_STATUS.PENDING,
-                BOOKING_STATUS.ACCEPTED,
-                BOOKING_STATUS.ENROUTE,
-                BOOKING_STATUS.ARRIVED,
-                BOOKING_STATUS.ONGOING,
-              ],
-            },
-          )
-          .getOne();
-
-      if (duplicateBooking) {
-        throw new ConflictException('A booking for this service and scheduled time already exists');
-      }
-
-      /*
-      * Find Purohits who:
-      *
-      * 1. Provide the selected service.
-      * 2. Have an active PurohitService record.
-      * 3. Have APPROVED profile verification.
-      * 4. Have ACTIVE user status.
-      * 5. Are available for offline bookings.
-      * 6. Serve the customer's pincode.
-      *
-      * Select profile.id because:
-      * Booking.purohitId references PurohitProfile.id.
-      */
-      const matchingPurohits =
-        await purohitProfileRepository
-          .createQueryBuilder('profile')
-          .innerJoin(
-            'profile.user',
-            'purohit_user',
-          )
-          .innerJoin(
-            'profile.purohitServices',
-            'purohit_service',
-            `
-              purohit_service.serviceId = :serviceId
-              AND purohit_service.isActive = :isServiceActive
-            `,
-            {
-              serviceId: service.id,
-              isServiceActive: true,
-            },
-          )
-          .innerJoin(
-            PurohitServiceArea,
-            'service_area',
-            `
-              service_area.purohitId = purohit_user.id
-              AND service_area.pincode = :customerPincode
-            `,
-            {
-              customerPincode,
-            },
-          )
-          .where(
-            'profile.verificationStatus = :verificationStatus',
-            {
-              verificationStatus:
-                PUROHIT_VERIFICATION_STATUS.APPROVED,
-            },
-          )
-          .andWhere(
-            'profile.isOfflineAvailable = :isOfflineAvailable',
-            {
-              isOfflineAvailable: true,
-            },
-          )
-          .andWhere(
-            'purohit_user.role = :purohitRole',
-            {
-              purohitRole: USER_ROLE.PUROHIT,
-            },
-          )
-          .andWhere(
-            'purohit_user.status = :purohitUserStatus',
-            {
-              purohitUserStatus: USER_STATUS.ACTIVE,
-            },
-          )
-          .select(
-            'profile.id',
-            'purohitProfileId',
-          )
-          .distinct(true)
-          .getRawMany<{
-            purohitProfileId: string;
-          }>();
-
-      const matchingPurohitIds = [
-        ...new Set(
-          matchingPurohits
-            .map(({ purohitProfileId }) =>
-              Number(purohitProfileId),
-            )
-            .filter((id) =>
-              Number.isInteger(id),
-            ),
-        ),
-      ];
-
-      /*
-      * Exclude Purohits who already have another active booking
-      * close to this scheduled time.
-      *
-      * Temporary assumption:
-      * Each booking occupies a four-hour window:
-      * two hours before and two hours after scheduledAt.
-      *
-      * Later, use PurohitService.durationMinutes to calculate
-      * a more accurate overlap window.
-      */
-      let availablePurohitIds = matchingPurohitIds;
-
-      if (matchingPurohitIds.length > 0) {
-        const conflictWindowMinutes = Number(process.env['BOOKING_CONFLICT_WINDOW_MINUTES'] ?? 120,
-        );
-
-        if (!Number.isFinite(conflictWindowMinutes) || conflictWindowMinutes < 0) {
-          throw new BadRequestException('Invalid booking conflict-window configuration');
-        }
-
-        const conflictStart = new Date(scheduledAt.getTime() - conflictWindowMinutes * 60 * 1000);
-        const conflictEnd = new Date(scheduledAt.getTime() + conflictWindowMinutes * 60 * 1000);
-
-        const busyPurohits =
-          await bookingRepository
-            .createQueryBuilder('booking')
-            .select(
-              'booking.purohitId',
-              'purohitId',
-            )
-            .where(
-              'booking.purohitId IN (:...purohitIds)',
-              {
-                purohitIds:
-                  matchingPurohitIds,
-              },
-            )
-            .andWhere(
-              'booking.status IN (:...busyStatuses)',
-              {
-                busyStatuses: [
-                  BOOKING_STATUS.ACCEPTED,
-                  BOOKING_STATUS.ENROUTE,
-                  BOOKING_STATUS.ARRIVED,
-                  BOOKING_STATUS.ONGOING,
-                ],
-              },
-            )
-            .andWhere(
-              'booking.scheduledAt BETWEEN :conflictStart AND :conflictEnd',
-              {
-                conflictStart,
-                conflictEnd,
-              },
-            )
-            .getRawMany<{
-              purohitId: string;
-            }>();
-
-        const busyPurohitIds = new Set(
-          busyPurohits.map(
-            ({ purohitId }) =>
-              Number(purohitId),
-          ),
-        );
-
-        availablePurohitIds =
-          matchingPurohitIds.filter(
-            (purohitId) =>
-              !busyPurohitIds.has(
-                purohitId,
-              ),
-          );
-      }
-
-      /*
-      * Automatically distribute only when eligible Purohits
-      * are available. Otherwise, mark for manual assignment.
-      */
-      const assignmentType = availablePurohitIds.length > 0 ? ASSIGNMENT_TYPE.AUTO : ASSIGNMENT_TYPE.MANUAL;
-
-      /*
-      * Current pricing uses the service minimum price.
-      */
-      const agreedPrice = minPrice;
-      const discountAmount = 0;
-
-      const platformCommission = Number((agreedPrice * (commissionPercentage / 100)).toFixed(2));
-
-      /*
-      * Current business assumption:
-      * Donation is included in the customer's final payment,
-      * but not included in the Purohit payout.
-      *
-      * Change this when the donation ownership rule is confirmed.
-      */
-      const purohitPayoutAmount = Number((agreedPrice - platformCommission).toFixed(2));
-
-      const finalAmount = Number((agreedPrice - discountAmount + donationAmount).toFixed(2));
-
-      if (platformCommission < 0 || purohitPayoutAmount < 0 || finalAmount < 0) {
-        throw new BadRequestException('Calculated booking amount is invalid');
-      }
-
-      /*
-      * Generate a unique booking number inside the transaction.
-      */
-      const bookingNumber = await this.generateUniqueBookingNumber(bookingRepository);
-
-      const booking = bookingRepository.create({
-          bookingNumber,
-          customerId: customer.id,
-          serviceId: service.id,
-          customerAddressId:
-          customerAddress.id,
-          addressSnapshot:this.createAddressSnapshot(customerAddress),
-          customerPincode,
-          scheduledAt,
-          specialInstructions: dto.specialInstructions?.trim() || undefined,
-          customFields: dto.customFields ?? undefined,
-          agreedPrice,
-          commissionPercentage,
-          platformCommission,
-          purohitPayoutAmount,
+    try {
+      return await this.dataSource.transaction(
+        async (manager) => {
+          const userRepository = manager.getRepository(User);
+          const serviceRepository = manager.getRepository(Service);
+          const addressRepository = manager.getRepository(CustomerAddress);
+          const bookingRepository = manager.getRepository(Booking);
+          const purohitProfileRepository = manager.getRepository(PurohitProfile);
 
           /*
-          * Coupon is undefined until a proper coupon-validation
-          * flow is implemented.
+          * Reload customer from database so an old JWT
+          * cannot be used by an inactive or blocked user.
           */
-          couponCode: undefined,
-          discountAmount,
-          donationAmount,
-          finalAmount,
-          status: BOOKING_STATUS.PENDING,
-          paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
-          assignmentType, 
-          filteredPurohitIds: availablePurohitIds,
-        });
+          const customer =
+            await userRepository.findOne({
+              where: {
+                id: user.id,
+                role: USER_ROLE.CUSTOMER,
+                status: USER_STATUS.ACTIVE,
+              },
+            });
 
-      return bookingRepository.save(
-        booking,
+          if (!customer) {
+            throw new ForbiddenException('Only active customers can create bookings');
+          }
+
+          /*
+          * Validate selected service.
+          */
+          const service =
+            await serviceRepository.findOne({
+              where: {
+                id: dto.serviceId,
+              },
+            });
+
+          if (!service) {
+            throw new NotFoundException('Service not found');
+          }
+
+          if (!service.isActive) {
+            throw new BadRequestException('Service is currently inactive' );
+          }
+
+          /*
+          * Address is required for an offline booking.
+          */
+          if (!dto.customerAddressId) {
+            throw new BadRequestException('Customer address is required for booking');
+          }
+
+          const customerAddress =
+            await addressRepository.findOne({
+              where: {
+                id: dto.customerAddressId,
+                customerId: customer.id,
+              },
+            });
+
+          if (!customerAddress) {
+            throw new NotFoundException('Customer address not found or does not belong to you');
+          }
+
+          const customerPincode = customerAddress.pincode?.trim();
+
+          if (!customerPincode) {
+            throw new BadRequestException('A valid pincode is required in the selected customer address');
+          }
+
+          /*
+          * Validate customer coordinates.
+          */
+          const customerLatitude = Number(customerAddress.latitude);
+          const customerLongitude = Number(customerAddress.longitude);
+
+          if (!Number.isFinite(customerLatitude) || customerLatitude < -90 || customerLatitude > 90) {
+            throw new BadRequestException('Selected customer address does not have a valid latitude');
+          }
+
+          if (!Number.isFinite(customerLongitude) || customerLongitude < -180 || customerLongitude > 180) {
+            throw new BadRequestException('Selected customer address does not have a valid longitude');
+          }
+
+          /*
+          * Validate pricing configuration.
+          */
+          const minPrice = Number(service.minPrice);
+          const maxPrice = Number(service.maxPrice);
+          const commissionPercentage = Number(service.commissionPercentage);
+
+          if (!Number.isFinite(minPrice) || minPrice <= 0) {
+            throw new BadRequestException('A valid minimum price is not configured for this service');
+          }
+
+          if (!Number.isFinite(maxPrice) || maxPrice < minPrice) {
+            throw new BadRequestException('A valid maximum price is not configured for this service');
+          }
+
+          if (!Number.isFinite(commissionPercentage) || commissionPercentage < 0 || commissionPercentage > 100) {
+            throw new BadRequestException('A valid commission percentage is not configured for this service');
+          }
+
+          const donationAmount = Number( dto.donationAmount ?? 0);
+
+          if (!Number.isFinite(donationAmount) || donationAmount < 0) {
+            throw new BadRequestException('Donation amount must be zero or greater');
+          }
+
+          const couponCode = dto.couponCode?.trim();
+
+          if (couponCode) {
+            throw new BadRequestException('Coupon functionality is not currently available');
+          }
+
+          /*
+          * Transaction-level advisory lock.
+          *
+          * Simultaneous requests for the same customer,
+          * service and scheduled time will be processed
+          * one after another.
+          */
+          const duplicateLockKey = [
+            customer.id,
+            service.id,
+            scheduledAt.toISOString(),
+          ].join(':');
+
+          await manager.query(
+            `
+              SELECT pg_advisory_xact_lock(
+                hashtext($1)
+              )
+            `,
+            [duplicateLockKey],
+          );
+
+          const activeBookingStatuses = [
+            BOOKING_STATUS.PENDING,
+            BOOKING_STATUS.ACCEPTED,
+            BOOKING_STATUS.ENROUTE,
+            BOOKING_STATUS.ARRIVED,
+            BOOKING_STATUS.ONGOING,
+          ];
+
+          /*
+          * Prevent an active duplicate booking.
+          */
+          const duplicateBookingExists =
+            await bookingRepository
+              .createQueryBuilder('booking')
+              .where(
+                'booking.customerId = :customerId',
+                {
+                  customerId: customer.id,
+                },
+              )
+              .andWhere(
+                'booking.serviceId = :serviceId',
+                {
+                  serviceId: service.id,
+                },
+              )
+              .andWhere(
+                'booking.scheduledAt = :scheduledAt',
+                {
+                  scheduledAt,
+                },
+              )
+              .andWhere(
+                'booking.status IN (:...statuses)',
+                {
+                  statuses:
+                    activeBookingStatuses,
+                },
+              )
+              .getExists();
+
+          if (duplicateBookingExists) {
+            throw new ConflictException('An active booking for this service and scheduled time already exists');
+          }
+
+          /*
+          * Find approved and active Purohits who:
+          *
+          * 1. Provide the selected service.
+          * 2. Are available for offline bookings.
+          * 3. Serve the customer's pincode.
+          */
+          const matchingPurohits =
+            await purohitProfileRepository
+              .createQueryBuilder('profile')
+              .innerJoin(
+                'profile.user',
+                'purohit_user',
+              )
+              .innerJoin(
+                'profile.purohitServices',
+                'purohit_service',
+                `
+                  purohit_service.serviceId = :serviceId
+                  AND purohit_service.isActive = :isServiceActive
+                `,
+                {
+                  serviceId: service.id,
+                  isServiceActive: true,
+                },
+              )
+              .innerJoin(
+                PurohitServiceArea,
+                'service_area',
+                `
+                  service_area.purohitId = purohit_user.id
+                  AND service_area.pincode = :customerPincode
+                `,
+                {
+                  customerPincode,
+                },
+              )
+              .where(
+                'profile.verificationStatus = :verificationStatus',
+                {
+                  verificationStatus:
+                    PUROHIT_VERIFICATION_STATUS.APPROVED,
+                },
+              )
+              .andWhere(
+                'profile.isOfflineAvailable = :isOfflineAvailable',
+                {
+                  isOfflineAvailable: true,
+                },
+              )
+              .andWhere(
+                'purohit_user.role = :purohitRole',
+                {
+                  purohitRole:
+                    USER_ROLE.PUROHIT,
+                },
+              )
+              .andWhere(
+                'purohit_user.status = :purohitUserStatus',
+                {
+                  purohitUserStatus:
+                    USER_STATUS.ACTIVE,
+                },
+              )
+              .select(
+                'profile.id',
+                'purohitProfileId',
+              )
+              .distinct(true)
+              .getRawMany<{
+                purohitProfileId: string;
+              }>();
+
+          const matchingPurohitIds = [
+            ...new Set(
+              matchingPurohits
+                .map(({ purohitProfileId }) =>
+                  Number(purohitProfileId),
+                )
+                .filter((id) =>
+                  Number.isInteger(id),
+                ),
+            ),
+          ];
+
+          /*
+          * Remove Purohits who already have another
+          * active booking within the conflict window.
+          */
+          let availablePurohitIds = matchingPurohitIds;
+
+          if (matchingPurohitIds.length > 0) {
+            const conflictStart = new Date(scheduledAt.getTime() - conflictWindowMinutes * 60 * 1000);
+            const conflictEnd = new Date(scheduledAt.getTime() + conflictWindowMinutes * 60 * 1000);
+            const busyPurohits =
+              await bookingRepository
+                .createQueryBuilder('booking')
+                .select(
+                  'booking.purohitId',
+                  'purohitId',
+                )
+                .where(
+                  'booking.purohitId IN (:...purohitIds)',
+                  {
+                    purohitIds:
+                      matchingPurohitIds,
+                  },
+                )
+                .andWhere(
+                  'booking.status IN (:...busyStatuses)',
+                  {
+                    busyStatuses: [
+                      BOOKING_STATUS.ACCEPTED,
+                      BOOKING_STATUS.ENROUTE,
+                      BOOKING_STATUS.ARRIVED,
+                      BOOKING_STATUS.ONGOING,
+                    ],
+                  },
+                )
+                .andWhere(
+                  `
+                    booking.scheduledAt
+                    BETWEEN :conflictStart
+                    AND :conflictEnd
+                  `,
+                  {
+                    conflictStart,
+                    conflictEnd,
+                  },
+                )
+                .getRawMany<{
+                  purohitId: string;
+                }>();
+
+            const busyPurohitIds = new Set(
+              busyPurohits.map(
+                ({ purohitId }) =>
+                  Number(purohitId),
+              ),
+            );
+
+            availablePurohitIds =
+              matchingPurohitIds.filter(
+                (purohitId) =>
+                  !busyPurohitIds.has(
+                    purohitId,
+                  ),
+              );
+          }
+
+          /*
+          * Current pricing uses the minimum
+          * service price.
+          */
+          const agreedPrice = minPrice;
+          const discountAmount = 0;
+          const platformCommission = Number((agreedPrice * (commissionPercentage / 100)).toFixed(2));
+          const purohitPayoutAmount = Number((agreedPrice - platformCommission).toFixed(2));
+          const finalAmount = Number((agreedPrice - discountAmount + donationAmount).toFixed(2));
+
+          if (platformCommission < 0 || purohitPayoutAmount < 0 || finalAmount < 0) {
+            throw new BadRequestException('Calculated booking amount is invalid');
+          }
+
+          const bookingNumber = await this.generateUniqueBookingNumber(bookingRepository);
+          const booking = bookingRepository.create({bookingNumber,
+
+              customerId: customer.id,
+              serviceId: service.id,
+
+              customerAddressId: customerAddress.id,
+
+              addressSnapshot:
+                this.createAddressSnapshot(customerAddress),
+
+              customerPincode,
+              scheduledAt,
+
+              specialInstructions: dto.specialInstructions?.trim() || undefined,
+
+              customFields: dto.customFields ?? undefined,
+
+              agreedPrice,
+              commissionPercentage,
+              platformCommission,
+              purohitPayoutAmount,
+
+              couponCode: undefined,
+              discountAmount,
+              donationAmount,
+              finalAmount,
+
+              status:
+                BOOKING_STATUS.PENDING,
+
+              paymentStatus:
+                BOOKING_PAYMENT_STATUS.PENDING,
+
+              /*
+              * Every new booking starts in AUTO mode.
+              *
+              * The cron job will later change it to
+              * MANUAL if no Purohit accepts it.
+              */
+              assignmentType:
+                ASSIGNMENT_TYPE.AUTO,
+
+              filteredPurohitIds:
+                availablePurohitIds,
+            });
+
+          return bookingRepository.save(
+            booking,
+          );
+        },
       );
-    });
+    } catch (error) {
+      /*
+      * PostgreSQL unique constraint violation.
+      *
+      * This will work after adding the unique
+      * partial index migration.
+      */
+      if (
+        error instanceof QueryFailedError &&
+        (
+          error as QueryFailedError & {
+            driverError?: {
+              code?: string;
+            };
+          }
+        ).driverError?.code === '23505'
+      ) {
+        throw new ConflictException(
+          'An active booking for this service and scheduled time already exists',
+        );
+      }
+
+      throw error;
+    }
   }
 
   async getBookings(
@@ -778,6 +822,65 @@ export class BookingService {
     }
   }
 
+  async softDeleteBooking(
+    user: User,
+    bookingId: number,
+  ): Promise<{
+    message: string;
+  }> {
+    if (user.role !== USER_ROLE.ADMIN) {
+      throw new ForbiddenException('Only admins can delete bookings');
+    }
+
+    const booking = await this.bookingRepository.findOne({
+        where: {
+          id: bookingId,
+        },
+        withDeleted: true,
+      });
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    if (booking.deletedAt) {
+      throw new ConflictException('Booking is already deleted');
+    }
+
+    const nonDeletableStatuses = [BOOKING_STATUS.ACCEPTED, BOOKING_STATUS.ENROUTE, BOOKING_STATUS.ARRIVED, BOOKING_STATUS.ONGOING];
+
+    if (nonDeletableStatuses.includes(booking.status)) {
+      throw new BadRequestException(`Booking cannot be deleted while its status is ${booking.status}`);
+    }
+    await this.bookingRepository.softDeleteBooking(booking.id);
+
+    return {
+      message: 'Booking deleted successfully',
+    };
+  }
+
+  async restoreBooking(
+    bookingId: number,
+  ): Promise<{
+    message: string;
+  }> {
+    const booking = await this.bookingRepository.findBookingByIdIncludingDeleted(bookingId);
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    if (!booking.deletedAt) {
+      throw new BadRequestException('Booking is not deleted');
+    }
+
+    await this.bookingRepository.restoreBooking(bookingId);
+
+    return {
+      message:'Booking restored successfully',
+    };
+  }
+
   async cancelBooking(
     user: User,
     bookingId: number,
@@ -786,25 +889,17 @@ export class BookingService {
     message: string;
     booking: Booking;
   }> {
-    const allowedRoles: USER_ROLE[] = [
-      USER_ROLE.CUSTOMER,
-      USER_ROLE.PUROHIT,
-      USER_ROLE.ADMIN,
-    ];
+    const allowedRoles: USER_ROLE[] = [USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN];
 
     if (!allowedRoles.includes(user.role)) {
-      throw new ForbiddenException(
-        'You are not allowed to cancel bookings',
-      );
+      throw new ForbiddenException('You are not allowed to cancel bookings');
     }
 
-    const cancellationReason =
-      dto.cancellationReason?.trim();
+    const cancellationReason = dto.cancellationReason?.trim();
 
     return this.dataSource.transaction(
       async (manager) => {
-        const bookingRepository =
-          manager.getRepository(Booking);
+        const bookingRepository = manager.getRepository(Booking);
 
         /*
         * Lock only the booking row.
@@ -822,32 +917,19 @@ export class BookingService {
           .getOne();
 
         if (!booking) {
-          throw new NotFoundException(
-            'Booking not found',
-          );
+          throw new NotFoundException('Booking not found');
         }
 
-        if (
-          booking.status ===
-          BOOKING_STATUS.CANCELLED
-        ) {
-          throw new ConflictException(
-            'Booking is already cancelled',
-          );
+        if (booking.status === BOOKING_STATUS.CANCELLED) {
+          throw new ConflictException('Booking is already cancelled');
         }
 
-        if (
-          booking.status ===
-          BOOKING_STATUS.COMPLETED
-        ) {
-          throw new BadRequestException(
-            'Completed bookings cannot be cancelled',
-          );
+        if ( booking.status === BOOKING_STATUS.COMPLETED) {
+          throw new BadRequestException('Completed bookings cannot be cancelled');
         }
 
         let cancelledBy: CANCELLED_BY;
-        let message =
-          'Booking cancelled successfully';
+        let message = 'Booking cancelled successfully';
 
         switch (user.role) {
           case USER_ROLE.CUSTOMER:
@@ -856,11 +938,8 @@ export class BookingService {
               booking,
             );
 
-            cancelledBy =
-              CANCELLED_BY.CUSTOMER;
-
-            booking.status =
-              BOOKING_STATUS.CANCELLED;
+            cancelledBy = CANCELLED_BY.CUSTOMER;
+            booking.status = BOOKING_STATUS.CANCELLED;
 
             break;
 
@@ -872,21 +951,15 @@ export class BookingService {
               cancellationReason,
             );
 
-            cancelledBy =
-              CANCELLED_BY.PUROHIT;
+            cancelledBy = CANCELLED_BY.PUROHIT;
 
             /*
             * Purohit cancellation should release
             * the booking for another Purohit.
             */
-            booking.status =
-              BOOKING_STATUS.PENDING;
-
+            booking.status = BOOKING_STATUS.PENDING;
             booking.purohitId = undefined;
-
-            message =
-              'Booking released successfully and is available for reassignment';
-
+            message = 'Booking released successfully and is available for reassignment';
             break;
 
           case USER_ROLE.ADMIN:
@@ -894,25 +967,18 @@ export class BookingService {
               cancellationReason,
             );
 
-            cancelledBy =
-              CANCELLED_BY.ADMIN;
-
-            booking.status =
-              BOOKING_STATUS.CANCELLED;
+            cancelledBy = CANCELLED_BY.ADMIN;
+            booking.status = BOOKING_STATUS.CANCELLED;
 
             break;
 
           default:
-            throw new ForbiddenException(
-              'You are not allowed to cancel this booking',
-            );
+            throw new ForbiddenException('You are not allowed to cancel this booking');
         }
 
-        booking.cancelledBy =
-          cancelledBy;
+        booking.cancelledBy = cancelledBy;
 
-        booking.cancellationReason =
-          cancellationReason || undefined;
+        booking.cancellationReason = cancellationReason || undefined;
 
         const savedBooking =
           await bookingRepository.save(
@@ -1024,10 +1090,20 @@ export class BookingService {
     message: string;
     booking?: Booking;
   }> {
+    if (user.role !== USER_ROLE.PUROHIT) {
+      throw new ForbiddenException(
+        'Only Purohits can respond to bookings',
+      );
+    }
+
     return this.dataSource.transaction(
       async (manager) => {
-        const bookingRepository = manager.getRepository(Booking);
-        const purohitProfileRepository = manager.getRepository(PurohitProfile);
+        const bookingRepository =
+          manager.getRepository(Booking);
+
+        const purohitProfileRepository =
+          manager.getRepository(PurohitProfile);
+
         const purohitProfile =
           await purohitProfileRepository.findOne({
             where: {
@@ -1036,32 +1112,28 @@ export class BookingService {
           });
 
         if (!purohitProfile) {
-          throw new NotFoundException('Purohit profile not found');
+          throw new NotFoundException(
+            'Purohit profile not found',
+          );
         }
 
         /*
-        * Prevent two Purohits from accepting
-        * the same booking simultaneously.
+        * Lock only the booking table row.
+        *
+        * Do not add LEFT JOIN relations to a
+        * pessimistic locking query.
         */
-        const booking = await bookingRepository
-          .createQueryBuilder('booking')
-          .setLock('pessimistic_write')
-          .leftJoinAndSelect(
-            'booking.customer',
-            'customer',
-          )
-          .leftJoinAndSelect(
-            'booking.service',
-            'service',
-          )
-          .leftJoinAndSelect(
-            'booking.customerAddress',
-            'customerAddress',
-          )
-          .where('booking.id = :bookingId', {
-            bookingId,
-          })
-          .getOne();
+        const booking =
+          await bookingRepository
+            .createQueryBuilder('booking')
+            .where(
+              'booking.id = :bookingId',
+              {
+                bookingId,
+              },
+            )
+            .setLock('pessimistic_write')
+            .getOne();
 
         if (!booking) {
           throw new NotFoundException(
@@ -1069,63 +1141,100 @@ export class BookingService {
           );
         }
 
-        /*
-        * Only pending and unassigned bookings
-        * can receive an accept/dismiss response.
-        */
-        if (booking.status !== BOOKING_STATUS.PENDING || booking.purohitId) {
-          throw new ConflictException('This booking is no longer available');
+        if (
+          booking.status !==
+            BOOKING_STATUS.PENDING ||
+          booking.purohitId !== null &&
+            booking.purohitId !== undefined
+        ) {
+          throw new ConflictException(
+            'This booking is no longer available',
+          );
         }
 
-        const filteredPurohitIds = booking.filteredPurohitIds ?? [];
+        const filteredPurohitIds =
+          booking.filteredPurohitIds ?? [];
 
-        /*
-        * Purohit must be part of the eligible
-        * Purohit list for this booking.
-        */
-        if (!filteredPurohitIds.includes(purohitProfile.id)) {
-          throw new ForbiddenException('This booking is not available to you or has already been dismissed');
+        if (
+          !filteredPurohitIds.includes(
+            purohitProfile.id,
+          )
+        ) {
+          throw new ForbiddenException(
+            'This booking is not available to you or has already been dismissed',
+          );
         }
 
-        if (dto.action === PUROHIT_BOOKING_ACTION.ACCEPT) {
-          booking.purohitId = purohitProfile.id;
-          booking.status = BOOKING_STATUS.ACCEPTED;
+        switch (dto.action) {
+          case PUROHIT_BOOKING_ACTION.ACCEPT: {
+            booking.purohitId =
+              purohitProfile.id;
 
-          /*
-          * Clear the list because the booking
-          * is no longer available to anyone else.
-          */
-          booking.filteredPurohitIds = [];
+            booking.status =
+              BOOKING_STATUS.ACCEPTED;
 
-          const acceptedBooking = await bookingRepository.save(booking);
+            /*
+            * Booking should disappear from the
+            * available list of all Purohits.
+            */
+            booking.filteredPurohitIds = [];
 
-          return {
-            message: 'Booking accepted successfully',
-            booking: acceptedBooking,
-          };
-        }
+            const savedBooking =
+              await bookingRepository.save(
+                booking,
+              );
 
-        if (dto.action === PUROHIT_BOOKING_ACTION.DISMISS) {
-          /*
-          * Remove only the current Purohit.
-          * Other Purohits can still accept it.
-          */
-          booking.filteredPurohitIds = filteredPurohitIds.filter(
-              (purohitId) => purohitId !== purohitProfile.id,
+            /*
+            * Reload the booking with relations
+            * after saving. No lock is needed here.
+            */
+            const acceptedBooking =
+              await bookingRepository.findOne({
+                where: {
+                  id: savedBooking.id,
+                },
+                relations: {
+                  customer: true,
+                  service: true,
+                  customerAddress: true,
+                  purohit: {
+                    user: true,
+                  },
+                },
+              });
+
+            return {
+              message:
+                'Booking accepted successfully',
+              booking:
+                acceptedBooking ??
+                savedBooking,
+            };
+          }
+
+          case PUROHIT_BOOKING_ACTION.DISMISS: {
+            booking.filteredPurohitIds =
+              filteredPurohitIds.filter(
+                (purohitId) =>
+                  purohitId !==
+                  purohitProfile.id,
+              );
+
+            await bookingRepository.save(
+              booking,
             );
 
-          await bookingRepository.save(booking);
+            return {
+              message:
+                'Booking dismissed successfully',
+            };
+          }
 
-          return {
-            message: 'Booking dismissed successfully',
-          };
+          default:
+            throw new BadRequestException(
+              'Invalid booking response action',
+            );
         }
-
-        /*
-        * Defensive validation, although IsEnum
-        * already rejects invalid actions.
-        */
-        throw new BadRequestException('Invalid booking response action');
       },
     );
   }
@@ -1342,10 +1451,15 @@ export class BookingService {
     bookingId: number,
     dto: UpdateBookingStatusDto,
   ) {
-    const booking = await this.bookingRepository.findBookingById(bookingId);
+    const booking =
+      await this.bookingRepository.findBookingById(
+        bookingId,
+      );
 
     if (!booking) {
-      throw new NotFoundException('Booking not found');
+      throw new NotFoundException(
+        'Booking not found',
+      );
     }
 
     await this.validateStatusUpdateAccess(
@@ -1360,18 +1474,14 @@ export class BookingService {
 
     booking.status = dto.status;
 
-    switch (dto.status) {
-      case BOOKING_STATUS.COMPLETED: booking.completionConfirmedAt = new Date();
-        break;
-
-      default:
-        break;
-    }
-
-    const updatedBooking = await this.bookingRepository.saveBooking(booking);
+    const updatedBooking =
+      await this.bookingRepository.saveBooking(
+        booking,
+      );
 
     return {
-      message: 'Booking status updated successfully',
+      message:
+        'Booking status updated successfully',
       booking: updatedBooking,
     };
   }
@@ -1387,7 +1497,7 @@ export class BookingService {
       [BOOKING_STATUS.ACCEPTED]: [BOOKING_STATUS.ENROUTE],
       [BOOKING_STATUS.ENROUTE]: [BOOKING_STATUS.ARRIVED],
       [BOOKING_STATUS.ARRIVED]: [BOOKING_STATUS.ONGOING],
-      [BOOKING_STATUS.ONGOING]: [BOOKING_STATUS.COMPLETED],
+      // [BOOKING_STATUS.ONGOING]: [BOOKING_STATUS.COMPLETED],
     };
 
     const allowedNextStatuses = allowedTransitions[currentStatus] ?? [];
@@ -1434,5 +1544,340 @@ export class BookingService {
     if (booking.purohitId !== purohitProfile.id) {
       throw new ForbiddenException('You are not assigned to this booking');
     }
+  }
+
+  async uploadCompletionProof(
+    user: User,
+    bookingId: number,
+    files: Express.Multer.File[],
+  ) {
+    if (!files?.length) {
+      throw new BadRequestException('At least one completion proof image is required');
+    }
+
+    const booking =
+      await this.bookingRepository.findBookingById(
+        bookingId,
+      );
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    if (booking.status !== BOOKING_STATUS.ONGOING) {
+      throw new BadRequestException('Completion proof can only be uploaded for an ongoing booking');
+    }
+
+    await this.validateCompletionProofAccess(
+      user,
+      booking,
+    );
+
+    const uploadedFiles: Array<{
+      key: string;
+      url: string;
+    }> = [];
+
+    try {
+      for (const file of files) {
+        const extension =
+          this.getCompletionProofExtension(
+            file.originalname,
+          );
+
+        const key =
+          `bookings/${booking.id}/completion-proofs/` +
+          `${Date.now()}-${crypto.randomUUID()}${extension}`;
+
+        const url =
+          await this.s3Service.uploadFile(
+            key,
+            file.buffer,
+            file.mimetype,
+          );
+
+        uploadedFiles.push({
+          key,
+          url,
+        });
+      }
+
+      const existingPhotoUrls = booking.completionPhotoUrls ?? [];
+
+      booking.completionPhotoUrls = [
+        ...existingPhotoUrls,
+        ...uploadedFiles.map(
+          (uploadedFile) => uploadedFile.url,
+        ),
+      ];
+
+      const savedBooking =
+        await this.bookingRepository.save(
+          booking,
+        );
+
+      return {
+        message: 'Completion proof uploaded successfully',
+        bookingId: savedBooking.id,
+        bookingNumber: savedBooking.bookingNumber,
+        completionPhotoUrls: savedBooking.completionPhotoUrls,
+      };
+    } catch (error) {
+      await Promise.allSettled(
+        uploadedFiles.map((uploadedFile) =>
+          this.s3Service.deleteFile(
+            uploadedFile.key,
+          ),
+        ),
+      );
+
+      if (error instanceof BadRequestException || error instanceof ForbiddenException || error instanceof NotFoundException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException(
+        'Failed to upload completion proof',
+      );
+    }
+  }
+
+  private async validateCompletionProofAccess(
+    user: User,
+    booking: Booking,
+  ): Promise<void> {
+    if (user.role === USER_ROLE.ADMIN) {
+      return;
+    }
+
+    if (user.role !== USER_ROLE.PUROHIT) {
+      throw new ForbiddenException('Only the assigned Purohit can upload completion proof');
+    }
+
+    const purohitProfileRepository = this.dataSource.getRepository(PurohitProfile);
+
+    const purohitProfile =
+      await purohitProfileRepository.findOne({
+        where: {
+          userId: user.id,
+        },
+      });
+
+    if (!purohitProfile) {
+      throw new NotFoundException('Purohit profile not found');
+    }
+
+    if (booking.purohitId !== purohitProfile.id) {
+      throw new ForbiddenException('You are not assigned to this booking');
+    }
+  }
+
+  private getCompletionProofExtension(
+    originalName: string,
+  ): string {
+    const extension =
+      path.extname(originalName).toLowerCase();
+
+    const allowedExtensions = [
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.webp',
+    ];
+
+    if (
+      !allowedExtensions.includes(extension)
+    ) {
+      throw new BadRequestException(
+        'Unsupported image extension',
+      );
+    }
+
+    return extension;
+  }
+
+  async generateCompletionOtp(
+    user: User,
+    bookingId: number,
+  ) {
+    const booking =
+      await this.bookingRepository.findBookingById(
+        bookingId,
+      );
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    await this.validateCompletionOtpGenerationAccess(
+      user,
+      booking,
+    );
+
+    if (
+      booking.status !== BOOKING_STATUS.ONGOING) {
+      throw new BadRequestException( 'Completion OTP can only be generated for an ongoing booking',
+      );
+    }
+
+    if (booking.completionConfirmedAt) {
+      throw new BadRequestException('Booking completion has already been confirmed');
+    }
+
+    if (!booking.customer) {
+      throw new NotFoundException('Booking customer details not found');
+    }
+
+    const customerPhone = booking.customer.phone;
+    const customerEmail = booking.customer.email;
+
+    if (!customerPhone && !customerEmail) {
+      throw new BadRequestException('Customer does not have a phone number or email address');
+    }
+
+    const otp = randomInt(
+      100000,
+      1000000,
+    ).toString();
+
+    booking.completionOtp = otp;
+
+    await this.bookingRepository.saveBooking(
+      booking,
+    );
+
+    const deliveryResults =
+      await Promise.allSettled([
+        customerPhone
+          ? this.smsService.sendSms(
+              customerPhone,
+              `Your Poojawala booking completion OTP is ${otp}. Share this OTP only after the Puja service is completed.`,
+            )
+          : Promise.resolve(null),
+
+        customerEmail
+          ? this.emailService.sendOtpEmail(
+              customerEmail,
+              otp,
+              booking.customer.firstName,
+            )
+          : Promise.resolve(null),
+      ]);
+
+    const smsResult = deliveryResults[0];
+    const emailResult = deliveryResults[1];
+    const smsSent = Boolean(customerPhone) && smsResult.status === 'fulfilled';
+    const emailSent = Boolean(customerEmail) && emailResult.status === 'fulfilled';
+
+    if (!smsSent && !emailSent) {
+      booking.completionOtp = undefined;
+
+      await this.bookingRepository.saveBooking(
+        booking,
+      );
+
+      throw new InternalServerErrorException('Unable to send completion OTP. Please try again');
+    }
+
+    return {
+      message:
+        'Booking completion OTP sent successfully',
+
+      bookingId:
+        booking.id,
+
+      bookingNumber:
+        booking.bookingNumber,
+
+      sentVia: {
+        sms: smsSent,
+        email: emailSent,
+      },
+
+      // Use only during development/Postman testing.
+      ...(process.env['NODE_ENV'] !==
+        'production'
+        ? { otp }
+        : {}),
+    };
+  }
+
+  private async validateCompletionOtpGenerationAccess(
+    user: User,
+    booking: Booking,
+  ): Promise<void> {
+    switch (user.role) {
+      case USER_ROLE.ADMIN:
+        return;
+
+      case USER_ROLE.PUROHIT:
+        await this.validateAssignedPurohit(
+          user.id,
+          booking,
+        );
+        return;
+
+      default:
+        throw new ForbiddenException('Only the assigned Purohit or an admin can generate the completion OTP');
+    }
+  }
+
+  async verifyCompletionOtp(
+    user: User,
+    bookingId: number,
+    dto: VerifyCompletionOtpDto,
+  ) {
+    const booking =
+      await this.bookingRepository.findBookingById(
+        bookingId,
+      );
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    if (booking.customerId !== user.id) {
+      throw new ForbiddenException('Only the booking customer can verify this completion OTP');
+    }
+
+    if (booking.status !== BOOKING_STATUS.ONGOING) {
+      throw new BadRequestException('Completion OTP can only be verified for an ongoing booking');
+    }
+
+    if (!booking.completionOtp) {
+      throw new BadRequestException('Completion OTP has not been generated');
+    }
+
+    if (booking.completionOtp !== dto.otp) {
+      throw new BadRequestException('Invalid completion OTP');
+    }
+
+    booking.status = BOOKING_STATUS.COMPLETED;
+ 
+    booking.completionConfirmedAt = new Date();
+
+    const updatedBooking =
+      await this.bookingRepository.saveBooking(
+        booking,
+      );
+
+    return {
+      message:
+        'Completion OTP verified and booking completed successfully',
+
+      booking: {
+        id:
+          updatedBooking.id,
+
+        bookingNumber:
+          updatedBooking.bookingNumber,
+
+        status:
+          updatedBooking.status,
+
+        completionConfirmedAt:
+          updatedBooking
+            .completionConfirmedAt,
+      },
+    };
   }
 }

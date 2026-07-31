@@ -1,15 +1,46 @@
 import { FileInterceptor } from "@nestjs/platform-express";
-import { Body, Controller, Query, Get, Put, Patch, Delete, Param, ParseIntPipe, HttpCode, HttpStatus, Post, Req, UnauthorizedException, UseGuards, UseInterceptors, ValidationPipe, UploadedFile, UnprocessableEntityException } from "@nestjs/common";
+import { Body, Controller, Query, Get, Put, Patch, Delete, Param, ParseIntPipe, HttpCode, HttpStatus, Post, Req, UnauthorizedException, UseGuards, UseInterceptors, ValidationPipe, UploadedFile, UnprocessableEntityException, Logger } from "@nestjs/common";
 import { UserService } from "./user.service";
 import { AuthGuard } from "@nestjs/passport";
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@likemyproduct/common";
 import { UpdateUserDto , VerifyPurohitDto } from "@likemyproduct/dtos";
 import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
 import { filter } from 'rxjs';
+import { Cron } from '@nestjs/schedule';
 
 @Controller('users')
 export class UserController {
-  constructor(private readonly userService: UserService) { }
+    private readonly logger = new Logger(UserController.name);
+
+  constructor(
+    private readonly userService: UserService
+  ) { }
+
+  @Cron('0 0 */6 * * *', {
+    name: 'delete-expired-otps',
+    timeZone: 'Asia/Kolkata',
+  })
+  async deleteExpiredOtpsCron(): Promise<void> {
+    this.logger.log(
+      'Expired OTP cleanup cron started',
+    );
+
+    try {
+      const deletedCount =
+        await this.userService.deleteExpiredOtps();
+
+      this.logger.log(
+        `${deletedCount} expired OTP(s) deleted`,
+      );
+    } catch (error) {
+      this.logger.error(
+        'Expired OTP cleanup cron failed',
+        error instanceof Error
+          ? error.stack
+          : String(error),
+      );
+    }
+  }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)

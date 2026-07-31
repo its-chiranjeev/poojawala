@@ -8,12 +8,14 @@ import { UserManagementService } from './user-management.service';
 import { EntitiesModule } from '@likemyproduct/entities';
 import { ConfigModule } from '@nestjs/config';
 import { ServiceModule } from './service/service.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    ScheduleModule.forRoot(),
     DatabaseModule,
     EntitiesModule,
     UserModule,

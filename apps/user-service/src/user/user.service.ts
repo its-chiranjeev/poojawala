@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import { DataSource, QueryRunner, Not, EntityManager } from 'typeorm';
 import { last, single } from 'rxjs';
 import { UserRepository } from '@likemyproduct/repositories';
-import { PurohitMedia, PurohitProfile, PUROHIT_MEDIA_TYPE, PUROHIT_MEDIA_VERIFICATION_STATUS, PUROHIT_VERIFICATION_STATUS, User, USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
+import { PurohitMedia, PurohitProfile, PUROHIT_MEDIA_TYPE, PUROHIT_MEDIA_VERIFICATION_STATUS, PUROHIT_VERIFICATION_STATUS, User, USER_ROLE, USER_STATUS, Otp  } from '@likemyproduct/entities';
 import { AuthModuleService } from 'apps/auth-service/src/auth/auth-module.service';
 import { S3Service } from '@likemyproduct/s3';
 import { UpdateUserDto, VerifyPurohitDto } from '@likemyproduct/dtos';
@@ -21,6 +21,18 @@ export class UserService {
     private readonly s3Service: S3Service,
     private readonly emailService: EmailService,  
   ) { }
+
+  async deleteExpiredOtps(): Promise<number> {
+    const result = await this.dataSource
+      .getRepository(Otp)
+      .createQueryBuilder()
+      .delete()
+      .from(Otp)
+      .where('"expiresAt" <= NOW()')
+      .execute();
+
+    return result.affected ?? 0;
+  }
 
   async updateProfileByAdmin(
     id: string,

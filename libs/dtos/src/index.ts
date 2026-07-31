@@ -14,3 +14,4 @@ export * from './booking/respond-booking.dto';
 export * from './booking/assign-booking.dto';
 export * from './booking/update-booking-status.dto';
 export * from './user/verify-purohit.dto';
+export * from './booking/verify-completion-otp.dto';
