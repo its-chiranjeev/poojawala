@@ -7,6 +7,7 @@ import { UserManagementService } from './user-management.service';
 import { EntitiesModule } from '@likemyproduct/entities';
 import { ConfigModule } from '@nestjs/config';
 import { ServiceModule } from './service/service.module';
+import { ReviewModule } from './review/review.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { ServiceModule } from './service/service.module';
     EntitiesModule,
     UserModule,
     ServiceModule,
+    ReviewModule,
   ],
   controllers: [UserManagementController],
   providers: [UserManagementService],
