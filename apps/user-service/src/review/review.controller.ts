@@ -60,7 +60,6 @@ export class ReviewController {
     @Param('purohitId', ParseIntPipe)
     purohitId: number,
   ) {
-    console.log(purohitId);
     return await this.reviewService.getPurohitOverallRating(purohitId);
   }
 }

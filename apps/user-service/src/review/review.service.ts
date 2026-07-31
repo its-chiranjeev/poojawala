@@ -159,13 +159,11 @@ export class ReviewService {
         id: purohitId,
       },
     });
-    console.log(purohitId);
-    console.log(purohit);
 
     if (!purohit) {
       throw new NotFoundException('Purohit not found.');
     }
-    // console.log(p)
+    
     if (purohit.role !== USER_ROLE.PUROHIT) {
       throw new BadRequestException('User is not a purohit.');
     }

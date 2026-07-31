@@ -8,6 +8,7 @@ import { EntitiesModule } from '@likemyproduct/entities';
 import { ConfigModule } from '@nestjs/config';
 import { ServiceModule } from './service/service.module';
 import { ReviewModule } from './review/review.module';
+import { PaymentModule } from './payment/payment.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ReviewModule } from './review/review.module';
     UserModule,
     ServiceModule,
     ReviewModule,
+    PaymentModule,
   ],
   controllers: [UserManagementController],
   providers: [UserManagementService],
