@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, IsEnum } from 'class-validator';
+import { IsEmail,IsDateString, IsOptional, IsString, IsEnum } from 'class-validator';
 import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
 import { Match } from './register-user.dto';
 
@@ -43,4 +43,12 @@ export class UpdateUserDto {
   @IsString()
   @Match('password', { message: 'Passwords do not match' })
   confirmPassword?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dob?: Date;
+
+  @IsOptional()
+  @IsString()
+  birthPlace?: string;
 }

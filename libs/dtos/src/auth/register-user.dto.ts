@@ -1,16 +1,6 @@
 import { USER_ROLE, QUALIFICATION } from '@likemyproduct/entities';
 import { Transform } from 'class-transformer';
-import {
-  IsEmail,
-  IsEnum,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  MaxLength,
-  registerDecorator,
-  ValidationOptions,
-  ValidationArguments,
-} from 'class-validator';
+import { IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, } from 'class-validator';
 
 export class OtpDto {
   @IsOptional()
@@ -127,6 +117,25 @@ export class RegisterNormalUserDto {
 
   @IsOptional()
   specializations?: string[];
+
+  @IsDateString()
+  dob?: string;
+
+  @IsString()
+  birthPlace!: string;
+}
+
+export class GenerateOtpDto {
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsEnum(USER_ROLE)
+  role!: USER_ROLE;
 }
 
 export class resetPasswordDto {

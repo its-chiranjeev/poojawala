@@ -5,7 +5,7 @@ import type { Response } from 'express';
 import * as crypto from 'crypto';
 import { AuthGuard } from "@nestjs/passport";
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@likemyproduct/common";
-import { UpdateUserDto, RegisterNormalUserDto, } from "@likemyproduct/dtos";
+import { UpdateUserDto, RegisterNormalUserDto, GenerateOtpDto} from "@likemyproduct/dtos";
 import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
 import { filter } from 'rxjs';
 
@@ -96,19 +96,20 @@ export class UserController {
   @Post('generate-otp')
   @HttpCode(HttpStatus.OK)
   async generateOtp(
-    @Body('email') email: string,
-    @Body('role') role: USER_ROLE,
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    dto:  GenerateOtpDto,
   ) {
-    return this.userService.generateOtp(email, role);
+    return this.userService.generateOtp(dto);
   }
   
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
   async verifyOtp(
-    @Body('email') email: string,
+    @Body('phone') phone: string,
     @Body('otp') otp: string,
+    @Body('email') email?: string,
   ) {
-    return this.userService.verifyOtp(email, otp);
+    return this.userService.verifyOtp(phone, otp, email);
   }
   // @Patch(':id/status')
   // @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)

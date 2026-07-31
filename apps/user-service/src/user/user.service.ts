@@ -1,39 +1,16 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { ConflictException, ForbiddenException,  Injectable,  InternalServerErrorException,  NotFoundException,  UnprocessableEntityException,} from '@nestjs/common';
 import { BadRequestException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { randomUUID, createHmac } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, QueryRunner, Not } from 'typeorm';
 import { last, single } from 'rxjs';
-import {
-  UserRepository,
-  OtpRepository,
-  PurohitProfileRepository,
-  PurohitMediaRepository,
-} from '@likemyproduct/repositories';
-import {
-  PurohitProfile,
-  PurohitMedia,
-  PUROHIT_VERIFICATION_STATUS,
-  PUROHIT_MEDIA_TYPE,
-  User,
-  Otp,
-  USER_ROLE,
-  USER_STATUS,
-   OTP_TYPE,
-} from '@likemyproduct/entities';
+import {  UserRepository,  OtpRepository,  PurohitProfileRepository,  PurohitMediaRepository, } from '@likemyproduct/repositories';
+import {  PurohitProfile,  PurohitMedia,  PUROHIT_VERIFICATION_STATUS,  PUROHIT_MEDIA_TYPE,  User,  Otp,  USER_ROLE,  USER_STATUS, OTP_TYPE, } from '@likemyproduct/entities';
 import { S3Service } from '@likemyproduct/s3';
 import { EmailService } from '@likemyproduct/email-services';
-import {
-  UpdateUserDto, RegisterNormalUserDto,
-} from '@likemyproduct/dtos';
+import { SmsService } from '@likemyproduct/sms-services';
+import { UpdateUserDto, RegisterNormalUserDto,GenerateOtpDto } from '@likemyproduct/dtos';
 
 
 @Injectable()
@@ -45,6 +22,7 @@ export class UserService {
     private readonly s3Service: S3Service,
     private readonly otpRepository: OtpRepository,
     private readonly emailService: EmailService,
+    private readonly smsService: SmsService,
     private readonly configService: ConfigService,
     private readonly purohitMediaRepository: PurohitMediaRepository,
   ) { }
@@ -161,21 +139,75 @@ export class UserService {
     return this.registerUserService(dto, files);
   }
 
-  async generateOtp(email: string, role: USER_ROLE) {
-    const existingUser = await this.userRepository.findByEmail(email);
+  async generateOtp(dto: GenerateOtpDto) {
 
-    if (existingUser) {
-      throw new ConflictException('User already exists');
+    const { email, phone, role } = dto;
+
+    if (
+      ![USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN].includes(role)
+    ) {
+      throw new BadRequestException('Invalid role');
     }
+
+    // Uncomment when phone number is added
+    // if (!email && !phone) {
+    //   throw new BadRequestException('Email or phone number is required');
+    // }
+
+
+    if (phone) {
+      const existingUserByPhone = await this.userRepository.findOne({
+        where: { phone },
+      });
+
+      if (existingUserByPhone) {
+        throw new ConflictException('Phone number already in use');
+      }
+    } else if (email) {
+      const existingUser = await this.userRepository.findByEmail(email);
+
+      if (existingUser) {
+        throw new ConflictException('User already exists');
+      }
+    } else {
+      throw new BadRequestException('Email or phone number is required');
+    }
+
+    
+
+
+    // Uncomment when phone number is added
+    // if (phone) {
+    //   const existingUserByPhone = await this.userRepository.findOne({
+    //     where: { phone },
+    //   });
+    //
+    //   if (existingUserByPhone) {
+    //     throw new ConflictException('Phone number already in use');
+    //   }
+    // }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + 10);
 
-    let otpRecord = await this.otpRepository.findOne({
-      where: { email },
-    });
+    let otpRecord;
+
+    if (phone) {
+      otpRecord = await this.otpRepository.findOne({
+        where: { phone },
+      });
+    } else {
+      otpRecord = await this.otpRepository.findOne({
+        where: { email },
+      });
+    }
+
+    // Uncomment when phone number is added
+    // let otpRecord = await this.otpRepository.findOne({
+    //   where: phone ? { phone } : { email },
+    // });
 
     if (otpRecord) {
       otpRecord.otp = otp;
@@ -183,20 +215,36 @@ export class UserService {
       otpRecord.isVerified = false;
       otpRecord.role = role;
       otpRecord.otpType = OTP_TYPE.USER_REGISTRATION;
+
+      if (phone) {
+        otpRecord.phone = phone;
+      } else {
+        otpRecord.email = email;
+      }
     } else {
-      otpRecord = this.otpRepository.create({
-        email,
-        otp,
-        expiresAt,
-        isVerified: false,
-        role,
-        otpType: OTP_TYPE.USER_REGISTRATION,
-      });
-    }
+        otpRecord = this.otpRepository.create({
+          phone,
+          email,
+          otp,
+          expiresAt,
+          isVerified: false,
+          role,
+          otpType: OTP_TYPE.USER_REGISTRATION,
+        });
+      }
 
     await this.otpRepository.save(otpRecord);
 
-    await this.emailService.sendOtpEmail(email, otp);
+    // Uncomment when phone number is added
+    // if (phone) {
+    //   await this.smsService.sendOtpSms(phone, otp);
+    // } else {
+    if (phone) {
+     await this.smsService.sendOtpSms(phone, otp);
+    } else if (email) {
+      await this.emailService.sendOtpEmail(email, otp);
+    }
+    // }
 
     return {
       success: true,
@@ -204,10 +252,20 @@ export class UserService {
     };
   }
 
-  async verifyOtp(email: string, otp: string) {
-    const otpRecord = await this.otpRepository.findOne({
-      where: { email },
-    });
+  async verifyOtp(phone: string, otp: string, email?: string) {
+    let otpRecord;
+
+    if (phone) {
+      otpRecord = await this.otpRepository.findOne({
+        where: { phone },
+      });
+    } else if (email) {
+      otpRecord = await this.otpRepository.findOne({
+        where: { email },
+      });
+    } else {
+      throw new BadRequestException('Phone number or email is required');
+    }
 
     if (!otpRecord) {
       throw new NotFoundException('OTP not found');
@@ -352,12 +410,25 @@ export class UserService {
 
     
 
-    const otpRecord = await this.otpRepository.findOne({
-      where: {
-        email: dto.email,
-        isVerified: true,
-      },
-    });
+    let otpRecord;
+
+    if (dto.phone) {
+      otpRecord = await this.otpRepository.findOne({
+        where: {
+          phone: dto.phone,
+          isVerified: true,
+        },
+      });
+    } else if (dto.email) {
+      otpRecord = await this.otpRepository.findOne({
+        where: {
+          email: dto.email,
+          isVerified: true,
+        },
+      });
+    } else {
+      throw new BadRequestException('Phone number or email is required');
+    }
     
 
     // const otpRecord = await this.otpRepository.findOne({
@@ -510,6 +581,8 @@ export class UserService {
         `user${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
       const newUser = manager.create(User, {
+        dob: dto.dob,
+        birthPlace: dto.birthPlace,
         ...(dto.email && { email: dto.email.toLowerCase() }),
         username,
         ...(dto.phone && { phone: dto.phone }),
