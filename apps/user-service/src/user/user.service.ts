@@ -12,7 +12,9 @@ import { randomUUID } from 'crypto';
 import { DataSource, QueryRunner, Not } from 'typeorm';
 import { last, single } from 'rxjs';
 import {
-  UserRepository, PlatformSettingRepository
+  UserRepository, PlatformSettingRepository,
+  CustomerAddressRepository,
+  PurohitServiceAreaRepository,
 } from '@likemyproduct/repositories';
 import {
   USER_ROLE,
@@ -24,6 +26,12 @@ import {
   UpdateUserDto,
 } from '@likemyproduct/dtos';
 import { UpsertPlatformSettingDto } from '@likemyproduct/dtos/Platform setting/Platform.dto';
+import { Brackets } from 'typeorm';
+import { GetAllUsersDto } from '@likemyproduct/dtos/user/get-all-users.dto';
+import { CreateCustomerAddressDto } from '@likemyproduct/dtos/user/add-customer-address.dto';
+import { CreatePurohitServiceAreaDto } from '@likemyproduct/dtos/user/add-prohit-address.dto';
+import { UpdatePurohitServiceAreaDto } from '@likemyproduct/dtos/user/update-progit-address.dto';
+
 @Injectable()
 export class UserService {
   constructor(
@@ -32,6 +40,8 @@ export class UserService {
     private readonly authModuleService: AuthModuleService,
     private readonly s3Service: S3Service,
     private readonly platformSettingRepository: PlatformSettingRepository,
+    private readonly customerAddressRepository: CustomerAddressRepository,
+    private readonly purohitServiceAreaRepository: PurohitServiceAreaRepository,
   ) { }
 
   async updateProfileByAdmin(
@@ -213,4 +223,212 @@ async deletePlatformSetting(id: number, userId: number) {
     message: 'Platform setting deleted successfully',
   };
 }
+
+  async getAllUsers(query: GetAllUsersDto) {
+    const { users, total } = await this.userRepository.getAllUsers(query);
+
+    const safeUsers = await Promise.all(
+      users.map(async (user) => {
+        const {hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } = user;
+
+        if (safeUser.profileImage) {
+          safeUser.profileImage = await this.s3Service.getDownloadUrl(
+            safeUser.profileImage,
+          );
+        }
+
+        return safeUser;
+      }),
+    );
+
+    return {
+      success: true,
+      message: 'Users fetched successfully',
+      data: safeUsers,
+      pagination: {
+        total,
+        page: query.page,
+        limit: query.limit,
+        totalPages: Math.ceil(total / query.limit),
+      },
+    };
+  }
+
+  async getUserById(id: string) {
+    try {
+      const user = await this.userRepository.findById(id);
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      const {
+        hashedPassword,
+        hashedRefreshToken,
+        tokenVersion,
+        ...safeUser
+      } = user;
+
+      if (safeUser.profileImage) {
+        safeUser.profileImage = await this.s3Service.getDownloadUrl(
+          safeUser.profileImage,
+        );
+      }
+
+      return {
+        success: true,
+        message: 'User fetched successfully',
+        data: safeUser,
+      };
+    } catch (error) {
+      console.error('Error fetching user:', error);
+
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException('Failed to fetch user');
+    }
+  }
+
+  async addAddress(userId: number, dto: CreateCustomerAddressDto) {
+    try {
+      const user = await this.userRepository.findById(userId);
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      if (dto.isDefault) {
+        await this.customerAddressRepository.clearDefaultAddress(userId);
+      }
+
+      const address = await this.customerAddressRepository.createAddress({
+        customerId: userId,
+        ...dto,
+      });
+
+      return {
+        success: true,
+        message: 'Address added successfully',
+        data: address,
+      };
+    } catch (error) {
+      console.error('Error adding address:', error);
+
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException('Failed to add address');
+    }
+  }
+
+  async addServiceArea(userId: number, dto: CreatePurohitServiceAreaDto) {
+    const user = await this.userRepository.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const existing = await this.purohitServiceAreaRepository.findOne({
+      where: {
+        purohitId: userId,
+        pincode: dto.pincode,
+      },
+    });
+
+    if (existing) {
+      throw new ConflictException(
+        'Service area already exists for this pincode',
+      );
+    }
+
+    if (dto.isDefault) {
+      await this.purohitServiceAreaRepository.clearDefaultAddress(userId);
+    }
+
+    const area = await this.purohitServiceAreaRepository.createArea({
+      purohitId: userId,
+      ...dto,
+    });
+
+    return {
+      success: true,
+      message: 'Service area added successfully',
+      data: area,
+    };
+  }
+
+  async updateServiceArea(
+    userId: number,
+    id: number,
+    dto: UpdatePurohitServiceAreaDto,
+  ) {
+    const area = await this.purohitServiceAreaRepository.findById(id);
+
+    if (!area) {
+      throw new NotFoundException('Service area not found');
+    }
+
+    if (area.purohitId !== userId) {
+      throw new ForbiddenException('You can update only your own service area');
+    }
+
+    // Check duplicate pincode only if pincode is being updated
+    if (dto.pincode) {
+      const existing =
+        await this.purohitServiceAreaRepository.findByPurohitAndPincode(
+          userId,
+          dto.pincode,
+        );
+
+      if (existing && existing.id !== id) {
+        throw new ConflictException(
+          'Service area already exists for this pincode',
+        );
+      }
+    }
+
+    if (dto.isDefault) {
+      await this.purohitServiceAreaRepository.clearDefaultAddress(userId);
+    }
+
+    const updated = await this.purohitServiceAreaRepository.updateArea(id, dto);
+
+    return {
+      success: true,
+      message: 'Service area updated successfully',
+      data: updated,
+    };
+  }
+
+  async getMyServiceAreas(userId: number) {
+    const areas =
+      await this.purohitServiceAreaRepository.findByPurohitId(userId);
+
+    return {
+      success: true,
+      message: 'Service areas fetched successfully',
+      data: areas,
+    };
+  }
+
+  async deleteServiceArea(userId: number, id: number) {
+    const area = await this.purohitServiceAreaRepository.findById(id);
+
+    if (!area) {
+      throw new NotFoundException('Service area not found');
+    }
+
+    if (area.purohitId !== userId) {
+      throw new ForbiddenException('You can delete only your own service area');
+    }
+
+    await this.purohitServiceAreaRepository.deleteArea(id);
+
+    return {
+      success: true,
+      message: 'Service area deleted successfully',
+    };
+  }
 }
