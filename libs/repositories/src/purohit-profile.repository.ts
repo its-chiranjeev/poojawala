@@ -12,4 +12,11 @@ export class PurohitProfileRepository extends BaseRepository<PurohitProfile> {
   ) {
     super(repo);
   }
-}
+  async findByUserId(userId: number) {
+    return this.repo.findOne({
+      where: {
+        userId,
+      },
+    });
+  }
+  }

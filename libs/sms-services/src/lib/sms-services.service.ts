@@ -19,7 +19,7 @@ export class SmsService {
 
     try {
       const response = await this.twilioClient.messages.create({
-        body: `Your HiChandra OTP is ${otp}. This OTP expires in 10 minutes.`,
+        body: `sms_2fa`,
         from: this.configService.getOrThrow<string>('TWILIO_PHONE_NUMBER'),
         to: phoneNumber,
       });
