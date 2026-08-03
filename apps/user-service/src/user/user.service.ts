@@ -5,12 +5,12 @@ import { randomUUID, createHmac } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, QueryRunner, Not } from 'typeorm';
 import { last, single } from 'rxjs';
-import {  UserRepository,  OtpRepository,  PurohitProfileRepository,  PurohitMediaRepository, } from '@likemyproduct/repositories';
+import {  UserRepository,  OtpRepository,  PurohitProfileRepository,  PurohitMediaRepository, CustomerFavoriteRepository, } from '@likemyproduct/repositories';
 import {  PurohitProfile,  PurohitMedia,  PUROHIT_VERIFICATION_STATUS,  PUROHIT_MEDIA_TYPE,  User,  Otp,  USER_ROLE,  USER_STATUS, OTP_TYPE, } from '@likemyproduct/entities';
 import { S3Service } from '@likemyproduct/s3';
 import { EmailService } from '@likemyproduct/email-services';
 import { SmsService } from '@likemyproduct/sms-services';
-import { UpdateUserDto, RegisterNormalUserDto,GenerateOtpDto } from '@likemyproduct/dtos';
+import { UpdateUserDto, RegisterNormalUserDto,GenerateOtpDto,CustomerFavoriteDto } from '@likemyproduct/dtos';
 
 
 @Injectable()
@@ -18,6 +18,7 @@ export class UserService {
   constructor(
     private readonly userRepository: UserRepository,
     private readonly purohitProfileRepository: PurohitProfileRepository,
+    private readonly customerFavoriteRepository: CustomerFavoriteRepository,
     private readonly dataSource: DataSource,
     private readonly s3Service: S3Service,
     private readonly otpRepository: OtpRepository,
@@ -380,15 +381,62 @@ export class UserService {
   //   };
   // }
 
-  async getApprovedPurohits() {
-    const purohits = await this.userRepository.findApprovedPurohits();
+  async getApprovedPurohits(
+    page = 1,
+    limit = 10,
+    search?: string,
+  ) {
+    const result = await this.userRepository.findApprovedPurohits(
+      page,
+      limit,
+      search,
+    );
 
     return {
       success: true,
       message: 'Purohits fetched successfully',
-      data: purohits,
+      ...result,
     };
   }
+  
+  async getApprovedPurohitById(id: number) {
+    const user = await this.userRepository.findApprovedPurohitById(id);
+
+    if (!user) {
+      throw new NotFoundException('Purohit not found');
+    }
+
+    const profile = await this.purohitProfileRepository.findByUserId(id);
+
+    return {
+      success: true,
+      message: 'Purohit fetched successfully',
+      data: {
+        id: user.id,
+        profileImage: user.profileImage,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        username: user.username,
+        email: user.email,
+        phone: user.phone,
+        dob: user.dob,
+        birthPlace: user.birthPlace,
+        bio: profile?.bio,
+        qualification: profile?.qualification,
+        experienceYears: profile?.experienceYears,
+        avgRating: profile?.avgRating,
+        totalReviews: profile?.totalReviews,
+        isOnlineAvailable: profile?.isOnlineAvailable,
+        isOfflineAvailable: profile?.isOfflineAvailable,
+        languages: profile?.languages,
+        specializations: profile?.specializations,
+        status: user.status,
+        createdAt: user.createdAt,
+        lastLoginAt: user.lastLoginAt,
+      },
+    };
+  }
+
 
   async registerUserService(
     dto: RegisterNormalUserDto,
@@ -779,4 +827,86 @@ export class UserService {
   private base64UrlEncode(value: string): string {
     return Buffer.from(value).toString('base64url');
   }
+
+  async addFavorite(
+    customerId: number,
+    dto: CustomerFavoriteDto,
+  ) {
+    const favorite = await this.customerFavoriteRepository.findFavorite(
+      customerId,
+      dto.purohitId,
+    );
+
+    if (favorite) {
+      // Already active
+      if (!favorite.deletedAt) {
+        throw new ConflictException(
+          'Purohit already added to favorites',
+        );
+      }
+
+      // Restore soft-deleted favorite
+      await this.customerFavoriteRepository.restoreFavorite(favorite.id);
+
+      return {
+        success: true,
+        message: 'Purohit added to favorites successfully',
+      };
+    }
+
+    await this.customerFavoriteRepository.createFavorite(
+      customerId,
+      dto.purohitId,
+    );
+
+    return {
+      success: true,
+      message: 'Purohit added to favorites successfully',
+    };
+  }
+
+  async getMyFavorites(customerId: number) {
+    const favorites =
+      await this.customerFavoriteRepository.getFavoritesByCustomerId(
+        customerId,
+      );
+
+    const data = favorites.map((favorite) => ({
+      id: favorite.purohit.user.id,
+      profileImage: favorite.purohit.user.profileImage,
+      firstName: favorite.purohit.user.firstName,
+      lastName: favorite.purohit.user.lastName,
+      username: favorite.purohit.user.username,
+      isActive: favorite.purohit.user.status === USER_STATUS.ACTIVE,
+    }));
+
+    return {
+      success: true,
+      message: 'Favorites fetched successfully',
+      data,
+    };
+  }
+
+  async removeFavorite(
+    customerId: number,
+    purohitId: number,
+  ) {
+    const favorite =
+      await this.customerFavoriteRepository.removeFavorite(
+        customerId,
+        purohitId,
+      );
+
+    if (!favorite) {
+      throw new NotFoundException(
+        'Favorite not found',
+      );
+    }
+
+    return {
+      success: true,
+      message: 'Favorite removed successfully',
+    };
+  }
+
 }

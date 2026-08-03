@@ -5,7 +5,7 @@ import type { Response } from 'express';
 import * as crypto from 'crypto';
 import { AuthGuard } from "@nestjs/passport";
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@likemyproduct/common";
-import { UpdateUserDto, RegisterNormalUserDto, GenerateOtpDto} from "@likemyproduct/dtos";
+import { UpdateUserDto, RegisterNormalUserDto, GenerateOtpDto, CustomerFavoriteDto,} from "@likemyproduct/dtos";
 import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
 import { filter } from 'rxjs';
 
@@ -127,10 +127,69 @@ export class UserController {
   // }
   @Get('purohits')
   @Roles(USER_ROLE.ADMIN)
-  getApprovedPurohits() {
-    return this.userService.getApprovedPurohits();
+  getApprovedPurohits(
+    @Query('page') page = 1,
+    @Query('limit') limit = 10,
+    @Query('search') search?: string,
+  ) {
+    return this.userService.getApprovedPurohits(
+      Number(page),
+      Number(limit),
+      search,
+    );
+  }
+
+  @Get('purohits/:id')
+  @Roles(USER_ROLE.ADMIN)
+  getApprovedPurohitById(
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.userService.getApprovedPurohitById(id);
   }
   
+
+  @Post('favorites')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER)
+  @HttpCode(HttpStatus.CREATED)
+  addFavorite(
+    @Req() req: any,
+    @Body(new ValidationPipe({ whitelist: true }))
+    dto: CustomerFavoriteDto,
+  ) {
+    return this.userService.addFavorite(
+      req.user.id,
+      dto,
+    );
+  }
+
+  @Get('favorites')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER)
+  @HttpCode(HttpStatus.OK)
+  getMyFavorites(
+    @Req() req: any,
+  ) {
+    return this.userService.getMyFavorites(
+      req.user.id,
+    );
+  }
+
+  @Delete('favorites/:purohitId')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER)
+  @HttpCode(HttpStatus.OK)
+  removeFavorite(
+    @Req() req: any,
+    @Param('purohitId', ParseIntPipe) purohitId: number,
+  ) {
+    return this.userService.removeFavorite(
+      req.user.id,
+      purohitId,
+    );
+  }
+
+    
   private setAuthCookies(
     res: Response,
     accessToken: string,
