@@ -52,24 +52,6 @@
         "tsConfigPath": "libs/entities/tsconfig.lib.json"
       }
     },
-    "repositories": {
-      "type": "library",
-      "root": "libs/repositories",
-      "entryFile": "index",
-      "sourceRoot": "libs/repositories/src",
-      "compilerOptions": {
-        "tsConfigPath": "libs/repositories/tsconfig.lib.json"
-      }
-    },
-    "s3": {
-      "type": "library",
-      "root": "libs/s3",
-      "entryFile": "index",
-      "sourceRoot": "libs/s3/src",
-      "compilerOptions": {
-        "tsConfigPath": "libs/s3/tsconfig.lib.json"
-      }
-    },
     "gateway": {
       "type": "library",
       "root": "libs/gateway",
@@ -86,6 +68,33 @@
       "sourceRoot": "libs/payment/src",
       "compilerOptions": {
         "tsConfigPath": "libs/payment/tsconfig.lib.json"
+      }
+    },
+    "payment-service": {
+      "type": "application",
+      "root": "apps/payment-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/payment-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/payment-service/tsconfig.app.json"
+      }
+    },
+    "repositories": {
+      "type": "library",
+      "root": "libs/repositories",
+      "entryFile": "index",
+      "sourceRoot": "libs/repositories/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/repositories/tsconfig.lib.json"
+      }
+    },
+    "s3": {
+      "type": "library",
+      "root": "libs/s3",
+      "entryFile": "index",
+      "sourceRoot": "libs/s3/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/s3/tsconfig.lib.json"
       }
     },
     "user-service": {
