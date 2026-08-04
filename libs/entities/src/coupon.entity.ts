@@ -65,11 +65,11 @@ export class Coupon {
   isActive!: boolean;
 
   @Column({ type: 'int' })
-  createdById!: number;
+createdById!: number;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'created_by_id' })
-  createdBy!: User;
+@ManyToOne(() => User, { onDelete: 'CASCADE' })
+@JoinColumn({ name: 'createdById' })
+createdBy!: User;
 
   @OneToMany(() => CouponUsage, (usage) => usage.coupon)
   usages!: CouponUsage[];
