@@ -1,3 +1,5 @@
+import { EmailServicesModule } from '@likemyproduct/email-services';
+import { SmsServicesModule } from '@likemyproduct/sms-services';
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { UserController } from './user.controller';
@@ -16,6 +18,8 @@ import { S3Module } from '@likemyproduct/s3';
     CommonAuthModule,
     AuthModuleModule,
     S3Module,
+    EmailServicesModule,
+    SmsServicesModule,
   ],
   controllers: [UserController],
   providers: [UserService],

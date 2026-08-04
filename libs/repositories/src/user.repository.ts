@@ -95,6 +95,79 @@ export class UserRepository extends BaseRepository<User> {
   }
 
   async findById(id: string | number) {
-    return this.repo.findOne({where: { id } as any});
+    return this.repo.findOne({where: { id } as any});}
+  async findApprovedPurohits(
+    page = 1,
+    limit = 10,
+    search?: string,
+  ) {
+    const query = this.repo
+    .createQueryBuilder('user')
+    .where('user.role = :role', { role: USER_ROLE.PUROHIT })
+    .andWhere('user.status = :status', { status: USER_STATUS.ACTIVE });
+
+    if (search) {
+      const isNumber = !isNaN(Number(search));
+
+      if (isNumber) {
+        query.andWhere('user.id = :id', {
+          id: Number(search),
+        });
+      } else {
+        query.andWhere(
+          `(
+            LOWER(user.firstName) LIKE LOWER(:search)
+            OR LOWER(user.lastName) LIKE LOWER(:search)
+            OR LOWER(CONCAT(user.firstName, ' ', user.lastName)) LIKE LOWER(:search)
+            OR LOWER(user.username) LIKE LOWER(:search)
+            OR LOWER(user.email) LIKE LOWER(:search)
+          )`,
+          {
+            search: `%${search}%`,
+          },
+        );
+      }
+    }
+
+    query
+    .skip((page - 1) * limit)
+    .take(limit);
+
+    const [users, total] = await query.getManyAndCount();
+
+    const data = users.map((user) => ({
+      id: user.id,
+      profileImage: user.profileImage,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      username: user.username,
+      isActive: user.status === USER_STATUS.ACTIVE,
+    }));
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
-}
+  async findApprovedPurohitById(id: number) {
+    return this.repo.findOne({
+      where: {
+        id,
+        role: USER_ROLE.PUROHIT,
+        status: USER_STATUS.ACTIVE,
+      },
+    });
+  }
+  }
+
