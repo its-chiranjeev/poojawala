@@ -7,3 +7,4 @@ export * from './auth/verify-otp.dto';
 export * from './multer/multer.dto';
 export * from './auth/customer-favorite.dto';
 export * from './auth/update-user.dto';
+export * from './coupon/create-coupon.dto';
