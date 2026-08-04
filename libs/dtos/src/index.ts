@@ -18,3 +18,5 @@ export * from './booking/verify-completion-otp.dto';
 export * from './complaint/create-complaint.dto';
 export * from './complaint/update-complaint-status.dto';
 export * from './complaint/complaint-query.dto';
+export * from './payment/create-payment-link.dto';
+export * from './payment/confirm-booking-payment.dto';
