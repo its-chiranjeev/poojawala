@@ -1,17 +1,75 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, InternalServerErrorException, Logger, NotFoundException, StreamableFile,} from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+
 import Razorpay from 'razorpay';
 import * as crypto from 'crypto';
 import puppeteer from 'puppeteer';
-import { Booking, BOOKING_PAYMENT_STATUS, BOOKING_STATUS, Payment, PAYMENT_METHOD, PAYMENT_STATUS, PAYMENT_TYPE, User, USER_ROLE,} from '@likemyproduct/entities';
-import { BookingRepository, PaymentRepository,} from '@likemyproduct/repositories';
-import { CreatePaymentLinkDto } from '@likemyproduct/dtos';
+
+import {
+  Booking,
+  BOOKING_PAYMENT_STATUS,
+  BOOKING_STATUS,
+  Payment,
+  PAYMENT_METHOD,
+  PAYMENT_STATUS,
+  PAYMENT_TYPE,
+  User,
+  USER_ROLE,
+} from '@likemyproduct/entities';
+
+import {
+  BookingRepository,
+  PaymentRepository,
+} from '@likemyproduct/repositories';
+
+import {
+  CreatePaymentLinkDto,
+  PaymentQueryDto,
+  AdminPaymentQueryDto,
+  CreateRefundDto,
+} from '@likemyproduct/dtos';
+
 import { paymentInvoiceTemplate } from './templates/invoice.template';
 
 interface RazorpayError {
   error?: {
     description?: string;
   };
+
   message?: string;
+}
+
+interface PaymentLinkCustomer {
+  name: string;
+  email?: string;
+  contact?: string;
+}
+
+interface RazorpayPaymentLinkData {
+  id: string;
+  entity?: string;
+  amount?: number;
+  amount_paid?: number;
+  currency?: string;
+  description?: string;
+  status?: string;
+  reference_id?: string;
+  short_url: string;
+  callback_url?: string;
+  created_at?: number;
+
+  notes?: {
+    paymentId?: string;
+    bookingId?: string;
+    bookingNumber?: string;
+  };
 }
 
 export interface RazorpayPaymentData {
@@ -42,7 +100,14 @@ export interface RazorpayPaymentData {
   error_step?: string | null;
   error_reason?: string | null;
   acquirer_data?: Record<string, unknown>;
-  notes?: Record<string, unknown> | string[];
+
+  notes?: {
+    paymentId?: string;
+    bookingId?: string;
+    bookingNumber?: string;
+    [key: string]: unknown;
+  };
+
   created_at?: number;
 }
 
@@ -52,18 +117,24 @@ interface RazorpayPaymentCollection {
   items?: RazorpayPaymentData[];
 }
 
-interface RazorpayOrderData {
+interface RazorpayRefundData {
   id: string;
   entity?: string;
   amount: number;
-  amount_paid?: number;
-  amount_due?: number;
-  currency: string;
-  receipt?: string;
+  currency?: string;
+  payment_id: string;
   status?: string;
-  attempts?: number;
-  notes?: Record<string, string>;
+  speed_processed?: string;
+  speed_requested?: string;
+  receipt?: string | null;
   created_at?: number;
+
+  notes?: {
+    originalPaymentId?: string;
+    refundPaymentId?: string;
+    bookingId?: string;
+    reason?: string;
+  };
 }
 
 export interface PaymentProviderDetails {
@@ -87,7 +158,7 @@ export interface PaymentProviderDetails {
   errorStep: string | null;
   errorReason: string | null;
   acquirerData: Record<string, unknown> | null;
-  notes: Record<string, unknown> | string[] | null;
+  notes: Record<string, unknown> | null;
   providerCreatedAt: Date | null;
 }
 
@@ -124,29 +195,113 @@ export interface PaymentDetailsResponse {
   updatedAt: Date;
 
   providerDetails: PaymentProviderDetails | null;
-
   razorpayRaw: RazorpayPaymentData | null;
 
   source: 'RAZORPAY_WITH_DB_FALLBACK' | 'DATABASE_ONLY';
 }
 
-export interface BookingPaymentOrderResponse {
+export interface BookingPaymentLinkResponse {
   paymentId: number;
-  razorpayKeyId: string;
-  razorpayOrderId: string;
+  paymentUrl: string;
+
   amount: number;
   amountInPaise: number;
   currency: string;
+
   bookingId: number;
   bookingNumber: string;
 
-  customer: {
-    name: string;
-    email?: string;
-    contact?: string;
+  status: PAYMENT_STATUS;
+}
+
+export interface RazorpayWebhookPaymentEntity {
+  id: string;
+  order_id?: string | null;
+  status?: string;
+  amount?: number;
+  currency?: string;
+  method?: string;
+  error_description?: string | null;
+  created_at?: number;
+
+  notes?: {
+    paymentId?: string;
+    bookingId?: string;
+    bookingNumber?: string;
+    [key: string]: unknown;
+  };
+}
+
+export interface RazorpayWebhookPaymentLinkEntity {
+  id: string;
+  entity?: string;
+  status?: string;
+  amount?: number;
+  amount_paid?: number;
+  currency?: string;
+  reference_id?: string;
+  short_url?: string;
+  created_at?: number;
+
+  notes?: {
+    paymentId?: string;
+    bookingId?: string;
+    bookingNumber?: string;
+  };
+}
+
+export interface RazorpayWebhookRefundEntity {
+  id: string;
+  payment_id?: string;
+  status?: string;
+  amount?: number;
+  currency?: string;
+  speed_processed?: string;
+  speed_requested?: string;
+  receipt?: string | null;
+  created_at?: number;
+
+  notes?: {
+    originalPaymentId?: string;
+    refundPaymentId?: string;
+    bookingId?: string;
+    reason?: string;
   };
 
-  status: PAYMENT_STATUS;
+  error_code?: string | null;
+  error_description?: string | null;
+  error_source?: string | null;
+  error_step?: string | null;
+  error_reason?: string | null;
+}
+
+export interface RazorpayWebhookPayload {
+  event: string;
+
+  payload?: {
+    payment?: {
+      entity?: RazorpayWebhookPaymentEntity;
+    };
+
+    payment_link?: {
+      entity?: RazorpayWebhookPaymentLinkEntity;
+    };
+
+    refund?: {
+      entity?: RazorpayWebhookRefundEntity;
+    };
+  };
+}
+
+export interface PaginatedPaymentsResponse {
+  items: PaymentDetailsResponse[];
+
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
 @Injectable()
@@ -155,21 +310,16 @@ export class PaymentService {
 
   private readonly razorpay: Razorpay;
 
-  private readonly razorpayKeyId: string;
-
   constructor(
     private readonly bookingRepository: BookingRepository,
     private readonly paymentRepository: PaymentRepository,
   ) {
     const keyId = process.env['RAZORPAY_KEY_ID'];
-
     const keySecret = process.env['RAZORPAY_KEY_SECRET'];
 
     if (!keyId || !keySecret) {
       throw new Error('Razorpay credentials are not configured');
     }
-
-    this.razorpayKeyId = keyId;
 
     this.razorpay = new Razorpay({
       key_id: keyId,
@@ -177,10 +327,16 @@ export class PaymentService {
     });
   }
 
+  /**
+   * Creates a Razorpay-hosted payment URL.
+   *
+   * Payment Link ID and URL are intentionally not
+   * stored in the database.
+   */
   async createBookingPaymentLink(
     user: User,
     dto: CreatePaymentLinkDto,
-  ): Promise<BookingPaymentOrderResponse> {
+  ): Promise<BookingPaymentLinkResponse> {
     const booking = await this.bookingRepository.findBookingById(dto.bookingId);
 
     if (!booking) {
@@ -189,51 +345,15 @@ export class PaymentService {
 
     this.validatePaymentCreationAccess(user, booking);
 
-    const existingPendingPayment = await this.paymentRepository.findOne({
-      where: {
-        bookingId: booking.id,
-        payerId: user.id,
-        paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
-        status: PAYMENT_STATUS.PENDING,
-      },
-
-      order: {
-        createdAt: 'DESC',
-      },
-    });
-
-    if (existingPendingPayment?.razorpayOrderId) {
-      return {
-        paymentId: existingPendingPayment.id,
-
-        razorpayKeyId: this.razorpayKeyId,
-
-        razorpayOrderId: existingPendingPayment.razorpayOrderId,
-
-        amount: Number(existingPendingPayment.amount),
-
-        amountInPaise: Math.round(Number(existingPendingPayment.amount) * 100),
-
-        currency: existingPendingPayment.currency,
-
-        bookingId: booking.id,
-
-        bookingNumber: booking.bookingNumber,
-
-        customer: this.getPaymentCustomer(user, booking),
-
-        status: existingPendingPayment.status,
-      };
-    }
-
     const amount = this.getBookingAmount(booking);
 
-    const razorpayOrder = await this.createRazorpayOrder(
-      amount,
-      booking,
-      dto.description,
-    );
-
+    /*
+     * Create a new payment row for every generated link.
+     *
+     * This is necessary because the URL is not stored.
+     * Each Razorpay Payment Link maps to exactly one
+     * database payment through reference_id and notes.
+     */
     const payment = this.paymentRepository.create({
       paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
 
@@ -247,36 +367,53 @@ export class PaymentService {
 
       amount,
 
-      currency: razorpayOrder.currency ?? 'INR',
-
-      razorpayOrderId: razorpayOrder.id,
+      currency: 'INR',
 
       status: PAYMENT_STATUS.PENDING,
     });
 
-    const savedPayment = await this.paymentRepository.save(payment);
+    const savedPayment = await this.paymentRepository.savePayment(payment);
 
-    return {
-      paymentId: savedPayment.id,
+    try {
+      const customer = this.getPaymentCustomer(user, booking);
 
-      razorpayKeyId: this.razorpayKeyId,
+      const paymentLink = await this.createRazorpayPaymentLink(
+        savedPayment,
+        booking,
+        customer,
+        dto.description,
+        dto.callbackUrl,
+      );
 
-      razorpayOrderId: razorpayOrder.id,
+      return {
+        paymentId: savedPayment.id,
 
-      amount,
+        paymentUrl: paymentLink.short_url,
 
-      amountInPaise: razorpayOrder.amount,
+        amount,
 
-      currency: razorpayOrder.currency,
+        amountInPaise: Math.round(amount * 100),
 
-      bookingId: booking.id,
+        currency: paymentLink.currency ?? 'INR',
 
-      bookingNumber: booking.bookingNumber,
+        bookingId: booking.id,
 
-      customer: this.getPaymentCustomer(user, booking),
+        bookingNumber: booking.bookingNumber,
 
-      status: savedPayment.status,
-    };
+        status: savedPayment.status,
+      };
+    } catch (error) {
+      savedPayment.status = PAYMENT_STATUS.FAILED;
+
+      savedPayment.failureReason =
+        error instanceof Error
+          ? error.message
+          : 'Unable to create payment link';
+
+      await this.paymentRepository.savePayment(savedPayment);
+
+      throw error;
+    }
   }
 
   private validatePaymentCreationAccess(user: User, booking: Booking): void {
@@ -310,11 +447,7 @@ export class PaymentService {
   private getPaymentCustomer(
     user: User,
     booking: Booking,
-  ): {
-    name: string;
-    email?: string;
-    contact?: string;
-  } {
+  ): PaymentLinkCustomer {
     const name = [booking.customer?.firstName, booking.customer?.lastName]
       .filter(Boolean)
       .join(' ')
@@ -327,47 +460,102 @@ export class PaymentService {
     return {
       name: name || user.username || 'Customer',
 
-      ...(email ? { email } : {}),
+      ...(email
+        ? {
+            email: email.trim(),
+          }
+        : {}),
 
-      ...(contact ? { contact } : {}),
+      ...(contact
+        ? {
+            contact: contact.trim(),
+          }
+        : {}),
     };
   }
 
-  private async createRazorpayOrder(
-    amount: number,
+  private async createRazorpayPaymentLink(
+    payment: Payment,
     booking: Booking,
+    customer: PaymentLinkCustomer,
     description?: string,
-  ): Promise<RazorpayOrderData> {
-    const amountInPaise = Math.round(amount * 100);
+    customCallbackUrl?: string,
+  ): Promise<RazorpayPaymentLinkData> {
+    const amountInPaise = Math.round(Number(payment.amount) * 100);
 
-    const receipt = `booking_${booking.id}_${Date.now()}`.slice(0, 40);
+    const callbackUrl =
+      customCallbackUrl?.trim() ||
+      process.env['FRONTEND_PAYMENT_CALLBACK_URL']?.trim();
+
+    const notify: {
+      sms: boolean;
+      email: boolean;
+    } = {
+      sms: Boolean(customer.contact),
+      email: Boolean(customer.email),
+    };
 
     try {
-      const order = await this.razorpay.orders.create({
+      const paymentLink = await this.razorpay.paymentLink.create({
         amount: amountInPaise,
 
         currency: 'INR',
 
-        receipt,
+        accept_partial: false,
+
+        description:
+          description?.trim() || `Payment for booking ${booking.bookingNumber}`,
+
+        customer: {
+          name: customer.name,
+
+          ...(customer.email
+            ? {
+                email: customer.email,
+              }
+            : {}),
+
+          ...(customer.contact
+            ? {
+                contact: customer.contact,
+              }
+            : {}),
+        },
+
+        notify,
+
+        reminder_enable: true,
+
+        /*
+         * This identifies the local DB payment row
+         * without storing paymentLinkId.
+         */
+        reference_id: `payment_${payment.id}`,
 
         notes: {
+          paymentId: String(payment.id),
+
           bookingId: String(booking.id),
 
           bookingNumber: booking.bookingNumber,
-
-          description:
-            description?.trim() ||
-            `Payment for booking ${booking.bookingNumber}`,
         },
-      });
 
-      if (!order.id) {
+        ...(callbackUrl
+          ? {
+              callback_url: callbackUrl,
+
+              callback_method: 'get' as const,
+            }
+          : {}),
+      } as unknown as Parameters<Razorpay['paymentLink']['create']>[0]);
+
+      if (!paymentLink.id || !paymentLink.short_url) {
         throw new InternalServerErrorException(
-          'Invalid order response received from Razorpay',
+          'Invalid payment-link response received from Razorpay',
         );
       }
 
-      return order as unknown as RazorpayOrderData;
+      return paymentLink as unknown as RazorpayPaymentLinkData;
     } catch (error) {
       if (error instanceof InternalServerErrorException) {
         throw error;
@@ -375,137 +563,18 @@ export class PaymentService {
 
       const razorpayError = error as RazorpayError;
 
-      this.logger.error(
-        `Razorpay order creation failed for booking ${booking.id}`,
-        razorpayError.error?.description || razorpayError.message,
-      );
-
-      throw new BadRequestException(
+      const message =
         razorpayError.error?.description ||
-          razorpayError.message ||
-          'Razorpay order creation failed',
+        razorpayError.message ||
+        'Razorpay payment-link creation failed';
+
+      this.logger.error(
+        `Payment-link creation failed for payment ${payment.id}`,
+        message,
       );
+
+      throw new BadRequestException(message);
     }
-  }
-
-  verifyCheckoutSignature(
-    razorpayOrderId: string,
-    razorpayPaymentId: string,
-    razorpaySignature: string,
-  ): boolean {
-    const keySecret = process.env['RAZORPAY_KEY_SECRET'];
-
-    if (!keySecret) {
-      throw new InternalServerErrorException(
-        'Razorpay key secret is not configured',
-      );
-    }
-
-    if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
-      throw new BadRequestException(
-        'Razorpay order ID, payment ID and signature are required',
-      );
-    }
-
-    const payload = `${razorpayOrderId}|${razorpayPaymentId}`;
-
-    const expectedSignature = crypto
-      .createHmac('sha256', keySecret)
-      .update(payload)
-      .digest('hex');
-
-    const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
-
-    const receivedBuffer = Buffer.from(razorpaySignature, 'utf8');
-
-    if (expectedBuffer.length !== receivedBuffer.length) {
-      return false;
-    }
-
-    return crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
-  }
-
-  async confirmBookingPayment(
-    user: User,
-    paymentId: number,
-    razorpayOrderId: string,
-    razorpayPaymentId: string,
-    razorpaySignature: string,
-  ): Promise<PaymentDetailsResponse> {
-    const payment = await this.paymentRepository.findOne({
-      where: {
-        id: paymentId,
-      },
-
-      relations: {
-        booking: true,
-      },
-    });
-
-    if (!payment) {
-      throw new NotFoundException('Payment record not found');
-    }
-
-    if (
-      user.role !== USER_ROLE.ADMIN &&
-      payment.payerId !== user.id &&
-      payment.createdById !== user.id
-    ) {
-      throw new ForbiddenException('You cannot confirm this payment');
-    }
-
-    if (payment.razorpayOrderId !== razorpayOrderId) {
-      throw new BadRequestException(
-        'Razorpay order ID does not match the payment record',
-      );
-    }
-
-    const isValidSignature = this.verifyCheckoutSignature(
-      razorpayOrderId,
-      razorpayPaymentId,
-      razorpaySignature,
-    );
-
-    if (!isValidSignature) {
-      throw new BadRequestException('Invalid Razorpay payment signature');
-    }
-
-    const razorpayPayment =
-      await this.fetchPaymentFromRazorpay(razorpayPaymentId);
-
-    if (!razorpayPayment) {
-      throw new BadRequestException('Unable to verify payment with Razorpay');
-    }
-
-    if (razorpayPayment.order_id !== razorpayOrderId) {
-      throw new BadRequestException(
-        'Razorpay payment does not belong to this order',
-      );
-    }
-
-    payment.razorpayPaymentId = razorpayPaymentId;
-
-    payment.status = this.mapRazorpayStatus(
-      razorpayPayment.status,
-      payment.status,
-    );
-
-    payment.paymentMethod = this.mapRazorpayMethod(
-      razorpayPayment.method,
-      payment.paymentMethod,
-    );
-
-    payment.failureReason = razorpayPayment.error_description ?? undefined;
-
-    if (this.isSuccessfulPaymentStatus(razorpayPayment.status ?? '')) {
-      payment.paidAt = razorpayPayment.created_at
-        ? new Date(razorpayPayment.created_at * 1000)
-        : new Date();
-    }
-
-    const savedPayment = await this.paymentRepository.save(payment);
-
-    return this.buildCombinedPaymentResponse(savedPayment, razorpayPayment);
   }
 
   verifyWebhook(rawBody: Buffer | string, signature: string): boolean {
@@ -539,29 +608,324 @@ export class PaymentService {
     return crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
   }
 
+  async processRazorpayWebhook(webhook: RazorpayWebhookPayload): Promise<void> {
+    if (!webhook?.event) {
+      throw new BadRequestException('Razorpay webhook event is required');
+    }
+
+    switch (webhook.event) {
+      case 'payment_link.paid':
+        await this.handlePaymentLinkPaid(
+          webhook.payload?.payment_link?.entity,
+          webhook.payload?.payment?.entity,
+        );
+        return;
+
+      case 'payment_link.cancelled':
+      case 'payment_link.expired':
+        await this.handlePaymentLinkUnavailable(
+          webhook.payload?.payment_link?.entity,
+          webhook.event,
+        );
+        return;
+
+      case 'payment.captured':
+        await this.handlePaymentCaptured(webhook.payload?.payment?.entity);
+        return;
+
+      case 'payment.failed':
+        await this.handlePaymentFailed(webhook.payload?.payment?.entity);
+        return;
+
+      case 'refund.created':
+        await this.handleRefundCreated(webhook.payload?.refund?.entity);
+        return;
+
+      case 'refund.processed':
+        await this.handleRefundProcessed(webhook.payload?.refund?.entity);
+        return;
+
+      case 'refund.failed':
+        await this.handleRefundFailed(webhook.payload?.refund?.entity);
+        return;
+
+      default:
+        this.logger.log(`Unhandled Razorpay webhook event: ${webhook.event}`);
+    }
+  }
+
+  private async handlePaymentLinkPaid(
+    paymentLink: RazorpayWebhookPaymentLinkEntity | undefined,
+
+    razorpayPayment: RazorpayWebhookPaymentEntity | undefined,
+  ): Promise<void> {
+    const databasePaymentId = this.resolveDatabasePaymentId(
+      paymentLink?.reference_id,
+      paymentLink?.notes?.paymentId,
+      razorpayPayment?.notes?.paymentId,
+    );
+
+    if (!databasePaymentId) {
+      this.logger.warn(
+        'Unable to resolve database payment ID from payment_link.paid webhook',
+      );
+
+      return;
+    }
+
+    const payment =
+      await this.paymentRepository.findPaymentById(databasePaymentId);
+
+    if (!payment) {
+      this.logger.warn(`Payment ${databasePaymentId} not found`);
+
+      return;
+    }
+
+    /*
+     * Razorpay can retry webhooks.
+     */
+    if (
+      payment.status === PAYMENT_STATUS.SUCCESS &&
+      (!razorpayPayment?.id || payment.razorpayPaymentId === razorpayPayment.id)
+    ) {
+      this.logger.log(
+        `Duplicate payment_link.paid webhook ignored for payment ${payment.id}`,
+      );
+
+      return;
+    }
+
+    payment.status = PAYMENT_STATUS.SUCCESS;
+
+    if (razorpayPayment?.id) {
+      payment.razorpayPaymentId = razorpayPayment.id;
+    }
+
+    if (razorpayPayment?.order_id) {
+      payment.razorpayOrderId = razorpayPayment.order_id;
+    }
+
+    payment.paymentMethod = this.mapRazorpayMethod(
+      razorpayPayment?.method,
+      payment.paymentMethod,
+    );
+
+    payment.failureReason = undefined;
+
+    payment.paidAt = razorpayPayment?.created_at
+      ? new Date(razorpayPayment.created_at * 1000)
+      : new Date();
+
+    await this.paymentRepository.savePayment(payment);
+
+    if (payment.booking) {
+      payment.booking.paymentStatus = BOOKING_PAYMENT_STATUS.PAID;
+
+      await this.bookingRepository.saveBooking(payment.booking);
+    }
+
+    this.logger.log(
+      `Payment ${payment.id} completed through Razorpay Payment Link`,
+    );
+  }
+
+  private async handlePaymentLinkUnavailable(
+    paymentLink: RazorpayWebhookPaymentLinkEntity | undefined,
+
+    event: string,
+  ): Promise<void> {
+    const databasePaymentId = this.resolveDatabasePaymentId(
+      paymentLink?.reference_id,
+      paymentLink?.notes?.paymentId,
+    );
+
+    if (!databasePaymentId) {
+      this.logger.warn(`Unable to resolve payment for ${event}`);
+
+      return;
+    }
+
+    const payment =
+      await this.paymentRepository.findPaymentById(databasePaymentId);
+
+    if (!payment) {
+      return;
+    }
+
+    /*
+     * Never downgrade a completed payment.
+     */
+    if (payment.status === PAYMENT_STATUS.SUCCESS) {
+      return;
+    }
+
+    payment.status = PAYMENT_STATUS.FAILED;
+
+    payment.failureReason =
+      event === 'payment_link.expired'
+        ? 'Payment link expired'
+        : 'Payment link cancelled';
+
+    await this.paymentRepository.savePayment(payment);
+  }
+
+  /**
+   * payment.captured is kept as a fallback.
+   *
+   * For Payment Links, the preferred event is
+   * payment_link.paid because it contains reference_id.
+   */
+  private async handlePaymentCaptured(
+    razorpayPayment: RazorpayWebhookPaymentEntity | undefined,
+  ): Promise<void> {
+    if (!razorpayPayment?.id) {
+      return;
+    }
+
+    const databasePaymentId = this.resolveDatabasePaymentId(
+      undefined,
+      razorpayPayment.notes?.paymentId,
+    );
+
+    let payment: Payment | null = null;
+
+    if (databasePaymentId) {
+      payment = await this.paymentRepository.findPaymentById(databasePaymentId);
+    }
+
+    if (!payment && razorpayPayment.order_id) {
+      payment = await this.paymentRepository.findByRazorpayOrderId(
+        razorpayPayment.order_id,
+      );
+    }
+
+    if (!payment) {
+      this.logger.warn(
+        `Unable to identify local payment for captured Razorpay payment ${razorpayPayment.id}`,
+      );
+
+      return;
+    }
+
+    if (
+      payment.status === PAYMENT_STATUS.SUCCESS &&
+      payment.razorpayPaymentId === razorpayPayment.id
+    ) {
+      return;
+    }
+
+    payment.status = PAYMENT_STATUS.SUCCESS;
+
+    payment.razorpayPaymentId = razorpayPayment.id;
+
+    if (razorpayPayment.order_id) {
+      payment.razorpayOrderId = razorpayPayment.order_id;
+    }
+
+    payment.paymentMethod = this.mapRazorpayMethod(
+      razorpayPayment.method,
+      payment.paymentMethod,
+    );
+
+    payment.failureReason = undefined;
+
+    payment.paidAt = razorpayPayment.created_at
+      ? new Date(razorpayPayment.created_at * 1000)
+      : new Date();
+
+    await this.paymentRepository.savePayment(payment);
+
+    if (payment.booking) {
+      payment.booking.paymentStatus = BOOKING_PAYMENT_STATUS.PAID;
+
+      await this.bookingRepository.saveBooking(payment.booking);
+    }
+  }
+
+  private async handlePaymentFailed(
+    razorpayPayment: RazorpayWebhookPaymentEntity | undefined,
+  ): Promise<void> {
+    if (!razorpayPayment?.id) {
+      return;
+    }
+
+    const databasePaymentId = this.resolveDatabasePaymentId(
+      undefined,
+      razorpayPayment.notes?.paymentId,
+    );
+
+    let payment: Payment | null = null;
+
+    if (databasePaymentId) {
+      payment = await this.paymentRepository.findPaymentById(databasePaymentId);
+    }
+
+    if (!payment && razorpayPayment.order_id) {
+      payment = await this.paymentRepository.findByRazorpayOrderId(
+        razorpayPayment.order_id,
+      );
+    }
+
+    if (!payment) {
+      this.logger.warn(
+        `Unable to identify local payment for failed Razorpay payment ${razorpayPayment.id}`,
+      );
+
+      return;
+    }
+
+    if (payment.status === PAYMENT_STATUS.SUCCESS) {
+      return;
+    }
+
+    payment.razorpayPaymentId = razorpayPayment.id;
+
+    payment.status = PAYMENT_STATUS.FAILED;
+
+    payment.paymentMethod = this.mapRazorpayMethod(
+      razorpayPayment.method,
+      payment.paymentMethod,
+    );
+
+    payment.failureReason =
+      razorpayPayment.error_description ?? 'Payment failed';
+
+    await this.paymentRepository.savePayment(payment);
+  }
+
+  private resolveDatabasePaymentId(
+    referenceId?: string,
+    ...possiblePaymentIds: Array<string | undefined>
+  ): number | null {
+    for (const paymentIdValue of possiblePaymentIds) {
+      if (!paymentIdValue) {
+        continue;
+      }
+
+      const parsedPaymentId = Number(paymentIdValue);
+
+      if (Number.isInteger(parsedPaymentId) && parsedPaymentId > 0) {
+        return parsedPaymentId;
+      }
+    }
+
+    if (referenceId?.startsWith('payment_')) {
+      const parsedPaymentId = Number(referenceId.replace('payment_', ''));
+
+      if (Number.isInteger(parsedPaymentId) && parsedPaymentId > 0) {
+        return parsedPaymentId;
+      }
+    }
+
+    return null;
+  }
+
   async getPaymentDetails(
     user: User,
     paymentId: number,
   ): Promise<PaymentDetailsResponse> {
-    const payment = await this.paymentRepository.findOne({
-      where: {
-        id: paymentId,
-      },
-
-      relations: {
-        booking: {
-          customer: true,
-          service: true,
-          purohit: {
-            user: true,
-          },
-        },
-
-        paymentBookings: {
-          booking: true,
-        },
-      },
-    });
+    const payment = await this.paymentRepository.findPaymentById(paymentId);
 
     if (!payment) {
       throw new NotFoundException('Payment not found');
@@ -591,10 +955,92 @@ export class PaymentService {
     }
   }
 
+  async getBookingPayments(
+    user: User,
+    bookingId: number,
+  ): Promise<PaymentDetailsResponse[]> {
+    const booking = await this.bookingRepository.findBookingById(bookingId);
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    const canAccess =
+      user.role === USER_ROLE.ADMIN ||
+      booking.customerId === user.id ||
+      booking.purohit?.userId === user.id;
+
+    if (!canAccess) {
+      throw new ForbiddenException(
+        'You cannot access payments for this booking',
+      );
+    }
+
+    const payments =
+      await this.paymentRepository.findPaymentsByBookingId(bookingId);
+
+    return Promise.all(
+      payments.map(async (payment) => {
+        const razorpayPayment = await this.resolveRazorpayPayment(payment);
+
+        return this.buildCombinedPaymentResponse(payment, razorpayPayment);
+      }),
+    );
+  }
+
+  async getMyPayments(
+    user: User,
+    query: PaymentQueryDto,
+  ): Promise<PaginatedPaymentsResponse> {
+    const page = Math.max(Number(query.page ?? 1), 1);
+
+    const limit = Math.min(Math.max(Number(query.limit ?? 10), 1), 100);
+
+    const search = query.search?.trim() || undefined;
+
+    const { payments, total } = await this.paymentRepository.findMyPayments({
+      userId: user.id,
+
+      userRole: user.role,
+
+      page,
+      limit,
+
+      status: query.status,
+
+      paymentType: query.paymentType,
+
+      search,
+    });
+
+    const items = await Promise.all(
+      payments.map(async (payment) => {
+        const razorpayPayment = await this.resolveRazorpayPayment(payment);
+
+        return this.buildCombinedPaymentResponse(payment, razorpayPayment);
+      }),
+    );
+
+    return {
+      items,
+
+      pagination: {
+        page,
+        limit,
+        total,
+
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
   async generateInvoicePdf(
     user: User,
     bookingId: number,
-  ): Promise<StreamableFile> {
+  ): Promise<{
+    buffer: Buffer;
+    filename: string;
+  }> {
     const booking = await this.bookingRepository.findBookingById(bookingId);
 
     if (!booking) {
@@ -612,16 +1058,9 @@ export class PaymentService {
       );
     }
 
-    const payment = await this.paymentRepository.findOne({
-      where: {
-        bookingId: booking.id,
-        paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
-      },
-
-      order: {
-        createdAt: 'DESC',
-      },
-    });
+    const payment = await this.paymentRepository.findLatestByBookingId(
+      booking.id,
+    );
 
     if (!payment) {
       throw new NotFoundException('Payment record not found');
@@ -662,7 +1101,6 @@ export class PaymentService {
       purohitName: this.getPurohitName(booking),
 
       invoiceTitle,
-
       invoiceId,
 
       dateLabel: isPaid ? 'Payment Date' : 'Invoice Date',
@@ -737,13 +1175,20 @@ export class PaymentService {
       const pdfBuffer = await page.pdf({
         format: 'A4',
         printBackground: true,
+
+        margin: {
+          top: '20px',
+          right: '20px',
+          bottom: '20px',
+          left: '20px',
+        },
       });
 
-      return new StreamableFile(Buffer.from(pdfBuffer), {
-        type: 'application/pdf',
+      return {
+        buffer: Buffer.from(pdfBuffer),
 
-        disposition: `attachment; filename="invoice-${booking.bookingNumber}.pdf"`,
-      });
+        filename: `invoice-${booking.bookingNumber}.pdf`,
+      };
     } catch (error) {
       this.logger.error(
         `Invoice generation failed for booking ${booking.id}`,
@@ -756,6 +1201,211 @@ export class PaymentService {
         await browser.close();
       }
     }
+  }
+
+  private getRefundPaymentId(
+    refund: RazorpayWebhookRefundEntity | undefined,
+  ): number | null {
+    const refundPaymentId = refund?.notes?.refundPaymentId;
+
+    if (!refundPaymentId) {
+      return null;
+    }
+
+    const parsedId = Number(refundPaymentId);
+
+    if (!Number.isInteger(parsedId) || parsedId <= 0) {
+      return null;
+    }
+
+    return parsedId;
+  }
+
+  private async handleRefundCreated(
+    refund: RazorpayWebhookRefundEntity | undefined,
+  ): Promise<void> {
+    if (!refund?.id) {
+      this.logger.warn('refund.created webhook does not contain a refund ID');
+
+      return;
+    }
+
+    const refundPaymentId = this.getRefundPaymentId(refund);
+
+    if (!refundPaymentId) {
+      this.logger.warn(
+        `Unable to resolve local refund payment for Razorpay refund ${refund.id}`,
+      );
+
+      return;
+    }
+
+    const refundPayment =
+      await this.paymentRepository.findPaymentById(refundPaymentId);
+
+    if (!refundPayment) {
+      this.logger.warn(`Refund payment ${refundPaymentId} not found`);
+
+      return;
+    }
+
+    if (refundPayment.paymentType !== PAYMENT_TYPE.CUSTOMER_REFUND) {
+      this.logger.warn(`Payment ${refundPayment.id} is not a customer refund`);
+
+      return;
+    }
+
+    refundPayment.razorpayRefundId = refund.id;
+
+    if (refund.payment_id) {
+      refundPayment.razorpayPaymentId = refund.payment_id;
+    }
+
+    if (refundPayment.status !== PAYMENT_STATUS.SUCCESS) {
+      refundPayment.status = PAYMENT_STATUS.PENDING;
+    }
+
+    refundPayment.failureReason = undefined;
+
+    await this.paymentRepository.savePayment(refundPayment);
+
+    this.logger.log(
+      `Refund ${refund.id} created for refund payment ${refundPayment.id}`,
+    );
+  }
+
+  private async handleRefundProcessed(
+    refund: RazorpayWebhookRefundEntity | undefined,
+  ): Promise<void> {
+    if (!refund?.id) {
+      this.logger.warn('refund.processed webhook does not contain a refund ID');
+
+      return;
+    }
+
+    const refundPaymentId = this.getRefundPaymentId(refund);
+
+    let refundPayment: Payment | null = null;
+
+    if (refundPaymentId) {
+      refundPayment =
+        await this.paymentRepository.findPaymentById(refundPaymentId);
+    }
+
+    /*
+     * Fallback for cases where Razorpay does not return
+     * notes in the processed webhook.
+     */
+    if (!refundPayment) {
+      refundPayment = await this.paymentRepository.findByRazorpayRefundId(
+        refund.id,
+      );
+    }
+
+    if (!refundPayment) {
+      this.logger.warn(
+        `Refund payment not found for Razorpay refund ${refund.id}`,
+      );
+
+      return;
+    }
+
+    if (refundPayment.paymentType !== PAYMENT_TYPE.CUSTOMER_REFUND) {
+      this.logger.warn(`Payment ${refundPayment.id} is not a customer refund`);
+
+      return;
+    }
+
+    /*
+     * Razorpay may send the same webhook repeatedly.
+     */
+    if (
+      refundPayment.status === PAYMENT_STATUS.SUCCESS &&
+      refundPayment.razorpayRefundId === refund.id
+    ) {
+      this.logger.log(
+        `Duplicate refund.processed webhook ignored for refund payment ${refundPayment.id}`,
+      );
+
+      return;
+    }
+
+    refundPayment.razorpayRefundId = refund.id;
+
+    if (refund.payment_id) {
+      refundPayment.razorpayPaymentId = refund.payment_id;
+    }
+
+    refundPayment.status = PAYMENT_STATUS.SUCCESS;
+
+    refundPayment.failureReason = undefined;
+
+    refundPayment.paidAt = refund.created_at
+      ? new Date(refund.created_at * 1000)
+      : new Date();
+
+    await this.paymentRepository.savePayment(refundPayment);
+
+    this.logger.log(
+      `Refund ${refund.id} processed successfully for refund payment ${refundPayment.id}`,
+    );
+  }
+
+  private async handleRefundFailed(
+    refund: RazorpayWebhookRefundEntity | undefined,
+  ): Promise<void> {
+    if (!refund?.id) {
+      this.logger.warn('refund.failed webhook does not contain a refund ID');
+
+      return;
+    }
+
+    const refundPaymentId = this.getRefundPaymentId(refund);
+
+    let refundPayment: Payment | null = null;
+
+    if (refundPaymentId) {
+      refundPayment =
+        await this.paymentRepository.findPaymentById(refundPaymentId);
+    }
+
+    if (!refundPayment) {
+      refundPayment = await this.paymentRepository.findByRazorpayRefundId(
+        refund.id,
+      );
+    }
+
+    if (!refundPayment) {
+      this.logger.warn(
+        `Refund payment not found for failed Razorpay refund ${refund.id}`,
+      );
+
+      return;
+    }
+
+    /*
+     * Never downgrade a successful refund.
+     */
+    if (refundPayment.status === PAYMENT_STATUS.SUCCESS) {
+      return;
+    }
+
+    refundPayment.razorpayRefundId = refund.id;
+
+    if (refund.payment_id) {
+      refundPayment.razorpayPaymentId = refund.payment_id;
+    }
+
+    refundPayment.status = PAYMENT_STATUS.FAILED;
+
+    refundPayment.failureReason =
+      refund.error_description ?? refund.error_reason ?? 'Refund failed';
+
+    await this.paymentRepository.savePayment(refundPayment);
+
+    this.logger.error(
+      `Refund ${refund.id} failed for refund payment ${refundPayment.id}: ${refundPayment.failureReason}`,
+    );
   }
 
   private async fetchPaymentFromRazorpay(
@@ -930,8 +1580,6 @@ export class PaymentService {
       case 'refunded':
         return 'Refunded';
 
-      case 'created':
-      case 'pending':
       default:
         return 'Pending';
     }
@@ -956,23 +1604,18 @@ export class PaymentService {
   }
 
   private formatPaymentMethod(method: string): string {
-    const normalizedMethod = method.toLowerCase();
-
     const methods: Record<string, string> = {
       netbanking: 'Net Banking',
 
       card: 'Card',
-
       upi: 'UPI',
-
       wallet: 'Wallet',
-
       emi: 'EMI',
 
       bank_transfer: 'Bank Transfer',
     };
 
-    return methods[normalizedMethod] || method || '-';
+    return methods[method.toLowerCase()] || method || '-';
   }
 
   private getBillingAddress(booking: Booking): string {
@@ -1117,9 +1760,7 @@ export class PaymentService {
             invoiceId: razorpayPayment.invoice_id ?? null,
 
             fee,
-
             tax,
-
             amountRefunded,
 
             refundStatus: razorpayPayment.refund_status ?? null,
@@ -1142,15 +1783,216 @@ export class PaymentService {
           }
         : null,
 
-      razorpayRaw: this.getSafeRazorpayRaw(razorpayPayment),
+      razorpayRaw: razorpayPayment,
 
       source: razorpayPayment ? 'RAZORPAY_WITH_DB_FALLBACK' : 'DATABASE_ONLY',
     };
   }
 
-  private getSafeRazorpayRaw(
-    payment: RazorpayPaymentData | null,
-  ): RazorpayPaymentData | null {
-    return payment;
+  async getAllPayments(
+    query: AdminPaymentQueryDto,
+  ): Promise<PaginatedPaymentsResponse> {
+    const page = Math.max(Number(query.page ?? 1), 1);
+
+    const limit = Math.min(Math.max(Number(query.limit ?? 10), 1), 100);
+
+    const search = query.search?.trim() || undefined;
+
+    const { payments, total } = await this.paymentRepository.findAllPayments({
+      page,
+      limit,
+
+      status: query.status,
+
+      paymentType: query.paymentType,
+
+      paymentMethod: query.paymentMethod,
+
+      bookingId: query.bookingId,
+
+      customerId: query.customerId,
+
+      purohitId: query.purohitId,
+
+      search,
+
+      fromDate: query.fromDate,
+
+      toDate: query.toDate,
+    });
+
+    const items = await Promise.all(
+      payments.map(async (payment) => {
+        const razorpayPayment = await this.resolveRazorpayPayment(payment);
+
+        return this.buildCombinedPaymentResponse(payment, razorpayPayment);
+      }),
+    );
+
+    return {
+      items,
+
+      pagination: {
+        page,
+        limit,
+        total,
+
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async createRefund(
+    admin: User,
+    paymentId: number,
+    dto: CreateRefundDto,
+  ): Promise<{
+    refundPaymentId: number;
+    originalPaymentId: number;
+    razorpayRefundId: string;
+    razorpayPaymentId: string;
+    amount: number;
+    currency: string;
+    providerStatus: string;
+    status: PAYMENT_STATUS;
+  }> {
+    const originalPayment =
+      await this.paymentRepository.findPaymentById(paymentId);
+
+    if (!originalPayment) {
+      throw new NotFoundException('Payment not found');
+    }
+
+    if (originalPayment.status !== PAYMENT_STATUS.SUCCESS) {
+      throw new BadRequestException('Only successful payments can be refunded');
+    }
+
+    if (!originalPayment.razorpayPaymentId) {
+      throw new BadRequestException('Razorpay payment ID is missing');
+    }
+
+    const originalAmount = Number(originalPayment.amount);
+
+    const refundAmount = Number(dto.amount);
+
+    if (!Number.isFinite(refundAmount) || refundAmount <= 0) {
+      throw new BadRequestException('Refund amount must be greater than zero');
+    }
+
+    if (refundAmount > originalAmount) {
+      throw new BadRequestException(
+        'Refund amount cannot exceed the original payment amount',
+      );
+    }
+
+    const amountInPaise = Math.round(refundAmount * 100);
+
+    /*
+     * Create local refund record first so its ID
+     * can be included in Razorpay notes.
+     */
+    const refundPayment = this.paymentRepository.create({
+      paymentType: PAYMENT_TYPE.CUSTOMER_REFUND,
+
+      bookingId: originalPayment.bookingId,
+
+      createdById: admin.id,
+
+      payerId: originalPayment.payeeId,
+
+      payeeId: originalPayment.payerId,
+
+      amount: refundAmount,
+
+      currency: originalPayment.currency ?? 'INR',
+
+      paymentMethod: originalPayment.paymentMethod,
+
+      status: PAYMENT_STATUS.PENDING,
+    });
+
+    const savedRefundPayment =
+      await this.paymentRepository.savePayment(refundPayment);
+
+    try {
+      const razorpayRefund = (await this.razorpay.payments.refund(
+        originalPayment.razorpayPaymentId,
+        {
+          amount: amountInPaise,
+
+          speed: 'normal',
+
+          notes: {
+            originalPaymentId: String(originalPayment.id),
+
+            refundPaymentId: String(savedRefundPayment.id),
+
+            bookingId: String(originalPayment.bookingId ?? ''),
+
+            reason: dto.reason?.trim() ?? 'Admin initiated refund',
+          },
+        },
+      )) as unknown as RazorpayRefundData;
+
+      if (!razorpayRefund.id) {
+        throw new InternalServerErrorException(
+          'Invalid refund response received from Razorpay',
+        );
+      }
+
+      savedRefundPayment.razorpayRefundId = razorpayRefund.id;
+
+      savedRefundPayment.razorpayPaymentId = originalPayment.razorpayPaymentId;
+
+      savedRefundPayment.status =
+        razorpayRefund.status === 'processed'
+          ? PAYMENT_STATUS.SUCCESS
+          : PAYMENT_STATUS.PENDING;
+
+      savedRefundPayment.paidAt =
+        razorpayRefund.status === 'processed' ? new Date() : undefined;
+
+      await this.paymentRepository.savePayment(savedRefundPayment);
+
+      return {
+        refundPaymentId: savedRefundPayment.id,
+
+        originalPaymentId: originalPayment.id,
+
+        razorpayRefundId: razorpayRefund.id,
+
+        razorpayPaymentId: originalPayment.razorpayPaymentId,
+
+        amount: refundAmount,
+
+        currency: razorpayRefund.currency ?? originalPayment.currency ?? 'INR',
+
+        providerStatus: razorpayRefund.status ?? 'pending',
+
+        status: savedRefundPayment.status,
+      };
+    } catch (error) {
+      savedRefundPayment.status = PAYMENT_STATUS.FAILED;
+
+      savedRefundPayment.failureReason =
+        error instanceof Error ? error.message : 'Refund creation failed';
+
+      await this.paymentRepository.savePayment(savedRefundPayment);
+
+      if (
+        error instanceof BadRequestException ||
+        error instanceof InternalServerErrorException
+      ) {
+        throw error;
+      }
+
+      const razorpayError = error as RazorpayError;
+
+      throw new BadRequestException(
+        razorpayError.error?.description ??
+          razorpayError.message ??
+          'Unable to create refund',
+      );
+    }
   }
 }
