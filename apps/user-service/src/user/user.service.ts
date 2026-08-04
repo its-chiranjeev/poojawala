@@ -127,17 +127,46 @@ export class UserService {
     };
   }
 
-  async blockUser(id: number) {
+ async updateUserStatus(
+    id: number,
+    status: USER_STATUS,
+  ) {
     const user = await this.userRepository.findById(id);
 
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
+    // Cannot revert back to pending
+    if (
+      user.status !== USER_STATUS.PENDING &&
+      status === USER_STATUS.PENDING
+    ) {
+      throw new BadRequestException(
+        'User status cannot be changed back to PENDING',
+      );
+    }
+
+    // Already in same status
+    if (user.status === status) {
+      throw new BadRequestException(
+        `User is already ${status}`,
+      );
+    }
+
+    user.status = status;
+
+    // Logout user if blocked
+    if (status === USER_STATUS.BLOCKED) {
+      user.hashedRefreshToken = null;
+      user.tokenVersion += 1;
+    }
+
+    await this.userRepository.save(user);
+
     return {
       success: true,
-      message: 'User found',
-      data: user,
+      message: `User status updated to ${status} successfully`,
     };
   }
   

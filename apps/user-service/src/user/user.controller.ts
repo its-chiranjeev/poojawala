@@ -5,7 +5,7 @@ import type { Response } from 'express';
 import * as crypto from 'crypto';
 import { AuthGuard } from "@nestjs/passport";
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@likemyproduct/common";
-import { UpdateUserDto, RegisterNormalUserDto, GenerateOtpDto, CustomerFavoriteDto,} from "@likemyproduct/dtos";
+import { UpdateUserDto, UpdateUserStatusDto, RegisterNormalUserDto, GenerateOtpDto, CustomerFavoriteDto,} from "@likemyproduct/dtos";
 import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
 import { filter } from 'rxjs';
 import { UpsertPlatformSettingDto } from "@likemyproduct/dtos/Platform setting/Platform.dto";
@@ -45,15 +45,20 @@ export class UserController {
   }
 
 
-  // Block the user by admin
+  // cahnge user status ACTIVE,PENDING,INACTIVE,BLOCKED,REJECTED
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
-  @Patch('admin/block/:id')
+  @Patch('admin/status/:id')
   @HttpCode(HttpStatus.OK)
-  async blockUser(
-    @Param('id') id: number,
+  async updateUserStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @Body(new ValidationPipe({ whitelist: true }))
+    dto: UpdateUserStatusDto,
   ) {
-    return this.userService.blockUser(id);
+    return this.userService.updateUserStatus(
+      id,
+      dto.status,
+    );
   }
 
 

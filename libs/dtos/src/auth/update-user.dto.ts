@@ -52,3 +52,8 @@ export class UpdateUserDto {
   @IsString()
   birthPlace?: string;
 }
+
+export class UpdateUserStatusDto {
+  @IsEnum(USER_STATUS)
+  status!: USER_STATUS;
+}
