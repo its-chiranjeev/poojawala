@@ -110,7 +110,7 @@ export class BookingService {
       );
     }
 
-    
+
     try {
       return await this.dataSource.transaction(async (manager) => {
         const userRepository = manager.getRepository(User);
@@ -119,7 +119,7 @@ export class BookingService {
         const bookingRepository = manager.getRepository(Booking);
         const purohitProfileRepository = manager.getRepository(PurohitProfile);
 
-        /*
+        /* 
          * Reload customer from database so an old JWT
          * cannot be used by an inactive or blocked user.
          */
