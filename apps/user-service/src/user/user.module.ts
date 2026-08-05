@@ -7,6 +7,7 @@ import { RepositoriesModule } from '@likemyproduct/repositories';
 import { CommonAuthModule } from '@likemyproduct/common';
 import { AuthModuleModule } from 'apps/auth-service/src/auth/auth-module.module';
 import { S3Module } from '@likemyproduct/s3';
+import { EmailServicesModule } from '@likemyproduct/email-services';
 
 
 @Module({
@@ -16,6 +17,7 @@ import { S3Module } from '@likemyproduct/s3';
     CommonAuthModule,
     AuthModuleModule,
     S3Module,
+    EmailServicesModule
   ],
   controllers: [UserController],
   providers: [UserService],
