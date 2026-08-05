@@ -17,41 +17,41 @@ import {
   Request
 } from '@nestjs/common';
 import { ServiceService } from './service.service';
-import { JwtAuthGuard, Roles, RolesGuard,CsrfGuard } from '@likemyproduct/common';
+import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@likemyproduct/common';
 import { USER_ROLE } from '@likemyproduct/entities';
 import { CreateServiceDto, CreatePurohitServiceDto } from '@likemyproduct/dtos/service/create.service.dto';
-import { UpdateServiceDto ,UpdatePurohitServiceDto} from '@likemyproduct/dtos/service/update.service.dto';
+import { UpdateServiceDto, UpdatePurohitServiceDto } from '@likemyproduct/dtos/service/update.service.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { GetServicesQueryDto } from '@likemyproduct/dtos/service/get.services.query.dto';
 
 @Controller('service')
 export class ServiceController {
-  constructor(private readonly serviceService: ServiceService) {}
+  constructor(private readonly serviceService: ServiceService) { }
 
-   //purohit add service
+  //purohit add service
   @Post('purohit-service')
   @Roles(USER_ROLE.PUROHIT)
-  @UseGuards(JwtAuthGuard, RolesGuard,CsrfGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @HttpCode(HttpStatus.CREATED)
-  
-   async addService(
-  @Req() req: Request,
-  @Body() dto: CreatePurohitServiceDto,
-)  {
-    
+
+  async addService(
+    @Req() req: Request,
+    @Body() dto: CreatePurohitServiceDto,
+  ) {
+
     const user = (req as any).user;
 
-  return this.serviceService.addService(dto, user.id);
+    return this.serviceService.addService(dto, user.id);
   }
 
 
   //get purohit services
   @Get('purohit-service')
   @Roles(USER_ROLE.PUROHIT)
-  @UseGuards(JwtAuthGuard, RolesGuard,CsrfGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @HttpCode(HttpStatus.OK)
   async getPurohitServices(@Req() req: Request) {
-    
+
     const user = (req as any).user;
     return this.serviceService.getPurohitServices(user.id);
   }
@@ -59,7 +59,7 @@ export class ServiceController {
   //delete purohit service
   @Delete('purohit-service/:id')
   @Roles(USER_ROLE.PUROHIT)
-  @UseGuards(JwtAuthGuard, RolesGuard,CsrfGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @HttpCode(HttpStatus.OK)
   async deletePurohitService(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
     const user = (req as any).user;
@@ -69,7 +69,7 @@ export class ServiceController {
   //update purohit service
   @Patch('purohit-service/:id')
   @Roles(USER_ROLE.PUROHIT)
-  @UseGuards(JwtAuthGuard, RolesGuard,CsrfGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @HttpCode(HttpStatus.OK)
   async updatePurohitService(
     @Req() req: Request,
@@ -145,9 +145,15 @@ export class ServiceController {
     return this.serviceService.deleteService(id);
   }
 
-
-
- 
-
-
+  @Get('purohit-service/:id')
+  @Roles(USER_ROLE.PUROHIT)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @HttpCode(HttpStatus.OK)
+  async getPurohitServiceById(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const user = (req as any).user;
+    return this.serviceService.getPurohitServiceById(id, user.id);
+  }
 }
