@@ -163,6 +163,28 @@ export class PaymentRepository extends BaseRepository<Payment> {
     });
   }
 
+  async findActivePaymentByBookingId(
+    bookingId: number,
+  ): Promise<Payment | null> {
+    return this.repo.findOne({
+      where: {
+        bookingId,
+
+        paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+
+        status: In([
+          PAYMENT_STATUS.CREATED,
+          PAYMENT_STATUS.PENDING,
+          PAYMENT_STATUS.SUCCESS,
+        ]),
+      },
+
+      order: {
+        createdAt: 'DESC',
+      },
+    });
+  }
+
   async findPaymentsByBookingId(bookingId: number): Promise<Payment[]> {
     return this.repo.find({
       where: {

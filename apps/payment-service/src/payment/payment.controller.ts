@@ -112,11 +112,8 @@ export class PaymentController {
     );
 
     res.setHeader('Content-Type', 'application/pdf');
-
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
     res.setHeader('Content-Length', buffer.length.toString());
-
     res.status(HttpStatus.OK).send(buffer);
   }
 

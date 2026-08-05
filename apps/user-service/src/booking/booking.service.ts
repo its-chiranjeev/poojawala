@@ -3,46 +3,51 @@ import * as crypto from 'crypto';
 import { randomInt } from 'crypto';
 import * as path from 'path';
 import { Cron } from '@nestjs/schedule';
-import { DataSource, EntityManager, Repository, QueryFailedError  } from 'typeorm';
-import { ASSIGNMENT_TYPE, Booking, BOOKING_PAYMENT_STATUS, BOOKING_STATUS, CustomerAddress, Service, USER_ROLE, User , CANCELLED_BY, PurohitProfile, USER_STATUS, PUROHIT_VERIFICATION_STATUS, PurohitService, PurohitServiceArea } from '@likemyproduct/entities';
+import { DataSource, EntityManager, Repository, QueryFailedError } from 'typeorm';
+import { ASSIGNMENT_TYPE, Booking, BOOKING_PAYMENT_STATUS, BOOKING_STATUS, CustomerAddress, Service, USER_ROLE, User, CANCELLED_BY, PurohitProfile, USER_STATUS, PUROHIT_VERIFICATION_STATUS, PurohitService, PurohitServiceArea, Coupon, CouponUsage, DISCOUNT_TYPE } from '@likemyproduct/entities';
 import { BookingRepository } from '@likemyproduct/repositories';
 import { BookingQueryDto, CreateBookingDto, UpdateBookingDto, CancelBookingDto, RespondBookingDto, PUROHIT_BOOKING_ACTION, AssignBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto } from '@likemyproduct/dtos';
 import { S3Service } from '@likemyproduct/s3';
 import { SmsService } from '@likemyproduct/sms-services';
 import { EmailService } from '@likemyproduct/email-services';
 
+interface CouponCalculationResult {
+  coupon: Coupon;
+  discountAmount: number;
+}
+
 @Injectable()
 export class BookingService {
-    private readonly logger = new Logger(BookingService.name);
+  private readonly logger = new Logger(BookingService.name);
   constructor(
     private readonly bookingRepository: BookingRepository,
     private readonly dataSource: DataSource,
     private readonly s3Service: S3Service,
     private readonly smsService: SmsService,
     private readonly emailService: EmailService,
-    ) {}
+  ) {}
 
-    @Cron('0 * * * * *', {
+  @Cron('0 * * * * *', {
     name: 'change-auto-bookings-to-manual',
   })
-
-  async changeAutoBookingsToManualCron():
-    Promise<void> {
+  async changeAutoBookingsToManualCron(): Promise<void> {
     this.logger.log('AUTO to MANUAL booking cron started');
 
     try {
       const affectedBookings = await this.changeBookingsToManual();
-      this.logger.log(`AUTO to MANUAL cron completed. Updated bookings: ${affectedBookings}`);
+      this.logger.log(
+        `AUTO to MANUAL cron completed. Updated bookings: ${affectedBookings}`,
+      );
     } catch (error) {
-      this.logger.error('Failed to change AUTO bookings to MANUAL',
+      this.logger.error(
+        'Failed to change AUTO bookings to MANUAL',
         error instanceof Error ? error.stack : String(error),
       );
     }
   }
 
   async changeBookingsToManual(): Promise<number> {
-    const bookingRepository =
-      this.dataSource.getRepository(Booking);
+    const bookingRepository = this.dataSource.getRepository(Booking);
 
     const result = await bookingRepository
       .createQueryBuilder()
@@ -50,18 +55,12 @@ export class BookingService {
       .set({
         assignmentType: ASSIGNMENT_TYPE.MANUAL,
       })
-      .where(
-        '"status" = :status',
-        {
-          status: BOOKING_STATUS.PENDING,
-        },
-      )
-      .andWhere(
-        '"assignmentType" = :assignmentType',
-        {
-          assignmentType: ASSIGNMENT_TYPE.AUTO,
-        },
-      )
+      .where('"status" = :status', {
+        status: BOOKING_STATUS.PENDING,
+      })
+      .andWhere('"assignmentType" = :assignmentType', {
+        assignmentType: ASSIGNMENT_TYPE.AUTO,
+      })
       .andWhere('"purohitId" IS NULL')
       .andWhere(
         `"createdAt" <=
@@ -73,18 +72,15 @@ export class BookingService {
     return result.affected ?? 0;
   }
 
-  async createBooking(
-    user: User,
-    dto: CreateBookingDto,
-  ): Promise<Booking> {
+  async createBooking(user: User, dto: CreateBookingDto): Promise<Booking> {
     if (user.role !== USER_ROLE.CUSTOMER) {
       throw new ForbiddenException('Only customers can create bookings');
     }
 
     /*
-    * Fixed booking configuration.
-    * No .env variables are required.
-    */
+     * Fixed booking configuration.
+     * No .env variables are required.
+     */
     const minimumLeadTimeMinutes = 120;
     const maximumAdvanceDays = 180;
     const conflictWindowMinutes = 120;
@@ -94,10 +90,14 @@ export class BookingService {
       throw new BadRequestException('Invalid scheduled date and time');
     }
 
-    const minimumScheduledAt = new Date(Date.now() + minimumLeadTimeMinutes * 60 * 1000);
+    const minimumScheduledAt = new Date(
+      Date.now() + minimumLeadTimeMinutes * 60 * 1000,
+    );
 
     if (scheduledAt < minimumScheduledAt) {
-      throw new BadRequestException(`Booking must be scheduled at least ${minimumLeadTimeMinutes} minutes in advance`);
+      throw new BadRequestException(
+        `Booking must be scheduled at least ${minimumLeadTimeMinutes} minutes in advance`,
+      );
     }
 
     const maximumScheduledAt = new Date(
@@ -105,413 +105,424 @@ export class BookingService {
     );
 
     if (scheduledAt > maximumScheduledAt) {
-      throw new BadRequestException(`Booking cannot be scheduled more than ${maximumAdvanceDays} days in advance`);
+      throw new BadRequestException(
+        `Booking cannot be scheduled more than ${maximumAdvanceDays} days in advance`,
+      );
     }
 
     try {
-      return await this.dataSource.transaction(
-        async (manager) => {
-          const userRepository = manager.getRepository(User);
-          const serviceRepository = manager.getRepository(Service);
-          const addressRepository = manager.getRepository(CustomerAddress);
-          const bookingRepository = manager.getRepository(Booking);
-          const purohitProfileRepository = manager.getRepository(PurohitProfile);
+      return await this.dataSource.transaction(async (manager) => {
+        const userRepository = manager.getRepository(User);
+        const serviceRepository = manager.getRepository(Service);
+        const addressRepository = manager.getRepository(CustomerAddress);
+        const bookingRepository = manager.getRepository(Booking);
+        const purohitProfileRepository = manager.getRepository(PurohitProfile);
 
-          /*
-          * Reload customer from database so an old JWT
-          * cannot be used by an inactive or blocked user.
-          */
-          const customer =
-            await userRepository.findOne({
-              where: {
-                id: user.id,
-                role: USER_ROLE.CUSTOMER,
-                status: USER_STATUS.ACTIVE,
-              },
-            });
+        /*
+         * Reload customer from database so an old JWT
+         * cannot be used by an inactive or blocked user.
+         */
+        const customer = await userRepository.findOne({
+          where: {
+            id: user.id,
+            role: USER_ROLE.CUSTOMER,
+            status: USER_STATUS.ACTIVE,
+          },
+        });
 
-          if (!customer) {
-            throw new ForbiddenException('Only active customers can create bookings');
-          }
+        if (!customer) {
+          throw new ForbiddenException(
+            'Only active customers can create bookings',
+          );
+        }
 
-          /*
-          * Validate selected service.
-          */
-          const service =
-            await serviceRepository.findOne({
-              where: {
-                id: dto.serviceId,
-              },
-            });
+        /*
+         * Validate selected service.
+         */
+        const service = await serviceRepository.findOne({
+          where: {
+            id: dto.serviceId,
+          },
+        });
 
-          if (!service) {
-            throw new NotFoundException('Service not found');
-          }
+        if (!service) {
+          throw new NotFoundException('Service not found');
+        }
 
-          if (!service.isActive) {
-            throw new BadRequestException('Service is currently inactive' );
-          }
+        if (!service.isActive) {
+          throw new BadRequestException('Service is currently inactive');
+        }
 
-          /*
-          * Address is required for an offline booking.
-          */
-          if (!dto.customerAddressId) {
-            throw new BadRequestException('Customer address is required for booking');
-          }
+        /*
+         * Address is required for an offline booking.
+         */
+        if (!dto.customerAddressId) {
+          throw new BadRequestException(
+            'Customer address is required for booking',
+          );
+        }
 
-          const customerAddress =
-            await addressRepository.findOne({
-              where: {
-                id: dto.customerAddressId,
-                customerId: customer.id,
-              },
-            });
+        const customerAddress = await addressRepository.findOne({
+          where: {
+            id: dto.customerAddressId,
+            customerId: customer.id,
+          },
+        });
 
-          if (!customerAddress) {
-            throw new NotFoundException('Customer address not found or does not belong to you');
-          }
+        if (!customerAddress) {
+          throw new NotFoundException(
+            'Customer address not found or does not belong to you',
+          );
+        }
 
-          const customerPincode = customerAddress.pincode?.trim();
+        const customerPincode = customerAddress.pincode?.trim();
 
-          if (!customerPincode) {
-            throw new BadRequestException('A valid pincode is required in the selected customer address');
-          }
+        if (!customerPincode) {
+          throw new BadRequestException(
+            'A valid pincode is required in the selected customer address',
+          );
+        }
 
-          /*
-          * Validate customer coordinates.
-          */
-          const customerLatitude = Number(customerAddress.latitude);
-          const customerLongitude = Number(customerAddress.longitude);
+        /*
+         * Validate customer coordinates.
+         */
+        const customerLatitude = Number(customerAddress.latitude);
+        const customerLongitude = Number(customerAddress.longitude);
 
-          if (!Number.isFinite(customerLatitude) || customerLatitude < -90 || customerLatitude > 90) {
-            throw new BadRequestException('Selected customer address does not have a valid latitude');
-          }
+        if (
+          !Number.isFinite(customerLatitude) ||
+          customerLatitude < -90 ||
+          customerLatitude > 90
+        ) {
+          throw new BadRequestException(
+            'Selected customer address does not have a valid latitude',
+          );
+        }
 
-          if (!Number.isFinite(customerLongitude) || customerLongitude < -180 || customerLongitude > 180) {
-            throw new BadRequestException('Selected customer address does not have a valid longitude');
-          }
+        if (
+          !Number.isFinite(customerLongitude) ||
+          customerLongitude < -180 ||
+          customerLongitude > 180
+        ) {
+          throw new BadRequestException(
+            'Selected customer address does not have a valid longitude',
+          );
+        }
 
-          /*
-          * Validate pricing configuration.
-          */
-          const minPrice = Number(service.minPrice);
-          const maxPrice = Number(service.maxPrice);
-          const commissionPercentage = Number(service.commissionPercentage);
+        /*
+         * Validate pricing configuration.
+         */
+        const minPrice = Number(service.minPrice);
+        const maxPrice = Number(service.maxPrice);
+        const commissionPercentage = Number(service.commissionPercentage);
 
-          if (!Number.isFinite(minPrice) || minPrice <= 0) {
-            throw new BadRequestException('A valid minimum price is not configured for this service');
-          }
+        if (!Number.isFinite(minPrice) || minPrice <= 0) {
+          throw new BadRequestException(
+            'A valid minimum price is not configured for this service',
+          );
+        }
 
-          if (!Number.isFinite(maxPrice) || maxPrice < minPrice) {
-            throw new BadRequestException('A valid maximum price is not configured for this service');
-          }
+        if (!Number.isFinite(maxPrice) || maxPrice < minPrice) {
+          throw new BadRequestException(
+            'A valid maximum price is not configured for this service',
+          );
+        }
 
-          if (!Number.isFinite(commissionPercentage) || commissionPercentage < 0 || commissionPercentage > 100) {
-            throw new BadRequestException('A valid commission percentage is not configured for this service');
-          }
+        if (
+          !Number.isFinite(commissionPercentage) ||
+          commissionPercentage < 0 ||
+          commissionPercentage > 100
+        ) {
+          throw new BadRequestException(
+            'A valid commission percentage is not configured for this service',
+          );
+        }
 
-          const donationAmount = Number( dto.donationAmount ?? 0);
+        const donationAmount = Number(dto.donationAmount ?? 0);
 
-          if (!Number.isFinite(donationAmount) || donationAmount < 0) {
-            throw new BadRequestException('Donation amount must be zero or greater');
-          }
+        if (!Number.isFinite(donationAmount) || donationAmount < 0) {
+          throw new BadRequestException(
+            'Donation amount must be zero or greater',
+          );
+        }
 
-          const couponCode = dto.couponCode?.trim();
+        const couponCode = dto.couponCode?.trim().toUpperCase();
 
-          if (couponCode) {
-            throw new BadRequestException('Coupon functionality is not currently available');
-          }
+        /*
+         * Transaction-level advisory lock.
+         *
+         * Simultaneous requests for the same customer,
+         * service and scheduled time will be processed
+         * one after another.
+         */
+        const duplicateLockKey = [
+          customer.id,
+          service.id,
+          scheduledAt.toISOString(),
+        ].join(':');
 
-          /*
-          * Transaction-level advisory lock.
-          *
-          * Simultaneous requests for the same customer,
-          * service and scheduled time will be processed
-          * one after another.
-          */
-          const duplicateLockKey = [
-            customer.id,
-            service.id,
-            scheduledAt.toISOString(),
-          ].join(':');
-
-          await manager.query(
-            `
+        await manager.query(
+          `
               SELECT pg_advisory_xact_lock(
                 hashtext($1)
               )
             `,
-            [duplicateLockKey],
+          [duplicateLockKey],
+        );
+
+        const activeBookingStatuses = [
+          BOOKING_STATUS.PENDING,
+          BOOKING_STATUS.ACCEPTED,
+          BOOKING_STATUS.ENROUTE,
+          BOOKING_STATUS.ARRIVED,
+          BOOKING_STATUS.ONGOING,
+        ];
+
+        /*
+         * Prevent an active duplicate booking.
+         */
+        const duplicateBookingExists = await bookingRepository
+          .createQueryBuilder('booking')
+          .where('booking.customerId = :customerId', {
+            customerId: customer.id,
+          })
+          .andWhere('booking.serviceId = :serviceId', {
+            serviceId: service.id,
+          })
+          .andWhere('booking.scheduledAt = :scheduledAt', {
+            scheduledAt,
+          })
+          .andWhere('booking.status IN (:...statuses)', {
+            statuses: activeBookingStatuses,
+          })
+          .getExists();
+
+        if (duplicateBookingExists) {
+          throw new ConflictException(
+            'An active booking for this service and scheduled time already exists',
           );
+        }
 
-          const activeBookingStatuses = [
-            BOOKING_STATUS.PENDING,
-            BOOKING_STATUS.ACCEPTED,
-            BOOKING_STATUS.ENROUTE,
-            BOOKING_STATUS.ARRIVED,
-            BOOKING_STATUS.ONGOING,
-          ];
-
-          /*
-          * Prevent an active duplicate booking.
-          */
-          const duplicateBookingExists =
-            await bookingRepository
-              .createQueryBuilder('booking')
-              .where(
-                'booking.customerId = :customerId',
-                {
-                  customerId: customer.id,
-                },
-              )
-              .andWhere(
-                'booking.serviceId = :serviceId',
-                {
-                  serviceId: service.id,
-                },
-              )
-              .andWhere(
-                'booking.scheduledAt = :scheduledAt',
-                {
-                  scheduledAt,
-                },
-              )
-              .andWhere(
-                'booking.status IN (:...statuses)',
-                {
-                  statuses:
-                    activeBookingStatuses,
-                },
-              )
-              .getExists();
-
-          if (duplicateBookingExists) {
-            throw new ConflictException('An active booking for this service and scheduled time already exists');
-          }
-
-          /*
-          * Find approved and active Purohits who:
-          *
-          * 1. Provide the selected service.
-          * 2. Are available for offline bookings.
-          * 3. Serve the customer's pincode.
-          */
-          const matchingPurohits =
-            await purohitProfileRepository
-              .createQueryBuilder('profile')
-              .innerJoin(
-                'profile.user',
-                'purohit_user',
-              )
-              .innerJoin(
-                'profile.purohitServices',
-                'purohit_service',
-                `
+        /*
+         * Find approved and active Purohits who:
+         *
+         * 1. Provide the selected service.
+         * 2. Are available for offline bookings.
+         * 3. Serve the customer's pincode.
+         */
+        const matchingPurohits = await purohitProfileRepository
+          .createQueryBuilder('profile')
+          .innerJoin('profile.user', 'purohit_user')
+          .innerJoin(
+            'profile.purohitServices',
+            'purohit_service',
+            `
                   purohit_service.serviceId = :serviceId
                   AND purohit_service.isActive = :isServiceActive
                 `,
-                {
-                  serviceId: service.id,
-                  isServiceActive: true,
-                },
-              )
-              .innerJoin(
-                PurohitServiceArea,
-                'service_area',
-                `
+            {
+              serviceId: service.id,
+              isServiceActive: true,
+            },
+          )
+          .innerJoin(
+            PurohitServiceArea,
+            'service_area',
+            `
                   service_area.purohitId = purohit_user.id
                   AND service_area.pincode = :customerPincode
                 `,
-                {
-                  customerPincode,
-                },
-              )
-              .where(
-                'profile.verificationStatus = :verificationStatus',
-                {
-                  verificationStatus:
-                    PUROHIT_VERIFICATION_STATUS.APPROVED,
-                },
-              )
-              .andWhere(
-                'profile.isOfflineAvailable = :isOfflineAvailable',
-                {
-                  isOfflineAvailable: true,
-                },
-              )
-              .andWhere(
-                'purohit_user.role = :purohitRole',
-                {
-                  purohitRole:
-                    USER_ROLE.PUROHIT,
-                },
-              )
-              .andWhere(
-                'purohit_user.status = :purohitUserStatus',
-                {
-                  purohitUserStatus:
-                    USER_STATUS.ACTIVE,
-                },
-              )
-              .select(
-                'profile.id',
-                'purohitProfileId',
-              )
-              .distinct(true)
-              .getRawMany<{
-                purohitProfileId: string;
-              }>();
+            {
+              customerPincode,
+            },
+          )
+          .where('profile.verificationStatus = :verificationStatus', {
+            verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+          })
+          .andWhere('profile.isOfflineAvailable = :isOfflineAvailable', {
+            isOfflineAvailable: true,
+          })
+          .andWhere('purohit_user.role = :purohitRole', {
+            purohitRole: USER_ROLE.PUROHIT,
+          })
+          .andWhere('purohit_user.status = :purohitUserStatus', {
+            purohitUserStatus: USER_STATUS.ACTIVE,
+          })
+          .select('profile.id', 'purohitProfileId')
+          .distinct(true)
+          .getRawMany<{
+            purohitProfileId: string;
+          }>();
 
-          const matchingPurohitIds = [
-            ...new Set(
-              matchingPurohits
-                .map(({ purohitProfileId }) =>
-                  Number(purohitProfileId),
-                )
-                .filter((id) =>
-                  Number.isInteger(id),
-                ),
-            ),
-          ];
+        const matchingPurohitIds = [
+          ...new Set(
+            matchingPurohits
+              .map(({ purohitProfileId }) => Number(purohitProfileId))
+              .filter((id) => Number.isInteger(id)),
+          ),
+        ];
 
-          /*
-          * Remove Purohits who already have another
-          * active booking within the conflict window.
-          */
-          let availablePurohitIds = matchingPurohitIds;
+        /*
+         * Remove Purohits who already have another
+         * active booking within the conflict window.
+         */
+        let availablePurohitIds = matchingPurohitIds;
 
-          if (matchingPurohitIds.length > 0) {
-            const conflictStart = new Date(scheduledAt.getTime() - conflictWindowMinutes * 60 * 1000);
-            const conflictEnd = new Date(scheduledAt.getTime() + conflictWindowMinutes * 60 * 1000);
-            const busyPurohits =
-              await bookingRepository
-                .createQueryBuilder('booking')
-                .select(
-                  'booking.purohitId',
-                  'purohitId',
-                )
-                .where(
-                  'booking.purohitId IN (:...purohitIds)',
-                  {
-                    purohitIds:
-                      matchingPurohitIds,
-                  },
-                )
-                .andWhere(
-                  'booking.status IN (:...busyStatuses)',
-                  {
-                    busyStatuses: [
-                      BOOKING_STATUS.ACCEPTED,
-                      BOOKING_STATUS.ENROUTE,
-                      BOOKING_STATUS.ARRIVED,
-                      BOOKING_STATUS.ONGOING,
-                    ],
-                  },
-                )
-                .andWhere(
-                  `
+        if (matchingPurohitIds.length > 0) {
+          const conflictStart = new Date(
+            scheduledAt.getTime() - conflictWindowMinutes * 60 * 1000,
+          );
+          const conflictEnd = new Date(
+            scheduledAt.getTime() + conflictWindowMinutes * 60 * 1000,
+          );
+          const busyPurohits = await bookingRepository
+            .createQueryBuilder('booking')
+            .select('booking.purohitId', 'purohitId')
+            .where('booking.purohitId IN (:...purohitIds)', {
+              purohitIds: matchingPurohitIds,
+            })
+            .andWhere('booking.status IN (:...busyStatuses)', {
+              busyStatuses: [
+                BOOKING_STATUS.ACCEPTED,
+                BOOKING_STATUS.ENROUTE,
+                BOOKING_STATUS.ARRIVED,
+                BOOKING_STATUS.ONGOING,
+              ],
+            })
+            .andWhere(
+              `
                     booking.scheduledAt
                     BETWEEN :conflictStart
                     AND :conflictEnd
                   `,
-                  {
-                    conflictStart,
-                    conflictEnd,
-                  },
-                )
-                .getRawMany<{
-                  purohitId: string;
-                }>();
+              {
+                conflictStart,
+                conflictEnd,
+              },
+            )
+            .getRawMany<{
+              purohitId: string;
+            }>();
 
-            const busyPurohitIds = new Set(
-              busyPurohits.map(
-                ({ purohitId }) =>
-                  Number(purohitId),
-              ),
-            );
+          const busyPurohitIds = new Set(
+            busyPurohits.map(({ purohitId }) => Number(purohitId)),
+          );
 
-            availablePurohitIds =
-              matchingPurohitIds.filter(
-                (purohitId) =>
-                  !busyPurohitIds.has(
-                    purohitId,
-                  ),
-              );
-          }
+          availablePurohitIds = matchingPurohitIds.filter(
+            (purohitId) => !busyPurohitIds.has(purohitId),
+          );
+        }
+
+        /*
+         * Current pricing uses the minimum
+         * service price.
+         */
+        const agreedPrice = minPrice;
+
+        const platformCommission = Number(
+          (agreedPrice * (commissionPercentage / 100)).toFixed(2),
+        );
+
+        const purohitPayoutAmount = Number(
+          (agreedPrice - platformCommission).toFixed(2),
+        );
+
+        let appliedCoupon: Coupon | null = null;
+        let discountAmount = 0;
+
+        if (couponCode) {
+          const couponResult = await this.validateAndCalculateCoupon(
+            manager,
+            customer.id,
+            service.id,
+            couponCode,
+            agreedPrice,
+          );
+
+          appliedCoupon = couponResult.coupon;
+          discountAmount = couponResult.discountAmount;
+        }
+
+        const finalAmount = Number(
+          (agreedPrice - discountAmount + donationAmount).toFixed(2),
+        );
+
+        if (
+          platformCommission < 0 ||
+          purohitPayoutAmount < 0 ||
+          discountAmount < 0 ||
+          finalAmount < 0
+        ) {
+          throw new BadRequestException('Calculated booking amount is invalid');
+        }
+
+        const bookingNumber =
+          await this.generateUniqueBookingNumber(bookingRepository);
+        const booking = bookingRepository.create({
+          bookingNumber,
+
+          customerId: customer.id,
+          serviceId: service.id,
+
+          customerAddressId: customerAddress.id,
+
+          addressSnapshot: this.createAddressSnapshot(customerAddress),
+
+          customerPincode,
+          scheduledAt,
+
+          specialInstructions: dto.specialInstructions?.trim() || undefined,
+
+          customFields: dto.customFields ?? undefined,
+
+          agreedPrice,
+          commissionPercentage,
+          platformCommission,
+          purohitPayoutAmount,
+
+          couponCode: appliedCoupon?.code ?? undefined,
+          discountAmount,
+          donationAmount,
+          finalAmount,
+
+          status: BOOKING_STATUS.PENDING,
+
+          paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
 
           /*
-          * Current pricing uses the minimum
-          * service price.
-          */
-          const agreedPrice = minPrice;
-          const discountAmount = 0;
-          const platformCommission = Number((agreedPrice * (commissionPercentage / 100)).toFixed(2));
-          const purohitPayoutAmount = Number((agreedPrice - platformCommission).toFixed(2));
-          const finalAmount = Number((agreedPrice - discountAmount + donationAmount).toFixed(2));
+           * Every new booking starts in AUTO mode.
+           *
+           * The cron job will later change it to
+           * MANUAL if no Purohit accepts it.
+           */
+          assignmentType: ASSIGNMENT_TYPE.AUTO,
 
-          if (platformCommission < 0 || purohitPayoutAmount < 0 || finalAmount < 0) {
-            throw new BadRequestException('Calculated booking amount is invalid');
-          }
+          filteredPurohitIds: availablePurohitIds,
+        });
 
-          const bookingNumber = await this.generateUniqueBookingNumber(bookingRepository);
-          const booking = bookingRepository.create({bookingNumber,
+        const savedBooking = await bookingRepository.save(booking);
 
-              customerId: customer.id,
-              serviceId: service.id,
+        if (appliedCoupon) {
+          const couponUsageRepository = manager.getRepository(CouponUsage);
 
-              customerAddressId: customerAddress.id,
+          const couponUsage = couponUsageRepository.create({
+            coupon: appliedCoupon,
+            customer,
+            booking: savedBooking,
+          });
 
-              addressSnapshot:
-                this.createAddressSnapshot(customerAddress),
+          await couponUsageRepository.save(couponUsage);
+        }
 
-              customerPincode,
-              scheduledAt,
-
-              specialInstructions: dto.specialInstructions?.trim() || undefined,
-
-              customFields: dto.customFields ?? undefined,
-
-              agreedPrice,
-              commissionPercentage,
-              platformCommission,
-              purohitPayoutAmount,
-
-              couponCode: undefined,
-              discountAmount,
-              donationAmount,
-              finalAmount,
-
-              status:
-                BOOKING_STATUS.PENDING,
-
-              paymentStatus:
-                BOOKING_PAYMENT_STATUS.PENDING,
-
-              /*
-              * Every new booking starts in AUTO mode.
-              *
-              * The cron job will later change it to
-              * MANUAL if no Purohit accepts it.
-              */
-              assignmentType:
-                ASSIGNMENT_TYPE.AUTO,
-
-              filteredPurohitIds:
-                availablePurohitIds,
-            });
-
-          return bookingRepository.save(
-            booking,
-          );
-        },
-      );
+        return savedBooking;
+      });
     } catch (error) {
       /*
-      * PostgreSQL unique constraint violation.
-      *
-      * This will work after adding the unique
-      * partial index migration.
-      */
+       * PostgreSQL unique constraint violation.
+       *
+       * This will work after adding the unique
+       * partial index migration.
+       */
       if (
         error instanceof QueryFailedError &&
         (
@@ -550,9 +561,7 @@ export class BookingService {
       user.role !== USER_ROLE.CUSTOMER &&
       user.role !== USER_ROLE.PUROHIT
     ) {
-      throw new ForbiddenException(
-        'You are not allowed to access bookings',
-      );
+      throw new ForbiddenException('You are not allowed to access bookings');
     }
 
     const page = query.page ?? 1;
@@ -563,14 +572,13 @@ export class BookingService {
     let purohitProfileId: number | undefined;
 
     if (user.role === USER_ROLE.PUROHIT) {
-      const purohitProfile =
-        await this.getPurohitProfile(user.id);
+      const purohitProfile = await this.getPurohitProfile(user.id);
 
       purohitProfileId = purohitProfile.id;
     }
 
-    const { bookings, total } =
-      await this.bookingRepository.findBookingsByRole({
+    const { bookings, total } = await this.bookingRepository.findBookingsByRole(
+      {
         userId: user.id,
         userRole: user.role,
         purohitProfileId,
@@ -578,7 +586,8 @@ export class BookingService {
         limit,
         status,
         search,
-      });
+      },
+    );
 
     return {
       bookings,
@@ -593,15 +602,14 @@ export class BookingService {
     };
   }
 
-  private async getPurohitProfile(
-    userId: number,
-  ): Promise<PurohitProfile> {
-    const purohitProfileRepository = this.dataSource.getRepository(PurohitProfile);
+  private async getPurohitProfile(userId: number): Promise<PurohitProfile> {
+    const purohitProfileRepository =
+      this.dataSource.getRepository(PurohitProfile);
     const purohitProfile = await purohitProfileRepository.findOne({
-        where: {
-          userId,
-        },
-      });
+      where: {
+        userId,
+      },
+    });
 
     if (!purohitProfile) {
       throw new NotFoundException('Purohit profile not found');
@@ -609,13 +617,8 @@ export class BookingService {
     return purohitProfile;
   }
 
-  async getBookingById(
-    user: User,
-    bookingId: number,
-  ): Promise<Booking> {
-    const booking = await this.bookingRepository.findBookingById(
-        bookingId,
-      );
+  async getBookingById(user: User, bookingId: number): Promise<Booking> {
+    const booking = await this.bookingRepository.findBookingById(bookingId);
 
     if (!booking) {
       throw new NotFoundException('Booking not found');
@@ -629,40 +632,44 @@ export class BookingService {
       case USER_ROLE.CUSTOMER:
         // Customer can access only their own booking.
         if (booking.customerId !== user.id) {
-          throw new ForbiddenException('You are not allowed to access this booking');
+          throw new ForbiddenException(
+            'You are not allowed to access this booking',
+          );
         }
 
         return booking;
 
       case USER_ROLE.PUROHIT: {
-        const purohitProfileRepository = this.dataSource.getRepository(
-            PurohitProfile,
-          );
+        const purohitProfileRepository =
+          this.dataSource.getRepository(PurohitProfile);
 
-        const purohitProfile =
-          await purohitProfileRepository.findOne({
-            where: {
-              userId: user.id,
-            },
-          });
+        const purohitProfile = await purohitProfileRepository.findOne({
+          where: {
+            userId: user.id,
+          },
+        });
 
         if (!purohitProfile) {
           throw new NotFoundException('Purohit profile not found');
         }
 
         /*
-        * booking.purohitId contains
-        * PurohitProfile.id, not User.id.
-        */
+         * booking.purohitId contains
+         * PurohitProfile.id, not User.id.
+         */
         if (booking.purohitId !== purohitProfile.id) {
-          throw new ForbiddenException('You are not allowed to access this booking');
+          throw new ForbiddenException(
+            'You are not allowed to access this booking',
+          );
         }
 
         return booking;
       }
 
       default:
-        throw new ForbiddenException('You are not allowed to access this booking');
+        throw new ForbiddenException(
+          'You are not allowed to access this booking',
+        );
     }
   }
 
@@ -675,14 +682,14 @@ export class BookingService {
       throw new ForbiddenException('Only customers can update bookings');
     }
 
-    const booking =
-      await this.getBookingById(
-        user,
-        bookingId,
-      );
+    const booking = await this.getBookingById(user, bookingId);
 
     if (booking.customerId !== user.id) {
       throw new ForbiddenException('You cannot update this booking');
+    }
+
+    if (booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID) {
+      throw new BadRequestException('A paid booking cannot be modified');
     }
 
     const editableStatuses: BOOKING_STATUS[] = [
@@ -691,29 +698,25 @@ export class BookingService {
     ];
 
     if (!editableStatuses.includes(booking.status)) {
-      throw new BadRequestException(`Booking cannot be updated when status is ${booking.status}`);
+      throw new BadRequestException(
+        `Booking cannot be updated when status is ${booking.status}`,
+      );
     }
 
     if (dto.scheduledAt !== undefined) {
-      const scheduledAt = new Date(
-        dto.scheduledAt,
-      );
+      const scheduledAt = new Date(dto.scheduledAt);
 
-      if (
-        Number.isNaN(scheduledAt.getTime()) || scheduledAt <= new Date()
-      ) {
-        throw new BadRequestException('Scheduled date and time must be in the future');
+      if (Number.isNaN(scheduledAt.getTime()) || scheduledAt <= new Date()) {
+        throw new BadRequestException(
+          'Scheduled date and time must be in the future',
+        );
       }
 
       booking.scheduledAt = scheduledAt;
     }
 
     if (dto.customerAddressId !== undefined) {
-      await this.updateBookingAddress(
-        booking,
-        user.id,
-        dto.customerAddressId,
-      );
+      await this.updateBookingAddress(booking, user.id, dto.customerAddressId);
     }
 
     if (dto.specialInstructions !== undefined) {
@@ -725,14 +728,18 @@ export class BookingService {
     }
 
     if (dto.couponCode !== undefined) {
-      booking.couponCode = dto.couponCode.trim() || undefined;
+      throw new BadRequestException(
+        'Coupon cannot be changed after booking creation',
+      );
     }
 
     if (dto.donationAmount !== undefined) {
       const donationAmount = Number(dto.donationAmount);
 
       if (!Number.isFinite(donationAmount) || donationAmount < 0) {
-        throw new BadRequestException('Donation amount must be zero or greater');
+        throw new BadRequestException(
+          'Donation amount must be zero or greater',
+        );
       }
 
       booking.donationAmount = donationAmount;
@@ -748,23 +755,21 @@ export class BookingService {
     return this.bookingRepository.save(booking);
   }
 
-  private validateCustomerCancellation(
-    user: User,
-    booking: Booking,
-  ): void {
+  private validateCustomerCancellation(user: User, booking: Booking): void {
     if (booking.customerId !== user.id) {
       throw new ForbiddenException('You can only cancel your own booking');
     }
 
-    const customerCancellableStatuses: BOOKING_STATUS[] =
-      [
-        BOOKING_STATUS.PENDING,
-        BOOKING_STATUS.ACCEPTED,
-        BOOKING_STATUS.ENROUTE,
-      ];
+    const customerCancellableStatuses: BOOKING_STATUS[] = [
+      BOOKING_STATUS.PENDING,
+      BOOKING_STATUS.ACCEPTED,
+      BOOKING_STATUS.ENROUTE,
+    ];
 
     if (!customerCancellableStatuses.includes(booking.status)) {
-      throw new BadRequestException(`Customer cannot cancel a booking when status is ${booking.status}`);
+      throw new BadRequestException(
+        `Customer cannot cancel a booking when status is ${booking.status}`,
+      );
     }
   }
 
@@ -775,32 +780,37 @@ export class BookingService {
     cancellationReason?: string,
   ): Promise<void> {
     if (!cancellationReason?.trim()) {
-      throw new BadRequestException('Cancellation reason is required when a Purohit cancels a booking');
+      throw new BadRequestException(
+        'Cancellation reason is required when a Purohit cancels a booking',
+      );
     }
 
     const purohitProfileRepository = manager.getRepository(PurohitProfile);
 
-    const purohitProfile =
-      await purohitProfileRepository.findOne({
-        where: {
-          userId: user.id,
-        },
-      });
+    const purohitProfile = await purohitProfileRepository.findOne({
+      where: {
+        userId: user.id,
+      },
+    });
 
     if (!purohitProfile) {
       throw new NotFoundException('Purohit profile not found');
     }
 
     if (!booking.purohitId) {
-      throw new ForbiddenException('This booking is not assigned to any Purohit');
+      throw new ForbiddenException(
+        'This booking is not assigned to any Purohit',
+      );
     }
 
     /*
-    * booking.purohitId references PurohitProfile.id.
-    * user.id references User.id.
-    */
+     * booking.purohitId references PurohitProfile.id.
+     * user.id references User.id.
+     */
     if (booking.purohitId !== purohitProfile.id) {
-      throw new ForbiddenException('You can only cancel bookings assigned to you');
+      throw new ForbiddenException(
+        'You can only cancel bookings assigned to you',
+      );
     }
 
     const allowedStatuses: BOOKING_STATUS[] = [
@@ -810,15 +820,17 @@ export class BookingService {
     ];
 
     if (!allowedStatuses.includes(booking.status)) {
-      throw new BadRequestException(`Purohit cannot cancel a booking with status ${booking.status}`);
+      throw new BadRequestException(
+        `Purohit cannot cancel a booking with status ${booking.status}`,
+      );
     }
   }
 
-  private validateAdminCancellation(
-    cancellationReason?: string,
-  ): void {
+  private validateAdminCancellation(cancellationReason?: string): void {
     if (!cancellationReason) {
-      throw new BadRequestException( 'Cancellation reason is required when an admin cancels a booking' );
+      throw new BadRequestException(
+        'Cancellation reason is required when an admin cancels a booking',
+      );
     }
   }
 
@@ -833,11 +845,11 @@ export class BookingService {
     }
 
     const booking = await this.bookingRepository.findOne({
-        where: {
-          id: bookingId,
-        },
-        withDeleted: true,
-      });
+      where: {
+        id: bookingId,
+      },
+      withDeleted: true,
+    });
 
     if (!booking) {
       throw new NotFoundException('Booking not found');
@@ -847,10 +859,17 @@ export class BookingService {
       throw new ConflictException('Booking is already deleted');
     }
 
-    const nonDeletableStatuses = [BOOKING_STATUS.ACCEPTED, BOOKING_STATUS.ENROUTE, BOOKING_STATUS.ARRIVED, BOOKING_STATUS.ONGOING];
+    const nonDeletableStatuses = [
+      BOOKING_STATUS.ACCEPTED,
+      BOOKING_STATUS.ENROUTE,
+      BOOKING_STATUS.ARRIVED,
+      BOOKING_STATUS.ONGOING,
+    ];
 
     if (nonDeletableStatuses.includes(booking.status)) {
-      throw new BadRequestException(`Booking cannot be deleted while its status is ${booking.status}`);
+      throw new BadRequestException(
+        `Booking cannot be deleted while its status is ${booking.status}`,
+      );
     }
     await this.bookingRepository.softDeleteBooking(booking.id);
 
@@ -859,12 +878,11 @@ export class BookingService {
     };
   }
 
-  async restoreBooking(
-    bookingId: number,
-  ): Promise<{
+  async restoreBooking(bookingId: number): Promise<{
     message: string;
   }> {
-    const booking = await this.bookingRepository.findBookingByIdIncludingDeleted(bookingId);
+    const booking =
+      await this.bookingRepository.findBookingByIdIncludingDeleted(bookingId);
 
     if (!booking) {
       throw new NotFoundException('Booking not found');
@@ -877,7 +895,7 @@ export class BookingService {
     await this.bookingRepository.restoreBooking(bookingId);
 
     return {
-      message:'Booking restored successfully',
+      message: 'Booking restored successfully',
     };
   }
 
@@ -889,7 +907,11 @@ export class BookingService {
     message: string;
     booking: Booking;
   }> {
-    const allowedRoles: USER_ROLE[] = [USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN];
+    const allowedRoles: USER_ROLE[] = [
+      USER_ROLE.CUSTOMER,
+      USER_ROLE.PUROHIT,
+      USER_ROLE.ADMIN,
+    ];
 
     if (!allowedRoles.includes(user.role)) {
       throw new ForbiddenException('You are not allowed to cancel bookings');
@@ -897,100 +919,376 @@ export class BookingService {
 
     const cancellationReason = dto.cancellationReason?.trim();
 
-    return this.dataSource.transaction(
-      async (manager) => {
-        const bookingRepository = manager.getRepository(Booking);
+    return this.dataSource.transaction(async (manager) => {
+      const bookingRepository = manager.getRepository(Booking);
 
-        /*
-        * Lock only the booking row.
-        * Do not use LEFT JOIN with pessimistic lock.
-        */
-        const booking = await bookingRepository
-          .createQueryBuilder('booking')
-          .where(
-            'booking.id = :bookingId',
-            {
-              bookingId,
-            },
-          )
-          .setLock('pessimistic_write')
-          .getOne();
+      /*
+       * Lock only the booking row.
+       * Do not use LEFT JOIN with pessimistic lock.
+       */
+      const booking = await bookingRepository
+        .createQueryBuilder('booking')
+        .where('booking.id = :bookingId', {
+          bookingId,
+        })
+        .setLock('pessimistic_write')
+        .getOne();
 
-        if (!booking) {
-          throw new NotFoundException('Booking not found');
-        }
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
 
-        if (booking.status === BOOKING_STATUS.CANCELLED) {
-          throw new ConflictException('Booking is already cancelled');
-        }
+      if (booking.status === BOOKING_STATUS.CANCELLED) {
+        throw new ConflictException('Booking is already cancelled');
+      }
 
-        if ( booking.status === BOOKING_STATUS.COMPLETED) {
-          throw new BadRequestException('Completed bookings cannot be cancelled');
-        }
+      if (booking.status === BOOKING_STATUS.COMPLETED) {
+        throw new BadRequestException('Completed bookings cannot be cancelled');
+      }
 
-        let cancelledBy: CANCELLED_BY;
-        let message = 'Booking cancelled successfully';
+      let cancelledBy: CANCELLED_BY;
+      let message = 'Booking cancelled successfully';
 
-        switch (user.role) {
-          case USER_ROLE.CUSTOMER:
-            this.validateCustomerCancellation(
-              user,
-              booking,
+      switch (user.role) {
+        case USER_ROLE.CUSTOMER:
+          this.validateCustomerCancellation(user, booking);
+
+          if (booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID) {
+            throw new BadRequestException(
+              'This booking has already been paid. Please contact support to cancel and initiate a refund',
             );
+          }
 
-            cancelledBy = CANCELLED_BY.CUSTOMER;
-            booking.status = BOOKING_STATUS.CANCELLED;
+          cancelledBy = CANCELLED_BY.CUSTOMER;
+          booking.status = BOOKING_STATUS.CANCELLED;
 
-            break;
+          break;
 
-          case USER_ROLE.PUROHIT:
-            await this.validatePurohitCancellation(
-              manager,
-              user,
-              booking,
-              cancellationReason,
-            );
-
-            cancelledBy = CANCELLED_BY.PUROHIT;
-
-            /*
-            * Purohit cancellation should release
-            * the booking for another Purohit.
-            */
-            booking.status = BOOKING_STATUS.PENDING;
-            booking.purohitId = undefined;
-            message = 'Booking released successfully and is available for reassignment';
-            break;
-
-          case USER_ROLE.ADMIN:
-            this.validateAdminCancellation(
-              cancellationReason,
-            );
-
-            cancelledBy = CANCELLED_BY.ADMIN;
-            booking.status = BOOKING_STATUS.CANCELLED;
-
-            break;
-
-          default:
-            throw new ForbiddenException('You are not allowed to cancel this booking');
-        }
-
-        booking.cancelledBy = cancelledBy;
-
-        booking.cancellationReason = cancellationReason || undefined;
-
-        const savedBooking =
-          await bookingRepository.save(
+        case USER_ROLE.PUROHIT: {
+          await this.validatePurohitCancellation(
+            manager,
+            user,
             booking,
+            cancellationReason,
           );
 
-        return {
-          message,
-          booking: savedBooking,
-        };
-      },
+          const cancellingPurohitProfileId = booking.purohitId;
+
+          cancelledBy = CANCELLED_BY.PUROHIT;
+          booking.status = BOOKING_STATUS.PENDING;
+          booking.purohitId = undefined;
+          booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
+
+          booking.filteredPurohitIds =
+            await this.findEligiblePurohitIdsForBooking(
+              manager,
+              booking,
+              cancellingPurohitProfileId ? [cancellingPurohitProfileId] : [],
+            );
+
+          message =
+            booking.filteredPurohitIds.length > 0
+              ? 'Booking released successfully and sent to other eligible Purohits'
+              : 'Booking released successfully, but no eligible Purohit is currently available';
+          break;
+        }
+
+        case USER_ROLE.ADMIN:
+          this.validateAdminCancellation(cancellationReason);
+
+          if (booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID) {
+            throw new BadRequestException(
+              'This booking has already been paid. Initiate the refund before cancelling it',
+            );
+          }
+
+          cancelledBy = CANCELLED_BY.ADMIN;
+          booking.status = BOOKING_STATUS.CANCELLED;
+
+          break;
+
+        default:
+          throw new ForbiddenException(
+            'You are not allowed to cancel this booking',
+          );
+      }
+
+      booking.cancelledBy = cancelledBy;
+
+      booking.cancellationReason = cancellationReason || undefined;
+
+      const savedBooking = await bookingRepository.save(booking);
+
+      return {
+        message,
+        booking: savedBooking,
+      };
+    });
+  }
+
+  private async findEligiblePurohitIdsForBooking(
+    manager: EntityManager,
+    booking: Booking,
+    excludedPurohitProfileIds: number[] = [],
+  ): Promise<number[]> {
+    const conflictWindowMinutes = 120;
+    const purohitProfileRepository = manager.getRepository(PurohitProfile);
+    const bookingRepository = manager.getRepository(Booking);
+
+    const customerPincode = booking.customerPincode?.trim();
+
+    if (!customerPincode) {
+      return [];
+    }
+
+    const matchingPurohits = await purohitProfileRepository
+      .createQueryBuilder('profile')
+      .innerJoin('profile.user', 'purohit_user')
+      .innerJoin(
+        'profile.purohitServices',
+        'purohit_service',
+        `
+          purohit_service.serviceId = :serviceId
+          AND purohit_service.isActive = :isServiceActive
+        `,
+        {
+          serviceId: booking.serviceId,
+          isServiceActive: true,
+        },
+      )
+      .innerJoin(
+        PurohitServiceArea,
+        'service_area',
+        `
+          service_area.purohitId = purohit_user.id
+          AND service_area.pincode = :customerPincode
+        `,
+        { customerPincode },
+      )
+      .where('profile.verificationStatus = :verificationStatus', {
+        verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+      })
+      .andWhere('profile.isOfflineAvailable = :isOfflineAvailable', {
+        isOfflineAvailable: true,
+      })
+      .andWhere('purohit_user.role = :purohitRole', {
+        purohitRole: USER_ROLE.PUROHIT,
+      })
+      .andWhere('purohit_user.status = :purohitStatus', {
+        purohitStatus: USER_STATUS.ACTIVE,
+      })
+      .select('profile.id', 'purohitProfileId')
+      .distinct(true)
+      .getRawMany<{ purohitProfileId: string }>();
+
+    const matchingPurohitIds = [
+      ...new Set(
+        matchingPurohits
+          .map(({ purohitProfileId }) => Number(purohitProfileId))
+          .filter(
+            (id) =>
+              Number.isInteger(id) &&
+              id > 0 &&
+              !excludedPurohitProfileIds.includes(id),
+          ),
+      ),
+    ];
+
+    if (!matchingPurohitIds.length) {
+      return [];
+    }
+
+    const conflictStart = new Date(
+      booking.scheduledAt.getTime() - conflictWindowMinutes * 60 * 1000,
     );
+    const conflictEnd = new Date(
+      booking.scheduledAt.getTime() + conflictWindowMinutes * 60 * 1000,
+    );
+
+    const busyPurohits = await bookingRepository
+      .createQueryBuilder('busyBooking')
+      .select('busyBooking.purohitId', 'purohitId')
+      .where('busyBooking.purohitId IN (:...purohitIds)', {
+        purohitIds: matchingPurohitIds,
+      })
+      .andWhere('busyBooking.id != :currentBookingId', {
+        currentBookingId: booking.id,
+      })
+      .andWhere('busyBooking.status IN (:...busyStatuses)', {
+        busyStatuses: [
+          BOOKING_STATUS.ACCEPTED,
+          BOOKING_STATUS.ENROUTE,
+          BOOKING_STATUS.ARRIVED,
+          BOOKING_STATUS.ONGOING,
+        ],
+      })
+      .andWhere(
+        `
+          busyBooking.scheduledAt
+          BETWEEN :conflictStart AND :conflictEnd
+        `,
+        { conflictStart, conflictEnd },
+      )
+      .getRawMany<{ purohitId: string }>();
+
+    const busyPurohitIds = new Set(
+      busyPurohits
+        .map(({ purohitId }) => Number(purohitId))
+        .filter(Number.isInteger),
+    );
+
+    return matchingPurohitIds.filter(
+      (purohitProfileId) => !busyPurohitIds.has(purohitProfileId),
+    );
+  }
+
+  private async validateAndCalculateCoupon(
+    manager: EntityManager,
+    customerId: number,
+    serviceId: number,
+    couponCode: string,
+    bookingAmount: number,
+  ): Promise<CouponCalculationResult> {
+    const couponRepository = manager.getRepository(Coupon);
+    const couponUsageRepository = manager.getRepository(CouponUsage);
+    const normalizedCouponCode = couponCode.trim().toUpperCase();
+
+    const coupon = await couponRepository
+      .createQueryBuilder('coupon')
+      .where('UPPER(coupon.code) = :couponCode', {
+        couponCode: normalizedCouponCode,
+      })
+      .andWhere('coupon.deletedAt IS NULL')
+      .setLock('pessimistic_write')
+      .getOne();
+
+    if (!coupon) {
+      throw new NotFoundException('Coupon not found');
+    }
+
+    if (!coupon.isActive) {
+      throw new BadRequestException('Coupon is not active');
+    }
+
+    const now = new Date();
+
+    if (now < new Date(coupon.validFrom)) {
+      throw new BadRequestException('Coupon is not valid yet');
+    }
+
+    if (now > new Date(coupon.validUntil)) {
+      throw new BadRequestException('Coupon has expired');
+    }
+
+    const applicableServiceIds = coupon.applicableServiceIds ?? [];
+
+    if (
+      applicableServiceIds.length > 0 &&
+      !applicableServiceIds.includes(serviceId)
+    ) {
+      throw new BadRequestException(
+        'Coupon is not applicable to the selected service',
+      );
+    }
+
+    const minimumBookingAmount = Number(coupon.minBookingAmount ?? 0);
+
+    if (
+      Number.isFinite(minimumBookingAmount) &&
+      bookingAmount < minimumBookingAmount
+    ) {
+      throw new BadRequestException(
+        `A minimum booking amount of ₹${minimumBookingAmount.toFixed(2)} is required to use this coupon`,
+      );
+    }
+
+    if (
+      coupon.usageLimitTotal !== null &&
+      coupon.usageLimitTotal !== undefined
+    ) {
+      const totalUsage = await couponUsageRepository.count({
+        where: {
+          coupon: {
+            id: coupon.id,
+          },
+        },
+      });
+
+      if (totalUsage >= coupon.usageLimitTotal) {
+        throw new BadRequestException('Coupon usage limit has been reached');
+      }
+    }
+
+    const customerUsage = await couponUsageRepository.count({
+      where: {
+        coupon: {
+          id: coupon.id,
+        },
+
+        customer: {
+          id: customerId,
+        },
+      },
+    });
+
+    if (customerUsage >= coupon.usageLimitPerCustomer) {
+      throw new BadRequestException(
+        'You have already used this coupon the maximum allowed number of times',
+      );
+    }
+
+    const discountValue = Number(coupon.discountValue);
+
+    if (!Number.isFinite(discountValue) || discountValue <= 0) {
+      throw new BadRequestException('Coupon discount value is invalid');
+    }
+
+    let discountAmount: number;
+
+    switch (coupon.discountType) {
+      case DISCOUNT_TYPE.FLAT:
+        discountAmount = discountValue;
+        break;
+
+      case DISCOUNT_TYPE.PERCENTAGE:
+        if (discountValue > 100) {
+          throw new BadRequestException(
+            'Percentage discount cannot exceed 100%',
+          );
+        }
+
+        discountAmount = bookingAmount * (discountValue / 100);
+
+        if (
+          coupon.maxDiscountAmount !== null &&
+          coupon.maxDiscountAmount !== undefined
+        ) {
+          const maximumDiscountAmount = Number(coupon.maxDiscountAmount);
+
+          if (
+            !Number.isFinite(maximumDiscountAmount) ||
+            maximumDiscountAmount < 0
+          ) {
+            throw new BadRequestException(
+              'Coupon maximum discount amount is invalid',
+            );
+          }
+
+          discountAmount = Math.min(discountAmount, maximumDiscountAmount);
+        }
+        break;
+
+      default:
+        throw new BadRequestException('Unsupported coupon discount type');
+    }
+
+    discountAmount = Math.min(discountAmount, bookingAmount);
+    discountAmount = Number(discountAmount.toFixed(2));
+
+    return {
+      coupon,
+      discountAmount,
+    };
   }
 
   private async updateBookingAddress(
@@ -1001,17 +1299,19 @@ export class BookingService {
     const addressRepository = this.dataSource.getRepository(CustomerAddress);
 
     const customerAddress = await addressRepository.findOne({
-        where: {
-          id: customerAddressId,
-          customerId,
-        },
-      });
+      where: {
+        id: customerAddressId,
+        customerId,
+      },
+    });
 
     if (!customerAddress) {
-      throw new NotFoundException('Customer address not found or does not belong to you');
+      throw new NotFoundException(
+        'Customer address not found or does not belong to you',
+      );
     }
 
-    booking.customerAddressId =customerAddress.id;
+    booking.customerAddressId = customerAddress.id;
     booking.addressSnapshot = this.createAddressSnapshot(customerAddress);
     booking.customerPincode = this.getAddressPincode(customerAddress);
   }
@@ -1022,24 +1322,20 @@ export class BookingService {
     const maximumAttempts = 5;
 
     for (let attempt = 1; attempt <= maximumAttempts; attempt++) {
-      const timestamp = Date.now()
-        .toString()
-        .slice(-8);
+      const timestamp = Date.now().toString().slice(-8);
 
       const randomPart = Math.random()
         .toString(36)
         .substring(2, 7)
         .toUpperCase();
 
-      const bookingNumber =
-        `PW${timestamp}${randomPart}`;
+      const bookingNumber = `PW${timestamp}${randomPart}`;
 
-      const alreadyExists =
-        await bookingRepository.exists({
-          where: {
-            bookingNumber,
-          },
-        });
+      const alreadyExists = await bookingRepository.exists({
+        where: {
+          bookingNumber,
+        },
+      });
 
       if (!alreadyExists) {
         return bookingNumber;
@@ -1056,8 +1352,10 @@ export class BookingService {
   ): Record<string, unknown> {
     return {
       id: address.id,
-      addressLine1: 'addressLine1' in address ? address.addressLine1 : undefined,
-      addressLine2: 'addressLine2' in address ? address.addressLine2 : undefined,
+      addressLine1:
+        'addressLine1' in address ? address.addressLine1 : undefined,
+      addressLine2:
+        'addressLine2' in address ? address.addressLine2 : undefined,
       city: 'city' in address ? address.city : undefined,
       state: 'state' in address ? address.state : undefined,
       pincode: 'pincode' in address ? address.pincode : undefined,
@@ -1070,13 +1368,13 @@ export class BookingService {
   private getAddressPincode(
     address: CustomerAddress | null,
   ): string | undefined {
-    if ( !address || !('pincode' in address)) {
+    if (!address || !('pincode' in address)) {
       return undefined;
     }
 
     const pincode = address.pincode;
 
-    if ( pincode === null || pincode === undefined) {
+    if (pincode === null || pincode === undefined) {
       return undefined;
     }
     return String(pincode);
@@ -1091,152 +1389,111 @@ export class BookingService {
     booking?: Booking;
   }> {
     if (user.role !== USER_ROLE.PUROHIT) {
-      throw new ForbiddenException(
-        'Only Purohits can respond to bookings',
-      );
+      throw new ForbiddenException('Only Purohits can respond to bookings');
     }
 
-    return this.dataSource.transaction(
-      async (manager) => {
-        const bookingRepository =
-          manager.getRepository(Booking);
+    return this.dataSource.transaction(async (manager) => {
+      const bookingRepository = manager.getRepository(Booking);
 
-        const purohitProfileRepository =
-          manager.getRepository(PurohitProfile);
+      const purohitProfileRepository = manager.getRepository(PurohitProfile);
 
-        const purohitProfile =
-          await purohitProfileRepository.findOne({
+      const purohitProfile = await purohitProfileRepository.findOne({
+        where: {
+          userId: user.id,
+        },
+      });
+
+      if (!purohitProfile) {
+        throw new NotFoundException('Purohit profile not found');
+      }
+
+      /*
+       * Lock only the booking table row.
+       *
+       * Do not add LEFT JOIN relations to a
+       * pessimistic locking query.
+       */
+      const booking = await bookingRepository
+        .createQueryBuilder('booking')
+        .where('booking.id = :bookingId', {
+          bookingId,
+        })
+        .setLock('pessimistic_write')
+        .getOne();
+
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
+
+      if (
+        booking.status !== BOOKING_STATUS.PENDING ||
+        (booking.purohitId !== null && booking.purohitId !== undefined)
+      ) {
+        throw new ConflictException('This booking is no longer available');
+      }
+
+      const filteredPurohitIds = booking.filteredPurohitIds ?? [];
+
+      if (!filteredPurohitIds.includes(purohitProfile.id)) {
+        throw new ForbiddenException(
+          'This booking is not available to you or has already been dismissed',
+        );
+      }
+
+      switch (dto.action) {
+        case PUROHIT_BOOKING_ACTION.ACCEPT: {
+          booking.purohitId = purohitProfile.id;
+
+          booking.status = BOOKING_STATUS.ACCEPTED;
+
+          /*
+           * Booking should disappear from the
+           * available list of all Purohits.
+           */
+          booking.filteredPurohitIds = [];
+
+          const savedBooking = await bookingRepository.save(booking);
+
+          /*
+           * Reload the booking with relations
+           * after saving. No lock is needed here.
+           */
+          const acceptedBooking = await bookingRepository.findOne({
             where: {
-              userId: user.id,
+              id: savedBooking.id,
+            },
+            relations: {
+              customer: true,
+              service: true,
+              customerAddress: true,
+              purohit: {
+                user: true,
+              },
             },
           });
 
-        if (!purohitProfile) {
-          throw new NotFoundException(
-            'Purohit profile not found',
+          return {
+            message: 'Booking accepted successfully',
+            booking: acceptedBooking ?? savedBooking,
+          };
+        }
+
+        case PUROHIT_BOOKING_ACTION.DISMISS: {
+          booking.filteredPurohitIds = filteredPurohitIds.filter(
+            (purohitId) => purohitId !== purohitProfile.id,
           );
+
+          await bookingRepository.save(booking);
+
+          return {
+            message: 'Booking dismissed successfully',
+          };
         }
 
-        /*
-        * Lock only the booking table row.
-        *
-        * Do not add LEFT JOIN relations to a
-        * pessimistic locking query.
-        */
-        const booking =
-          await bookingRepository
-            .createQueryBuilder('booking')
-            .where(
-              'booking.id = :bookingId',
-              {
-                bookingId,
-              },
-            )
-            .setLock('pessimistic_write')
-            .getOne();
-
-        if (!booking) {
-          throw new NotFoundException(
-            'Booking not found',
-          );
-        }
-
-        if (
-          booking.status !==
-            BOOKING_STATUS.PENDING ||
-          booking.purohitId !== null &&
-            booking.purohitId !== undefined
-        ) {
-          throw new ConflictException(
-            'This booking is no longer available',
-          );
-        }
-
-        const filteredPurohitIds =
-          booking.filteredPurohitIds ?? [];
-
-        if (
-          !filteredPurohitIds.includes(
-            purohitProfile.id,
-          )
-        ) {
-          throw new ForbiddenException(
-            'This booking is not available to you or has already been dismissed',
-          );
-        }
-
-        switch (dto.action) {
-          case PUROHIT_BOOKING_ACTION.ACCEPT: {
-            booking.purohitId =
-              purohitProfile.id;
-
-            booking.status =
-              BOOKING_STATUS.ACCEPTED;
-
-            /*
-            * Booking should disappear from the
-            * available list of all Purohits.
-            */
-            booking.filteredPurohitIds = [];
-
-            const savedBooking =
-              await bookingRepository.save(
-                booking,
-              );
-
-            /*
-            * Reload the booking with relations
-            * after saving. No lock is needed here.
-            */
-            const acceptedBooking =
-              await bookingRepository.findOne({
-                where: {
-                  id: savedBooking.id,
-                },
-                relations: {
-                  customer: true,
-                  service: true,
-                  customerAddress: true,
-                  purohit: {
-                    user: true,
-                  },
-                },
-              });
-
-            return {
-              message:
-                'Booking accepted successfully',
-              booking:
-                acceptedBooking ??
-                savedBooking,
-            };
-          }
-
-          case PUROHIT_BOOKING_ACTION.DISMISS: {
-            booking.filteredPurohitIds =
-              filteredPurohitIds.filter(
-                (purohitId) =>
-                  purohitId !==
-                  purohitProfile.id,
-              );
-
-            await bookingRepository.save(
-              booking,
-            );
-
-            return {
-              message:
-                'Booking dismissed successfully',
-            };
-          }
-
-          default:
-            throw new BadRequestException(
-              'Invalid booking response action',
-            );
-        }
-      },
-    );
+        default:
+          throw new BadRequestException('Invalid booking response action');
+      }
+    });
   }
 
   async assignBookingToPurohit(
@@ -1251,133 +1508,125 @@ export class BookingService {
       throw new ForbiddenException('Only admins can assign bookings');
     }
 
-    return this.dataSource.transaction(
-      async (manager) => {
-        const bookingRepository = manager.getRepository(Booking);
-        const purohitProfileRepository = manager.getRepository(PurohitProfile);
-        const purohitServiceRepository = manager.getRepository(PurohitService);
+    return this.dataSource.transaction(async (manager) => {
+      const bookingRepository = manager.getRepository(Booking);
+      const purohitProfileRepository = manager.getRepository(PurohitProfile);
+      const purohitServiceRepository = manager.getRepository(PurohitService);
 
-        /*
-        * Lock only the booking row.
-        * Do not add LEFT JOIN relations to this query.
-        */
-        const booking = await bookingRepository
-          .createQueryBuilder('booking')
-          .where(
-            'booking.id = :bookingId',
-            {
-              bookingId,
-            },
-          )
-          .setLock('pessimistic_write')
-          .getOne();
+      /*
+       * Lock only the booking row.
+       * Do not add LEFT JOIN relations to this query.
+       */
+      const booking = await bookingRepository
+        .createQueryBuilder('booking')
+        .where('booking.id = :bookingId', {
+          bookingId,
+        })
+        .setLock('pessimistic_write')
+        .getOne();
 
-        if (!booking) {
-          throw new NotFoundException('Booking not found');
-        }
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
 
-        const assignableStatuses: BOOKING_STATUS[] = [ BOOKING_STATUS.PENDING ];
+      const assignableStatuses: BOOKING_STATUS[] = [BOOKING_STATUS.PENDING];
 
-        if (!assignableStatuses.includes(booking.status)) {
-          throw new BadRequestException(`Booking cannot be assigned when status is ${booking.status}`);
-        }
+      if (!assignableStatuses.includes(booking.status)) {
+        throw new BadRequestException(
+          `Booking cannot be assigned when status is ${booking.status}`,
+        );
+      }
 
-        if (booking.purohitId) {
-          throw new ConflictException('Booking is already assigned to a Purohit');
-        }
+      if (booking.purohitId) {
+        throw new ConflictException('Booking is already assigned to a Purohit');
+      }
 
-        /*
-        * Load the selected Purohit and user account.
-        */
-        const purohit = await purohitProfileRepository
-            .createQueryBuilder('purohit')
-            .innerJoinAndSelect(
-              'purohit.user',
-              'user',
-            )
-            .where(
-              'purohit.id = :purohitId',
-              {
-                purohitId: dto.purohitId,
-              },
-            )
-            .getOne();
+      /*
+       * Load the selected Purohit and user account.
+       */
+      const purohit = await purohitProfileRepository
+        .createQueryBuilder('purohit')
+        .innerJoinAndSelect('purohit.user', 'user')
+        .where('purohit.id = :purohitId', {
+          purohitId: dto.purohitId,
+        })
+        .getOne();
 
-        if (!purohit) {
-          throw new NotFoundException('Purohit not found');
-        }
+      if (!purohit) {
+        throw new NotFoundException('Purohit not found');
+      }
 
-        if (purohit.user.role !== USER_ROLE.PUROHIT) {
-          throw new BadRequestException('Selected user is not a Purohit');
-        }
+      if (purohit.user.role !== USER_ROLE.PUROHIT) {
+        throw new BadRequestException('Selected user is not a Purohit');
+      }
 
-        if (purohit.user.status !== USER_STATUS.ACTIVE) {
-          throw new BadRequestException('Purohit account is not active');
-        }
+      if (purohit.user.status !== USER_STATUS.ACTIVE) {
+        throw new BadRequestException('Purohit account is not active');
+      }
 
-        if (purohit.verificationStatus !== PUROHIT_VERIFICATION_STATUS.APPROVED) {
-          throw new BadRequestException('Purohit is not approved');
-        }
+      if (purohit.verificationStatus !== PUROHIT_VERIFICATION_STATUS.APPROVED) {
+        throw new BadRequestException('Purohit is not approved');
+      }
 
-        /*
-        * Verify that the selected Purohit provides
-        * the exact service required by the booking.
-        */
-        const matchingPurohitService =
-          await purohitServiceRepository.findOne({
-            where: {
-              purohitId: purohit.id,
-              serviceId: booking.serviceId,
-              isActive: true,
-            },
-          });
+      /*
+       * Verify that the selected Purohit provides
+       * the exact service required by the booking.
+       */
+      const matchingPurohitService = await purohitServiceRepository.findOne({
+        where: {
+          purohitId: purohit.id,
+          serviceId: booking.serviceId,
+          isActive: true,
+        },
+      });
 
-        if (!matchingPurohitService) {
-          throw new BadRequestException('Selected Purohit does not provide the service required for this booking');
-        }
+      if (!matchingPurohitService) {
+        throw new BadRequestException(
+          'Selected Purohit does not provide the service required for this booking',
+        );
+      }
 
-        /*
-        * Optional:
-        * Prevent assigning a Purohit who previously
-        * rejected or cancelled this booking.
-        */
-        if (booking.filteredPurohitIds?.includes(purohit.id)
-        ) {
-          throw new BadRequestException('This Purohit is not eligible for this booking');
-        }
+      const eligiblePurohitIds = await this.findEligiblePurohitIdsForBooking(
+        manager,
+        booking,
+      );
 
-        booking.purohitId = purohit.id;
-        booking.status = BOOKING_STATUS.ACCEPTED;
-        booking.assignmentType = ASSIGNMENT_TYPE.MANUAL;
+      if (!eligiblePurohitIds.includes(purohit.id)) {
+        throw new BadRequestException(
+          'Selected Purohit is not currently eligible or available for this booking',
+        );
+      }
 
-        const savedBooking =
-          await bookingRepository.save(booking);
+      booking.purohitId = purohit.id;
+      booking.status = BOOKING_STATUS.ACCEPTED;
+      booking.assignmentType = ASSIGNMENT_TYPE.MANUAL;
+      booking.filteredPurohitIds = [];
 
-        /*
-        * Reload relations after saving.
-        * No pessimistic lock is applied here.
-        */
-        const assignedBooking =
-          await bookingRepository.findOne({
-            where: {
-              id: savedBooking.id,
-            },
-            relations: {
-              customer: true,
-              service: true,
-              purohit: {
-                user: true,
-              },
-              customerAddress: true,
-            },
-          });
+      const savedBooking = await bookingRepository.save(booking);
 
-        return {
-          message:'Booking assigned to Purohit successfully',
-          booking: assignedBooking ?? savedBooking,
-        };
-      },
-    );
+      /*
+       * Reload relations after saving.
+       * No pessimistic lock is applied here.
+       */
+      const assignedBooking = await bookingRepository.findOne({
+        where: {
+          id: savedBooking.id,
+        },
+        relations: {
+          customer: true,
+          service: true,
+          purohit: {
+            user: true,
+          },
+          customerAddress: true,
+        },
+      });
+
+      return {
+        message: 'Booking assigned to Purohit successfully',
+        booking: assignedBooking ?? savedBooking,
+      };
+    });
   }
 
   async getAvailableBookings(
@@ -1395,42 +1644,44 @@ export class BookingService {
     if (user.role !== USER_ROLE.PUROHIT) {
       throw new ForbiddenException('Only Purohits can view available bookings');
     }
-    const purohitProfileRepository = this.dataSource.getRepository(PurohitProfile);
+    const purohitProfileRepository =
+      this.dataSource.getRepository(PurohitProfile);
     const purohitProfile = await purohitProfileRepository.findOne({
-        where: {
-          userId: user.id,
-        },
-        relations: {
-          user: true,
-        },
-      });
+      where: {
+        userId: user.id,
+      },
+      relations: {
+        user: true,
+      },
+    });
 
     if (!purohitProfile) {
       throw new NotFoundException('Purohit profile not found');
     }
 
     /*
-    * Use these checks only when the corresponding
-    * fields exist in your entities.
-    */
+     * Use these checks only when the corresponding
+     * fields exist in your entities.
+     */
     if (purohitProfile.user?.status !== USER_STATUS.ACTIVE) {
       throw new ForbiddenException('Your Purohit account is not active');
     }
 
-    if (purohitProfile.verificationStatus !== PUROHIT_VERIFICATION_STATUS.APPROVED) {
+    if (
+      purohitProfile.verificationStatus !== PUROHIT_VERIFICATION_STATUS.APPROVED
+    ) {
       throw new ForbiddenException('Your Purohit profile is not approved');
     }
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const { bookings, total } =
-      await this.bookingRepository
-        .findAvailableBookingsForPurohit(
-          purohitProfile.id,
-          page,
-          limit,
-          query.search?.trim(),
-        );
+      await this.bookingRepository.findAvailableBookingsForPurohit(
+        purohitProfile.id,
+        page,
+        limit,
+        query.search?.trim(),
+      );
 
     return {
       bookings,
@@ -1438,10 +1689,7 @@ export class BookingService {
         total,
         page,
         limit,
-        totalPages:
-          total === 0
-            ? 0
-            : Math.ceil(total / limit),
+        totalPages: total === 0 ? 0 : Math.ceil(total / limit),
       },
     };
   }
@@ -1450,40 +1698,59 @@ export class BookingService {
     user: User,
     bookingId: number,
     dto: UpdateBookingStatusDto,
-  ) {
-    const booking =
-      await this.bookingRepository.findBookingById(
-        bookingId,
-      );
+  ): Promise<{
+    message: string;
+    booking: Booking;
+  }> {
+    return this.dataSource.transaction(async (manager) => {
+      const bookingRepository = manager.getRepository(Booking);
 
-    if (!booking) {
-      throw new NotFoundException(
-        'Booking not found',
+      const booking = await bookingRepository
+        .createQueryBuilder('booking')
+        .where('booking.id = :bookingId', {
+          bookingId,
+        })
+        .setLock('pessimistic_write')
+        .getOne();
+
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
+
+      await this.validateStatusUpdateAccess(user, booking);
+
+      this.validateStatusTransition(booking.status, dto.status);
+
+      this.validatePaymentForStatusChange(booking, dto.status);
+
+      booking.status = dto.status;
+
+      const updatedBooking = await bookingRepository.save(booking);
+
+      return {
+        message: 'Booking status updated successfully',
+        booking: updatedBooking,
+      };
+    });
+  }
+
+  private validatePaymentForStatusChange(
+    booking: Booking,
+    nextStatus: BOOKING_STATUS,
+  ): void {
+    const paymentRequiredStatuses: BOOKING_STATUS[] = [
+      BOOKING_STATUS.ONGOING,
+      BOOKING_STATUS.COMPLETED,
+    ];
+
+    if (
+      paymentRequiredStatuses.includes(nextStatus) &&
+      booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID
+    ) {
+      throw new BadRequestException(
+        `Payment must be completed before changing booking status to ${nextStatus}`,
       );
     }
-
-    await this.validateStatusUpdateAccess(
-      user,
-      booking,
-    );
-
-    this.validateStatusTransition(
-      booking.status,
-      dto.status,
-    );
-
-    booking.status = dto.status;
-
-    const updatedBooking =
-      await this.bookingRepository.saveBooking(
-        booking,
-      );
-
-    return {
-      message:
-        'Booking status updated successfully',
-      booking: updatedBooking,
-    };
   }
 
   private validateStatusTransition(
@@ -1493,17 +1760,17 @@ export class BookingService {
     const allowedTransitions: Partial<
       Record<BOOKING_STATUS, BOOKING_STATUS[]>
     > = {
-      // [BOOKING_STATUS.PENDING]: [BOOKING_STATUS.ACCEPTED],
       [BOOKING_STATUS.ACCEPTED]: [BOOKING_STATUS.ENROUTE],
       [BOOKING_STATUS.ENROUTE]: [BOOKING_STATUS.ARRIVED],
       [BOOKING_STATUS.ARRIVED]: [BOOKING_STATUS.ONGOING],
-      // [BOOKING_STATUS.ONGOING]: [BOOKING_STATUS.COMPLETED],
     };
 
     const allowedNextStatuses = allowedTransitions[currentStatus] ?? [];
 
     if (!allowedNextStatuses.includes(nextStatus)) {
-      throw new BadRequestException(`Booking status cannot be changed from ${currentStatus} to ${nextStatus}`);
+      throw new BadRequestException(
+        `Booking status cannot be changed from ${currentStatus} to ${nextStatus}`,
+      );
     }
   }
 
@@ -1515,13 +1782,14 @@ export class BookingService {
       case USER_ROLE.ADMIN:
         return;
 
-      case USER_ROLE.PUROHIT: await this.validateAssignedPurohit(
-          user.id,
-          booking,
-        );
+      case USER_ROLE.PUROHIT:
+        await this.validateAssignedPurohit(user.id, booking);
         return;
 
-      default: throw new ForbiddenException('You are not allowed to update booking status');
+      default:
+        throw new ForbiddenException(
+          'You are not allowed to update booking status',
+        );
     }
   }
 
@@ -1552,26 +1820,41 @@ export class BookingService {
     files: Express.Multer.File[],
   ) {
     if (!files?.length) {
-      throw new BadRequestException('At least one completion proof image is required');
+      const booking = await this.bookingRepository.findBookingById(bookingId);
+
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
+
+      await this.validateCompletionProofAccess(user, booking);
+
+      return {
+        message: 'No completion proof uploaded',
+        bookingId: booking.id,
+        bookingNumber: booking.bookingNumber,
+        completionPhotoUrls: booking.completionPhotoUrls ?? [],
+      };
     }
 
-    const booking =
-      await this.bookingRepository.findBookingById(
-        bookingId,
-      );
+    const booking = await this.bookingRepository.findBookingById(bookingId);
 
     if (!booking) {
       throw new NotFoundException('Booking not found');
     }
 
     if (booking.status !== BOOKING_STATUS.ONGOING) {
-      throw new BadRequestException('Completion proof can only be uploaded for an ongoing booking');
+      throw new BadRequestException(
+        'Completion proof can only be uploaded for an ongoing booking',
+      );
     }
 
-    await this.validateCompletionProofAccess(
-      user,
-      booking,
-    );
+    if (booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID) {
+      throw new BadRequestException(
+        'Booking payment must be completed before uploading completion proof',
+      );
+    }
+
+    await this.validateCompletionProofAccess(user, booking);
 
     const uploadedFiles: Array<{
       key: string;
@@ -1580,21 +1863,17 @@ export class BookingService {
 
     try {
       for (const file of files) {
-        const extension =
-          this.getCompletionProofExtension(
-            file.originalname,
-          );
+        const extension = this.getCompletionProofExtension(file.originalname);
 
         const key =
           `bookings/${booking.id}/completion-proofs/` +
           `${Date.now()}-${crypto.randomUUID()}${extension}`;
 
-        const url =
-          await this.s3Service.uploadFile(
-            key,
-            file.buffer,
-            file.mimetype,
-          );
+        const url = await this.s3Service.uploadFile(
+          key,
+          file.buffer,
+          file.mimetype,
+        );
 
         uploadedFiles.push({
           key,
@@ -1606,15 +1885,10 @@ export class BookingService {
 
       booking.completionPhotoUrls = [
         ...existingPhotoUrls,
-        ...uploadedFiles.map(
-          (uploadedFile) => uploadedFile.url,
-        ),
+        ...uploadedFiles.map((uploadedFile) => uploadedFile.url),
       ];
 
-      const savedBooking =
-        await this.bookingRepository.save(
-          booking,
-        );
+      const savedBooking = await this.bookingRepository.save(booking);
 
       return {
         message: 'Completion proof uploaded successfully',
@@ -1625,13 +1899,15 @@ export class BookingService {
     } catch (error) {
       await Promise.allSettled(
         uploadedFiles.map((uploadedFile) =>
-          this.s3Service.deleteFile(
-            uploadedFile.key,
-          ),
+          this.s3Service.deleteFile(uploadedFile.key),
         ),
       );
 
-      if (error instanceof BadRequestException || error instanceof ForbiddenException || error instanceof NotFoundException) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof ForbiddenException ||
+        error instanceof NotFoundException
+      ) {
         throw error;
       }
 
@@ -1650,17 +1926,19 @@ export class BookingService {
     }
 
     if (user.role !== USER_ROLE.PUROHIT) {
-      throw new ForbiddenException('Only the assigned Purohit can upload completion proof');
+      throw new ForbiddenException(
+        'Only the assigned Purohit can upload completion proof',
+      );
     }
 
-    const purohitProfileRepository = this.dataSource.getRepository(PurohitProfile);
+    const purohitProfileRepository =
+      this.dataSource.getRepository(PurohitProfile);
 
-    const purohitProfile =
-      await purohitProfileRepository.findOne({
-        where: {
-          userId: user.id,
-        },
-      });
+    const purohitProfile = await purohitProfileRepository.findOne({
+      where: {
+        userId: user.id,
+      },
+    });
 
     if (!purohitProfile) {
       throw new NotFoundException('Purohit profile not found');
@@ -1671,56 +1949,43 @@ export class BookingService {
     }
   }
 
-  private getCompletionProofExtension(
-    originalName: string,
-  ): string {
-    const extension =
-      path.extname(originalName).toLowerCase();
+  private getCompletionProofExtension(originalName: string): string {
+    const extension = path.extname(originalName).toLowerCase();
 
-    const allowedExtensions = [
-      '.jpg',
-      '.jpeg',
-      '.png',
-      '.webp',
-    ];
+    const allowedExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
 
-    if (
-      !allowedExtensions.includes(extension)
-    ) {
-      throw new BadRequestException(
-        'Unsupported image extension',
-      );
+    if (!allowedExtensions.includes(extension)) {
+      throw new BadRequestException('Unsupported image extension');
     }
 
     return extension;
   }
 
-  async generateCompletionOtp(
-    user: User,
-    bookingId: number,
-  ) {
-    const booking =
-      await this.bookingRepository.findBookingById(
-        bookingId,
-      );
+  async generateCompletionOtp(user: User, bookingId: number) {
+    const booking = await this.bookingRepository.findBookingById(bookingId);
 
     if (!booking) {
       throw new NotFoundException('Booking not found');
     }
 
-    await this.validateCompletionOtpGenerationAccess(
-      user,
-      booking,
-    );
+    await this.validateCompletionOtpGenerationAccess(user, booking);
 
-    if (
-      booking.status !== BOOKING_STATUS.ONGOING) {
-      throw new BadRequestException( 'Completion OTP can only be generated for an ongoing booking',
+    if (booking.status !== BOOKING_STATUS.ONGOING) {
+      throw new BadRequestException(
+        'Completion OTP can only be generated for an ongoing booking',
+      );
+    }
+
+    if (booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID) {
+      throw new BadRequestException(
+        'Booking payment must be completed before generating the completion OTP',
       );
     }
 
     if (booking.completionConfirmedAt) {
-      throw new BadRequestException('Booking completion has already been confirmed');
+      throw new BadRequestException(
+        'Booking completion has already been confirmed',
+      );
     }
 
     if (!booking.customer) {
@@ -1731,62 +1996,56 @@ export class BookingService {
     const customerEmail = booking.customer.email;
 
     if (!customerPhone && !customerEmail) {
-      throw new BadRequestException('Customer does not have a phone number or email address');
+      throw new BadRequestException(
+        'Customer does not have a phone number or email address',
+      );
     }
 
-    const otp = randomInt(
-      100000,
-      1000000,
-    ).toString();
+    const otp = randomInt(100000, 1000000).toString();
 
     booking.completionOtp = otp;
 
-    await this.bookingRepository.saveBooking(
-      booking,
-    );
+    await this.bookingRepository.saveBooking(booking);
 
-    const deliveryResults =
-      await Promise.allSettled([
-        customerPhone
-          ? this.smsService.sendSms(
-              customerPhone,
-              `Your Poojawala booking completion OTP is ${otp}. Share this OTP only after the Puja service is completed.`,
-            )
-          : Promise.resolve(null),
+    const deliveryResults = await Promise.allSettled([
+      customerPhone
+        ? this.smsService.sendSms(
+            customerPhone,
+            `Your Poojawala booking completion OTP is ${otp}. Share this OTP only after the Puja service is completed.`,
+          )
+        : Promise.resolve(null),
 
-        customerEmail
-          ? this.emailService.sendOtpEmail(
-              customerEmail,
-              otp,
-              booking.customer.firstName,
-            )
-          : Promise.resolve(null),
-      ]);
+      customerEmail
+        ? this.emailService.sendOtpEmail(
+            customerEmail,
+            otp,
+            booking.customer.firstName,
+          )
+        : Promise.resolve(null),
+    ]);
 
     const smsResult = deliveryResults[0];
     const emailResult = deliveryResults[1];
     const smsSent = Boolean(customerPhone) && smsResult.status === 'fulfilled';
-    const emailSent = Boolean(customerEmail) && emailResult.status === 'fulfilled';
+    const emailSent =
+      Boolean(customerEmail) && emailResult.status === 'fulfilled';
 
     if (!smsSent && !emailSent) {
       booking.completionOtp = undefined;
 
-      await this.bookingRepository.saveBooking(
-        booking,
-      );
+      await this.bookingRepository.saveBooking(booking);
 
-      throw new InternalServerErrorException('Unable to send completion OTP. Please try again');
+      throw new InternalServerErrorException(
+        'Unable to send completion OTP. Please try again',
+      );
     }
 
     return {
-      message:
-        'Booking completion OTP sent successfully',
+      message: 'Booking completion OTP sent successfully',
 
-      bookingId:
-        booking.id,
+      bookingId: booking.id,
 
-      bookingNumber:
-        booking.bookingNumber,
+      bookingNumber: booking.bookingNumber,
 
       sentVia: {
         sms: smsSent,
@@ -1794,10 +2053,7 @@ export class BookingService {
       },
 
       // Use only during development/Postman testing.
-      ...(process.env['NODE_ENV'] !==
-        'production'
-        ? { otp }
-        : {}),
+      ...(process.env['NODE_ENV'] !== 'production' ? { otp } : {}),
     };
   }
 
@@ -1810,14 +2066,13 @@ export class BookingService {
         return;
 
       case USER_ROLE.PUROHIT:
-        await this.validateAssignedPurohit(
-          user.id,
-          booking,
-        );
+        await this.validateAssignedPurohit(user.id, booking);
         return;
 
       default:
-        throw new ForbiddenException('Only the assigned Purohit or an admin can generate the completion OTP');
+        throw new ForbiddenException(
+          'Only the assigned Purohit or an admin can generate the completion OTP',
+        );
     }
   }
 
@@ -1825,59 +2080,95 @@ export class BookingService {
     user: User,
     bookingId: number,
     dto: VerifyCompletionOtpDto,
-  ) {
-    const booking =
-      await this.bookingRepository.findBookingById(
-        bookingId,
-      );
-
-    if (!booking) {
-      throw new NotFoundException('Booking not found');
-    }
-
-    if (booking.customerId !== user.id) {
-      throw new ForbiddenException('Only the booking customer can verify this completion OTP');
-    }
-
-    if (booking.status !== BOOKING_STATUS.ONGOING) {
-      throw new BadRequestException('Completion OTP can only be verified for an ongoing booking');
-    }
-
-    if (!booking.completionOtp) {
-      throw new BadRequestException('Completion OTP has not been generated');
-    }
-
-    if (booking.completionOtp !== dto.otp) {
-      throw new BadRequestException('Invalid completion OTP');
-    }
-
-    booking.status = BOOKING_STATUS.COMPLETED;
- 
-    booking.completionConfirmedAt = new Date();
-
-    const updatedBooking =
-      await this.bookingRepository.saveBooking(
-        booking,
-      );
-
-    return {
-      message:
-        'Completion OTP verified and booking completed successfully',
-
-      booking: {
-        id:
-          updatedBooking.id,
-
-        bookingNumber:
-          updatedBooking.bookingNumber,
-
-        status:
-          updatedBooking.status,
-
-        completionConfirmedAt:
-          updatedBooking
-            .completionConfirmedAt,
-      },
+  ): Promise<{
+    message: string;
+    booking: {
+      id: number;
+      bookingNumber: string;
+      status: BOOKING_STATUS;
+      paymentStatus: BOOKING_PAYMENT_STATUS;
+      completionConfirmedAt: Date | undefined;
     };
+  }> {
+    if (user.role !== USER_ROLE.PUROHIT && user.role !== USER_ROLE.ADMIN) {
+      throw new ForbiddenException(
+        'Only the assigned Purohit or an admin can verify the completion OTP',
+      );
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const bookingRepository = manager.getRepository(Booking);
+
+      const booking = await bookingRepository
+        .createQueryBuilder('booking')
+        .where('booking.id = :bookingId', { bookingId })
+        .setLock('pessimistic_write')
+        .getOne();
+
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
+
+      if (user.role === USER_ROLE.PUROHIT) {
+        const purohitProfile = await manager
+          .getRepository(PurohitProfile)
+          .findOne({
+            where: { userId: user.id },
+          });
+
+        if (!purohitProfile) {
+          throw new NotFoundException('Purohit profile not found');
+        }
+
+        if (booking.purohitId !== purohitProfile.id) {
+          throw new ForbiddenException('You are not assigned to this booking');
+        }
+      }
+
+      if (booking.status !== BOOKING_STATUS.ONGOING) {
+        throw new BadRequestException(
+          'Completion OTP can only be verified for an ongoing booking',
+        );
+      }
+
+      if (booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID) {
+        throw new BadRequestException(
+          'Booking payment must be completed before confirming completion',
+        );
+      }
+
+      if (booking.completionConfirmedAt) {
+        throw new ConflictException(
+          'Booking completion has already been confirmed',
+        );
+      }
+
+      if (!booking.completionOtp) {
+        throw new BadRequestException('Completion OTP has not been generated');
+      }
+
+      const submittedOtp = dto.otp?.trim();
+
+      if (!submittedOtp || booking.completionOtp !== submittedOtp) {
+        throw new BadRequestException('Invalid completion OTP');
+      }
+
+      booking.status = BOOKING_STATUS.COMPLETED;
+      booking.completionConfirmedAt = new Date();
+      booking.completionOtp = undefined;
+
+      const updatedBooking = await bookingRepository.save(booking);
+
+      return {
+        message: 'Completion OTP verified and booking completed successfully',
+        booking: {
+          id: updatedBooking.id,
+          bookingNumber: updatedBooking.bookingNumber,
+          status: updatedBooking.status,
+          paymentStatus: updatedBooking.paymentStatus,
+          completionConfirmedAt: updatedBooking.completionConfirmedAt,
+        },
+      };
+    });
   }
 }

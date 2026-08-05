@@ -169,7 +169,7 @@ export class BookingController {
   }
 
   @Post(':id/verify-completion-otp')
-  @Roles(USER_ROLE.CUSTOMER)
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   verifyCompletionOtp(
     @Req() req: AuthenticatedRequest,
     @Param('id', ParseIntPipe)

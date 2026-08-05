@@ -11,11 +11,13 @@ import {
 import Razorpay from 'razorpay';
 import * as crypto from 'crypto';
 import puppeteer from 'puppeteer';
+import { DataSource } from 'typeorm';
 
 import {
   Booking,
   BOOKING_PAYMENT_STATUS,
   BOOKING_STATUS,
+  PaymentBooking,
   Payment,
   PAYMENT_METHOD,
   PAYMENT_STATUS,
@@ -307,12 +309,12 @@ export interface PaginatedPaymentsResponse {
 @Injectable()
 export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
-
   private readonly razorpay: Razorpay;
 
   constructor(
     private readonly bookingRepository: BookingRepository,
     private readonly paymentRepository: PaymentRepository,
+    private readonly dataSource: DataSource,
   ) {
     const keyId = process.env['RAZORPAY_KEY_ID'];
     const keySecret = process.env['RAZORPAY_KEY_SECRET'];
@@ -347,32 +349,46 @@ export class PaymentService {
 
     const amount = this.getBookingAmount(booking);
 
-    /*
-     * Create a new payment row for every generated link.
-     *
-     * This is necessary because the URL is not stored.
-     * Each Razorpay Payment Link maps to exactly one
-     * database payment through reference_id and notes.
-     */
-    const payment = this.paymentRepository.create({
-      paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+    // Add duplicate active payment check here
+    const existingPayment =
+      await this.paymentRepository.findActivePaymentByBookingId(booking.id);
 
-      bookingId: booking.id,
+    if (existingPayment) {
+      throw new ConflictException(
+        existingPayment.status === PAYMENT_STATUS.SUCCESS
+          ? 'This booking is already paid'
+          : 'An active payment already exists for this booking',
+      );
+    }
 
-      createdById: user.id,
+    // Create the new payment only after the check passes
+    const savedPayment = await this.dataSource.transaction(async (manager) => {
+      const paymentRepository = manager.getRepository(Payment);
 
-      payerId: user.id,
+      const paymentBookingRepository = manager.getRepository(PaymentBooking);
 
-      payeeId: booking.purohit?.userId,
+      const payment = paymentRepository.create({
+        paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+        bookingId: booking.id,
+        createdById: user.id,
+        payerId: user.id,
+        payeeId: booking.purohit?.userId,
+        amount,
+        currency: 'INR',
+        status: PAYMENT_STATUS.PENDING,
+      });
 
-      amount,
+      const createdPayment = await paymentRepository.save(payment);
 
-      currency: 'INR',
+      const paymentBooking = paymentBookingRepository.create({
+        paymentId: createdPayment.id,
+        bookingId: booking.id,
+      });
 
-      status: PAYMENT_STATUS.PENDING,
+      await paymentBookingRepository.save(paymentBooking);
+
+      return createdPayment;
     });
-
-    const savedPayment = await this.paymentRepository.savePayment(payment);
 
     try {
       const customer = this.getPaymentCustomer(user, booking);
@@ -387,19 +403,12 @@ export class PaymentService {
 
       return {
         paymentId: savedPayment.id,
-
         paymentUrl: paymentLink.short_url,
-
         amount,
-
         amountInPaise: Math.round(amount * 100),
-
         currency: paymentLink.currency ?? 'INR',
-
         bookingId: booking.id,
-
         bookingNumber: booking.bookingNumber,
-
         status: savedPayment.status,
       };
     } catch (error) {
@@ -1911,8 +1920,47 @@ export class PaymentService {
       status: PAYMENT_STATUS.PENDING,
     });
 
-    const savedRefundPayment =
-      await this.paymentRepository.savePayment(refundPayment);
+    const savedRefundPayment = await this.dataSource.transaction(
+      async (manager) => {
+        const paymentRepository = manager.getRepository(Payment);
+
+        const paymentBookingRepository = manager.getRepository(PaymentBooking);
+
+        const refundPayment = paymentRepository.create({
+          paymentType: PAYMENT_TYPE.CUSTOMER_REFUND,
+
+          bookingId: originalPayment.bookingId,
+
+          createdById: admin.id,
+
+          payerId: originalPayment.payeeId,
+
+          payeeId: originalPayment.payerId,
+
+          amount: refundAmount,
+
+          currency: originalPayment.currency ?? 'INR',
+
+          paymentMethod: originalPayment.paymentMethod,
+
+          status: PAYMENT_STATUS.PENDING,
+        });
+
+        const savedPayment = await paymentRepository.save(refundPayment);
+
+        if (originalPayment.bookingId) {
+          const mapping = paymentBookingRepository.create({
+            paymentId: savedPayment.id,
+
+            bookingId: originalPayment.bookingId,
+          });
+
+          await paymentBookingRepository.save(mapping);
+        }
+
+        return savedPayment;
+      },
+    );
 
     try {
       const razorpayRefund = (await this.razorpay.payments.refund(

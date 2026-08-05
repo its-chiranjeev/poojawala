@@ -34,6 +34,16 @@ export interface PaymentInvoiceTemplateData {
   discountAmount: string;
 
   date: string;
+
+  /*
+   * Optional fields. Existing PaymentService calls will
+   * continue to work without providing them.
+   */
+  couponCode?: string;
+  scheduledAt?: string;
+  websiteUrl?: string;
+  supportHours?: string;
+  logoUrl?: string;
 }
 
 const escapeHtml = (value: string | number | null | undefined): string => {
@@ -49,6 +59,69 @@ const displayValue = (value: string | number | null | undefined): string => {
   const normalizedValue = String(value ?? '').trim();
 
   return normalizedValue ? escapeHtml(normalizedValue) : '-';
+};
+
+const normalizeStatusClass = (statusClass: string): string => {
+  const normalized = statusClass.trim().toLowerCase();
+
+  if (['success', 'failed', 'pending', 'refunded'].includes(normalized)) {
+    return normalized;
+  }
+
+  return 'pending';
+};
+
+const formatBookingStatus = (
+  bookingStatus: string,
+): {
+  label: string;
+  className: string;
+} => {
+  const normalized = bookingStatus.trim().toUpperCase();
+
+  switch (normalized) {
+    case 'COMPLETED':
+      return {
+        label: 'Completed',
+        className: 'success',
+      };
+
+    case 'CANCELLED':
+      return {
+        label: 'Cancelled',
+        className: 'failed',
+      };
+
+    case 'ONGOING':
+      return {
+        label: 'Ongoing',
+        className: 'info',
+      };
+
+    case 'ARRIVED':
+      return {
+        label: 'Arrived',
+        className: 'info',
+      };
+
+    case 'ENROUTE':
+      return {
+        label: 'En route',
+        className: 'pending',
+      };
+
+    case 'ACCEPTED':
+      return {
+        label: 'Accepted',
+        className: 'success',
+      };
+
+    default:
+      return {
+        label: normalized || 'Pending',
+        className: 'pending',
+      };
+  }
 };
 
 export const paymentInvoiceTemplate = (
@@ -69,18 +142,34 @@ export const paymentInvoiceTemplate = (
 
   const discountAmount = Number(data.discountAmount) || 0;
 
-  /*
-   * finalAmount normally contains the payable amount after
-   * donation and discount calculations.
-   *
-   * This value is only displayed as an estimated service
-   * amount because the Booking entity currently does not
-   * provide a separate base-price field to this template.
-   */
-  const estimatedServiceAmount = Math.max(
+  const baseServiceAmount = Math.max(
     finalAmount - donationAmount + discountAmount,
     0,
   );
+
+  const paymentStatusClass = normalizeStatusClass(data.statusClass);
+
+  const bookingStatus = formatBookingStatus(data.bookingStatus);
+
+  const websiteUrl = data.websiteUrl?.trim() || 'https://poojawala.com';
+
+  const supportHours = data.supportHours?.trim() || 'Mon–Sat, 9:00 AM–7:00 PM';
+
+  const currency = displayValue(data.currency);
+
+  const logoMarkup = data.logoUrl?.trim()
+    ? `
+      <img
+        src="${displayValue(data.logoUrl)}"
+        alt="Poojawala"
+        class="brand-logo-image"
+      />
+    `
+    : `
+      <div class="brand-symbol">
+        ॐ
+      </div>
+    `;
 
   return `
 <!DOCTYPE html>
@@ -98,216 +187,581 @@ export const paymentInvoiceTemplate = (
   </title>
 
   <style>
+    :root {
+      --primary: #c66b18;
+      --primary-dark: #8c3b16;
+      --accent: #f28c28;
+      --cream: #fff8f2;
+      --cream-soft: #fffdf9;
+      --line: #efd9c8;
+      --text: #3f2a1e;
+      --muted: #7a665b;
+      --success: #1f8a4c;
+      --success-bg: #eaf7ef;
+      --danger: #c0392b;
+      --danger-bg: #fdecea;
+      --warning: #b76e00;
+      --warning-bg: #fff3dc;
+      --info: #2e6cb8;
+      --info-bg: #eaf2fb;
+      --refund: #3b6fc4;
+      --refund-bg: #e9f0ff;
+    }
+
     * {
       box-sizing: border-box;
     }
 
+    @page {
+      size: A4;
+      margin: 12mm;
+    }
+
     body {
       margin: 0;
-      padding: 24px;
+      padding: 0;
+      background: #ffffff;
+      color: var(--text);
       font-family:
         Arial,
         Helvetica,
         sans-serif;
-      background: #f3f4f6;
-      color: #111827;
-      font-size: 14px;
-      line-height: 1.5;
+      font-size: 11px;
+      line-height: 1.45;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
 
-    .container {
+    .page {
+      position: relative;
       width: 100%;
-      max-width: 900px;
-      margin: 0 auto;
-      background: #ffffff;
-      padding: 34px;
-      border-radius: 10px;
+      min-height: 100%;
+      overflow: hidden;
+      background:
+        radial-gradient(
+          circle at top right,
+          rgba(242, 140, 40, 0.12),
+          transparent 28%
+        ),
+        linear-gradient(
+          180deg,
+          #fffdf9 0%,
+          #ffffff 45%,
+          #fffdf9 100%
+        );
+      border: 1px solid var(--line);
+      border-radius: 18px;
+    }
+
+    .top-stripe {
+      height: 8px;
+      background:
+        linear-gradient(
+          90deg,
+          var(--primary-dark),
+          var(--primary),
+          #f6b73c
+        );
+    }
+
+    .watermark {
+      position: absolute;
+      right: -36px;
+      top: 38px;
+      width: 180px;
+      height: 180px;
+      border: 1px solid rgba(198, 107, 24, 0.08);
+      border-radius: 50%;
+      opacity: 0.55;
+    }
+
+    .watermark::before,
+    .watermark::after {
+      content: '';
+      position: absolute;
+      inset: 22px;
+      border: 1px solid rgba(198, 107, 24, 0.08);
+      border-radius: 50%;
+    }
+
+    .watermark::after {
+      inset: 48px;
+    }
+
+    .content {
+      padding: 22px 24px 18px;
     }
 
     .header {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      gap: 20px;
+      gap: 24px;
       padding-bottom: 18px;
-      border-bottom: 2px solid #e5e7eb;
+      border-bottom: 1px solid var(--line);
     }
 
-    .brand-name {
-      margin: 0 0 6px;
-      font-size: 16px;
-      color: #6b7280;
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
 
-    .header h1 {
-      margin: 0 0 10px;
-      font-size: 26px;
-      color: #111827;
+    .brand-symbol,
+    .brand-logo-image {
+      width: 50px;
+      height: 50px;
+      border-radius: 14px;
     }
 
-    .header p {
-      margin: 4px 0;
+    .brand-symbol {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #ffffff;
+      background:
+        linear-gradient(
+          135deg,
+          #ff9e35,
+          var(--primary)
+        );
+      font-size: 28px;
+      font-weight: 700;
+      box-shadow:
+        0 8px 20px
+        rgba(198, 107, 24, 0.22);
     }
 
-    .date-section {
-      min-width: 220px;
+    .brand-logo-image {
+      object-fit: contain;
+      background: #ffffff;
+    }
+
+    .brand-copy h1 {
+      margin: 0;
+      font-size: 22px;
+      color: var(--primary-dark);
+      letter-spacing: -0.3px;
+    }
+
+    .brand-copy p {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 9px;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+    }
+
+    .invoice-title {
+      margin-top: 14px;
+    }
+
+    .invoice-title h2 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.2;
+      color: #2f2018;
+    }
+
+    .invoice-title p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .invoice-meta {
+      width: 255px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background:
+        rgba(255, 255, 255, 0.86);
+      box-shadow:
+        0 8px 18px
+        rgba(97, 53, 22, 0.06);
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 4px 0;
+    }
+
+    .meta-label {
+      color: var(--muted);
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.7px;
+      text-transform: uppercase;
+    }
+
+    .meta-value {
+      max-width: 150px;
+      color: var(--text);
+      font-size: 10px;
+      font-weight: 700;
       text-align: right;
+      overflow-wrap: anywhere;
     }
 
-    .section-title {
-      margin-top: 28px;
-      margin-bottom: 12px;
-      padding-bottom: 7px;
-      border-bottom: 1px solid #e5e7eb;
-      font-size: 17px;
-      color: #1f2937;
+    .grid-two {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 16px;
     }
 
-    .detail-grid {
-      display: table;
-      width: 100%;
+    .card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background:
+        rgba(255, 255, 255, 0.92);
+    }
+
+    .card-title {
+      padding: 9px 12px;
+      color: var(--primary-dark);
+      background:
+        linear-gradient(
+          90deg,
+          #fff4e8,
+          #fffaf5
+        );
+      border-bottom: 1px solid var(--line);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.9px;
+      text-transform: uppercase;
+    }
+
+    .card-body {
+      padding: 11px 12px;
     }
 
     .detail-row {
-      display: table-row;
-    }
-
-    .detail-label,
-    .detail-value {
-      display: table-cell;
-      padding: 5px 0;
-      vertical-align: top;
+      display: grid;
+      grid-template-columns: 90px 1fr;
+      gap: 10px;
+      padding: 3px 0;
+      align-items: start;
     }
 
     .detail-label {
-      width: 180px;
-      padding-right: 15px;
-      font-weight: bold;
-      color: #374151;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 600;
     }
 
     .detail-value {
-      color: #111827;
-      word-break: break-word;
+      color: var(--text);
+      font-size: 10px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+
+    .section {
+      margin-top: 16px;
+    }
+
+    .section-heading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      color: var(--primary-dark);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .section-heading::before {
+      content: '';
+      width: 5px;
+      height: 17px;
+      border-radius: 6px;
+      background:
+        linear-gradient(
+          180deg,
+          #ff9e35,
+          var(--primary)
+        );
+    }
+
+    .booking-card {
+      display: grid;
+      grid-template-columns:
+        repeat(4, minmax(0, 1fr));
+      gap: 0;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      background: #ffffff;
+    }
+
+    .booking-item {
+      min-height: 68px;
+      padding: 11px 12px;
+      border-right: 1px solid var(--line);
+    }
+
+    .booking-item:last-child {
+      border-right: 0;
+    }
+
+    .booking-item-label {
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+    }
+
+    .booking-item-value {
+      color: var(--text);
+      font-size: 10px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .pill.success {
+      color: var(--success);
+      background: var(--success-bg);
+    }
+
+    .pill.failed {
+      color: var(--danger);
+      background: var(--danger-bg);
+    }
+
+    .pill.pending {
+      color: var(--warning);
+      background: var(--warning-bg);
+    }
+
+    .pill.refunded {
+      color: var(--refund);
+      background: var(--refund-bg);
+    }
+
+    .pill.info {
+      color: var(--info);
+      background: var(--info-bg);
     }
 
     table {
       width: 100%;
-      margin-top: 14px;
-      border-collapse: collapse;
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #ffffff;
     }
 
     th,
     td {
-      padding: 11px;
-      border: 1px solid #d1d5db;
-      text-align: left;
-      vertical-align: top;
-      word-break: break-word;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: middle;
     }
 
     th {
-      background: #f9fafb;
-      font-weight: bold;
-      color: #374151;
+      color: var(--primary-dark);
+      background:
+        linear-gradient(
+          90deg,
+          #fff5e9,
+          #fffaf5
+        );
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: 0.7px;
+      text-align: left;
+      text-transform: uppercase;
     }
 
-    td:first-child {
-      width: 48%;
+    tr:last-child td {
+      border-bottom: 0;
     }
 
-    .amount-cell {
+    .amount {
       text-align: right;
       white-space: nowrap;
     }
 
-    .success {
-      color: #15803d;
-      font-weight: bold;
+    .negative {
+      color: var(--success);
     }
 
-    .failed {
-      color: #dc2626;
-      font-weight: bold;
-    }
-
-    .pending {
-      color: #d97706;
-      font-weight: bold;
-    }
-
-    .refunded {
-      color: #2563eb;
-      font-weight: bold;
-    }
-
-    .total-box {
-      margin-top: 24px;
-      padding: 18px;
-      border: 1px solid #d1d5db;
-      background: #f9fafb;
-      text-align: right;
-      border-radius: 6px;
-    }
-
-    .total-label {
-      margin-right: 15px;
-      font-size: 16px;
-      font-weight: bold;
-    }
-
-    .total-amount {
-      font-size: 23px;
-      font-weight: bold;
-      color: #111827;
-    }
-
-    .payment-note {
-      margin-top: 10px;
-      color: #6b7280;
+    .total-row td {
+      color: var(--primary-dark);
+      background: #fffaf2;
       font-size: 12px;
+      font-weight: 800;
     }
 
-    .error-message {
-      color: #dc2626;
-      font-weight: bold;
+    .payment-grid {
+      display: grid;
+      grid-template-columns:
+        repeat(3, minmax(0, 1fr));
+      gap: 0;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      background: #ffffff;
+    }
+
+    .payment-cell {
+      min-height: 66px;
+      padding: 10px 12px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .payment-cell:nth-child(3n) {
+      border-right: 0;
+    }
+
+    .payment-cell:nth-last-child(-n + 3) {
+      border-bottom: 0;
+    }
+
+    .payment-label {
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+    }
+
+    .payment-value {
+      color: var(--text);
+      font-size: 9px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+
+    .amount-banner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      margin-top: 15px;
+      padding: 14px 16px;
+      color: #ffffff;
+      border-radius: 14px;
+      background:
+        linear-gradient(
+          135deg,
+          var(--primary-dark),
+          var(--primary)
+        );
+      box-shadow:
+        0 10px 22px
+        rgba(140, 59, 22, 0.18);
+    }
+
+    .amount-banner-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.7px;
+      text-transform: uppercase;
+    }
+
+    .amount-banner-note {
+      margin-top: 3px;
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 9px;
+    }
+
+    .amount-banner-value {
+      font-size: 22px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .notice {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border: 1px solid #f0d2ac;
+      border-radius: 12px;
+      color: #84501c;
+      background: #fff7ea;
+      font-size: 9px;
+    }
+
+    .error-box {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border: 1px solid #f2b7b0;
+      border-radius: 12px;
+      color: var(--danger);
+      background: var(--danger-bg);
+      font-size: 9px;
+      font-weight: 700;
     }
 
     .footer {
-      margin-top: 42px;
-      padding-top: 16px;
-      border-top: 1px solid #e5e7eb;
-      text-align: center;
-      color: #6b7280;
-      line-height: 1.6;
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 18px;
+      margin-top: 15px;
+      padding: 13px 14px;
+      border-top: 1px solid var(--line);
+      background:
+        linear-gradient(
+          90deg,
+          #fff9f1,
+          #fffdf9
+        );
+    }
+
+    .footer h3 {
+      margin: 0 0 5px;
+      color: var(--primary-dark);
+      font-size: 11px;
     }
 
     .footer p {
-      margin: 6px 0;
+      margin: 2px 0;
+      color: var(--muted);
+      font-size: 8px;
     }
 
-    .invoice-note {
-      padding: 12px;
-      border-radius: 5px;
-      background: #fffbeb;
-      color: #92400e;
+    .footer strong {
+      color: var(--text);
     }
 
-    .tax-note {
-      margin-top: 9px;
-      font-size: 12px;
-      color: #6b7280;
+    .footer-right {
+      text-align: right;
+    }
+
+    .legal {
+      margin-top: 4px;
+      color: #99877d;
+      font-size: 7px;
     }
 
     @media print {
       body {
-        padding: 0;
         background: #ffffff;
       }
 
-      .container {
-        max-width: none;
-        padding: 22px;
+      .page {
         border-radius: 0;
       }
     }
@@ -315,382 +769,480 @@ export const paymentInvoiceTemplate = (
 </head>
 
 <body>
-  <div class="container">
+  <div class="page">
+    <div class="top-stripe"></div>
+    <div class="watermark"></div>
 
-    <div class="header">
-      <div>
-        <p class="brand-name">
-          ${displayValue(data.companyName)}
-        </p>
+    <div class="content">
+      <header class="header">
+        <div>
+          <div class="brand">
+            ${logoMarkup}
 
-        <h1>
-          ${displayValue(data.invoiceTitle)}
-        </h1>
+            <div class="brand-copy">
+              <h1>
+                ${displayValue(data.companyName)}
+              </h1>
 
-        <p>
-          <strong>Invoice ID:</strong>
-          ${displayValue(data.invoiceId)}
-        </p>
+              <p>
+                Sacred rituals. Trusted Pandits.
+              </p>
+            </div>
+          </div>
 
-        <p>
-          <strong>Booking Number:</strong>
-          ${displayValue(data.bookingNumber)}
-        </p>
+          <div class="invoice-title">
+            <h2>
+              ${isProformaInvoice ? 'Proforma Invoice' : 'Tax Invoice'}
+            </h2>
+
+            <p>
+              Sacred ritual booking invoice
+            </p>
+          </div>
+        </div>
+
+        <div class="invoice-meta">
+          <div class="meta-row">
+            <span class="meta-label">
+              Invoice ID
+            </span>
+
+            <span class="meta-value">
+              ${displayValue(data.invoiceId)}
+            </span>
+          </div>
+
+          <div class="meta-row">
+            <span class="meta-label">
+              Booking No.
+            </span>
+
+            <span class="meta-value">
+              ${displayValue(data.bookingNumber)}
+            </span>
+          </div>
+
+          <div class="meta-row">
+            <span class="meta-label">
+              ${displayValue(data.dateLabel)}
+            </span>
+
+            <span class="meta-value">
+              ${displayValue(data.date)}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <div class="grid-two">
+        <section class="card">
+          <div class="card-title">
+            Bill To
+          </div>
+
+          <div class="card-body">
+            <div class="detail-row">
+              <div class="detail-label">
+                Customer
+              </div>
+
+              <div class="detail-value">
+                ${displayValue(data.customerName)}
+              </div>
+            </div>
+
+            <div class="detail-row">
+              <div class="detail-label">
+                Phone
+              </div>
+
+              <div class="detail-value">
+                ${displayValue(data.customerPhone)}
+              </div>
+            </div>
+
+            <div class="detail-row">
+              <div class="detail-label">
+                Email
+              </div>
+
+              <div class="detail-value">
+                ${displayValue(data.customerEmail)}
+              </div>
+            </div>
+
+            <div class="detail-row">
+              <div class="detail-label">
+                Address
+              </div>
+
+              <div class="detail-value">
+                ${displayValue(data.billingAddress)}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-title">
+            Issued By
+          </div>
+
+          <div class="card-body">
+            <div class="detail-row">
+              <div class="detail-label">
+                Company
+              </div>
+
+              <div class="detail-value">
+                ${displayValue(data.companyName)}
+              </div>
+            </div>
+
+            <div class="detail-row">
+              <div class="detail-label">
+                Phone
+              </div>
+
+              <div class="detail-value">
+                ${displayValue(data.companyPhone)}
+              </div>
+            </div>
+
+            <div class="detail-row">
+              <div class="detail-label">
+                Email
+              </div>
+
+              <div class="detail-value">
+                ${displayValue(data.companyEmail)}
+              </div>
+            </div>
+
+            <div class="detail-row">
+              <div class="detail-label">
+                GSTIN
+              </div>
+
+              <div class="detail-value">
+                ${displayValue(data.companyGstin)}
+              </div>
+            </div>
+
+            <div class="detail-row">
+              <div class="detail-label">
+                Address
+              </div>
+
+              <div class="detail-value">
+                ${displayValue(data.companyAddress)}
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
 
-      <div class="date-section">
-        <p>
-          <strong>
-            ${displayValue(data.dateLabel)}:
-          </strong>
+      <section class="section">
+        <div class="section-heading">
+          Booking Summary
+        </div>
 
-          ${displayValue(data.date)}
-        </p>
+        <div class="booking-card">
+          <div class="booking-item">
+            <div class="booking-item-label">
+              Booking ID
+            </div>
+
+            <div class="booking-item-value">
+              ${displayValue(data.bookingId)}
+            </div>
+          </div>
+
+          <div class="booking-item">
+            <div class="booking-item-label">
+              Service
+            </div>
+
+            <div class="booking-item-value">
+              ${displayValue(data.serviceName)}
+            </div>
+          </div>
+
+          <div class="booking-item">
+            <div class="booking-item-label">
+              Assigned Purohit
+            </div>
+
+            <div class="booking-item-value">
+              ${displayValue(data.purohitName)}
+            </div>
+          </div>
+
+          <div class="booking-item">
+            <div class="booking-item-label">
+              Booking Status
+            </div>
+
+            <div class="booking-item-value">
+              <span class="pill ${bookingStatus.className}">
+                ${displayValue(bookingStatus.label)}
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-heading">
+          Price Breakdown
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>
+                Description
+              </th>
+
+              <th class="amount">
+                Amount
+              </th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>
+                ${displayValue(data.serviceName)}
+                service charge
+              </td>
+
+              <td class="amount">
+                ${currency}
+                ${baseServiceAmount.toFixed(2)}
+              </td>
+            </tr>
+
+            ${
+              discountAmount > 0
+                ? `
+                  <tr>
+                    <td>
+                      Coupon discount
+                      ${
+                        data.couponCode?.trim()
+                          ? `(${displayValue(data.couponCode)})`
+                          : ''
+                      }
+                    </td>
+
+                    <td class="amount negative">
+                      -
+                      ${currency}
+                      ${discountAmount.toFixed(2)}
+                    </td>
+                  </tr>
+                `
+                : ''
+            }
+
+            ${
+              donationAmount > 0
+                ? `
+                  <tr>
+                    <td>
+                      Voluntary donation
+                    </td>
+
+                    <td class="amount">
+                      ${currency}
+                      ${donationAmount.toFixed(2)}
+                    </td>
+                  </tr>
+                `
+                : ''
+            }
+
+            <tr class="total-row">
+              <td>
+                Total Payable Amount
+              </td>
+
+              <td class="amount">
+                ${currency}
+                ${finalAmount.toFixed(2)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="section">
+        <div class="section-heading">
+          Payment Details
+        </div>
+
+        <div class="payment-grid">
+          <div class="payment-cell">
+            <div class="payment-label">
+              Payment Status
+            </div>
+
+            <div class="payment-value">
+              <span class="pill ${paymentStatusClass}">
+                ${displayValue(data.paymentStatus || 'Pending')}
+              </span>
+            </div>
+          </div>
+
+          <div class="payment-cell">
+            <div class="payment-label">
+              Payment Method
+            </div>
+
+            <div class="payment-value">
+              ${displayValue(data.paymentMethod)}
+            </div>
+          </div>
+
+          <div class="payment-cell">
+            <div class="payment-label">
+              Recorded Payment
+            </div>
+
+            <div class="payment-value">
+              ${currency}
+              ${paidAmount.toFixed(2)}
+            </div>
+          </div>
+
+          <div class="payment-cell">
+            <div class="payment-label">
+              Razorpay Payment ID
+            </div>
+
+            <div class="payment-value">
+              ${displayValue(data.paymentId)}
+            </div>
+          </div>
+
+          <div class="payment-cell">
+            <div class="payment-label">
+              Razorpay Order ID
+            </div>
+
+            <div class="payment-value">
+              ${displayValue(data.orderId)}
+            </div>
+          </div>
+
+          <div class="payment-cell">
+            <div class="payment-label">
+              Invoice Type
+            </div>
+
+            <div class="payment-value">
+              ${isProformaInvoice ? 'Proforma Invoice' : 'Tax Invoice'}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="amount-banner">
+        <div>
+          <div class="amount-banner-label">
+            ${isProformaInvoice ? 'Amount Due' : 'Amount Paid'}
+          </div>
+
+          <div class="amount-banner-note">
+            ${
+              isProformaInvoice
+                ? 'Payment confirmation is pending.'
+                : 'Payment received successfully.'
+            }
+          </div>
+        </div>
+
+        <div class="amount-banner-value">
+          ${currency}
+          ${finalAmount.toFixed(2)}
+        </div>
       </div>
-    </div>
-
-    <h2 class="section-title">
-      Company Details
-    </h2>
-
-    <div class="detail-grid">
-      <div class="detail-row">
-        <div class="detail-label">
-          Company Name:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.companyName)}
-        </div>
-      </div>
-
-      <div class="detail-row">
-        <div class="detail-label">
-          Email:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.companyEmail)}
-        </div>
-      </div>
-
-      <div class="detail-row">
-        <div class="detail-label">
-          Phone:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.companyPhone)}
-        </div>
-      </div>
-
-      <div class="detail-row">
-        <div class="detail-label">
-          Address:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.companyAddress)}
-        </div>
-      </div>
-
-      <div class="detail-row">
-        <div class="detail-label">
-          GSTIN:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.companyGstin)}
-        </div>
-      </div>
-    </div>
-
-    <h2 class="section-title">
-      Customer Details
-    </h2>
-
-    <div class="detail-grid">
-      <div class="detail-row">
-        <div class="detail-label">
-          Customer Name:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.customerName)}
-        </div>
-      </div>
-
-      <div class="detail-row">
-        <div class="detail-label">
-          Email:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.customerEmail)}
-        </div>
-      </div>
-
-      <div class="detail-row">
-        <div class="detail-label">
-          Phone:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.customerPhone)}
-        </div>
-      </div>
-
-      <div class="detail-row">
-        <div class="detail-label">
-          Billing Address:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.billingAddress)}
-        </div>
-      </div>
-    </div>
-
-    <h2 class="section-title">
-      Booking Details
-    </h2>
-
-    <div class="detail-grid">
-      <div class="detail-row">
-        <div class="detail-label">
-          Booking ID:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.bookingId)}
-        </div>
-      </div>
-
-      <div class="detail-row">
-        <div class="detail-label">
-          Booking Number:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.bookingNumber)}
-        </div>
-      </div>
-
-      <div class="detail-row">
-        <div class="detail-label">
-          Service:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.serviceName)}
-        </div>
-      </div>
-
-      <div class="detail-row">
-        <div class="detail-label">
-          Purohit:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.purohitName)}
-        </div>
-      </div>
-
-      <div class="detail-row">
-        <div class="detail-label">
-          Booking Status:
-        </div>
-
-        <div class="detail-value">
-          ${displayValue(data.bookingStatus)}
-        </div>
-      </div>
-    </div>
-
-    <h2 class="section-title">
-      Pricing Details
-    </h2>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Description</th>
-          <th class="amount-cell">Amount</th>
-        </tr>
-      </thead>
-
-      <tbody>
-        <tr>
-          <td>Estimated Service Amount</td>
-
-          <td class="amount-cell">
-            ${displayValue(data.currency)}
-            ${estimatedServiceAmount.toFixed(2)}
-          </td>
-        </tr>
-
-        ${
-          donationAmount > 0
-            ? `
-              <tr>
-                <td>Donation Amount</td>
-
-                <td class="amount-cell">
-                  ${displayValue(data.currency)}
-                  ${donationAmount.toFixed(2)}
-                </td>
-              </tr>
-            `
-            : ''
-        }
-
-        ${
-          discountAmount > 0
-            ? `
-              <tr>
-                <td>Discount</td>
-
-                <td class="amount-cell">
-                  -
-                  ${displayValue(data.currency)}
-                  ${discountAmount.toFixed(2)}
-                </td>
-              </tr>
-            `
-            : ''
-        }
-
-        <tr>
-          <td>
-            <strong>Final Booking Amount</strong>
-          </td>
-
-          <td class="amount-cell">
-            <strong>
-              ${displayValue(data.currency)}
-              ${finalAmount.toFixed(2)}
-            </strong>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-
-    <h2 class="section-title">
-      Payment Details
-    </h2>
-
-    <table>
-      <tbody>
-        <tr>
-          <td>Payment Status</td>
-
-          <td class="${displayValue(data.statusClass)}">
-            ${displayValue(data.paymentStatus || 'Pending')}
-          </td>
-        </tr>
-
-        <tr>
-          <td>Payment Method</td>
-
-          <td>
-            ${displayValue(data.paymentMethod)}
-          </td>
-        </tr>
-
-        <tr>
-          <td>Razorpay Payment ID</td>
-
-          <td>
-            ${displayValue(data.paymentId)}
-          </td>
-        </tr>
-
-        <tr>
-          <td>Razorpay Order ID</td>
-
-          <td>
-            ${displayValue(data.orderId)}
-          </td>
-        </tr>
-
-        <tr>
-          <td>Recorded Payment Amount</td>
-
-          <td>
-            ${displayValue(data.currency)}
-            ${paidAmount.toFixed(2)}
-          </td>
-        </tr>
-
-        ${
-          hasError
-            ? `
-              <tr>
-                <td>Payment Error</td>
-
-                <td class="error-message">
-                  ${displayValue(data.errorMessage)}
-                </td>
-              </tr>
-            `
-            : ''
-        }
-      </tbody>
-    </table>
-
-    <div class="total-box">
-      <span class="total-label">
-        Total Amount:
-      </span>
-
-      <span class="total-amount">
-        ${displayValue(data.currency)}
-        ${finalAmount.toFixed(2)}
-      </span>
 
       ${
-        !isProformaInvoice && paidAmount !== finalAmount
+        hasError
           ? `
-            <p class="payment-note">
-              The recorded Razorpay payment amount is
-              ${displayValue(data.currency)}
-              ${paidAmount.toFixed(2)}.
-            </p>
+            <div class="error-box">
+              Payment issue:
+              ${displayValue(data.errorMessage)}
+            </div>
           `
           : ''
       }
-    </div>
 
-    <div class="footer">
       ${
         isProformaInvoice
           ? `
-            <div class="invoice-note">
-              <strong>Note:</strong>
-
-              This is a proforma invoice generated before
-              successful payment. It is not a final tax
-              invoice. The final invoice will become
-              available after payment confirmation.
+            <div class="notice">
+              <strong>Proforma notice:</strong>
+              This document is generated before successful
+              payment and is not a final tax invoice. A final
+              invoice will become available after payment
+              confirmation.
             </div>
           `
           : `
-            <p>
-              Payment received successfully.
-            </p>
-
-            <p>
-              Thank you for choosing Poojawala.
-            </p>
-
-            <p class="tax-note">
-              This is a system-generated invoice and does
-              not require a physical signature.
-            </p>
+            <div class="notice">
+              <strong>Payment confirmed:</strong>
+              This is a system-generated tax invoice for the
+              successfully recorded booking payment.
+            </div>
           `
       }
     </div>
 
+    <footer class="footer">
+      <div>
+        <h3>
+          Thank you for choosing Poojawala.
+        </h3>
+
+        <p>
+          Trusted Puja services for sacred moments.
+        </p>
+
+        <p class="legal">
+          This is a system-generated invoice and does not
+          require a physical signature.
+        </p>
+      </div>
+
+      <div class="footer-right">
+        <h3>
+          Need help?
+        </h3>
+
+        <p>
+          <strong>Email:</strong>
+          ${displayValue(data.companyEmail)}
+        </p>
+
+        <p>
+          <strong>Phone:</strong>
+          ${displayValue(data.companyPhone)}
+        </p>
+
+        <p>
+          <strong>Support:</strong>
+          ${displayValue(supportHours)}
+        </p>
+
+        <p>
+          <strong>Website:</strong>
+          ${displayValue(websiteUrl)}
+        </p>
+      </div>
+    </footer>
   </div>
 </body>
 </html>
