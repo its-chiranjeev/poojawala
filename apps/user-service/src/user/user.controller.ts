@@ -33,15 +33,32 @@ export class UserController {
 
   @UseGuards(JwtAuthGuard, CsrfGuard)
   @Patch('profile')
-  @UseInterceptors(FileInterceptor('profileImage'))
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'profileImage', maxCount: 1 },
+      { name: 'certificate', maxCount: 1 },
+      { name: 'templeAffiliationProof', maxCount: 1 },
+    ]),
+  )
   @HttpCode(HttpStatus.OK)
   async updateProfile(
     @Req() req: any,
-    @Body(new ValidationPipe({ whitelist: true })) dto: UpdateUserDto,
-    @UploadedFile() file?: Express.Multer.File,
+    @UploadedFiles()
+    files: {
+      profileImage?: Express.Multer.File[];
+      certificate?: Express.Multer.File[];
+      templeAffiliationProof?: Express.Multer.File[];
+    },
+    @Body(new ValidationPipe({ whitelist: true }))
+    dto: UpdateUserDto,
   ) {
     const userId = req.user.id;
-    return this.userService.updateProfileByUser(userId, dto, file);
+
+    return this.userService.updateProfileByUser(
+      userId,
+      dto,
+      files,
+    );
   }
 
 
@@ -62,7 +79,7 @@ export class UserController {
   }
 
 
- @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   @Patch('platform-upsert')
   @HttpCode(HttpStatus.OK)
@@ -84,6 +101,7 @@ export class UserController {
       { name: 'panDoc', maxCount: 1 },
       { name: 'certificate', maxCount: 1 },
       { name: 'templeAffiliationProof', maxCount: 1 },
+      { name: 'profileImage', maxCount: 1 },
     ]),
   )
 
@@ -94,6 +112,7 @@ export class UserController {
       panDoc?: Express.Multer.File[];
       certificate?: Express.Multer.File[];
       templeAffiliationProof?: Express.Multer.File[];
+      profileImage?: Express.Multer.File[];
     },
     @Body(new ValidationPipe({ whitelist: true }))
     dto: RegisterNormalUserDto,

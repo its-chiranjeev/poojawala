@@ -10,8 +10,8 @@ import { GetAllUsersDto } from '@likemyproduct/dtos/user/get-all-users.dto';
 import { CreateCustomerAddressDto } from '@likemyproduct/dtos/user/add-customer-address.dto';
 import { CreatePurohitServiceAreaDto } from '@likemyproduct/dtos/user/add-prohit-address.dto';
 import { UpdatePurohitServiceAreaDto } from '@likemyproduct/dtos/user/update-progit-address.dto';
-import { UserRepository,  OtpRepository,  PurohitProfileRepository,  PurohitMediaRepository, CustomerFavoriteRepository, PlatformSettingRepository, CustomerAddressRepository, PurohitServiceAreaRepository,} from '@likemyproduct/repositories';
-import { PurohitProfile,  PurohitMedia,  PUROHIT_VERIFICATION_STATUS,  PUROHIT_MEDIA_TYPE,  User,  Otp,  USER_ROLE,  USER_STATUS, OTP_TYPE, } from '@likemyproduct/entities';
+import { UserRepository,  OtpRepository,  PurohitProfileRepository,  PurohitMediaRepository, CustomerFavoriteRepository, PlatformSettingRepository, CustomerAddressRepository, PurohitServiceAreaRepository, PurohitBankAccountRepository, } from '@likemyproduct/repositories';
+import { PurohitProfile,  PurohitMedia,  PUROHIT_VERIFICATION_STATUS,  PUROHIT_MEDIA_TYPE,  User,  Otp,  USER_ROLE,  USER_STATUS, OTP_TYPE, BANK_VERIFICATION_STATUS, PurohitBankAccount } from '@likemyproduct/entities';
 import { EmailService } from '@likemyproduct/email-services';
 import { SmsService } from '@likemyproduct/sms-services';
 import { UpdateUserDto, RegisterNormalUserDto,GenerateOtpDto,CustomerFavoriteDto } from '@likemyproduct/dtos';
@@ -33,6 +33,7 @@ export class UserService {
     private readonly smsService: SmsService,
     private readonly configService: ConfigService,
     private readonly purohitMediaRepository: PurohitMediaRepository,
+    private readonly purohitBankAccountRepository: PurohitBankAccountRepository,
   ) { }
 
   async updateProfileByAdmin(
@@ -63,6 +64,34 @@ export class UserService {
 
     const updatedUser = await this.userRepository.updateUser(id, dto);
 
+    if (user.role === USER_ROLE.PUROHIT) {
+      const profile = await this.purohitProfileRepository.findByUserId(
+        Number(id),
+      );
+
+      if (!profile) {
+        throw new NotFoundException('Purohit profile not found');
+      }
+
+      await this.purohitProfileRepository.update(profile.id, {
+        bio: dto.bio,
+        qualification: dto.qualification,
+        experienceYears: dto.experienceYears,
+        aadhaarNumber: dto.aadhaarNumber,
+        city: dto.city,
+        languages: dto.languages,
+        specializations: dto.specializations,
+        isOnlineAvailable:
+          dto.isOnlineAvailable === undefined
+            ? profile.isOnlineAvailable
+            : dto.isOnlineAvailable === 'true',
+        isOfflineAvailable:
+          dto.isOfflineAvailable === undefined
+            ? profile.isOfflineAvailable
+            : dto.isOfflineAvailable === 'true',
+      });
+    }
+
     const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } = updatedUser!;
     if (safeUser.profileImage) {
       try {
@@ -81,8 +110,13 @@ export class UserService {
   async updateProfileByUser(
     id: string,
     dto: UpdateUserDto,
-    file?: Express.Multer.File,
-  ) {
+    files: {
+      profileImage?: Express.Multer.File[];
+      certificate?: Express.Multer.File[];
+      templeAffiliationProof?: Express.Multer.File[];
+    },
+  )
+   {
     const user = await this.userRepository.findById(id);
     if (!user) {
       throw new NotFoundException('User not found');
@@ -101,13 +135,12 @@ export class UserService {
       delete dto.confirmPassword;
     }
 
-    if (file) {
-      const imageUrl = await this.s3Service.uploadFileHelper(
+    if (files.profileImage?.length) {
+      dto.profileImage = await this.s3Service.uploadFileHelper(
         id,
         'profileImage',
-        [file],
+        files.profileImage,
       );
-      dto.profileImage = imageUrl;
     }
 
     const updatedUser = await this.userRepository.updateUser(id, dto);
@@ -181,6 +214,7 @@ export class UserService {
       panDoc?: Express.Multer.File[];
       certificate?: Express.Multer.File[];
       templeAffiliationProof?: Express.Multer.File[];
+      profileImage?: Express.Multer.File[];
     },
   ) {
     return this.registerUserService(dto, files);
@@ -745,6 +779,7 @@ export class UserService {
       panDoc?: Express.Multer.File[];
       certificate?: Express.Multer.File[];
       templeAffiliationProof?: Express.Multer.File[];
+      profileImage?: Express.Multer.File[];
     },
   ) {
     if (!dto.email && !dto.phone) {
@@ -790,36 +825,39 @@ export class UserService {
     if (otpRecord.expiresAt < new Date()) {
       throw new BadRequestException('OTP has expired');
     }
+    
     if (otpRecord.role === USER_ROLE.CUSTOMER) {
-      const purohitFields = [
-        'bio',
-        'qualification',
-        'experienceYears',
-        'aadhaarNumber',
-        'city',
-        'languages',
-        'isOnlineAvailable',
-        'isOfflineAvailable',
-        'specializations',
-        'aadhaarDoc',
-        'panDoc',
-        'certificate',
-        'templeAffiliationProof',
-      ];
+      if (dto.bio)
+        throw new BadRequestException('bio is not allowed for CUSTOMER registration');
 
-      for (const field of purohitFields) {
-        const value = dto[field];
+      if (dto.qualification)
+        throw new BadRequestException('qualification is not allowed for CUSTOMER registration');
 
-        if (
-          value !== undefined &&
-          value !== null &&
-          (typeof value !== 'string' || value.trim() !== '') &&
-          (!Array.isArray(value) || value.length > 0)
-        ) {
-          throw new BadRequestException(
-            `${field} is not allowed for CUSTOMER registration`,
-          );
-        }
+      if (dto.experienceYears !== undefined)
+        throw new BadRequestException('experienceYears is not allowed for CUSTOMER registration');
+
+      if (dto.aadhaarNumber)
+        throw new BadRequestException('aadhaarNumber is not allowed for CUSTOMER registration');
+
+      if (dto.city)
+        throw new BadRequestException('city is not allowed for CUSTOMER registration');
+
+      if (dto.languages?.length)
+        throw new BadRequestException('languages are not allowed for CUSTOMER registration');
+
+      if (dto.specializations?.length)
+        throw new BadRequestException('specializations are not allowed for CUSTOMER registration');
+
+      if (
+        dto.accountHolderName ||
+        dto.accountNumber ||
+        dto.ifscCode ||
+        dto.bankName ||
+        dto.accountType
+      ) {
+        throw new BadRequestException(
+          'Bank account details are not allowed for CUSTOMER registration',
+        );
       }
 
       if (
@@ -845,6 +883,11 @@ export class UserService {
         'isOnlineAvailable',
         'isOfflineAvailable',
         'specializations',
+        'accountHolderName',
+        'accountNumber',
+        'ifscCode',
+        'bankName',
+        'accountType',
       ];
 
       for (const field of requiredFields) {
@@ -919,7 +962,32 @@ export class UserService {
     }
   }
 
-    // Run database writes inside a transaction
+
+    // 5. Check duplicate Aadhaar number (Purohit only)
+      if (otpRecord.role === USER_ROLE.PUROHIT && dto.aadhaarNumber) {
+        const existingAadhaar = await this.purohitProfileRepository.findOne({
+          where: { aadhaarNumber: dto.aadhaarNumber },
+        });
+
+        if (existingAadhaar) {
+          throw new ConflictException('Aadhaar number already in use');
+        }
+      }
+
+      // 6. Check duplicate Bank Account number (Purohit only)
+      if (otpRecord.role === USER_ROLE.PUROHIT && dto.accountNumber) {
+        const existingAccount = await this.dataSource
+          .getRepository(PurohitBankAccount)
+          .findOne({ where: { accountNumber: dto.accountNumber } });
+
+        if (existingAccount) {
+          throw new ConflictException('Bank account number already in use');
+        }
+      }
+
+
+
+     // Run database writes inside a transaction
     const savedUser = await this.dataSource.transaction(async (manager) => {
       // 5. Hash password and save user
       const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -945,104 +1013,127 @@ export class UserService {
             : USER_STATUS.ACTIVE,
       });
 
-      const saved = await manager.save(User, newUser);
+          const saved = await manager.save(User, newUser);
 
-      const aadhaarDocUrl = files.aadhaarDoc?.length
-  ? await this.s3Service.uploadFileHelper(
-      saved.id,
-      'aadhaarDoc',
-      files.aadhaarDoc,
-    )
-  : dto.aadhaarDoc;
-
-    const panDocUrl = files.panDoc?.length
+          const aadhaarDocUrl = files.aadhaarDoc?.length
       ? await this.s3Service.uploadFileHelper(
           saved.id,
-          'panDoc',
-          files.panDoc,
+          'aadhaarDoc',
+          files.aadhaarDoc,
         )
-      : dto.panDoc;
+      : dto.aadhaarDoc;
 
-    const certificateUrl = files.certificate?.length
-      ? await this.s3Service.uploadFileHelper(
-          saved.id,
-          'certificate',
-          files.certificate,
-        )
-      : dto.certificate;
+        const panDocUrl = files.panDoc?.length
+          ? await this.s3Service.uploadFileHelper(
+              saved.id,
+              'panDoc',
+              files.panDoc,
+            )
+          : dto.panDoc;
 
-    const templeAffiliationProofUrl =
-      files.templeAffiliationProof?.length
-        ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'templeAffiliationProof',
-            files.templeAffiliationProof,
-          )
-        : dto.templeAffiliationProof;
+        const certificateUrl = files.certificate?.length
+          ? await this.s3Service.uploadFileHelper(
+              saved.id,
+              'certificate',
+              files.certificate,
+            )
+          : dto.certificate;
 
-        if (otpRecord.role === USER_ROLE.PUROHIT) {
-          const isOnlineAvailable =
-            dto.isOnlineAvailable === 'true';
+        const templeAffiliationProofUrl =
+          files.templeAffiliationProof?.length
+            ? await this.s3Service.uploadFileHelper(
+                saved.id,
+                'templeAffiliationProof',
+                files.templeAffiliationProof,
+              )
+            : dto.templeAffiliationProof;
 
-          const isOfflineAvailable =
-            dto.isOfflineAvailable === 'true';
-          const profile = manager.create(PurohitProfile, {
-            userId: saved.id,
-            bio: dto.bio,
-            qualification: dto.qualification,
-            experienceYears: dto.experienceYears,
-            aadhaarNumber: dto.aadhaarNumber,
+          const profileImageUrl = files.profileImage?.length
+            ? await this.s3Service.uploadFileHelper(saved.id, 'profileImage', files.profileImage)
+            : undefined;
 
-            aadhaarDocUrl,
-            panDocUrl,
-            certificateUrl,
-            templeAffiliationProofUrl,
+          if (profileImageUrl) {
+            await manager.update(User, saved.id, { profileImage: profileImageUrl });
+            saved.profileImage = profileImageUrl;
+          }
 
-            city: dto.city,
-            languages: dto.languages,
-            specializations: dto.specializations,
-            isOnlineAvailable,
-            isOfflineAvailable,
-          });
+          if (otpRecord.role === USER_ROLE.PUROHIT) {
+            const isOnlineAvailable =
+              dto.isOnlineAvailable === 'true';
 
-          await manager.save(profile);
+            const isOfflineAvailable =
+              dto.isOfflineAvailable === 'true';
+            const profile = manager.create(PurohitProfile, {
+              profileImage: profileImageUrl,
+              userId: saved.id,
+              bio: dto.bio,
+              qualification: dto.qualification,
+              experienceYears: dto.experienceYears,
+              aadhaarNumber: dto.aadhaarNumber,
 
-          await manager.save(PurohitMedia, [
-            manager.create(PurohitMedia, {
-              purohitId: profile.id,
-              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-              documentType: 'AADHAAR',
-              mediaUrl: aadhaarDocUrl!,
-            }),
+              aadhaarDocUrl,
+              panDocUrl,
+              certificateUrl,
+              templeAffiliationProofUrl,
 
-            manager.create(PurohitMedia, {
-              purohitId: profile.id,
-              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-              documentType: 'PAN',
-              mediaUrl: panDocUrl!,
-            }),
+              city: dto.city,
+              languages: dto.languages,
+              specializations: dto.specializations,
+              isOnlineAvailable,
+              isOfflineAvailable,
+            });
 
-            manager.create(PurohitMedia, {
-              purohitId: profile.id,
-              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-              documentType: 'CERTIFICATE',
-              mediaUrl: certificateUrl!,
-            }),
+            await manager.save(profile);
 
-            manager.create(PurohitMedia, {
-              purohitId: profile.id,
-              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-              documentType: 'TEMPLE_PROOF',
-              mediaUrl: templeAffiliationProofUrl!,
-            }),
-          ]);
-        }
-  
+            await manager.save(
+              manager.create(PurohitBankAccount, {
+                purohitId: profile.id,
+                accountHolderName: dto.accountHolderName!,
+                accountNumber: dto.accountNumber!,
+                ifscCode: dto.ifscCode!,
+                bankName: dto.bankName!,
+                accountType: dto.accountType!,
+                isPrimary: true,
+                verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
+              }),
+            );
 
-      // 6. Delete OTP record after verification
-      await manager.delete(Otp, { id: otpRecord.id });
+            await manager.save(PurohitMedia, [
+              manager.create(PurohitMedia, {
+                purohitId: profile.id,
+                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                documentType: 'AADHAAR',
+                mediaUrl: aadhaarDocUrl!,
+              }),
 
-      return saved;
+              manager.create(PurohitMedia, {
+                purohitId: profile.id,
+                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                documentType: 'PAN',
+                mediaUrl: panDocUrl!,
+              }),
+
+              manager.create(PurohitMedia, {
+                purohitId: profile.id,
+                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                documentType: 'CERTIFICATE',
+                mediaUrl: certificateUrl!,
+              }),
+
+              manager.create(PurohitMedia, {
+                purohitId: profile.id,
+                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                documentType: 'TEMPLE_PROOF',
+                mediaUrl: templeAffiliationProofUrl!,
+              }),
+            ]);
+          }
+    
+
+            // 6. Delete OTP record after verification
+            await manager.delete(Otp, { id: otpRecord.id });
+
+            return saved;
     });
 
     // 7. Issue Auth Tokens

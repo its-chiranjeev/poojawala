@@ -1,4 +1,4 @@
-import { USER_ROLE, QUALIFICATION } from '@likemyproduct/entities';
+import { USER_ROLE, QUALIFICATION, BANK_ACCOUNT_TYPE } from '@likemyproduct/entities';
 import { Transform } from 'class-transformer';
 import { IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, } from 'class-validator';
 
@@ -123,6 +123,34 @@ export class RegisterNormalUserDto {
 
   @IsString()
   birthPlace!: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => value?.trim())
+  accountHolderName?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => value?.trim())
+  accountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => value?.trim())
+  ifscCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => value?.trim())
+  bankName?: string;
+
+  @IsOptional()
+  @IsEnum(BANK_ACCOUNT_TYPE)
+  accountType?: BANK_ACCOUNT_TYPE;
 }
 
 export class GenerateOtpDto {

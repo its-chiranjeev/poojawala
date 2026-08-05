@@ -1,5 +1,5 @@
 import { IsEmail,IsDateString, IsOptional, IsString, IsEnum } from 'class-validator';
-import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
+import { USER_ROLE, USER_STATUS, BANK_ACCOUNT_TYPE, QUALIFICATION } from '@likemyproduct/entities';
 import { Match } from './register-user.dto';
 
 export class UpdateUserDto {
@@ -46,11 +46,80 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsDateString()
-  dob?: Date;
+  dob?: string;
 
   @IsOptional()
   @IsString()
   birthPlace?: string;
+
+  @IsOptional()
+  @IsString()
+  bio?: string;
+
+  @IsOptional()
+  @IsEnum(QUALIFICATION)
+  qualification?: QUALIFICATION;
+
+  @IsOptional()
+  experienceYears?: number;
+
+  @IsOptional()
+  @IsString()
+  aadhaarNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  city?: string;
+
+  @IsOptional()
+  languages?: string[];
+
+  @IsOptional()
+  specializations?: string[];
+
+  @IsOptional()
+  isOnlineAvailable?: string;
+
+  @IsOptional()
+  isOfflineAvailable?: string;
+
+  @IsOptional()
+  @IsString()
+  aadhaarDoc?: string;
+
+  @IsOptional()
+  @IsString()
+  panDoc?: string;
+
+  @IsOptional()
+  @IsString()
+  certificate?: string;
+
+  @IsOptional()
+  @IsString()
+  templeAffiliationProof?: string;
+
+  // Bank Details
+
+  @IsOptional()
+  @IsString()
+  accountHolderName?: string;
+
+  @IsOptional()
+  @IsString()
+  accountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  ifscCode?: string;
+
+  @IsOptional()
+  @IsString()
+  bankName?: string;
+
+  @IsOptional()
+  @IsEnum(BANK_ACCOUNT_TYPE)
+  accountType?: BANK_ACCOUNT_TYPE;
 }
 
 export class UpdateUserStatusDto {
