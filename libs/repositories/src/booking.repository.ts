@@ -23,15 +23,10 @@ export class BookingRepository extends BaseRepository<Booking> {
     super(bookingRepo);
   }
 
-  async findBookingById(
-    bookingId: number,
-  ): Promise<Booking | null> {
+  async findBookingById(bookingId: number): Promise<Booking | null> {
     return this.bookingRepo
       .createQueryBuilder('booking')
-      .leftJoin(
-        'booking.customer',
-        'customer',
-      )
+      .leftJoin('booking.customer', 'customer')
       .addSelect([
         'customer.id',
         'customer.email',
@@ -45,18 +40,9 @@ export class BookingRepository extends BaseRepository<Booking> {
         'customer.createdAt',
         'customer.updatedAt',
       ])
-      .leftJoinAndSelect(
-        'booking.service',
-        'service',
-      )
-      .leftJoinAndSelect(
-        'booking.purohit',
-        'purohit',
-      )
-      .leftJoin(
-        'purohit.user',
-        'purohitUser',
-      )
+      .leftJoinAndSelect('booking.service', 'service')
+      .leftJoinAndSelect('booking.purohit', 'purohit')
+      .leftJoin('purohit.user', 'purohitUser')
       .addSelect([
         'purohitUser.id',
         'purohitUser.email',
@@ -70,37 +56,20 @@ export class BookingRepository extends BaseRepository<Booking> {
         'purohitUser.createdAt',
         'purohitUser.updatedAt',
       ])
-      .leftJoinAndSelect(
-        'booking.customerAddress',
-        'customerAddress',
-      )
-      .leftJoinAndSelect(
-        'booking.payments',
-        'payments',
-      )
-      .leftJoinAndSelect(
-        'booking.review',
-        'review',
-      )
-      .leftJoinAndSelect(
-        'booking.complaints',
-        'complaints',
-      )
+      .leftJoinAndSelect('booking.customerAddress', 'customerAddress')
+      .leftJoinAndSelect('booking.payments', 'payments')
+      .leftJoinAndSelect('booking.review', 'review')
+      .leftJoinAndSelect('booking.complaints', 'complaints')
       .where('booking.id = :bookingId', {
         bookingId,
       })
       .getOne();
   }
 
-  async findBookingByNumber(
-    bookingNumber: string,
-  ): Promise<Booking | null> {
+  async findBookingByNumber(bookingNumber: string): Promise<Booking | null> {
     return this.bookingRepo
       .createQueryBuilder('booking')
-      .leftJoin(
-        'booking.customer',
-        'customer',
-      )
+      .leftJoin('booking.customer', 'customer')
       .addSelect([
         'customer.id',
         'customer.email',
@@ -114,18 +83,9 @@ export class BookingRepository extends BaseRepository<Booking> {
         'customer.createdAt',
         'customer.updatedAt',
       ])
-      .leftJoinAndSelect(
-        'booking.service',
-        'service',
-      )
-      .leftJoinAndSelect(
-        'booking.purohit',
-        'purohit',
-      )
-      .leftJoin(
-        'purohit.user',
-        'purohitUser',
-      )
+      .leftJoinAndSelect('booking.service', 'service')
+      .leftJoinAndSelect('booking.purohit', 'purohit')
+      .leftJoin('purohit.user', 'purohitUser')
       .addSelect([
         'purohitUser.id',
         'purohitUser.email',
@@ -137,22 +97,14 @@ export class BookingRepository extends BaseRepository<Booking> {
         'purohitUser.role',
         'purohitUser.status',
       ])
-      .leftJoinAndSelect(
-        'booking.customerAddress',
-        'customerAddress',
-      )
-      .where(
-        'booking.bookingNumber = :bookingNumber',
-        {
-          bookingNumber,
-        },
-      )
+      .leftJoinAndSelect('booking.customerAddress', 'customerAddress')
+      .where('booking.bookingNumber = :bookingNumber', {
+        bookingNumber,
+      })
       .getOne();
   }
 
-  async findBookingsByRole(
-    options: FindBookingsByRoleOptions,
-  ): Promise<{
+  async findBookingsByRole(options: FindBookingsByRoleOptions): Promise<{
     bookings: Booking[];
     total: number;
   }> {
@@ -170,10 +122,7 @@ export class BookingRepository extends BaseRepository<Booking> {
 
     const query = this.bookingRepo
       .createQueryBuilder('booking')
-      .leftJoin(
-        'booking.customer',
-        'customer',
-      )
+      .leftJoin('booking.customer', 'customer')
       .addSelect([
         'customer.id',
         'customer.email',
@@ -187,18 +136,9 @@ export class BookingRepository extends BaseRepository<Booking> {
         'customer.createdAt',
         'customer.updatedAt',
       ])
-      .leftJoinAndSelect(
-        'booking.service',
-        'service',
-      )
-      .leftJoinAndSelect(
-        'booking.purohit',
-        'purohit',
-      )
-      .leftJoin(
-        'purohit.user',
-        'purohitUser',
-      )
+      .leftJoinAndSelect('booking.service', 'service')
+      .leftJoinAndSelect('booking.purohit', 'purohit')
+      .leftJoin('purohit.user', 'purohitUser')
       .addSelect([
         'purohitUser.id',
         'purohitUser.email',
@@ -210,22 +150,16 @@ export class BookingRepository extends BaseRepository<Booking> {
         'purohitUser.role',
         'purohitUser.status',
       ])
-      .leftJoinAndSelect(
-        'booking.customerAddress',
-        'customerAddress',
-      );
+      .leftJoinAndSelect('booking.customerAddress', 'customerAddress');
 
     switch (userRole) {
       case USER_ROLE.ADMIN:
         break;
 
       case USER_ROLE.CUSTOMER:
-        query.andWhere(
-          'booking.customerId = :customerId',
-          {
-            customerId: userId,
-          },
-        );
+        query.andWhere('booking.customerId = :customerId', {
+          customerId: userId,
+        });
         break;
 
       case USER_ROLE.PUROHIT:
@@ -234,12 +168,9 @@ export class BookingRepository extends BaseRepository<Booking> {
           break;
         }
 
-        query.andWhere(
-          'booking.purohitId = :purohitProfileId',
-          {
-            purohitProfileId,
-          },
-        );
+        query.andWhere('booking.purohitId = :purohitProfileId', {
+          purohitProfileId,
+        });
         break;
 
       default:
@@ -248,12 +179,9 @@ export class BookingRepository extends BaseRepository<Booking> {
     }
 
     if (status) {
-      query.andWhere(
-        'booking.status = :status',
-        {
-          status,
-        },
-      );
+      query.andWhere('booking.status = :status', {
+        status,
+      });
     }
 
     if (search?.trim()) {
@@ -287,15 +215,11 @@ export class BookingRepository extends BaseRepository<Booking> {
       }
     }
 
-    const [bookings, total] =
-      await query
-        .orderBy(
-          'booking.createdAt',
-          'DESC',
-        )
-        .skip(skip)
-        .take(limit)
-        .getManyAndCount();
+    const [bookings, total] = await query
+      .orderBy('booking.createdAt', 'DESC')
+      .skip(skip)
+      .take(limit)
+      .getManyAndCount();
 
     return {
       bookings,
@@ -313,14 +237,11 @@ export class BookingRepository extends BaseRepository<Booking> {
     total: number;
   }> {
     const safePage = Math.max(page, 1);
-    const safeLimit = Math.min(Math.max(limit, 1),100,);
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
     const skip = (safePage - 1) * safeLimit;
     const query = this.bookingRepo
       .createQueryBuilder('booking')
-      .leftJoin(
-        'booking.customer',
-        'customer',
-      )
+      .leftJoin('booking.customer', 'customer')
       .addSelect([
         'customer.id',
         'customer.email',
@@ -332,24 +253,12 @@ export class BookingRepository extends BaseRepository<Booking> {
         'customer.role',
         'customer.status',
       ])
-      .leftJoinAndSelect(
-        'booking.service',
-        'service',
-      )
-      .leftJoinAndSelect(
-        'booking.customerAddress',
-        'customerAddress',
-      )
-      .where(
-        'booking.status = :status',
-        {
-          status:
-            BOOKING_STATUS.PENDING,
-        },
-      )
-      .andWhere(
-        'booking."purohitId" IS NULL',
-      )
+      .leftJoinAndSelect('booking.service', 'service')
+      .leftJoinAndSelect('booking.customerAddress', 'customerAddress')
+      .where('booking.status = :status', {
+        status: BOOKING_STATUS.PENDING,
+      })
+      .andWhere('booking."purohitId" IS NULL')
       .andWhere(
         `
         booking."filteredPurohitIds" IS NOT NULL
@@ -357,10 +266,7 @@ export class BookingRepository extends BaseRepository<Booking> {
           @> CAST(:purohitFilter AS jsonb)
         `,
         {
-          purohitFilter:
-            JSON.stringify([
-              purohitId,
-            ]),
+          purohitFilter: JSON.stringify([purohitId]),
         },
       )
       .andWhere(
@@ -388,24 +294,17 @@ export class BookingRepository extends BaseRepository<Booking> {
           OR service.name ILIKE :search
         )`,
         {
-          search:
-            `%${normalizedSearch}%`,
+          search: `%${normalizedSearch}%`,
         },
       );
     }
 
     const [bookings, total] = await query
-        .orderBy(
-          'booking.scheduledAt',
-          'ASC',
-        )
-        .addOrderBy(
-          'booking.createdAt',
-          'DESC',
-        )
-        .skip(skip)
-        .take(safeLimit)
-        .getManyAndCount();
+      .orderBy('booking.scheduledAt', 'ASC')
+      .addOrderBy('booking.createdAt', 'DESC')
+      .skip(skip)
+      .take(safeLimit)
+      .getManyAndCount();
 
     return {
       bookings,
@@ -413,9 +312,7 @@ export class BookingRepository extends BaseRepository<Booking> {
     };
   }
 
-  async bookingNumberExists(
-    bookingNumber: string,
-  ): Promise<boolean> {
+  async bookingNumberExists(bookingNumber: string): Promise<boolean> {
     return this.bookingRepo.exists({
       where: {
         bookingNumber,
@@ -423,17 +320,11 @@ export class BookingRepository extends BaseRepository<Booking> {
     });
   }
 
-  async saveBooking(
-    booking: Booking,
-  ): Promise<Booking> {
-    return this.bookingRepo.save(
-      booking,
-    );
+  async saveBooking(booking: Booking): Promise<Booking> {
+    return this.bookingRepo.save(booking);
   }
 
-  async softDeleteBooking(
-    bookingId: number,
-  ): Promise<void> {
+  async softDeleteBooking(bookingId: number): Promise<void> {
     await this.repo.softDelete(bookingId);
   }
 
@@ -448,9 +339,163 @@ export class BookingRepository extends BaseRepository<Booking> {
     });
   }
 
-  async restoreBooking(
-    bookingId: number,
-  ): Promise<void> {
+  async restoreBooking(bookingId: number): Promise<void> {
     await this.repo.restore(bookingId);
+  }
+
+  async findActiveBookingsByRole(options: {
+    userId: number;
+    userRole: USER_ROLE;
+    purohitProfileId?: number;
+    page: number;
+    limit: number;
+    search?: string;
+    activeStatuses: BOOKING_STATUS[];
+  }): Promise<{
+    bookings: Booking[];
+    total: number;
+  }> {
+    const {
+      userId,
+      userRole,
+      purohitProfileId,
+      page,
+      limit,
+      search,
+      activeStatuses,
+    } = options;
+
+    const skip = (page - 1) * limit;
+
+    const queryBuilder = this.repo
+      .createQueryBuilder('booking')
+
+      .leftJoin('booking.customer', 'customer')
+      .leftJoin('booking.service', 'service')
+      .leftJoin('booking.customerAddress', 'customerAddress')
+      .leftJoin('booking.purohit', 'purohit')
+      .leftJoin('purohit.user', 'purohitUser')
+
+      .select([
+        // Booking
+        'booking.id',
+        'booking.bookingNumber',
+        'booking.customerId',
+        'booking.serviceId',
+        'booking.purohitId',
+        'booking.customerAddressId',
+        'booking.addressSnapshot',
+        'booking.customerPincode',
+        'booking.scheduledAt',
+        'booking.specialInstructions',
+        'booking.customFields',
+        'booking.agreedPrice',
+        'booking.discountAmount',
+        'booking.donationAmount',
+        'booking.finalAmount',
+        'booking.status',
+        'booking.paymentStatus',
+        'booking.assignmentType',
+        'booking.couponCode',
+
+        // Customer
+        'customer.id',
+        'customer.firstName',
+        'customer.lastName',
+        'customer.email',
+        'customer.phone',
+        'customer.profileImage',
+
+        // Service
+        'service.id',
+        'service.name',
+        'service.iconUrl',
+        'service.durationMinutes',
+
+        // Customer Address
+        'customerAddress.id',
+        'customerAddress.addressLabel',
+        'customerAddress.fullAddress',
+        'customerAddress.city',
+        'customerAddress.pincode',
+        'customerAddress.latitude',
+        'customerAddress.longitude',
+
+        // Purohit Profile
+        'purohit.id',
+        'purohit.userId',
+        'purohit.avgRating',
+
+        // Purohit User
+        'purohitUser.id',
+        'purohitUser.firstName',
+        'purohitUser.lastName',
+        'purohitUser.email',
+        'purohitUser.phone',
+        'purohitUser.profileImage',
+      ])
+
+      .where('booking.status IN (:...activeStatuses)', {
+        activeStatuses,
+      });
+
+    switch (userRole) {
+      case USER_ROLE.ADMIN:
+        break;
+
+      case USER_ROLE.CUSTOMER:
+        queryBuilder.andWhere('booking.customerId = :customerId', {
+          customerId: userId,
+        });
+        break;
+
+      case USER_ROLE.PUROHIT:
+        if (!purohitProfileId) {
+          return {
+            bookings: [],
+            total: 0,
+          };
+        }
+
+        queryBuilder.andWhere('booking.purohitId = :purohitProfileId', {
+          purohitProfileId,
+        });
+        break;
+
+      default:
+        return {
+          bookings: [],
+          total: 0,
+        };
+    }
+
+    if (search) {
+      queryBuilder.andWhere(
+        `
+      (
+        booking.bookingNumber ILIKE :search
+        OR service.name ILIKE :search
+        OR customer.firstName ILIKE :search
+        OR customer.lastName ILIKE :search
+        OR purohitUser.firstName ILIKE :search
+        OR purohitUser.lastName ILIKE :search
+      )
+      `,
+        {
+          search: `%${search}%`,
+        },
+      );
+    }
+
+    const [bookings, total] = await queryBuilder
+      .orderBy('booking.scheduledAt', 'ASC')
+      .skip(skip)
+      .take(limit)
+      .getManyAndCount();
+
+    return {
+      bookings,
+      total,
+    };
   }
 }

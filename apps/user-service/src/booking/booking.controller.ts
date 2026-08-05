@@ -97,6 +97,19 @@ export class BookingController {
     );
   }
 
+  @Get('active')
+  @UseGuards(JwtAuthGuard,RolesGuard,CsrfGuard)
+  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
+  async getActiveBookings(
+    @Req() req: AuthenticatedRequest,
+    @Query() query: BookingQueryDto,
+  ) {
+    return this.bookingService.getActiveBookings(
+      req.user,
+      query,
+    );
+  }
+
   @Patch(':id/respond')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.PUROHIT)

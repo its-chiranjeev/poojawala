@@ -1,12 +1,53 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ConflictException, InternalServerErrorException, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import * as crypto from 'crypto';
 import { randomInt } from 'crypto';
 import * as path from 'path';
 import { Cron } from '@nestjs/schedule';
-import { DataSource, EntityManager, Repository, QueryFailedError } from 'typeorm';
-import { ASSIGNMENT_TYPE, Booking, BOOKING_PAYMENT_STATUS, BOOKING_STATUS, CustomerAddress, Service, USER_ROLE, User, CANCELLED_BY, PurohitProfile, USER_STATUS, PUROHIT_VERIFICATION_STATUS, PurohitService, PurohitServiceArea, Coupon, CouponUsage, DISCOUNT_TYPE } from '@likemyproduct/entities';
+import {
+  DataSource,
+  EntityManager,
+  Repository,
+  QueryFailedError,
+} from 'typeorm';
+import {
+  ASSIGNMENT_TYPE,
+  Booking,
+  BOOKING_PAYMENT_STATUS,
+  BOOKING_STATUS,
+  CustomerAddress,
+  Service,
+  USER_ROLE,
+  User,
+  CANCELLED_BY,
+  PurohitProfile,
+  USER_STATUS,
+  PUROHIT_VERIFICATION_STATUS,
+  PurohitService,
+  PurohitServiceArea,
+  Coupon,
+  CouponUsage,
+  DISCOUNT_TYPE,
+} from '@likemyproduct/entities';
 import { BookingRepository } from '@likemyproduct/repositories';
-import { BookingQueryDto, CreateBookingDto, UpdateBookingDto, CancelBookingDto, RespondBookingDto, PUROHIT_BOOKING_ACTION, AssignBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto } from '@likemyproduct/dtos';
+import {
+  BookingQueryDto,
+  CreateBookingDto,
+  UpdateBookingDto,
+  CancelBookingDto,
+  RespondBookingDto,
+  PUROHIT_BOOKING_ACTION,
+  AssignBookingDto,
+  UpdateBookingStatusDto,
+  VerifyCompletionOtpDto,
+} from '@likemyproduct/dtos';
 import { S3Service } from '@likemyproduct/s3';
 import { SmsService } from '@likemyproduct/sms-services';
 import { EmailService } from '@likemyproduct/email-services';
@@ -110,7 +151,6 @@ export class BookingService {
       );
     }
 
-
     try {
       return await this.dataSource.transaction(async (manager) => {
         const userRepository = manager.getRepository(User);
@@ -119,7 +159,7 @@ export class BookingService {
         const bookingRepository = manager.getRepository(Booking);
         const purohitProfileRepository = manager.getRepository(PurohitProfile);
 
-        /* 
+        /*
          * Reload customer from database so an old JWT
          * cannot be used by an inactive or blocked user.
          */
@@ -2171,5 +2211,188 @@ export class BookingService {
         },
       };
     });
+  }
+
+  async getActiveBookings(user: User, query: BookingQueryDto) {
+    const allowedRoles: USER_ROLE[] = [
+      USER_ROLE.ADMIN,
+      USER_ROLE.CUSTOMER,
+      USER_ROLE.PUROHIT,
+    ];
+
+    if (!allowedRoles.includes(user.role)) {
+      throw new ForbiddenException(
+        'You are not allowed to access active bookings',
+      );
+    }
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const search = query.search?.trim();
+
+    let purohitProfileId: number | undefined;
+
+    if (user.role === USER_ROLE.PUROHIT) {
+      const purohitProfile = await this.getPurohitProfile(user.id);
+
+      purohitProfileId = purohitProfile.id;
+    }
+
+    const activeStatuses: BOOKING_STATUS[] = [
+      BOOKING_STATUS.ACCEPTED,
+      BOOKING_STATUS.ENROUTE,
+      BOOKING_STATUS.ARRIVED,
+      BOOKING_STATUS.ONGOING,
+    ];
+
+    const { bookings, total } =
+      await this.bookingRepository.findActiveBookingsByRole({
+        userId: user.id,
+        userRole: user.role,
+        purohitProfileId,
+        page,
+        limit,
+        search,
+        activeStatuses,
+      });
+
+    const formattedBookings = bookings.map((booking) => {
+      const customerName = [
+        booking.customer?.firstName,
+        booking.customer?.lastName,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+
+      const purohitUser = booking.purohit?.user;
+
+      const purohitName = [purohitUser?.firstName, purohitUser?.lastName]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+
+      const customerAddress = booking.customerAddress;
+
+      const snapshot = booking.addressSnapshot ?? {};
+
+      return {
+        id: booking.id,
+
+        bookingNumber: booking.bookingNumber,
+
+        scheduledAt: booking.scheduledAt,
+
+        status: booking.status,
+
+        paymentStatus: booking.paymentStatus,
+
+        assignmentType: booking.assignmentType,
+
+        service: {
+          id: booking.service?.id ?? booking.serviceId,
+
+          name: booking.service?.name ?? '-',
+
+          iconUrl: booking.service?.iconUrl ?? null,
+
+          durationMinutes: booking.service?.durationMinutes ?? null,
+        },
+
+        customer: {
+          id: booking.customer?.id ?? booking.customerId,
+
+          name: customerName || '-',
+
+          email: booking.customer?.email ?? null,
+
+          phone: booking.customer?.phone ?? null,
+
+          profileImage: booking.customer?.profileImage ?? null,
+        },
+
+        purohit: booking.purohit
+          ? {
+              profileId: booking.purohit.id,
+
+              userId: booking.purohit.userId,
+
+              name: purohitName || '-',
+
+              email: purohitUser?.email ?? null,
+
+              phone: purohitUser?.phone ?? null,
+
+              profileImage: purohitUser?.profileImage ?? null,
+
+              avgRating: Number(booking.purohit.avgRating ?? 0),
+            }
+          : null,
+
+        address: {
+          id: customerAddress?.id ?? booking.customerAddressId ?? null,
+
+          label: customerAddress?.addressLabel ?? null,
+
+          fullAddress:
+            (customerAddress?.fullAddress ??
+              String(snapshot['fullAddress'] ?? '')) ||
+            null,
+
+          city:
+            (customerAddress?.city ?? String(snapshot['city'] ?? '')) || null,
+
+          pincode: customerAddress?.pincode ?? booking.customerPincode ?? null,
+
+          latitude:
+            customerAddress?.latitude !== null &&
+            customerAddress?.latitude !== undefined
+              ? Number(customerAddress.latitude)
+              : snapshot['latitude'] !== undefined
+                ? Number(snapshot['latitude'])
+                : null,
+
+          longitude:
+            customerAddress?.longitude !== null &&
+            customerAddress?.longitude !== undefined
+              ? Number(customerAddress.longitude)
+              : snapshot['longitude'] !== undefined
+                ? Number(snapshot['longitude'])
+                : null,
+        },
+
+        pricing: {
+          agreedPrice: Number(booking.agreedPrice),
+
+          discountAmount: Number(booking.discountAmount ?? 0),
+
+          donationAmount: Number(booking.donationAmount ?? 0),
+
+          finalAmount: Number(booking.finalAmount),
+
+          couponCode: booking.couponCode ?? null,
+        },
+
+        specialInstructions: booking.specialInstructions ?? null,
+
+        customFields: booking.customFields ?? null,
+      };
+    });
+
+    return {
+      bookings: formattedBookings,
+
+      pagination: {
+        total,
+        page,
+        limit,
+
+        totalPages: total === 0 ? 0 : Math.ceil(total / limit),
+
+        hasNextPage: page * limit < total,
+
+        hasPreviousPage: page > 1,
+      },
+    };
   }
 }
