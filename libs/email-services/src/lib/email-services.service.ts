@@ -66,6 +66,91 @@ export class EmailService {
     }
   }
 
+  async sendPurohitApprovalEmail(
+    email: string,
+    firstName?: string,
+  ): Promise<void> {
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+        <h2>Hello ${this.escapeHtml(firstName ?? 'Purohit')},</h2>
+
+        <p>
+          Congratulations! Your Purohit profile and submitted documents
+          have been successfully verified and approved.
+        </p>
+
+        <p>
+          Your account is now active. You can access the available
+          Purohit features on the Poojawala platform.
+        </p>
+
+        <p>
+          Regards,<br />
+          Poojawala Team
+        </p>
+      </div>
+    `;
+
+    await this.sendMail({
+      to: email,
+      subject: 'Your Purohit Profile Has Been Approved',
+      html,
+    });
+  }
+
+  async sendPurohitRejectionEmail(
+    email: string,
+    rejectionReason: string,
+    firstName?: string,
+  ): Promise<void> {
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+        <h2>Hello ${this.escapeHtml(firstName ?? 'Purohit')},</h2>
+
+        <p>
+          Your Purohit profile verification has been rejected.
+        </p>
+
+        <div
+          style="
+            padding: 12px;
+            border-left: 4px solid #d9534f;
+            background-color: #f8f8f8;
+            margin: 16px 0;
+          "
+        >
+          <strong>Rejection reason:</strong>
+          <p>${this.escapeHtml(rejectionReason)}</p>
+        </div>
+
+        <p>
+          Please correct the mentioned issue before contacting
+          the Poojawala support team for further review.
+        </p>
+
+        <p>
+          Regards,<br />
+          Poojawala Team
+        </p>
+      </div>
+    `;
+
+    await this.sendMail({
+      to: email,
+      subject: 'Your Purohit Profile Verification Was Rejected',
+      html,
+    });
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   async sendOtpEmail(email: string, otp: string, firstName?: string) {
     const html = `
             <div>

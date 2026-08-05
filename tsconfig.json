@@ -40,26 +40,14 @@
       "@likemyproduct/dtos/*": [
         "libs/dtos/src/*"
       ],
+      "@likemyproduct/email-services": [
+        "libs/email-services/src/index.ts"
+      ],
       "@likemyproduct/entities": [
         "libs/entities/src"
       ],
       "@likemyproduct/entities/*": [
         "libs/entities/src/*"
-      ],
-      "@likemyproduct/repositories": [
-        "libs/repositories/src"
-      ],
-      "@likemyproduct/repositories/*": [
-        "libs/repositories/src/*"
-      ],
-      "@likemyproduct/email-services": [
-        "libs/email-services/src/index.ts"
-      ],
-      "@likemyproduct/s3": [
-        "libs/s3/src"
-      ],
-      "@likemyproduct/s3/*": [
-        "libs/s3/src/*"
       ],
       "@likemyproduct/gateway": [
         "libs/gateway/src"
@@ -72,6 +60,18 @@
       ],
       "@likemyproduct/payment/*": [
         "libs/payment/src/*"
+      ],
+      "@likemyproduct/repositories": [
+        "libs/repositories/src"
+      ],
+      "@likemyproduct/repositories/*": [
+        "libs/repositories/src/*"
+      ],
+      "@likemyproduct/s3": [
+        "libs/s3/src"
+      ],
+      "@likemyproduct/s3/*": [
+        "libs/s3/src/*"
       ],
       "@likemyproduct/sms-services": [
         "libs/sms-services/src"
