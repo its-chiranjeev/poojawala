@@ -22,6 +22,10 @@ export class BaseRepository<T extends ObjectLiteral> {
     return this.repo.findOne(options);
   }
 
+  async find(options?: FindManyOptions<T>): Promise<T[]> {
+    return this.repo.find(options);
+  }
+
   async findAndCount(options?: FindManyOptions<T>): Promise<[T[], number]> {
     return this.repo.findAndCount(options);
   }
