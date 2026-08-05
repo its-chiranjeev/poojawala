@@ -145,7 +145,6 @@ export class ServiceController {
     return this.serviceService.deleteService(id);
   }
 
-
   @Get('purohit-service/:id')
   @Roles(USER_ROLE.PUROHIT)
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
