@@ -1,16 +1,6 @@
-import { USER_ROLE } from '@likemyproduct/entities';
+import { USER_ROLE, QUALIFICATION, BANK_ACCOUNT_TYPE } from '@likemyproduct/entities';
 import { Transform } from 'class-transformer';
-import {
-  IsEmail,
-  IsEnum,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  MaxLength,
-  registerDecorator,
-  ValidationOptions,
-  ValidationArguments,
-} from 'class-validator';
+import { IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, } from 'class-validator';
 
 export class OtpDto {
   @IsOptional()
@@ -43,12 +33,14 @@ export class RegisterNormalUserDto {
   @Transform(({ value }) => value?.trim())
   @MaxLength(15)
   phone?: string;
+  
+  // @IsOptional()
+  // @IsString()
+  // @IsNotEmpty()
+  // @Transform(({ value }) => value?.trim())
+  // otp!: string;
 
-  @IsString()
-  @IsNotEmpty()
-  @Transform(({ value }) => value?.trim())
-  otp!: string;
-
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
@@ -68,12 +60,110 @@ export class RegisterNormalUserDto {
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
   password!: string;
-
+  
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
   @Match('password', { message: 'Passwords do not match' })
   confirmPassword!: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  bio?: string;
+
+  @IsOptional()
+  @IsEnum(QUALIFICATION)
+  qualification?: QUALIFICATION;
+
+  @IsOptional()
+  experienceYears?: number;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  aadhaarNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  aadhaarDoc?: string;
+
+  @IsOptional()
+  @IsString()
+  panDoc?: string;
+
+  @IsOptional()
+  @IsString()
+  certificate?: string;
+
+  @IsOptional()
+  @IsString()
+  templeAffiliationProof?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  city?: string;
+
+  @IsOptional()
+  languages?: string[];
+
+  @IsOptional()
+  isOnlineAvailable?: string;
+
+  @IsOptional()
+  isOfflineAvailable?: string;
+
+  @IsOptional()
+  specializations?: string[];
+
+  @IsDateString()
+  dob?: string;
+
+  @IsString()
+  birthPlace!: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => value?.trim())
+  accountHolderName?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => value?.trim())
+  accountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => value?.trim())
+  ifscCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => value?.trim())
+  bankName?: string;
+
+  @IsOptional()
+  @IsEnum(BANK_ACCOUNT_TYPE)
+  accountType?: BANK_ACCOUNT_TYPE;
+}
+
+export class GenerateOtpDto {
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsEnum(USER_ROLE)
+  role!: USER_ROLE;
 }
 
 export class resetPasswordDto {

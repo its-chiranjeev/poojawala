@@ -12,4 +12,20 @@ export class PurohitBankAccountRepository extends BaseRepository<PurohitBankAcco
   ) {
     super(repo);
   }
+
+  async findByPurohitId(purohitId: number) {
+    return this.repo.find({
+      where: { purohitId },
+      order: { id: 'ASC' },
+    });
+  }
+
+  async findPrimaryAccount(purohitId: number) {
+    return this.repo.findOne({
+      where: {
+        purohitId,
+        isPrimary: true,
+      },
+    });
+  }
 }

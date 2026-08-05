@@ -11,6 +11,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ServiceModule } from './service/service.module';
 import { ReviewModule } from './review/review.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { CouponModule } from './coupon/coupon.module';
 
 @Module({
   imports: [
@@ -24,7 +25,8 @@ import { ScheduleModule } from '@nestjs/schedule';
     ServiceModule,
     ReviewModule,
     BookingModule,
-    ComplaintModule
+    ComplaintModule,
+    CouponModule,
   ],
   controllers: [UserManagementController],
   providers: [UserManagementService],

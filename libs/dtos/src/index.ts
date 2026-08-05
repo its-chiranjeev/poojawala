@@ -23,3 +23,6 @@ export * from './payment/confirm-booking-payment.dto';
 export * from './payment/payment-query.dto';
 export * from './payment/admin-payment-query.dto';
 export * from './payment/create-refund.dto';
+export * from './auth/customer-favorite.dto';
+export * from './auth/update-user.dto';
+export * from './coupon/create-coupon.dto';
