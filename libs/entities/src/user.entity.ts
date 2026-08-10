@@ -98,6 +98,9 @@ birthPlace?: string;
   @Column({ type: 'text', nullable: true })
   rejectionReason?: string;
 
+  @Column({ type: 'boolean', default: false })
+  isAdminCreated!: boolean;
+
   @OneToMany(() => CustomerAddress, (address) => address.customer)
   addresses!: CustomerAddress[];
 
