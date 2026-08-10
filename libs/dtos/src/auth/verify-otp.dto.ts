@@ -45,5 +45,5 @@ export class ResendOtpDto {
   phone?: string;
 
   @IsEnum(OTP_TYPE)
-  otpType: OTP_TYPE;
+  otpType?: OTP_TYPE;
 }

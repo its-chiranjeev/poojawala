@@ -10,9 +10,9 @@ import {
 } from 'typeorm';
 import { PurohitProfile } from './purohit-profile.entity';
 
-export enum BANK_ACCOUNT_TYPE {
-  SAVINGS = 'SAVINGS',
-  CURRENT = 'CURRENT',
+export enum PUROHIT_PAYMENT_METHOD {
+  BANK = 'BANK',
+  UPI = 'UPI',
 }
 
 export enum BANK_VERIFICATION_STATUS {
@@ -36,26 +36,26 @@ export class PurohitBankAccount {
   purohit!: PurohitProfile;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
-  accountHolderName!: string;
+  accountHolderName?: string;
 
   @Column({ type: 'varchar', length: 30, nullable: true })
-  accountNumber!: string;
+  accountNumber?: string;
 
   @Column({ type: 'varchar', length: 15, nullable: true })
-  ifscCode!: string;
+  ifscCode?: string;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
-  bankName!: string;
-
-  @Column({
-    type: 'enum',
-    enum: BANK_ACCOUNT_TYPE,
-    default: BANK_ACCOUNT_TYPE.SAVINGS,
-  })
-  accountType!: BANK_ACCOUNT_TYPE;
+  bankName?: string;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   upiId?: string;
+
+  @Column({
+    type: 'enum',
+    enum: PUROHIT_PAYMENT_METHOD,
+    default: PUROHIT_PAYMENT_METHOD.BANK,
+  })
+  paymentMethod!: PUROHIT_PAYMENT_METHOD;
 
   @Column({ type: 'boolean', default: false })
   isPrimary!: boolean;

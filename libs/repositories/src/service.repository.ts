@@ -15,10 +15,19 @@ export class ServiceRepository extends BaseRepository<Service> {
   }
 
   async findAllServices(query: GetServicesQueryDto) {
-    const { page = 1, limit = 10, search } = query;
+    const { page = 1, limit = 10, search, isActive } = query;
+    console.log("=== API REQUEST RECEIVED ===");
+    console.log("Original query object:", query);
+    
+    let parsedIsActive: boolean | undefined = undefined;
+    if (isActive !== undefined) {
+      parsedIsActive = String(isActive) === 'true';
+    }
+    
+    console.log("Parsed isActive:", parsedIsActive);
 
-    const where = {
-      isActive: true,
+    const where: any = {
+      ...(parsedIsActive !== undefined && { isActive: parsedIsActive }),
       ...(search && {
         name: ILike(`%${search}%`),
       }),

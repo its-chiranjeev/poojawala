@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Delete, Param, ParseIntPipe, Patch, Post, Query, Req, UseGuards, UseInterceptors, UploadedFiles, BadRequestException } from '@nestjs/common';
 import { BookingService } from './booking.service';
-import { CreateBookingDto, UpdateBookingDto, BookingQueryDto, CancelBookingDto, RespondBookingDto, AssignBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto, RescheduleBookingDto, RepeatBookingDto } from '@likemyproduct/dtos';
+import { CreateBookingDto, UpdateBookingDto, BookingQueryDto, CancelBookingDto, RespondBookingDto, AssignBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto, CreateBookingByAdminDto, RescheduleBookingDto, RepeatBookingDto } from '@likemyproduct/dtos';
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@likemyproduct/common';
 import { USER_ROLE, User } from '@likemyproduct/entities';
 import { FilesInterceptor } from '@nestjs/platform-express';
@@ -14,6 +14,17 @@ export class BookingController {
   constructor(
     private readonly bookingService: BookingService,
     ) {}
+
+
+  @Post('admin/add')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  createBookingByAdmin(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: CreateBookingByAdminDto,
+  ) {
+    return this.bookingService.createBookingByAdmin(req.user, dto);
+  }
 
   @Post('add')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)

@@ -28,3 +28,5 @@ export * from './auth/update-user.dto';
 export * from './coupon/create-coupon.dto';
 export * from './booking/reschedule-booking.dto';
 export * from './booking/repeat-booking.dto';
+export * from './booking/create-booking-by-admin.dto';
+export * from './auth/create-purohit-by-admin.dto';

@@ -37,19 +37,7 @@ import {
   DISCOUNT_TYPE,
 } from '@likemyproduct/entities';
 import { BookingRepository } from '@likemyproduct/repositories';
-import {
-  BookingQueryDto,
-  CreateBookingDto,
-  UpdateBookingDto,
-  CancelBookingDto,
-  RespondBookingDto,
-  PUROHIT_BOOKING_ACTION,
-  AssignBookingDto,
-  UpdateBookingStatusDto,
-  VerifyCompletionOtpDto,
-  RescheduleBookingDto,
-  RepeatBookingDto,
-} from '@likemyproduct/dtos';
+import { BookingQueryDto, CreateBookingDto, UpdateBookingDto, CancelBookingDto, RespondBookingDto, PUROHIT_BOOKING_ACTION, AssignBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto, CreateBookingByAdminDto, RescheduleBookingDto, RepeatBookingDto } from '@likemyproduct/dtos';
 import { S3Service } from '@likemyproduct/s3';
 import { SmsService } from '@likemyproduct/sms-services';
 import { EmailService } from '@likemyproduct/email-services';
@@ -2927,5 +2915,133 @@ export class BookingService {
         eligiblePurohitCount: repeatedBooking.filteredPurohitIds?.length ?? 0,
       },
     };
+  }
+
+    async createBookingByAdmin(adminUser: User, dto: CreateBookingByAdminDto): Promise<Booking> {
+    if (adminUser.role !== USER_ROLE.ADMIN) {
+      throw new ForbiddenException('Only admins can create bookings manually');
+    }
+
+    const scheduledAt = new Date(dto.scheduledAt);
+    if (Number.isNaN(scheduledAt.getTime())) {
+      throw new BadRequestException('Invalid scheduled date and time');
+    }
+
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+        const userRepository = manager.getRepository(User);
+        const serviceRepository = manager.getRepository(Service);
+        const addressRepository = manager.getRepository(CustomerAddress);
+        const bookingRepository = manager.getRepository(Booking);
+        const purohitProfileRepository = manager.getRepository(PurohitProfile);
+
+        const customer = await userRepository.findOne({
+          where: { id: dto.customerId, role: USER_ROLE.CUSTOMER },
+        });
+
+        if (!customer) {
+          throw new NotFoundException('Customer not found');
+        }
+
+        const purohitProfile = await purohitProfileRepository.findOne({
+          where: { userId: dto.purohitId },
+        });
+
+        if (!purohitProfile) {
+          throw new NotFoundException('Purohit profile not found');
+        }
+
+        const service = await serviceRepository.findOne({
+          where: { id: dto.serviceId },
+        });
+
+        if (!service) {
+          throw new NotFoundException('Service not found');
+        }
+
+        if (!service.isActive) {
+          throw new BadRequestException('Service is currently inactive');
+        }
+
+        const customerAddress = await addressRepository.findOne({
+          where: { id: dto.customerAddressId, customerId: customer.id },
+        });
+
+        if (!customerAddress) {
+          throw new NotFoundException('Customer address not found');
+        }
+
+        const duplicateLockKey = [
+          customer.id,
+          service.id,
+          scheduledAt.toISOString(),
+        ].join(':');
+
+        await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [duplicateLockKey]);
+
+        const minPrice = Number(service.minPrice);
+        const commissionPercentage = Number(service.commissionPercentage);
+        const agreedPrice = minPrice;
+        const platformCommission = Number((agreedPrice * (commissionPercentage / 100)).toFixed(2));
+        const purohitPayoutAmount = Number((agreedPrice - platformCommission).toFixed(2));
+        const donationAmount = Number(dto.donationAmount ?? 0);
+
+        let appliedCoupon: Coupon | null = null;
+        let discountAmount = 0;
+
+        if (dto.couponCode) {
+          const couponResult = await this.validateAndCalculateCoupon(
+            manager, customer.id, service.id, dto.couponCode.trim().toUpperCase(), agreedPrice,
+          );
+          appliedCoupon = couponResult.coupon;
+          discountAmount = couponResult.discountAmount;
+        }
+
+        const finalAmount = Number((agreedPrice - discountAmount + donationAmount).toFixed(2));
+
+        const bookingNumber = await this.generateUniqueBookingNumber(bookingRepository);
+        
+        const booking = bookingRepository.create({
+          bookingNumber,
+          customerId: customer.id,
+          serviceId: service.id,
+          customerAddressId: customerAddress.id,
+          addressSnapshot: this.createAddressSnapshot(customerAddress),
+          customerPincode: customerAddress.pincode?.trim() || '',
+          scheduledAt,
+          specialInstructions: dto.specialInstructions?.trim() || undefined,
+          customFields: dto.customFields ?? undefined,
+          agreedPrice,
+          commissionPercentage,
+          platformCommission,
+          purohitPayoutAmount,
+          couponCode: appliedCoupon?.code ?? undefined,
+          discountAmount,
+          donationAmount,
+          finalAmount,
+          status: BOOKING_STATUS.ACCEPTED,
+          paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+          assignmentType: ASSIGNMENT_TYPE.MANUAL,
+          purohitId: purohitProfile.id,
+          filteredPurohitIds: [purohitProfile.id],
+        });
+
+        const savedBooking = await bookingRepository.save(booking);
+
+        if (appliedCoupon) {
+          const couponUsageRepository = manager.getRepository(CouponUsage);
+          await couponUsageRepository.save(
+            couponUsageRepository.create({ coupon: appliedCoupon, customer, booking: savedBooking })
+          );
+        }
+
+        return savedBooking;
+      });
+    } catch (error) {
+      if (error instanceof QueryFailedError && (error as any).driverError?.code === '23505') {
+        throw new ConflictException('An active booking for this service and scheduled time already exists');
+      }
+      throw error;
+    }
   }
 }

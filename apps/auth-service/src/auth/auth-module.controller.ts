@@ -240,16 +240,41 @@ export class AuthModuleController {
     };
   }
 
-  @UseGuards(JwtAuthGuard)
+ @UseGuards(JwtAuthGuard)
   @Get('me')
   @HttpCode(HttpStatus.OK)
   async getMe(@Req() req: any) {
-    const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } = req.user;
+    const safeUser = await this.authModuleService.getFullProfile(req.user.id, req.user.role);
     if (safeUser.profileImage) {
       try {
         safeUser.profileImage = await this.s3Service.getDownloadUrl(safeUser.profileImage);
       } catch (e) {
         console.error('Failed to generate pre-signed URL for profileImage:', e);
+      }
+    }
+
+    if ((safeUser as any).profile) {
+      const profile = { ...(safeUser as any).profile };
+      try {
+        if (profile.aadhaarDocUrl) {
+          profile.aadhaarDocDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.aadhaarDocUrl);
+          profile.aadhaarDocUrl = await this.s3Service.getDownloadUrl(profile.aadhaarDocUrl);
+        }
+        if (profile.panDocUrl) {
+          profile.panDocDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.panDocUrl);
+          profile.panDocUrl = await this.s3Service.getDownloadUrl(profile.panDocUrl);
+        }
+        if (profile.certificateUrl) {
+          profile.certificateDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.certificateUrl);
+          profile.certificateUrl = await this.s3Service.getDownloadUrl(profile.certificateUrl);
+        }
+        if (profile.templeAffiliationProofUrl) {
+          profile.templeAffiliationProofDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.templeAffiliationProofUrl);
+          profile.templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(profile.templeAffiliationProofUrl);
+        }
+        (safeUser as any).profile = profile;
+      } catch (e) {
+        console.error('Failed to generate pre-signed URL for profile documents:', e);
       }
     }
     return {

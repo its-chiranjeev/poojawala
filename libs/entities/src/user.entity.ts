@@ -44,6 +44,9 @@ export class User {
   @Column({ type: 'varchar', length: 100 })
   username!: string;
 
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  countryCode?: string;
+
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 15, nullable: true })
   phone?: string;
@@ -97,6 +100,9 @@ birthPlace?: string;
 
   @Column({ type: 'text', nullable: true })
   rejectionReason?: string;
+
+  @Column({ type: 'boolean', default: false })
+  isAdminCreated!: boolean;
 
   @OneToMany(() => CustomerAddress, (address) => address.customer)
   addresses!: CustomerAddress[];

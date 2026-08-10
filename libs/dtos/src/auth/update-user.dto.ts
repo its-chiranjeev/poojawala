@@ -1,5 +1,5 @@
 import { IsEmail,IsDateString, IsOptional, IsString, IsEnum } from 'class-validator';
-import { USER_ROLE, USER_STATUS, BANK_ACCOUNT_TYPE, QUALIFICATION } from '@likemyproduct/entities';
+import { USER_ROLE, USER_STATUS, QUALIFICATION, PUROHIT_PAYMENT_METHOD } from '@likemyproduct/entities';
 import { Match } from './register-user.dto';
 
 export class UpdateUserDto {
@@ -118,8 +118,12 @@ export class UpdateUserDto {
   bankName?: string;
 
   @IsOptional()
-  @IsEnum(BANK_ACCOUNT_TYPE)
-  accountType?: BANK_ACCOUNT_TYPE;
+  @IsEnum(PUROHIT_PAYMENT_METHOD)
+  paymentMethod?: PUROHIT_PAYMENT_METHOD;
+
+  @IsOptional()
+  @IsString()
+  upiId?: string;
 }
 
 export class UpdateUserStatusDto {

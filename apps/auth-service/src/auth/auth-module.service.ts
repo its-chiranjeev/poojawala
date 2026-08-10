@@ -21,13 +21,13 @@ import {
   RegisterUserDto,
   resetPasswordDto,
   forgotPasswordDto,
-  ResendOtpDto
+  ResendOtpDto,
 } from '@likemyproduct/dtos';
 import { DataSource } from 'typeorm';
 import { EmailService } from '@likemyproduct/email-services';
 import { SmsService } from '@likemyproduct/sms-services';
 import { MoreThan } from 'typeorm';
-import { OTP_TYPE} from '@likemyproduct/entities';
+import { OTP_TYPE } from '@likemyproduct/entities';
 
 @Injectable()
 export class AuthModuleService {
@@ -38,7 +38,7 @@ export class AuthModuleService {
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
     private readonly smsService: SmsService,
-  ) { }
+  ) {}
 
   async issueAuthTokens(user: User) {
     const accessSecret =
@@ -118,7 +118,11 @@ export class AuthModuleService {
       throw new BadRequestException('Phone number is required');
     }
 
-    if (![USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN].includes(dto.role)) {
+    if (
+      ![USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN].includes(
+        dto.role,
+      )
+    ) {
       throw new BadRequestException('Invalid role');
     }
 
@@ -205,17 +209,17 @@ export class AuthModuleService {
       throw new NotFoundException('User not found');
     }
 
-    const passwordMatch = await bcrypt.compare(dto.password, user.hashedPassword);
+    const passwordMatch = await bcrypt.compare(
+      dto.password,
+      user.hashedPassword,
+    );
     if (!passwordMatch) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    if (
-      user.status === USER_STATUS.BLOCKED
-     
-    ) {
+    if (user.status === USER_STATUS.BLOCKED) {
       user.hashedRefreshToken = null; // Invalidate existing refresh tokens
-     
+
       await this.userRepository.save(user);
       throw new ForbiddenException('User is blocked');
     }
@@ -306,7 +310,7 @@ export class AuthModuleService {
       // 6. Issue new tokens (rotation)
       return this.issueAuthTokens(user);
     } catch (e) {
-      throw new UnauthorizedException(e.message || 'Invalid refresh token');
+      throw new UnauthorizedException('Invalid refresh token');
     }
   }
 
@@ -337,7 +341,7 @@ export class AuthModuleService {
     };
   }
 
- /* async registerUserService(dto: RegisterNormalUserDto) {
+  /* async registerUserService(dto: RegisterNormalUserDto) {
     if (!dto.email && !dto.phone) {
       throw new BadRequestException(
         'At least email or phone number must be provided',
@@ -425,236 +429,221 @@ export class AuthModuleService {
   }*/
 
   async forgotPasswordService(dto: forgotPasswordDto) {
-  // 1. Validate input
-  if (!dto.email && !dto.phone) {
-    throw new BadRequestException(
-      'Either phone or email must be provided',
-    );
-  }
+    // 1. Validate input
+    if (!dto.email && !dto.phone) {
+      throw new BadRequestException('Either phone or email must be provided');
+    }
 
-  let user;
+    let user;
 
-  // 2. Find user
-  if (dto.phone) {
-    user = await this.userRepository.findOne({
-      where: { phone: dto.phone },
-    });
+    // 2. Find user
+    if (dto.phone) {
+      user = await this.userRepository.findOne({
+        where: { phone: dto.phone },
+      });
 
-    if (!user) {
-      throw new NotFoundException(
-        'User with this phone number not found',
+      if (!user) {
+        throw new NotFoundException('User with this phone number not found');
+      }
+    } else {
+      user = await this.userRepository.findByEmail(dto.email!);
+
+      if (!user) {
+        throw new NotFoundException('User with this email not found');
+      }
+    }
+
+    if (user.isVerified === false) {
+      throw new BadRequestException(
+        'User is not verified. Please verify your account first.',
       );
     }
-  } else {
-    user = await this.userRepository.findByEmail(dto.email!);
 
-    if (!user) {
-      throw new NotFoundException(
-        'User with this email not found',
-      );
-    }
-  }
-
-  if(user.isVerified === false){
-    throw new BadRequestException(
-      'User is not verified. Please verify your account first.',
-    );
-  }
-
-  // 3. Delete previous OTP
- /* const whereCondition = dto.email
+    // 3. Delete previous OTP
+    /* const whereCondition = dto.email
     ? { email: dto.email }
     : { phone: dto.phone };
 
   await this.otpRepository.delete(whereCondition);*/
 
-  // 4. Generate OTP
-  const otpCode = Math.floor(
-    100000 + Math.random() * 900000,
-  ).toString();
+    // 4. Generate OTP
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-  
-  // 5. Expiry
-  const expiresAt = new Date();
-  expiresAt.setMinutes(expiresAt.getMinutes() + 2);
+    // 5. Expiry
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 2);
 
-  // 6. Save OTP
-  const newOtp = this.otpRepository.create({
-    email: dto.email,
-    phone: dto.phone,
-    otp: otpCode,
-    expiresAt,
-    role: user.role,
-    isVerified: false,
-    otpType: OTP_TYPE.RESET_PASSWORD,
-  });
+    // 6. Save OTP
+    const newOtp = this.otpRepository.create({
+      email: dto.email,
+      phone: dto.phone,
+      otp: otpCode,
+      expiresAt,
+      role: user.role,
+      isVerified: false,
+      otpType: OTP_TYPE.RESET_PASSWORD,
+    });
 
-  await this.otpRepository.save(newOtp);
+    await this.otpRepository.save(newOtp);
 
-  // 7. Send OTP
-  if (dto.phone) {
-    await this.smsService.sendOtpSms(dto.phone, otpCode);
+    // 7. Send OTP
+    if (dto.phone) {
+      await this.smsService.sendOtpSms(dto.phone, otpCode);
+
+      return {
+        message: 'OTP has been sent to your phone.',
+      };
+    }
+
+    await this.emailService.sendOtpEmail(dto.email!, otpCode);
 
     return {
-      message: 'OTP has been sent to your phone.',
+      message: 'OTP has been sent to your email.',
     };
   }
 
-  await this.emailService.sendOtpEmail(dto.email!, otpCode);
+  async resetPasswordService(dto: resetPasswordDto) {
+    // 1. Validate input
+    if (!dto.phone && !dto.email) {
+      throw new BadRequestException('Either phone or email must be provided');
+    }
 
-  return {
-    message: 'OTP has been sent to your email.',
-  };
-}
+    // 2. Find user
+    let user;
 
+    if (dto.phone) {
+      user = await this.userRepository.findOne({
+        where: { phone: dto.phone },
+      });
+    } else {
+      user = await this.userRepository.findByEmail(dto.email!);
+    }
 
-async resetPasswordService(dto: resetPasswordDto) {
-  // 1. Validate input
-  if (!dto.phone && !dto.email) {
-    throw new BadRequestException(
-      'Either phone or email must be provided',
-    );
-  }
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
 
-  // 2. Find user
-  let user;
-
-  if (dto.phone) {
-    user = await this.userRepository.findOne({
-      where: { phone: dto.phone },
+    // 3. Find OTP
+    const otp = await this.otpRepository.findOne({
+      where: dto.email
+        ? {
+            email: dto.email,
+            expiresAt: MoreThan(new Date()),
+            otpType: OTP_TYPE.RESET_PASSWORD,
+          }
+        : {
+            phone: dto.phone,
+            expiresAt: MoreThan(new Date()),
+            otpType: OTP_TYPE.RESET_PASSWORD,
+          },
     });
-  } else {
-    user = await this.userRepository.findByEmail(dto.email!);
-  }
 
-  if (!user) {
-    throw new NotFoundException('User not found');
-  }
+    if (!otp) {
+      throw new BadRequestException('OTP is invalid or has expired');
+    }
 
-  // 3. Find OTP
-const otp = await this.otpRepository.findOne({
-  where: dto.email
-    ? {
-        email: dto.email,
-        expiresAt: MoreThan(new Date()),
-        otpType: OTP_TYPE.RESET_PASSWORD,
-      }
-    : {
-        phone: dto.phone,
-        expiresAt: MoreThan(new Date()),
-        otpType: OTP_TYPE.RESET_PASSWORD,
-      },
-});
+    // 4. Check OTP
+    if (otp.otp !== dto.otp) {
+      throw new BadRequestException('Invalid OTP');
+    }
 
-  if (!otp) {
-    throw new BadRequestException('OTP is invalid or has expired');
-  }
-
-  // 4. Check OTP
-  if (otp.otp !== dto.otp) {
-    throw new BadRequestException('Invalid OTP');
-  }
-
-  // 5. Check expiry
- /* if (otp.expiresAt < new Date()) {
+    // 5. Check expiry
+    /* if (otp.expiresAt < new Date()) {
     throw new BadRequestException('OTP has expired');
   }*/
 
-  const isSamePassword = await bcrypt.compare(
-  dto.password,
-  user.hashedPassword,
-);
-
-if (isSamePassword) {
-  throw new BadRequestException(
-    'New password cannot be same as old password',
-  );
-}
-
-  // 6. Hash new password
-  user.hashedPassword = await bcrypt.hash(dto.password, 10);
-  user.hashedRefreshToken = null; // Invalidate existing refresh tokens
-  user.tokenVersion += 1; // Increment token version to invalidate existing tokens
-
-  await this.userRepository.save(user);
-
-  // 7. Delete OTP
-  await this.otpRepository.delete(otp.id);
-
-  return {
-    message: 'Password reset successfully',
-  };
-}
-
-async resendOtpService(dto: ResendOtpDto) {
-
-  // 1. Validate input
-  if (!dto.phone && !dto.email) {
-    throw new BadRequestException(
-      'Either phone or email must be provided',
+    const isSamePassword = await bcrypt.compare(
+      dto.password,
+      user.hashedPassword,
     );
-  }
-    let user;
 
-  // 2. Find user
-  if (dto.phone) {
-    user = await this.userRepository.findOne({
-      where: { phone: dto.phone },
-    });
-
-    if (!user) {
-      throw new NotFoundException(
-        'User with this phone number not found',
+    if (isSamePassword) {
+      throw new BadRequestException(
+        'New password cannot be same as old password',
       );
     }
-  } else {
-    user = await this.userRepository.findByEmail(dto.email!);
 
-    if (!user) {
-      throw new NotFoundException(
-        'User with this email not found',
-      );
-    }
-  }
+    // 6. Hash new password
+    user.hashedPassword = await bcrypt.hash(dto.password, 10);
+    user.hashedRefreshToken = null; // Invalidate existing refresh tokens
+    user.tokenVersion += 1; // Increment token version to invalidate existing tokens
 
-  // 3. Generate OTP
-  const otpCode = Math.floor(
-    100000 + Math.random() * 900000,
-  ).toString();
+    await this.userRepository.save(user);
 
-  
-  // 4. Expiry
-  const expiresAt = new Date();
-  expiresAt.setMinutes(expiresAt.getMinutes() + 2);
-
-  // 5. Save OTP
-  const newOtp = this.otpRepository.create({
-    email: dto.email,
-    phone: dto.phone,
-    otp: otpCode,
-    expiresAt,
-    role: user.role,
-    isVerified: false,
-    otpType: dto.otpType,
-  });
-
-  await this.otpRepository.save(newOtp);
-
-  // 6. Send OTP
-  if (dto.phone) {
-    await this.smsService.sendOtpSms(dto.phone, otpCode);
+    // 7. Delete OTP
+    await this.otpRepository.delete(otp.id);
 
     return {
-      message: 'OTP has been sent to your phone.',
+      message: 'Password reset successfully',
     };
   }
-  else{
 
-  await this.emailService.sendOtpEmail(dto.email!, otpCode);
+  async resendOtpService(dto: ResendOtpDto) {
+    // 1. Validate input
+    if (!dto.phone && !dto.email) {
+      throw new BadRequestException('Either phone or email must be provided');
+    }
+    let user;
+
+    // 2. Find user
+    if (dto.phone) {
+      user = await this.userRepository.findOne({
+        where: { phone: dto.phone },
+      });
+
+      if (!user) {
+        throw new NotFoundException('User with this phone number not found');
+      }
+    } else {
+      user = await this.userRepository.findByEmail(dto.email!);
+
+      if (!user) {
+        throw new NotFoundException('User with this email not found');
+      }
+    }
+
+    // 3. Generate OTP
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // 4. Expiry
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 2);
+
+    // 5. Save OTP
+    const newOtp = this.otpRepository.create({
+      email: dto.email,
+      phone: dto.phone,
+      otp: otpCode,
+      expiresAt,
+      role: user.role,
+      isVerified: false,
+      otpType: dto.otpType,
+    });
+
+    await this.otpRepository.save(newOtp);
+
+    // 6. Send OTP
+    if (dto.phone) {
+      await this.smsService.sendOtpSms(dto.phone, otpCode);
+
+      return {
+        message: 'OTP has been sent to your phone.',
+      };
+    } else {
+      await this.emailService.sendOtpEmail(dto.email!, otpCode);
+    }
+    return {
+      message: 'OTP has been sent to your email.',
+    };
   }
-  return {
-    message: 'OTP has been sent to your email.',
-  };              
 
-}
+  async getFullProfile(userId: number, role: USER_ROLE) {
+    const user = await this.userRepository.getFullProfile(userId, role);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } =
+      user;
+    return safeUser;
+  }
 }

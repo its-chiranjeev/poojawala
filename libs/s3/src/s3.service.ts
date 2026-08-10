@@ -187,6 +187,24 @@ export class S3Service {
     });
   }
 
+  async getAttachmentDownloadUrl(fileKey: string): Promise<string> {
+    if (!fileKey) {
+      throw new Error('File key is required');
+    }
+
+    const normalizedKey = this.normalizeS3Key(fileKey);
+
+    const command = new GetObjectCommand({
+      Bucket: this.bucketName,
+      Key: normalizedKey,
+      ResponseContentDisposition: 'attachment',
+    });
+
+    return await getSignedUrl(this.s3Client, command, {
+      expiresIn: 60 * 60,
+    });
+  }
+
   async getS3DownloadUrl(key: string, expiresInSeconds = 300): Promise<string> {
     const command = new GetObjectCommand({
       Bucket: this.bucketName,

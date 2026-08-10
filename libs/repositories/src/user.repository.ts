@@ -31,10 +31,7 @@ export class UserRepository extends BaseRepository<User> {
     });
   }
 
-  async updateUser(
-    id: string | number,
-    payload: Partial<User>,
-  ) {
+  async updateUser(id: string | number, payload: Partial<User>) {
     await this.repo.update(id, payload);
 
     return this.repo.findOne({
@@ -50,6 +47,10 @@ export class UserRepository extends BaseRepository<User> {
     const { page, limit, search, role, status, sortBy, order } = query;
 
     const qb = this.repo.createQueryBuilder('user');
+    qb.leftJoinAndMapOne('user.profile', 'purohit_profiles', 'profile', 'profile.userId = user.id');
+    qb.leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id');
+    qb.leftJoinAndSelect('user.serviceAreas', 'serviceAreas');
+    qb.leftJoinAndSelect('user.addresses', 'addresses');
     if (search) {
       qb.andWhere(
         new Brackets((qb) => {
@@ -80,6 +81,12 @@ export class UserRepository extends BaseRepository<User> {
       qb.andWhere('user.status = :status', { status });
     }
 
+    if (query.verificationStatus && role === 'PUROHIT') {
+      qb.andWhere('profile.verificationStatus = :verificationStatus', {
+        verificationStatus: query.verificationStatus,
+      });
+    }
+
     qb.orderBy(`user.${sortBy}`, order);
 
     qb.skip((page - 1) * limit);
@@ -95,16 +102,13 @@ export class UserRepository extends BaseRepository<User> {
   }
 
   async findById(id: string | number) {
-    return this.repo.findOne({where: { id } as any});}
-  async findApprovedPurohits(
-    page = 1,
-    limit = 10,
-    search?: string,
-  ) {
+    return this.repo.findOne({ where: { id } as any });
+  }
+  async findApprovedPurohits(page = 1, limit = 10, search?: string) {
     const query = this.repo
-    .createQueryBuilder('user')
-    .where('user.role = :role', { role: USER_ROLE.PUROHIT })
-    .andWhere('user.status = :status', { status: USER_STATUS.ACTIVE });
+      .createQueryBuilder('user')
+      .where('user.role = :role', { role: USER_ROLE.PUROHIT })
+      .andWhere('user.status = :status', { status: USER_STATUS.ACTIVE });
 
     if (search) {
       const isNumber = !isNaN(Number(search));
@@ -129,9 +133,7 @@ export class UserRepository extends BaseRepository<User> {
       }
     }
 
-    query
-    .skip((page - 1) * limit)
-    .take(limit);
+    query.skip((page - 1) * limit).take(limit);
 
     const [users, total] = await query.getManyAndCount();
 
@@ -169,5 +171,25 @@ export class UserRepository extends BaseRepository<User> {
       },
     });
   }
-  }
 
+  async getFullProfile(userId: number, role: USER_ROLE) {
+    const qb = this.repo
+      .createQueryBuilder('user')
+      .where('user.id = :id', { id: userId });
+
+    if (role === USER_ROLE.PUROHIT) {
+      qb.leftJoinAndMapOne(
+        'user.profile',
+        'purohit_profiles',
+        'profile',
+        'profile.userId = user.id',
+      )
+      .leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id')
+      .leftJoinAndSelect('user.serviceAreas', 'serviceAreas');
+    } else if (role === USER_ROLE.CUSTOMER) {
+      qb.leftJoinAndSelect('user.addresses', 'addresses');
+    }
+
+    return qb.getOne();
+  }
+}

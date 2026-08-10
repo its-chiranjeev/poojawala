@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsNumber,
@@ -64,10 +65,10 @@ export class UpdateServiceDto {
 }
 
 export class UpdatePurohitServiceDto{
-  @IsOptional()
+ @IsOptional()
  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  customPrice: number;
+  customPrice!: number;
 
   @IsOptional()
   @IsInt()
@@ -80,3 +81,8 @@ export class UpdatePurohitServiceDto{
 
 } 
  
+export class UpdateServiceStatusDto {
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  isActive!: boolean;
+}

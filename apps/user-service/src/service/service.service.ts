@@ -1,7 +1,18 @@
-import { CreateServiceDto, CreatePurohitServiceDto, PurohitServiceItemDto } from '@likemyproduct/dtos/service/create.service.dto';
+import {
+  CreateServiceDto,
+  CreatePurohitServiceDto,
+  PurohitServiceItemDto,
+} from '@likemyproduct/dtos/service/create.service.dto';
 import { GetServicesQueryDto } from '@likemyproduct/dtos/service/get.services.query.dto';
-import { UpdateServiceDto, UpdatePurohitServiceDto } from '@likemyproduct/dtos/service/update.service.dto';
-import { ServiceRepository, PurohitServiceRepository, PurohitProfileRepository } from '@likemyproduct/repositories';
+import {
+  UpdateServiceDto,
+  UpdatePurohitServiceDto,
+} from '@likemyproduct/dtos/service/update.service.dto';
+import {
+  ServiceRepository,
+  PurohitServiceRepository,
+  PurohitProfileRepository,
+} from '@likemyproduct/repositories';
 import { S3Service } from '@likemyproduct/s3';
 import {
   BadRequestException,
@@ -15,7 +26,7 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { QueryFailedError } from 'typeorm';
 
-// 177 87 
+// 177 87
 
 @Injectable()
 export class ServiceService {
@@ -24,15 +35,33 @@ export class ServiceService {
     private readonly s3Service: S3Service,
     private readonly PurohitServiceRepository: PurohitServiceRepository,
     private readonly PurohitProfileRepository: PurohitProfileRepository,
-  ) { }
+  ) {}
 
   async findAllServices(query: GetServicesQueryDto) {
     const result = await this.serviceRepository.findAllServices(query);
 
+    const dataWithUrls = await Promise.all(
+      result.data.map(async (service: any) => {
+        let iconDownloadurl: string | null = null;
+        if (service.iconUrl) {
+          try {
+            iconDownloadurl = await this.s3Service.getDownloadUrl(
+              service.iconUrl,
+            );
+          } catch (e) {
+            console.error('Failed to generate pre-signed URL for icon:', e);
+          }
+        }
+
+        (service as any).iconDownloadurl = iconDownloadurl;
+        return service;
+      }),
+    );
+
     return {
       success: true,
       message: 'Services fetched successfully',
-      data: result.data,
+      data: dataWithUrls,
       pagination: {
         page: result.page,
         limit: result.limit,
@@ -48,55 +77,64 @@ export class ServiceService {
       icon?: Express.Multer.File[];
     },
   ) {
-    const existing = await this.serviceRepository.findOne({
-      where: [{ name: dto.name }, { slug: dto.slug }],
-    });
+    try {
+      const existing = await this.serviceRepository.findOne({
+        where: [{ name: dto.name }, { slug: dto.slug }],
+      });
 
-    if (existing) {
-      throw new ConflictException(
-        'Service with same name or slug already exists',
-      );
-    }
-
-    if (dto.minPrice > dto.maxPrice) {
-      throw new BadRequestException(
-        'Minimum price cannot be greater than maximum price',
-      );
-    }
-
-    let iconUrl: string | undefined;
-
-    if (files?.icon?.length) {
-      iconUrl = await this.s3Service.uploadFileHelper(
-        dto.slug,
-        'icon',
-        files.icon,
-      );
-    }
-
-    const service = this.serviceRepository.create({
-      ...dto,
-      iconUrl,
-      isActive: dto.isActive ?? true,
-    });
-
-    const savedService = await this.serviceRepository.save(service);
-
-    if (savedService.iconUrl) {
-      try {
-        savedService.iconUrl = await this.s3Service.getDownloadUrl(
-          savedService.iconUrl,
+      if (existing) {
+        throw new ConflictException(
+          'Service with same name or slug already exists',
         );
-      } catch (e) {
-        console.error('Failed to generate signed URL:', e);
       }
-    }
 
-    return {
-      success: true,
-      message: 'Service created successfully',
-      data: savedService,
-    };
+      if (dto.minPrice > dto.maxPrice) {
+        throw new BadRequestException(
+          'Minimum price cannot be greater than maximum price',
+        );
+      }
+
+      let iconUrl: string | undefined;
+
+      if (files?.icon?.length) {
+        iconUrl = await this.s3Service.uploadFileHelper(
+          dto.slug,
+          'icon',
+          files.icon,
+        );
+      }
+
+      const service = this.serviceRepository.create({
+        ...dto,
+        iconUrl,
+        isActive: dto.isActive ?? true,
+      });
+
+      const savedService = await this.serviceRepository.save(service);
+
+      if (savedService.iconUrl) {
+        try {
+          savedService.iconUrl = await this.s3Service.getDownloadUrl(
+            savedService.iconUrl,
+          );
+        } catch (e) {
+          console.error('Failed to generate signed URL:', e);
+        }
+      }
+
+      return {
+        success: true,
+        message: 'Service created successfully',
+        data: savedService,
+      };
+    } catch (error: any) {
+      console.error('Error in createService:', error);
+      const errorMsg =
+        error instanceof Error ? error.stack : JSON.stringify(error);
+      throw new InternalServerErrorException(
+        `createService failed: ${errorMsg}`,
+      );
+    }
   }
 
   async updateService(
@@ -167,21 +205,21 @@ export class ServiceService {
 
   async findServiceById(id: number) {
     const service = await this.serviceRepository.findById(id);
-  
+
     if (!service) {
       throw new NotFoundException('Service not found');
     }
-  
+
+    let iconDownloadurl: string | null = null;
     if (service.iconUrl) {
       try {
-        service.iconUrl = await this.s3Service.getDownloadUrl(
-          service.iconUrl,
-        );
+        iconDownloadurl = await this.s3Service.getDownloadUrl(service.iconUrl);
       } catch (e) {
         console.error('Failed to generate pre-signed URL for icon:', e);
       }
     }
-  
+    (service as any).iconDownloadurl = iconDownloadurl;
+
     return {
       success: true,
       message: 'Service fetched successfully',
@@ -221,8 +259,23 @@ export class ServiceService {
     }
   }
 
-  async addService(dto: CreatePurohitServiceDto, userId: number) {
+  async updateServiceStatus(id: number, isActive: boolean) {
+    const service = await this.serviceRepository.findOne({ where: { id } });
+    if (!service) {
+      throw new NotFoundException('Service not found');
+    }
 
+    service.isActive = isActive;
+    const updatedService = await this.serviceRepository.save(service);
+
+    return {
+      success: true,
+      message: 'Service status updated successfully',
+      data: updatedService,
+    };
+  }
+
+  async addService(dto: CreatePurohitServiceDto, userId: number) {
     const purohitProfile = await this.PurohitProfileRepository.findOne({
       where: { userId },
     });
@@ -251,7 +304,7 @@ export class ServiceService {
       if (errors.length > 0) {
         failed.push({
           serviceId: item.serviceId,
-          reason: errors.flatMap(error =>
+          reason: errors.flatMap((error) =>
             Object.values(error.constraints ?? {}),
           ),
         });
@@ -328,10 +381,7 @@ export class ServiceService {
     };
   }
 
-
   async deletePurohitService(Id: number, userId: number) {
-
-
     const purohitService = await this.PurohitServiceRepository.findOne({
       where: { id: Id },
     });
@@ -349,7 +399,9 @@ export class ServiceService {
     }
 
     if (purohitService.purohitId !== purohitProfile.id) {
-      throw new ForbiddenException('You are not authorized to delete this service');
+      throw new ForbiddenException(
+        'You are not authorized to delete this service',
+      );
     }
 
     await this.PurohitServiceRepository.softDelete(Id);
@@ -360,8 +412,12 @@ export class ServiceService {
     };
   }
 
-  async updatePurohitService(Id: number, dto: UpdatePurohitServiceDto, userId: number) {
-    console.log(dto)
+  async updatePurohitService(
+    Id: number,
+    dto: UpdatePurohitServiceDto,
+    userId: number,
+  ) {
+    console.log(dto);
     const purohitService = await this.PurohitServiceRepository.findOne({
       where: { id: Id },
     });
@@ -379,19 +435,21 @@ export class ServiceService {
     }
 
     if (purohitService.purohitId !== purohitProfile.id) {
-      throw new ForbiddenException('You are not authorized to update this service');
+      throw new ForbiddenException(
+        'You are not authorized to update this service',
+      );
     }
 
     Object.assign(purohitService, dto);
 
-    const updatedService = await this.PurohitServiceRepository.save(purohitService);
+    const updatedService =
+      await this.PurohitServiceRepository.save(purohitService);
 
     return {
       success: true,
       message: 'Purohit service updated successfully',
       data: updatedService,
     };
-
   }
 
   async getPurohitServiceById(id: number, userId: number) {
