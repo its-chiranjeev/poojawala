@@ -35,16 +35,16 @@ export class PurohitBankAccount {
   @JoinColumn({ name: 'purohitId' })
   purohit!: PurohitProfile;
 
-  @Column({ type: 'varchar', length: 100 })
+  @Column({ type: 'varchar', length: 100, nullable: true })
   accountHolderName!: string;
 
-  @Column({ type: 'varchar', length: 30 })
+  @Column({ type: 'varchar', length: 30, nullable: true })
   accountNumber!: string;
 
-  @Column({ type: 'varchar', length: 15 })
+  @Column({ type: 'varchar', length: 15, nullable: true })
   ifscCode!: string;
 
-  @Column({ type: 'varchar', length: 100 })
+  @Column({ type: 'varchar', length: 100, nullable: true })
   bankName!: string;
 
   @Column({
@@ -53,6 +53,9 @@ export class PurohitBankAccount {
     default: BANK_ACCOUNT_TYPE.SAVINGS,
   })
   accountType!: BANK_ACCOUNT_TYPE;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  upiId?: string;
 
   @Column({ type: 'boolean', default: false })
   isPrimary!: boolean;
