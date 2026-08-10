@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Delete, Param, ParseIntPipe, Patch, Post, Query, Req, UseGuards, UseInterceptors, UploadedFiles, BadRequestException } from '@nestjs/common';
 import { BookingService } from './booking.service';
-import { CreateBookingDto, UpdateBookingDto, BookingQueryDto, CancelBookingDto, RespondBookingDto, AssignBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto } from '@likemyproduct/dtos';
+import { CreateBookingDto, UpdateBookingDto, BookingQueryDto, CancelBookingDto, RespondBookingDto, AssignBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto, RescheduleBookingDto, RepeatBookingDto } from '@likemyproduct/dtos';
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@likemyproduct/common';
 import { USER_ROLE, User } from '@likemyproduct/entities';
 import { FilesInterceptor } from '@nestjs/platform-express';
@@ -94,6 +94,36 @@ export class BookingController {
   ) {
     return this.bookingService.restoreBooking(
       bookingId,
+    );
+  }
+
+  @Patch(':bookingId/reschedule')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(USER_ROLE.CUSTOMER)
+  async rescheduleBooking(
+    @Req() req: AuthenticatedRequest,
+    @Param('bookingId', ParseIntPipe) bookingId: number,
+    @Body() dto: RescheduleBookingDto,
+  ) {
+    return this.bookingService.rescheduleBooking(
+      req.user,
+      bookingId,
+      dto,
+    );
+  }
+
+  @Post(':bookingId/repeat')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(USER_ROLE.CUSTOMER)
+  async repeatBooking(
+    @Req() req: AuthenticatedRequest,
+    @Param('bookingId', ParseIntPipe) bookingId: number,
+    @Body() dto: RepeatBookingDto,
+  ) {
+    return this.bookingService.repeatBooking(
+      req.user,
+      bookingId,
+      dto,
     );
   }
 

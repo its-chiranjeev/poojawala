@@ -566,4 +566,46 @@ export class PaymentRepository extends BaseRepository<Payment> {
       },
     });
   }
+
+  async findBookingPaymentByRazorpayPaymentId(
+    razorpayPaymentId: string,
+  ): Promise<Payment | null> {
+    return this.repo.findOne({
+      where: {
+        razorpayPaymentId,
+
+        paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+      },
+
+      relations: {
+        booking: true,
+
+        paymentBookings: {
+          booking: true,
+        },
+      },
+    });
+  }
+
+  async getReservedRefundAmountByRazorpayPaymentId(
+    razorpayPaymentId: string,
+  ): Promise<number> {
+    const result = await this.repo
+      .createQueryBuilder('refund')
+      .select('COALESCE(SUM(refund.amount), 0)', 'total')
+      .where('refund.paymentType = :paymentType', {
+        paymentType: PAYMENT_TYPE.CUSTOMER_REFUND,
+      })
+      .andWhere('refund.razorpayPaymentId = :razorpayPaymentId', {
+        razorpayPaymentId,
+      })
+      .andWhere('refund.status IN (:...statuses)', {
+        statuses: [PAYMENT_STATUS.PENDING, PAYMENT_STATUS.SUCCESS],
+      })
+      .getRawOne<{
+        total: string;
+      }>();
+
+    return Number(result?.total ?? 0);
+  }
 }

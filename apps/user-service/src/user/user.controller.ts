@@ -11,8 +11,8 @@ import { filter } from 'rxjs';
 import { UpsertPlatformSettingDto } from "@likemyproduct/dtos/Platform setting/Platform.dto";
 import { GetAllUsersDto } from "@likemyproduct/dtos/user/get-all-users.dto";
 import { CreateCustomerAddressDto } from "@likemyproduct/dtos/user/add-customer-address.dto";
-import { CreatePurohitServiceAreaDto } from "@likemyproduct/dtos/user/add-prohit-address.dto";
-import { UpdatePurohitServiceAreaDto } from "@likemyproduct/dtos/user/update-progit-address.dto";
+import { CreatePurohitServiceAreaDto } from "@likemyproduct/dtos/user/add-purohit-address.dto";
+import { UpdatePurohitServiceAreaDto } from "@likemyproduct/dtos/user/update-purohit-address.dto";
 import { Cron } from '@nestjs/schedule';
 
 @Controller('users')

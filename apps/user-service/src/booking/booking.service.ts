@@ -47,6 +47,8 @@ import {
   AssignBookingDto,
   UpdateBookingStatusDto,
   VerifyCompletionOtpDto,
+  RescheduleBookingDto,
+  RepeatBookingDto,
 } from '@likemyproduct/dtos';
 import { S3Service } from '@likemyproduct/s3';
 import { SmsService } from '@likemyproduct/sms-services';
@@ -2392,6 +2394,537 @@ export class BookingService {
         hasNextPage: page * limit < total,
 
         hasPreviousPage: page > 1,
+      },
+    };
+  }
+
+  async rescheduleBooking(
+    user: User,
+    bookingId: number,
+    dto: RescheduleBookingDto,
+  ): Promise<{
+    message: string;
+    assignmentChanged: boolean;
+    booking: ReturnType<BookingService['formatBookingResponse']>;
+    reschedule: {
+      previousScheduledAt: Date;
+      newScheduledAt: Date;
+      reason: string | null;
+    };
+  }> {
+    if (user.role !== USER_ROLE.CUSTOMER) {
+      throw new ForbiddenException('Only customers can reschedule bookings');
+    }
+
+    const minimumLeadTimeMinutes = 120;
+    const maximumAdvanceDays = 180;
+    const newScheduledAt = new Date(dto.scheduledAt);
+
+    if (Number.isNaN(newScheduledAt.getTime())) {
+      throw new BadRequestException('Invalid scheduled date and time');
+    }
+
+    const minimumScheduledAt = new Date(
+      Date.now() + minimumLeadTimeMinutes * 60 * 1000,
+    );
+
+    if (newScheduledAt < minimumScheduledAt) {
+      throw new BadRequestException(
+        `Booking must be rescheduled at least ${minimumLeadTimeMinutes} minutes in advance`,
+      );
+    }
+
+    const maximumScheduledAt = new Date(
+      Date.now() + maximumAdvanceDays * 24 * 60 * 60 * 1000,
+    );
+
+    if (newScheduledAt > maximumScheduledAt) {
+      throw new BadRequestException(
+        `Booking cannot be rescheduled more than ${maximumAdvanceDays} days in advance`,
+      );
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const bookingRepository = manager.getRepository(Booking);
+
+      const addressRepository = manager.getRepository(CustomerAddress);
+
+      const booking = await bookingRepository
+        .createQueryBuilder('booking')
+        .where('booking.id = :bookingId', {
+          bookingId,
+        })
+        .setLock('pessimistic_write')
+        .getOne();
+
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
+
+      if (booking.customerId !== user.id) {
+        throw new ForbiddenException(
+          'You can only reschedule your own booking',
+        );
+      }
+
+      const reschedulableStatuses: BOOKING_STATUS[] = [
+        BOOKING_STATUS.PENDING,
+        BOOKING_STATUS.ACCEPTED,
+      ];
+
+      if (!reschedulableStatuses.includes(booking.status)) {
+        throw new BadRequestException(
+          `Booking cannot be rescheduled when status is ${booking.status}`,
+        );
+      }
+
+      if (booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID) {
+        throw new BadRequestException(
+          'A paid booking cannot be rescheduled. Please contact support',
+        );
+      }
+
+      const previousScheduledAt = new Date(booking.scheduledAt);
+
+      if (previousScheduledAt.getTime() === newScheduledAt.getTime()) {
+        throw new BadRequestException(
+          'The new scheduled date and time must be different from the current scheduled date and time',
+        );
+      }
+
+      const rescheduleLockKey = [
+        booking.customerId,
+        booking.serviceId,
+        newScheduledAt.toISOString(),
+      ].join(':');
+
+      await manager.query(
+        `
+          SELECT pg_advisory_xact_lock(
+            hashtext($1)
+          )
+        `,
+        [rescheduleLockKey],
+      );
+
+      const duplicateStatuses: BOOKING_STATUS[] = [
+        BOOKING_STATUS.PENDING,
+        BOOKING_STATUS.ACCEPTED,
+        BOOKING_STATUS.ENROUTE,
+        BOOKING_STATUS.ARRIVED,
+        BOOKING_STATUS.ONGOING,
+      ];
+
+      const duplicateBookingExists = await bookingRepository
+        .createQueryBuilder('duplicateBooking')
+        .where('duplicateBooking.id != :bookingId', {
+          bookingId: booking.id,
+        })
+        .andWhere('duplicateBooking.customerId = :customerId', {
+          customerId: booking.customerId,
+        })
+        .andWhere('duplicateBooking.serviceId = :serviceId', {
+          serviceId: booking.serviceId,
+        })
+        .andWhere('duplicateBooking.scheduledAt = :scheduledAt', {
+          scheduledAt: newScheduledAt,
+        })
+        .andWhere('duplicateBooking.status IN (:...statuses)', {
+          statuses: duplicateStatuses,
+        })
+        .getExists();
+
+      if (duplicateBookingExists) {
+        throw new ConflictException(
+          'An active booking for this service and scheduled time already exists',
+        );
+      }
+
+      if (dto.customerAddressId !== undefined) {
+        const customerAddress = await addressRepository.findOne({
+          where: {
+            id: dto.customerAddressId,
+            customerId: user.id,
+          },
+        });
+
+        if (!customerAddress) {
+          throw new NotFoundException(
+            'Customer address not found or does not belong to you',
+          );
+        }
+
+        const customerPincode = customerAddress.pincode?.trim();
+
+        if (!customerPincode) {
+          throw new BadRequestException(
+            'A valid pincode is required in the selected customer address',
+          );
+        }
+
+        const latitude = Number(customerAddress.latitude);
+        const longitude = Number(customerAddress.longitude);
+
+        if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+          throw new BadRequestException(
+            'Selected customer address does not have a valid latitude',
+          );
+        }
+
+        if (
+          !Number.isFinite(longitude) ||
+          longitude < -180 ||
+          longitude > 180
+        ) {
+          throw new BadRequestException(
+            'Selected customer address does not have a valid longitude',
+          );
+        }
+
+        booking.customerAddressId = customerAddress.id;
+        booking.addressSnapshot = this.createAddressSnapshot(customerAddress);
+        booking.customerPincode = customerPincode;
+      }
+
+      booking.scheduledAt = newScheduledAt;
+
+      const previousPurohitId = booking.purohitId;
+      const eligiblePurohitIds = await this.findEligiblePurohitIdsForBooking(
+        manager,
+        booking,
+      );
+
+      let assignmentChanged = false;
+      let message = 'Booking rescheduled successfully';
+
+      if (booking.status === BOOKING_STATUS.ACCEPTED && previousPurohitId) {
+        const assignedPurohitIsAvailable =
+          eligiblePurohitIds.includes(previousPurohitId);
+
+        if (assignedPurohitIsAvailable) {
+          booking.purohitId = previousPurohitId;
+          booking.status = BOOKING_STATUS.ACCEPTED;
+          booking.filteredPurohitIds = [];
+
+          message =
+            'Booking rescheduled successfully. The assigned Purohit remains available';
+        } else {
+          assignmentChanged = true;
+          booking.purohitId = undefined;
+          booking.status = BOOKING_STATUS.PENDING;
+          booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
+          booking.filteredPurohitIds = eligiblePurohitIds.filter(
+            (purohitId) => purohitId !== previousPurohitId,
+          );
+
+          message =
+            booking.filteredPurohitIds.length > 0
+              ? 'Booking rescheduled successfully. The previous Purohit is unavailable, so the booking has been sent to other eligible Purohits'
+              : 'Booking rescheduled successfully, but no eligible Purohit is currently available for the new schedule';
+        }
+      } else {
+        booking.purohitId = undefined;
+        booking.status = BOOKING_STATUS.PENDING;
+        booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
+        booking.filteredPurohitIds = eligiblePurohitIds;
+
+        message =
+          eligiblePurohitIds.length > 0
+            ? 'Booking rescheduled successfully and sent to eligible Purohits'
+            : 'Booking rescheduled successfully, but no eligible Purohit is currently available';
+      }
+
+      const reason = dto.reason?.trim() || null;
+      const savedBooking = await bookingRepository.save(booking);
+      const rescheduledBooking = await bookingRepository.findOne({
+        where: {
+          id: savedBooking.id,
+        },
+        relations: {
+          customer: true,
+          service: true,
+          customerAddress: true,
+          purohit: {
+            user: true,
+          },
+        },
+      });
+
+      const finalBooking = rescheduledBooking ?? savedBooking;
+
+      return {
+        message,
+        assignmentChanged,
+        booking: this.formatBookingResponse(finalBooking),
+        reschedule: {
+          previousScheduledAt,
+          newScheduledAt,
+          reason,
+        },
+      };
+    });
+  }
+
+  private formatBookingResponse(booking: Booking) {
+    const customerName = [
+      booking.customer?.firstName,
+      booking.customer?.lastName,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    const purohitUser = booking.purohit?.user;
+
+    const purohitName = [purohitUser?.firstName, purohitUser?.lastName]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    const customerAddress = booking.customerAddress;
+
+    const addressSnapshot = (booking.addressSnapshot ?? {}) as Record<
+      string,
+      unknown
+    >;
+
+    const latitude = customerAddress?.latitude ?? addressSnapshot['latitude'];
+
+    const longitude =
+      customerAddress?.longitude ?? addressSnapshot['longitude'];
+
+    return {
+      id: booking.id,
+      bookingNumber: booking.bookingNumber,
+      scheduledAt: booking.scheduledAt,
+      status: booking.status,
+      paymentStatus: booking.paymentStatus,
+      assignmentType: booking.assignmentType,
+
+      service: {
+        id: booking.service?.id ?? booking.serviceId,
+        name: booking.service?.name ?? null,
+        iconUrl: booking.service?.iconUrl ?? null,
+        durationMinutes: booking.service?.durationMinutes ?? null,
+      },
+
+      customer: {
+        id: booking.customer?.id ?? booking.customerId,
+        name: customerName || null,
+        email: booking.customer?.email ?? null,
+        phone: booking.customer?.phone ?? null,
+        profileImage: booking.customer?.profileImage ?? null,
+      },
+
+      purohit: booking.purohit
+        ? {
+            profileId: booking.purohit.id,
+            userId: booking.purohit.userId,
+            name: purohitName || null,
+            email: purohitUser?.email ?? null,
+            phone: purohitUser?.phone ?? null,
+            profileImage: purohitUser?.profileImage ?? null,
+            avgRating: Number(booking.purohit.avgRating ?? 0),
+          }
+        : null,
+
+      address: {
+        id: customerAddress?.id ?? booking.customerAddressId ?? null,
+        label: customerAddress?.addressLabel ?? null,
+        fullAddress:
+          (customerAddress?.fullAddress ??
+            String(addressSnapshot['fullAddress'] ?? '')) || null,
+        city:
+          (customerAddress?.city ?? String(addressSnapshot['city'] ?? '')) || null,
+        pincode:
+          (customerAddress?.pincode ??
+            booking.customerPincode ??
+            String(addressSnapshot['pincode'] ?? '')) || null,
+        latitude:
+          latitude !== null &&
+          latitude !== undefined &&
+          Number.isFinite(Number(latitude))
+            ? Number(latitude) : null,
+        longitude:
+          longitude !== null &&
+          longitude !== undefined &&
+          Number.isFinite(Number(longitude))
+            ? Number(longitude)
+            : null,
+      },
+
+      pricing: {
+        agreedPrice: Number(booking.agreedPrice),
+        platformCommission: Number(booking.platformCommission),
+        purohitPayoutAmount: Number(booking.purohitPayoutAmount),
+        discountAmount: Number(booking.discountAmount ?? 0),
+        donationAmount: Number(booking.donationAmount ?? 0),
+        finalAmount: Number(booking.finalAmount),
+        couponCode: booking.couponCode ?? null,
+      },
+
+      specialInstructions: booking.specialInstructions ?? null,
+      customFields: booking.customFields ?? null,
+      eligiblePurohitCount: booking.filteredPurohitIds?.length ?? 0,
+    };
+  }
+
+  async repeatBooking(
+    user: User,
+    originalBookingId: number,
+    dto: RepeatBookingDto,
+  ): Promise<{
+    message: string;
+    originalBooking: {
+      id: number;
+      bookingNumber: string;
+      status: BOOKING_STATUS;
+    };
+    booking: {
+      id: number;
+      bookingNumber: string;
+      scheduledAt: Date;
+      status: BOOKING_STATUS;
+      paymentStatus: BOOKING_PAYMENT_STATUS;
+      assignmentType: ASSIGNMENT_TYPE;
+      serviceId: number;
+      customerAddressId: number | null;
+      finalAmount: number;
+      eligiblePurohitCount: number;
+    };
+  }> {
+    if (user.role !== USER_ROLE.CUSTOMER) {
+      throw new ForbiddenException('Only customers can repeat bookings');
+    }
+
+    const originalBooking =
+      await this.bookingRepository.findBookingById(originalBookingId);
+
+    if (!originalBooking) {
+      throw new NotFoundException('Original booking not found');
+    }
+
+    if (originalBooking.customerId !== user.id) {
+      throw new ForbiddenException('You can only repeat your own bookings');
+    }
+
+    /*
+     * Only finished or cancelled bookings can be repeated.
+     *
+     * Active bookings must not be repeated because they are
+     * still pending, assigned, in transit or in progress.
+     */
+    const repeatableStatuses: BOOKING_STATUS[] = [
+      BOOKING_STATUS.COMPLETED,
+      BOOKING_STATUS.CANCELLED,
+    ];
+
+    if (!repeatableStatuses.includes(originalBooking.status)) {
+      throw new BadRequestException(
+        `Booking cannot be repeated when status is ${originalBooking.status}`,
+      );
+    }
+
+    if (!originalBooking.serviceId) {
+      throw new BadRequestException(
+        'Original booking service information is missing',
+      );
+    }
+
+    const customerAddressId =
+      dto.customerAddressId ?? originalBooking.customerAddressId;
+
+    if (!customerAddressId) {
+      throw new BadRequestException(
+        'Please select an address for the repeated booking',
+      );
+    }
+
+    const scheduledAt = new Date(dto.scheduledAt);
+
+    if (Number.isNaN(scheduledAt.getTime())) {
+      throw new BadRequestException('Invalid scheduled date and time');
+    }
+
+    /*
+     * createBooking() performs the main lead-time and
+     * advance-booking validations. This early check gives
+     * a clearer repeat-booking error before constructing
+     * the new DTO.
+     */
+    if (scheduledAt <= new Date()) {
+      throw new BadRequestException(
+        'Repeated booking must be scheduled for a future date and time',
+      );
+    }
+
+    /*
+     * Do not copy the old coupon automatically.
+     *
+     * It may have expired, become inactive, reached its
+     * usage limit or no longer apply to the service.
+     */
+    const createBookingDto: CreateBookingDto = {
+      serviceId: originalBooking.serviceId,
+
+      customerAddressId,
+
+      scheduledAt: dto.scheduledAt,
+
+      specialInstructions:
+        dto.specialInstructions !== undefined
+          ? dto.specialInstructions.trim() || undefined
+          : originalBooking.specialInstructions,
+
+      customFields:
+        dto.customFields !== undefined
+          ? dto.customFields
+          : originalBooking.customFields,
+
+      donationAmount:
+        dto.donationAmount !== undefined
+          ? Number(dto.donationAmount)
+          : Number(originalBooking.donationAmount ?? 0),
+
+      couponCode: dto.couponCode?.trim() || undefined,
+    };
+
+    /*
+     * Reuse createBooking() so all current booking rules
+     * remain centralized:
+     *
+     * - Active customer validation
+     * - Service validation
+     * - Address ownership validation
+     * - Minimum lead time
+     * - Maximum advance period
+     * - Pricing and commission calculation
+     * - Coupon validation
+     * - Duplicate booking prevention
+     * - Eligible Purohit matching
+     * - New booking number generation
+     */
+    const repeatedBooking = await this.createBooking(user, createBookingDto);
+
+    return {
+      message: 'Booking repeated successfully',
+      originalBooking: {
+        id: originalBooking.id,
+        bookingNumber: originalBooking.bookingNumber,
+        status: originalBooking.status,
+      },
+
+      booking: {
+        id: repeatedBooking.id,
+        bookingNumber: repeatedBooking.bookingNumber,
+        scheduledAt: repeatedBooking.scheduledAt,
+        status: repeatedBooking.status,
+        paymentStatus: repeatedBooking.paymentStatus,
+        assignmentType: repeatedBooking.assignmentType,
+        serviceId: repeatedBooking.serviceId,
+        customerAddressId: repeatedBooking.customerAddressId ?? null,
+        finalAmount: Number(repeatedBooking.finalAmount),
+        eligiblePurohitCount: repeatedBooking.filteredPurohitIds?.length ?? 0,
       },
     };
   }

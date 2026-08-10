@@ -26,3 +26,5 @@ export * from './payment/create-refund.dto';
 export * from './auth/customer-favorite.dto';
 export * from './auth/update-user.dto';
 export * from './coupon/create-coupon.dto';
+export * from './booking/reschedule-booking.dto';
+export * from './booking/repeat-booking.dto';
