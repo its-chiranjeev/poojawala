@@ -1,14 +1,14 @@
-import { CreatePurohitByAdminDto, CustomerFavoriteDto, GenerateOtpDto, RegisterNormalUserDto, UpdateUserDto, VerifyPurohitDto } from '@likemyproduct/dtos';
-import { UpsertPlatformSettingDto } from '@likemyproduct/dtos/Platform setting/Platform.dto';
-import { CreateCustomerAddressDto } from '@likemyproduct/dtos/user/add-customer-address.dto';
-import { CreatePurohitServiceAreaDto } from '@likemyproduct/dtos/user/add-purohit-address.dto';
-import { GetAllUsersDto } from '@likemyproduct/dtos/user/get-all-users.dto';
-import { UpdatePurohitServiceAreaDto } from '@likemyproduct/dtos/user/update-purohit-address.dto';
-import { EmailService } from '@likemyproduct/email-services';
-import { BANK_VERIFICATION_STATUS, Otp, OTP_TYPE, PUROHIT_MEDIA_TYPE, PUROHIT_MEDIA_VERIFICATION_STATUS, PUROHIT_VERIFICATION_STATUS, PurohitBankAccount, PurohitMedia, PurohitProfile, User, USER_ROLE, USER_STATUS, } from '@likemyproduct/entities';
-import { CustomerAddressRepository, CustomerFavoriteRepository, OtpRepository, PlatformSettingRepository, PurohitBankAccountRepository, PurohitMediaRepository, PurohitProfileRepository, PurohitServiceAreaRepository, UserRepository, } from '@likemyproduct/repositories';
-import { S3Service } from '@likemyproduct/s3';
-import { SmsService } from '@likemyproduct/sms-services';
+import { CreatePurohitByAdminDto, CustomerFavoriteDto, GenerateOtpDto, RegisterNormalUserDto, UpdateUserDto, VerifyPurohitDto } from '@poojawala/dtos';
+import { UpsertPlatformSettingDto } from '@poojawala/dtos/Platform setting/Platform.dto';
+import { CreateCustomerAddressDto } from '@poojawala/dtos/user/add-customer-address.dto';
+import { CreatePurohitServiceAreaDto } from '@poojawala/dtos/user/add-purohit-address.dto';
+import { GetAllUsersDto } from '@poojawala/dtos/user/get-all-users.dto';
+import { UpdatePurohitServiceAreaDto } from '@poojawala/dtos/user/update-purohit-address.dto';
+import { EmailService } from '@poojawala/email-services';
+import { BANK_VERIFICATION_STATUS, Otp, OTP_TYPE, PUROHIT_MEDIA_TYPE, PUROHIT_MEDIA_VERIFICATION_STATUS, PUROHIT_VERIFICATION_STATUS, PurohitBankAccount, PurohitMedia, PurohitProfile, User, USER_ROLE, USER_STATUS, } from '@poojawala/entities';
+import { CustomerAddressRepository, CustomerFavoriteRepository, OtpRepository, PlatformSettingRepository, PurohitBankAccountRepository, PurohitMediaRepository, PurohitProfileRepository, PurohitServiceAreaRepository, UserRepository, } from '@poojawala/repositories';
+import { S3Service } from '@poojawala/s3';
+import { SmsService } from '@poojawala/sms-services';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, InternalServerErrorException, Logger, NotFoundException, } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
@@ -720,7 +720,6 @@ export class UserService {
         qualification: profile?.qualification,
         experienceYears: profile?.experienceYears,
         avgRating: profile?.avgRating,
-        totalReviews: profile?.totalReviews,
         isOnlineAvailable: profile?.isOnlineAvailable,
         isOfflineAvailable: profile?.isOfflineAvailable,
         languages: profile?.languages,

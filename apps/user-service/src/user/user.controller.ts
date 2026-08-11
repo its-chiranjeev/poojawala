@@ -4,14 +4,14 @@ import { UserService } from "./user.service";
 import type { Response } from 'express';
 import * as crypto from 'crypto';
 import { AuthGuard } from "@nestjs/passport";
-import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@likemyproduct/common";
-import { UpdateUserDto, UpdateUserStatusDto, RegisterNormalUserDto, GenerateOtpDto, CustomerFavoriteDto, VerifyPurohitDto, CreatePurohitByAdminDto } from "@likemyproduct/dtos";import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
+import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@poojawala/common";
+import { UpdateUserDto, UpdateUserStatusDto, RegisterNormalUserDto, GenerateOtpDto, CustomerFavoriteDto, VerifyPurohitDto, CreatePurohitByAdminDto } from "@poojawala/dtos";import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { filter } from 'rxjs';
-import { UpsertPlatformSettingDto } from "@likemyproduct/dtos/Platform setting/Platform.dto";
-import { GetAllUsersDto } from "@likemyproduct/dtos/user/get-all-users.dto";
-import { CreateCustomerAddressDto } from "@likemyproduct/dtos/user/add-customer-address.dto";
-import { CreatePurohitServiceAreaDto } from "@likemyproduct/dtos/user/add-purohit-address.dto";
-import { UpdatePurohitServiceAreaDto } from "@likemyproduct/dtos/user/update-purohit-address.dto";
+import { UpsertPlatformSettingDto } from "@poojawala/dtos/Platform setting/Platform.dto";
+import { GetAllUsersDto } from "@poojawala/dtos/user/get-all-users.dto";
+import { CreateCustomerAddressDto } from "@poojawala/dtos/user/add-customer-address.dto";
+import { CreatePurohitServiceAreaDto } from "@poojawala/dtos/user/add-purohit-address.dto";
+import { UpdatePurohitServiceAreaDto } from "@poojawala/dtos/user/update-purohit-address.dto";
 import { Cron } from '@nestjs/schedule';
 
 @Controller('users')

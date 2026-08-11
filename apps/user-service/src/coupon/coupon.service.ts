@@ -1,8 +1,8 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { CouponRepository } from '@likemyproduct/repositories';
-import { CreateCouponDto, } from '@likemyproduct/dtos';
+import { CouponRepository } from '@poojawala/repositories';
+import { CreateCouponDto, } from '@poojawala/dtos';
 
-import { DISCOUNT_TYPE,} from '@likemyproduct/entities';
+import { DISCOUNT_TYPE,} from '@poojawala/entities';
 
 @Injectable()
 export class CouponService {

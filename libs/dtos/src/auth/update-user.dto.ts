@@ -1,5 +1,5 @@
 import { IsEmail,IsDateString, IsOptional, IsString, IsEnum } from 'class-validator';
-import { USER_ROLE, USER_STATUS, QUALIFICATION, PUROHIT_PAYMENT_METHOD } from '@likemyproduct/entities';
+import { USER_ROLE, USER_STATUS, QUALIFICATION, PUROHIT_PAYMENT_METHOD } from '@poojawala/entities';
 import { Match } from './register-user.dto';
 
 export class UpdateUserDto {

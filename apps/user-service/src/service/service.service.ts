@@ -2,18 +2,18 @@ import {
   CreateServiceDto,
   CreatePurohitServiceDto,
   PurohitServiceItemDto,
-} from '@likemyproduct/dtos/service/create.service.dto';
-import { GetServicesQueryDto } from '@likemyproduct/dtos/service/get.services.query.dto';
+} from '@poojawala/dtos/service/create.service.dto';
+import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
 import {
   UpdateServiceDto,
   UpdatePurohitServiceDto,
-} from '@likemyproduct/dtos/service/update.service.dto';
+} from '@poojawala/dtos/service/update.service.dto';
 import {
   ServiceRepository,
   PurohitServiceRepository,
   PurohitProfileRepository,
-} from '@likemyproduct/repositories';
-import { S3Service } from '@likemyproduct/s3';
+} from '@poojawala/repositories';
+import { S3Service } from '@poojawala/s3';
 import {
   BadRequestException,
   ConflictException,

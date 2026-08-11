@@ -15,7 +15,7 @@ import {
   PAYMENT_METHOD,
   PAYMENT_STATUS,
   PAYMENT_TYPE,
-} from '@likemyproduct/entities';
+} from '@poojawala/entities';
 
 export class AdminPaymentQueryDto {
   @IsOptional()

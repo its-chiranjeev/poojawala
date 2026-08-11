@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Booking, BOOKING_STATUS, USER_ROLE } from '@likemyproduct/entities';
+import { Repository, SelectQueryBuilder } from 'typeorm';
+
+import { Booking, BOOKING_STATUS, USER_ROLE } from '@poojawala/entities';
+
 import { BaseRepository } from './baseDb.repository';
 
 interface FindBookingsByRoleOptions {
@@ -21,6 +23,10 @@ export class BookingRepository extends BaseRepository<Booking> {
     private readonly bookingRepo: Repository<Booking>,
   ) {
     super(bookingRepo);
+  }
+
+  createQueryBuilder(alias: string): SelectQueryBuilder<Booking> {
+    return this.bookingRepo.createQueryBuilder(alias);
   }
 
   async findBookingById(bookingId: number): Promise<Booking | null> {
@@ -58,7 +64,6 @@ export class BookingRepository extends BaseRepository<Booking> {
       ])
       .leftJoinAndSelect('booking.customerAddress', 'customerAddress')
       .leftJoinAndSelect('booking.payments', 'payments')
-      .leftJoinAndSelect('booking.review', 'review')
       .leftJoinAndSelect('booking.complaints', 'complaints')
       .where('booking.id = :bookingId', {
         bookingId,
@@ -237,8 +242,11 @@ export class BookingRepository extends BaseRepository<Booking> {
     total: number;
   }> {
     const safePage = Math.max(page, 1);
+
     const safeLimit = Math.min(Math.max(limit, 1), 100);
+
     const skip = (safePage - 1) * safeLimit;
+
     const query = this.bookingRepo
       .createQueryBuilder('booking')
       .leftJoin('booking.customer', 'customer')
@@ -325,13 +333,13 @@ export class BookingRepository extends BaseRepository<Booking> {
   }
 
   async softDeleteBooking(bookingId: number): Promise<void> {
-    await this.repo.softDelete(bookingId);
+    await this.bookingRepo.softDelete(bookingId);
   }
 
   async findBookingByIdIncludingDeleted(
     bookingId: number,
   ): Promise<Booking | null> {
-    return this.repo.findOne({
+    return this.bookingRepo.findOne({
       where: {
         id: bookingId,
       },
@@ -340,7 +348,7 @@ export class BookingRepository extends BaseRepository<Booking> {
   }
 
   async restoreBooking(bookingId: number): Promise<void> {
-    await this.repo.restore(bookingId);
+    await this.bookingRepo.restore(bookingId);
   }
 
   async findActiveBookingsByRole(options: {
@@ -367,17 +375,14 @@ export class BookingRepository extends BaseRepository<Booking> {
 
     const skip = (page - 1) * limit;
 
-    const queryBuilder = this.repo
+    const queryBuilder = this.bookingRepo
       .createQueryBuilder('booking')
-
       .leftJoin('booking.customer', 'customer')
       .leftJoin('booking.service', 'service')
       .leftJoin('booking.customerAddress', 'customerAddress')
       .leftJoin('booking.purohit', 'purohit')
       .leftJoin('purohit.user', 'purohitUser')
-
       .select([
-        // Booking
         'booking.id',
         'booking.bookingNumber',
         'booking.customerId',
@@ -398,7 +403,6 @@ export class BookingRepository extends BaseRepository<Booking> {
         'booking.assignmentType',
         'booking.couponCode',
 
-        // Customer
         'customer.id',
         'customer.firstName',
         'customer.lastName',
@@ -406,13 +410,11 @@ export class BookingRepository extends BaseRepository<Booking> {
         'customer.phone',
         'customer.profileImage',
 
-        // Service
         'service.id',
         'service.name',
         'service.iconUrl',
         'service.durationMinutes',
 
-        // Customer Address
         'customerAddress.id',
         'customerAddress.addressLabel',
         'customerAddress.fullAddress',
@@ -421,12 +423,10 @@ export class BookingRepository extends BaseRepository<Booking> {
         'customerAddress.latitude',
         'customerAddress.longitude',
 
-        // Purohit Profile
         'purohit.id',
         'purohit.userId',
         'purohit.avgRating',
 
-        // Purohit User
         'purohitUser.id',
         'purohitUser.firstName',
         'purohitUser.lastName',
@@ -434,7 +434,6 @@ export class BookingRepository extends BaseRepository<Booking> {
         'purohitUser.phone',
         'purohitUser.profileImage',
       ])
-
       .where('booking.status IN (:...activeStatuses)', {
         activeStatuses,
       });
@@ -469,20 +468,22 @@ export class BookingRepository extends BaseRepository<Booking> {
         };
     }
 
-    if (search) {
+    if (search?.trim()) {
+      const normalizedSearch = search.trim();
+
       queryBuilder.andWhere(
         `
-      (
-        booking.bookingNumber ILIKE :search
-        OR service.name ILIKE :search
-        OR customer.firstName ILIKE :search
-        OR customer.lastName ILIKE :search
-        OR purohitUser.firstName ILIKE :search
-        OR purohitUser.lastName ILIKE :search
-      )
-      `,
+        (
+          booking."bookingNumber" ILIKE :search
+          OR service.name ILIKE :search
+          OR customer."firstName" ILIKE :search
+          OR customer."lastName" ILIKE :search
+          OR purohitUser."firstName" ILIKE :search
+          OR purohitUser."lastName" ILIKE :search
+        )
+        `,
         {
-          search: `%${search}%`,
+          search: `%${normalizedSearch}%`,
         },
       );
     }

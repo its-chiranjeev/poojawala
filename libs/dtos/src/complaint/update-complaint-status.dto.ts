@@ -1,5 +1,5 @@
 import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
-import { COMPLAINT_STATUS } from '@likemyproduct/entities';
+import { COMPLAINT_STATUS } from '@poojawala/entities';
 
 export class UpdateComplaintStatusDto {
   @IsEnum(COMPLAINT_STATUS)

@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { IsDateString, IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
-import { COMPLAINT_CATEGORY, COMPLAINT_STATUS } from '@likemyproduct/entities';
+import { COMPLAINT_CATEGORY, COMPLAINT_STATUS } from '@poojawala/entities';
 
 export class ComplaintQueryDto {
   @IsOptional()

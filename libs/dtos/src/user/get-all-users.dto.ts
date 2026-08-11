@@ -8,7 +8,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { USER_ROLE, USER_STATUS, PUROHIT_VERIFICATION_STATUS } from '@likemyproduct/entities';
+import { USER_ROLE, USER_STATUS, PUROHIT_VERIFICATION_STATUS } from '@poojawala/entities';
 
 export class GetAllUsersDto {
   @IsOptional()

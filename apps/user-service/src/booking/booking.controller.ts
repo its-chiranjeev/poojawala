@@ -1,8 +1,8 @@
 import { Body, Controller, Get, Delete, Param, ParseIntPipe, Patch, Post, Query, Req, UseGuards, UseInterceptors, UploadedFiles, BadRequestException } from '@nestjs/common';
 import { BookingService } from './booking.service';
-import { CreateBookingDto, UpdateBookingDto, BookingQueryDto, CancelBookingDto, RespondBookingDto, AssignBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto, CreateBookingByAdminDto, RescheduleBookingDto, RepeatBookingDto } from '@likemyproduct/dtos';
-import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@likemyproduct/common';
-import { USER_ROLE, User } from '@likemyproduct/entities';
+import { CreateBookingDto, UpdateBookingDto, BookingQueryDto, CancelBookingDto, RespondBookingDto, AssignBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto, CreateBookingByAdminDto, RescheduleBookingDto, RepeatBookingDto } from '@poojawala/dtos';
+import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@poojawala/common';
+import { USER_ROLE, User } from '@poojawala/entities';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 

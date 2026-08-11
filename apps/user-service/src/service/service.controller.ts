@@ -17,12 +17,12 @@ import {
   Request
 } from '@nestjs/common';
 import { ServiceService } from './service.service';
-import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@likemyproduct/common';
-import { USER_ROLE } from '@likemyproduct/entities';
-import { CreateServiceDto, CreatePurohitServiceDto } from '@likemyproduct/dtos/service/create.service.dto';
+import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@poojawala/common';
+import { USER_ROLE } from '@poojawala/entities';
+import { CreateServiceDto, CreatePurohitServiceDto } from '@poojawala/dtos/service/create.service.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { GetServicesQueryDto } from '@likemyproduct/dtos/service/get.services.query.dto';
-import { UpdateServiceDto, UpdatePurohitServiceDto, UpdateServiceStatusDto } from '@likemyproduct/dtos/service/update.service.dto';
+import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
+import { UpdateServiceDto, UpdatePurohitServiceDto, UpdateServiceStatusDto } from '@poojawala/dtos/service/update.service.dto';
 @Controller('service')
 export class ServiceController {
   constructor(private readonly serviceService: ServiceService) { }

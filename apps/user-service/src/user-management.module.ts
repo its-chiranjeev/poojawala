@@ -4,9 +4,9 @@ import { UserModule } from './user/user.module';
 import { BookingModule } from './booking/booking.module';
 import { ComplaintModule } from './complaint/complaint.module';
 
-import { DatabaseModule } from '@likemyproduct/database';
+import { DatabaseModule } from '@poojawala/database';
 import { UserManagementService } from './user-management.service';
-import { EntitiesModule } from '@likemyproduct/entities';
+import { EntitiesModule } from '@poojawala/entities';
 import { ConfigModule } from '@nestjs/config';
 import { ServiceModule } from './service/service.module';
 import { ReviewModule } from './review/review.module';

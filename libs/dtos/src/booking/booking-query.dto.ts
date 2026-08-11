@@ -1,6 +1,6 @@
 import { Type, Transform } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
-import { BOOKING_STATUS } from '@likemyproduct/entities';
+import { BOOKING_STATUS } from '@poojawala/entities';
 
 export class BookingQueryDto {
   @IsOptional()

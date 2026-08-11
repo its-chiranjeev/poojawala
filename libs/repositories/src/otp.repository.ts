@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Otp } from '@likemyproduct/entities';
+import { Otp } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 @Injectable()

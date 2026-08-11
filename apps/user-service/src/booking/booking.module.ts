@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Booking, CustomerAddress, Service } from '@likemyproduct/entities';
+import { Booking, CustomerAddress, Service } from '@poojawala/entities';
 import { BookingController } from './booking.controller';
 import { BookingService } from './booking.service';
-import { BookingRepository } from '@likemyproduct/repositories';
-import { S3Module } from '@likemyproduct/s3';
-import { SmsServicesModule } from '@likemyproduct/sms-services';
-import { EmailServicesModule } from '@likemyproduct/email-services';
+import { BookingRepository } from '@poojawala/repositories';
+import { S3Module } from '@poojawala/s3';
+import { SmsServicesModule } from '@poojawala/sms-services';
+import { EmailServicesModule } from '@poojawala/email-services';
 
 @Module({
   imports: [

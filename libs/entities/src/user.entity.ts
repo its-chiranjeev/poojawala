@@ -13,7 +13,6 @@ import {
 import { CustomerAddress } from './customer-address.entity';
 import { CustomerFavorite } from './customer-favorite.entity';
 import { Booking } from './booking.entity';
-import { Review } from './review.entity';
 import { PurohitServiceArea } from './purohit-service-area.entity';
 
 export enum USER_ROLE {
@@ -64,11 +63,10 @@ export class User {
   profileImage?: string;
 
   @Column({ type: 'timestamp', nullable: true })
-dob?: Date;
+  dob?: Date;
 
-@Column({ type: 'varchar', length: 255, nullable: true })
-birthPlace?: string;
-
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  birthPlace?: string;
 
   // Authentication
   @Column({ type: 'varchar', length: 255 })
@@ -80,9 +78,6 @@ birthPlace?: string;
   @Column({ type: 'timestamp', nullable: true })
   lastLoginAt?: Date;
 
-  @Column({ type: 'varchar', length: 10, nullable: true })
-  countryCode?: string;
-  
   @Column({ default: 1 })
   tokenVersion!: number;
 
@@ -116,11 +111,11 @@ birthPlace?: string;
   @OneToMany(() => Booking, (booking) => booking.customer)
   bookings!: Booking[];
 
-  @OneToMany(() => Review, (review) => review.customer)
-  reviews!: Review[];
-
-@OneToMany(() => PurohitServiceArea, (serviceArea) => serviceArea.purohit)
-serviceAreas!: PurohitServiceArea[];
+  @Column({ type: 'decimal', precision: 2, scale: 1, default: 0.0 })
+  avgRating!: number;
+  
+  @OneToMany(() => PurohitServiceArea, (serviceArea) => serviceArea.purohit)
+  serviceAreas!: PurohitServiceArea[];
 
   // Timestamps
   @CreateDateColumn()

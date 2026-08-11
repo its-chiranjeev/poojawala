@@ -1,6 +1,6 @@
 import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { PAYMENT_STATUS, PAYMENT_TYPE } from '@likemyproduct/entities';
+import { PAYMENT_STATUS, PAYMENT_TYPE } from '@poojawala/entities';
 
 export class PaymentQueryDto {
   @IsOptional()

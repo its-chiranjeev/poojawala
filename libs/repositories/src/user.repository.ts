@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from '@likemyproduct/entities';
+import { User } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 import { Brackets } from 'typeorm';
-import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
+import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { Not } from 'typeorm';
-import { GetAllUsersDto } from '@likemyproduct/dtos/user/get-all-users.dto';
+import { GetAllUsersDto } from '@poojawala/dtos/user/get-all-users.dto';
 
 @Injectable()
 export class UserRepository extends BaseRepository<User> {

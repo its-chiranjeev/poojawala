@@ -1,4 +1,4 @@
-import { USER_ROLE, QUALIFICATION, PUROHIT_PAYMENT_METHOD } from '@likemyproduct/entities';
+import { USER_ROLE, QUALIFICATION, PUROHIT_PAYMENT_METHOD } from '@poojawala/entities';
 import { Transform } from 'class-transformer';
 import { IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, } from 'class-validator';
 

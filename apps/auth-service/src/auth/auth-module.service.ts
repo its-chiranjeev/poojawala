@@ -7,9 +7,9 @@ import {
   UnauthorizedException,
   ForbiddenException,
 } from '@nestjs/common';
-import { UserRepository, OtpRepository } from '@likemyproduct/repositories';
+import { UserRepository, OtpRepository } from '@poojawala/repositories';
 import * as bcrypt from 'bcryptjs';
-import { User, USER_STATUS, USER_ROLE, Otp } from '@likemyproduct/entities';
+import { User, USER_STATUS, USER_ROLE, Otp } from '@poojawala/entities';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
 import {
@@ -22,12 +22,12 @@ import {
   resetPasswordDto,
   forgotPasswordDto,
   ResendOtpDto,
-} from '@likemyproduct/dtos';
+} from '@poojawala/dtos';
 import { DataSource } from 'typeorm';
-import { EmailService } from '@likemyproduct/email-services';
-import { SmsService } from '@likemyproduct/sms-services';
+import { EmailService } from '@poojawala/email-services';
+import { SmsService } from '@poojawala/sms-services';
 import { MoreThan } from 'typeorm';
-import { OTP_TYPE } from '@likemyproduct/entities';
+import { OTP_TYPE } from '@poojawala/entities';
 
 @Injectable()
 export class AuthModuleService {

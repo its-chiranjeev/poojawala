@@ -1,5 +1,5 @@
 import { IsEnum, IsNotEmpty, IsString, MaxLength, NotEquals, ValidateIf } from 'class-validator';
-import { PUROHIT_VERIFICATION_STATUS } from '@likemyproduct/entities';
+import { PUROHIT_VERIFICATION_STATUS } from '@poojawala/entities';
 
 export class VerifyPurohitDto {
   @IsEnum(PUROHIT_VERIFICATION_STATUS, {

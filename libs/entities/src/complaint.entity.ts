@@ -11,7 +11,6 @@ import {
 } from 'typeorm';
 import { Booking } from './booking.entity';
 import { User } from './user.entity';
-import { Payment } from './payment.entity';
 
 export enum COMPLAINT_CATEGORY {
   SERVICE_NOT_PROVIDED = 'SERVICE_NOT_PROVIDED',
@@ -28,9 +27,8 @@ export enum COMPLAINT_CATEGORY {
 export enum COMPLAINT_STATUS {
   OPEN = 'OPEN',
   UNDER_REVIEW = 'UNDER_REVIEW',
-  RESOLVED_CUSTOMER_FAVOR = 'RESOLVED_CUSTOMER_FAVOR',
-  RESOLVED_PUROHIT_FAVOR = 'RESOLVED_PUROHIT_FAVOR',
   RESOLVED = 'RESOLVED',
+  REJECTED = 'REJECTED',
   CLOSED = 'CLOSED',
 }
 
@@ -59,13 +57,6 @@ export class Complaint {
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'raisedById' })
   raisedBy!: User;
-
-  @Column({ type: 'int', nullable: true })
-  raisedAgainstId?: number;
-
-  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'raisedAgainstId' })
-  raisedAgainst?: User;
 
   @Column({
     type: 'enum',
@@ -102,13 +93,6 @@ export class Complaint {
 
   @Column({ type: 'timestamp', nullable: true })
   resolvedAt?: Date;
-
-  @Column({ type: 'int', nullable: true })
-  linkedPaymentId?: number;
-
-  @ManyToOne(() => Payment, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'linkedPaymentId' })
-  linkedPayment?: Payment;
 
   @CreateDateColumn()
   createdAt!: Date;

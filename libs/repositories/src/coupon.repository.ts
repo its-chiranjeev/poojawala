@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Coupon, DISCOUNT_TYPE } from '@likemyproduct/entities';
+import { Coupon, DISCOUNT_TYPE } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 @Injectable()

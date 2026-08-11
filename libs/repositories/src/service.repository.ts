@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
-import { Service } from '@likemyproduct/entities';
+import { Service } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
-import { GetServicesQueryDto } from '@likemyproduct/dtos/service/get.services.query.dto';
+import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
 
 @Injectable()
 export class ServiceRepository extends BaseRepository<Service> {
@@ -51,8 +51,6 @@ export class ServiceRepository extends BaseRepository<Service> {
         commissionPercentage: true,
         durationMinutes: true,
         requiresVenue: true,
-        supportsOnline: true,
-        supportsOffline: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,
@@ -93,8 +91,6 @@ export class ServiceRepository extends BaseRepository<Service> {
         commissionPercentage: true,
         durationMinutes: true,
         requiresVenue: true,
-        supportsOnline: true,
-        supportsOffline: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { PurohitMedia } from '@likemyproduct/entities';
+import { PurohitMedia } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 @Injectable()

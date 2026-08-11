@@ -11,7 +11,7 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { DISCOUNT_TYPE } from '@likemyproduct/entities';
+import { DISCOUNT_TYPE } from '@poojawala/entities';
 
 export class CreateCouponDto {
   @IsString()

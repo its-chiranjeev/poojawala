@@ -17,12 +17,12 @@ import {
   Repository,
   QueryFailedError,
 } from 'typeorm';
-import { ASSIGNMENT_TYPE, Booking, BOOKING_MODE, BOOKING_PAYMENT_STATUS, BOOKING_STATUS, CANCELLED_BY, Coupon, CouponUsage, CustomerAddress, DISCOUNT_TYPE, PUROHIT_VERIFICATION_STATUS, PurohitProfile, PurohitService, PurohitServiceArea, Service, User, USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
-import { BookingRepository } from '@likemyproduct/repositories';
-import { AssignBookingDto, BookingQueryDto, CancelBookingDto, CreateBookingByAdminDto, CreateBookingDto, PUROHIT_BOOKING_ACTION, RespondBookingDto, UpdateBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto, RepeatBookingDto, RescheduleBookingDto } from '@likemyproduct/dtos';
-import { S3Service } from '@likemyproduct/s3';
-import { SmsService } from '@likemyproduct/sms-services';
-import { EmailService } from '@likemyproduct/email-services';
+import { ASSIGNMENT_TYPE, Booking, BOOKING_MODE, BOOKING_PAYMENT_STATUS, BOOKING_STATUS, CANCELLED_BY, Coupon, CouponUsage, CustomerAddress, DISCOUNT_TYPE, PUROHIT_VERIFICATION_STATUS, PurohitProfile, PurohitService, PurohitServiceArea, Service, User, USER_ROLE, USER_STATUS } from '@poojawala/entities';
+import { BookingRepository } from '@poojawala/repositories';
+import { AssignBookingDto, BookingQueryDto, CancelBookingDto, CreateBookingByAdminDto, CreateBookingDto, PUROHIT_BOOKING_ACTION, RespondBookingDto, UpdateBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto, RepeatBookingDto, RescheduleBookingDto } from '@poojawala/dtos';
+import { S3Service } from '@poojawala/s3';
+import { SmsService } from '@poojawala/sms-services';
+import { EmailService } from '@poojawala/email-services';
 
 interface CouponCalculationResult {
   coupon: Coupon;

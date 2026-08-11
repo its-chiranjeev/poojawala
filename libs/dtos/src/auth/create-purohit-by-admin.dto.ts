@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString, MaxLength, IsDateString } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class CreatePurohitByAdminDto {
@@ -39,7 +39,6 @@ export class CreatePurohitByAdminDto {
   password!: string;
 
   @IsOptional()
-  @IsString()
-  @Transform(({ value }) => value?.trim())
-  city?: string;
+  @IsDateString()
+  dob?: string;
 }

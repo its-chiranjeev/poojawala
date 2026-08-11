@@ -15,7 +15,7 @@ import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { MulterFile } from '@likemyproduct/dtos';
+import { MulterFile } from '@poojawala/dtos';
 
 // TODO: For utho s3 code
 @Injectable()

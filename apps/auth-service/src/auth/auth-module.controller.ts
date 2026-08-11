@@ -13,12 +13,12 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { AuthModuleService } from './auth-module.service';
-import { JwtAuthGuard, CsrfGuard } from '@likemyproduct/common';
-import { LoginDto, VerifyOtpDto, RegisterSuperAdminDto, RegisterNormalUserDto, OtpDto, RegisterUserDto ,resetPasswordDto,forgotPasswordDto} from '@likemyproduct/dtos';
+import { JwtAuthGuard, CsrfGuard } from '@poojawala/common';
+import { LoginDto, VerifyOtpDto, RegisterSuperAdminDto, RegisterNormalUserDto, OtpDto, RegisterUserDto ,resetPasswordDto,forgotPasswordDto} from '@poojawala/dtos';
 import type { Response } from 'express';
 import * as crypto from 'crypto';
-import { S3Service } from '@likemyproduct/s3';
-import { ResendOtpDto } from '@likemyproduct/dtos';
+import { S3Service } from '@poojawala/s3';
+import { ResendOtpDto } from '@poojawala/dtos';
 
 @Controller('auth')
 export class AuthModuleController {

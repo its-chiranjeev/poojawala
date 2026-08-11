@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
-import { Complaint, COMPLAINT_CATEGORY, COMPLAINT_STATUS } from '@likemyproduct/entities';
+import { Complaint, COMPLAINT_CATEGORY, COMPLAINT_STATUS } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 export interface FindComplaintsOptions {
@@ -11,7 +11,6 @@ export interface FindComplaintsOptions {
   category?: COMPLAINT_CATEGORY;
   search?: string;
   raisedById?: number;
-  raisedAgainstId?: number;
   fromDate?: string;
   toDate?: string;
 }
@@ -49,17 +48,6 @@ export class ComplaintRepository extends BaseRepository<Complaint> {
         'raisedBy.role',
         'raisedBy.status',
       ])
-      .leftJoin('complaint.raisedAgainst', 'raisedAgainst')
-      .addSelect([
-        'raisedAgainst.id',
-        'raisedAgainst.firstName',
-        'raisedAgainst.lastName',
-        'raisedAgainst.email',
-        'raisedAgainst.phone',
-        'raisedAgainst.profileImage',
-        'raisedAgainst.role',
-        'raisedAgainst.status',
-      ])
       .leftJoin('complaint.booking', 'booking')
       .addSelect([
         'booking.id',
@@ -80,7 +68,6 @@ export class ComplaintRepository extends BaseRepository<Complaint> {
         'resolvedBy.lastName',
         'resolvedBy.role',
       ])
-      .leftJoinAndSelect('complaint.linkedPayment', 'linkedPayment')
       .where('complaint.id = :complaintId', {
         complaintId,
       })
@@ -143,18 +130,6 @@ export class ComplaintRepository extends BaseRepository<Complaint> {
         'raisedBy.status',
       ])
 
-      .leftJoin('complaint.raisedAgainst', 'raisedAgainst')
-      .addSelect([
-        'raisedAgainst.id',
-        'raisedAgainst.firstName',
-        'raisedAgainst.lastName',
-        'raisedAgainst.email',
-        'raisedAgainst.phone',
-        'raisedAgainst.profileImage',
-        'raisedAgainst.role',
-        'raisedAgainst.status',
-      ])
-
       .leftJoin('complaint.resolvedBy', 'resolvedBy')
       .addSelect([
         'resolvedBy.id',
@@ -164,24 +139,9 @@ export class ComplaintRepository extends BaseRepository<Complaint> {
         'resolvedBy.role',
       ])
 
-      .leftJoin('complaint.linkedPayment', 'linkedPayment')
-      .addSelect([
-        'linkedPayment.id',
-        'linkedPayment.bookingId',
-        'linkedPayment.status',
-        'linkedPayment.amount',
-        'linkedPayment.createdAt',
-      ]);
-
     if (options.raisedById) {
       query.andWhere('complaint.raisedById = :raisedById', {
         raisedById: options.raisedById,
-      });
-    }
-
-    if (options.raisedAgainstId) {
-      query.andWhere('complaint.raisedAgainstId = :raisedAgainstId', {
-        raisedAgainstId: options.raisedAgainstId,
       });
     }
 
@@ -209,8 +169,6 @@ export class ComplaintRepository extends BaseRepository<Complaint> {
           OR service.name ILIKE :search
           OR raisedBy."firstName" ILIKE :search
           OR raisedBy."lastName" ILIKE :search
-          OR raisedAgainst."firstName" ILIKE :search
-          OR raisedAgainst."lastName" ILIKE :search
         )`,
         {
           search,

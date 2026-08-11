@@ -9,9 +9,9 @@ import {
   IsPhoneNumber,
   ValidateIf
 } from 'class-validator';
-import { USER_ROLE } from '@likemyproduct/entities';
+import { USER_ROLE } from '@poojawala/entities';
 
-import { OTP_TYPE } from '@likemyproduct/entities';
+import { OTP_TYPE } from '@poojawala/entities';
 
 export class VerifyOtpDto {
   @IsOptional()
