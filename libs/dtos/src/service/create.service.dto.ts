@@ -45,14 +45,6 @@ export class CreateServiceDto {
 
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
-  supportsOnline!: boolean;
-
-  @Transform(({ value }) => value === 'true' || value === true)
-  @IsBoolean()
-  supportsOffline!: boolean;
-
-  @Transform(({ value }) => value === 'true' || value === true)
-  @IsBoolean()
   requiresVenue!: boolean;
 
   @Transform(({ value }) => value === 'true' || value === true)
@@ -62,11 +54,23 @@ export class CreateServiceDto {
 export class PurohitServiceItemDto {
   @IsInt()
   @Min(1)
-  serviceId: number;
+  serviceId!: number;
 
+  @IsBoolean()
+  isOnline!: boolean;
+
+  @IsBoolean()
+  isOffline!: boolean;
+
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  customPrice: number;
+  onlinePrice?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  offlinePrice?: number;
 
   @IsOptional()
   @IsInt()
@@ -80,5 +84,5 @@ export class PurohitServiceItemDto {
 export class CreatePurohitServiceDto {
   @IsArray()
   @ArrayNotEmpty()
-  services: any[];
+  services!: any[];
 }

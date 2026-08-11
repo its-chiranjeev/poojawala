@@ -17,27 +17,9 @@ import {
   Repository,
   QueryFailedError,
 } from 'typeorm';
-import {
-  ASSIGNMENT_TYPE,
-  Booking,
-  BOOKING_PAYMENT_STATUS,
-  BOOKING_STATUS,
-  CustomerAddress,
-  Service,
-  USER_ROLE,
-  User,
-  CANCELLED_BY,
-  PurohitProfile,
-  USER_STATUS,
-  PUROHIT_VERIFICATION_STATUS,
-  PurohitService,
-  PurohitServiceArea,
-  Coupon,
-  CouponUsage,
-  DISCOUNT_TYPE,
-} from '@likemyproduct/entities';
+import { ASSIGNMENT_TYPE, Booking, BOOKING_MODE, BOOKING_PAYMENT_STATUS, BOOKING_STATUS, CANCELLED_BY, Coupon, CouponUsage, CustomerAddress, DISCOUNT_TYPE, PUROHIT_VERIFICATION_STATUS, PurohitProfile, PurohitService, PurohitServiceArea, Service, User, USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
 import { BookingRepository } from '@likemyproduct/repositories';
-import { BookingQueryDto, CreateBookingDto, UpdateBookingDto, CancelBookingDto, RespondBookingDto, PUROHIT_BOOKING_ACTION, AssignBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto, CreateBookingByAdminDto, RescheduleBookingDto, RepeatBookingDto } from '@likemyproduct/dtos';
+import { AssignBookingDto, BookingQueryDto, CancelBookingDto, CreateBookingByAdminDto, CreateBookingDto, PUROHIT_BOOKING_ACTION, RespondBookingDto, UpdateBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto, RepeatBookingDto, RescheduleBookingDto } from '@likemyproduct/dtos';
 import { S3Service } from '@likemyproduct/s3';
 import { SmsService } from '@likemyproduct/sms-services';
 import { EmailService } from '@likemyproduct/email-services';
@@ -500,6 +482,7 @@ export class BookingService {
           addressSnapshot: this.createAddressSnapshot(customerAddress),
 
           customerPincode,
+          bookingMode: dto.bookingMode as BOOKING_MODE,
           scheduledAt,
 
           specialInstructions: dto.specialInstructions?.trim() || undefined,
@@ -1473,6 +1456,36 @@ export class BookingService {
 
       switch (dto.action) {
         case PUROHIT_BOOKING_ACTION.ACCEPT: {
+          const purohitServiceRepository = manager.getRepository(PurohitService);
+          const matchingPurohitService = await purohitServiceRepository.findOne({
+            where: {
+              purohitId: purohitProfile.id,
+              serviceId: booking.serviceId,
+              isActive: true,
+            },
+          });
+
+          if (!matchingPurohitService) {
+            throw new BadRequestException('You do not provide the service required for this booking');
+          }
+
+          if (booking.bookingMode === BOOKING_MODE.ONLINE && !matchingPurohitService.isOnline) {
+            throw new BadRequestException('You do not provide this service online');
+          }
+          if (booking.bookingMode === BOOKING_MODE.OFFLINE && !matchingPurohitService.isOffline) {
+            throw new BadRequestException('You do not provide this service offline');
+          }
+
+          const exactPrice = booking.bookingMode === BOOKING_MODE.ONLINE ? Number(matchingPurohitService.onlinePrice) : Number(matchingPurohitService.offlinePrice);
+
+          if (!exactPrice || exactPrice <= 0) {
+            throw new BadRequestException('Exact price is not configured for this mode');
+          }
+
+          booking.agreedPrice = exactPrice;
+          booking.platformCommission = Number((exactPrice * (Number(booking.commissionPercentage) / 100)).toFixed(2));
+          booking.purohitPayoutAmount = Number((exactPrice - booking.platformCommission).toFixed(2));
+          booking.finalAmount = Number((exactPrice - Number(booking.discountAmount ?? 0) + Number(booking.donationAmount ?? 0)).toFixed(2));
           booking.purohitId = purohitProfile.id;
 
           booking.status = BOOKING_STATUS.ACCEPTED;
@@ -1616,6 +1629,18 @@ export class BookingService {
           'Selected Purohit does not provide the service required for this booking',
         );
       }
+      if (booking.bookingMode === BOOKING_MODE.ONLINE && !matchingPurohitService.isOnline) {
+        throw new BadRequestException('Selected Purohit does not provide this service online');
+      }
+      if (booking.bookingMode === BOOKING_MODE.OFFLINE && !matchingPurohitService.isOffline) {
+        throw new BadRequestException('Selected Purohit does not provide this service offline');
+      }
+
+      const exactPrice = booking.bookingMode === BOOKING_MODE.ONLINE ? Number(matchingPurohitService.onlinePrice) : Number(matchingPurohitService.offlinePrice);
+
+      if (!exactPrice || exactPrice <= 0) {
+        throw new BadRequestException('Exact price is not configured for this mode by the selected Purohit');
+      }
 
       const eligiblePurohitIds = await this.findEligiblePurohitIdsForBooking(
         manager,
@@ -1627,7 +1652,10 @@ export class BookingService {
           'Selected Purohit is not currently eligible or available for this booking',
         );
       }
-
+      booking.agreedPrice = exactPrice;
+      booking.platformCommission = Number((exactPrice * (Number(booking.commissionPercentage) / 100)).toFixed(2));
+      booking.purohitPayoutAmount = Number((exactPrice - booking.platformCommission).toFixed(2));
+      booking.finalAmount = Number((exactPrice - Number(booking.discountAmount ?? 0) + Number(booking.donationAmount ?? 0)).toFixed(2));
       booking.purohitId = purohit.id;
       booking.status = BOOKING_STATUS.ACCEPTED;
       booking.assignmentType = ASSIGNMENT_TYPE.MANUAL;
@@ -1750,11 +1778,14 @@ export class BookingService {
 
       await this.validateStatusUpdateAccess(user, booking);
 
-      this.validateStatusTransition(booking.status, dto.status);
+      this.validateStatusTransition(booking.status, dto.status, user.role);
 
       this.validatePaymentForStatusChange(booking, dto.status);
 
       booking.status = dto.status;
+      if (dto.status === BOOKING_STATUS.CANCELLED && !booking.cancelledBy) {
+        booking.cancelledBy = CANCELLED_BY.ADMIN;
+      }
 
       const updatedBooking = await bookingRepository.save(booking);
 
@@ -1787,7 +1818,11 @@ export class BookingService {
   private validateStatusTransition(
     currentStatus: BOOKING_STATUS,
     nextStatus: BOOKING_STATUS,
+    role: USER_ROLE,
   ): void {
+    if (role === USER_ROLE.ADMIN) {
+      return;
+    }
     const allowedTransitions: Partial<
       Record<BOOKING_STATUS, BOOKING_STATUS[]>
     > = {
@@ -2798,9 +2833,6 @@ export class BookingService {
 
     /*
      * Only finished or cancelled bookings can be repeated.
-     *
-     * Active bookings must not be repeated because they are
-     * still pending, assigned, in transit or in progress.
      */
     const repeatableStatuses: BOOKING_STATUS[] = [
       BOOKING_STATUS.COMPLETED,
@@ -2834,64 +2866,32 @@ export class BookingService {
       throw new BadRequestException('Invalid scheduled date and time');
     }
 
-    /*
-     * createBooking() performs the main lead-time and
-     * advance-booking validations. This early check gives
-     * a clearer repeat-booking error before constructing
-     * the new DTO.
-     */
     if (scheduledAt <= new Date()) {
       throw new BadRequestException(
         'Repeated booking must be scheduled for a future date and time',
       );
     }
 
-    /*
-     * Do not copy the old coupon automatically.
-     *
-     * It may have expired, become inactive, reached its
-     * usage limit or no longer apply to the service.
-     */
     const createBookingDto: CreateBookingDto = {
       serviceId: originalBooking.serviceId,
-
       customerAddressId,
-
       scheduledAt: dto.scheduledAt,
-
+      bookingMode: originalBooking.bookingMode as BOOKING_MODE,
       specialInstructions:
         dto.specialInstructions !== undefined
           ? dto.specialInstructions.trim() || undefined
           : originalBooking.specialInstructions,
-
       customFields:
         dto.customFields !== undefined
           ? dto.customFields
           : originalBooking.customFields,
-
       donationAmount:
         dto.donationAmount !== undefined
           ? Number(dto.donationAmount)
           : Number(originalBooking.donationAmount ?? 0),
-
       couponCode: dto.couponCode?.trim() || undefined,
     };
 
-    /*
-     * Reuse createBooking() so all current booking rules
-     * remain centralized:
-     *
-     * - Active customer validation
-     * - Service validation
-     * - Address ownership validation
-     * - Minimum lead time
-     * - Maximum advance period
-     * - Pricing and commission calculation
-     * - Coupon validation
-     * - Duplicate booking prevention
-     * - Eligible Purohit matching
-     * - New booking number generation
-     */
     const repeatedBooking = await this.createBooking(user, createBookingDto);
 
     return {
@@ -2901,7 +2901,6 @@ export class BookingService {
         bookingNumber: originalBooking.bookingNumber,
         status: originalBooking.status,
       },
-
       booking: {
         id: repeatedBooking.id,
         bookingNumber: repeatedBooking.bookingNumber,
@@ -3008,6 +3007,7 @@ export class BookingService {
           customerAddressId: customerAddress.id,
           addressSnapshot: this.createAddressSnapshot(customerAddress),
           customerPincode: customerAddress.pincode?.trim() || '',
+          bookingMode: dto.bookingMode as BOOKING_MODE,
           scheduledAt,
           specialInstructions: dto.specialInstructions?.trim() || undefined,
           customFields: dto.customFields ?? undefined,

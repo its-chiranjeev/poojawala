@@ -51,6 +51,8 @@ export class UserRepository extends BaseRepository<User> {
     qb.leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id');
     qb.leftJoinAndSelect('user.serviceAreas', 'serviceAreas');
     qb.leftJoinAndSelect('user.addresses', 'addresses');
+    qb.leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id');
+    qb.leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId');
     if (search) {
       qb.andWhere(
         new Brackets((qb) => {
@@ -107,6 +109,9 @@ export class UserRepository extends BaseRepository<User> {
   async findApprovedPurohits(page = 1, limit = 10, search?: string) {
     const query = this.repo
       .createQueryBuilder('user')
+      .leftJoinAndMapOne('user.profile', 'purohit_profiles', 'profile', 'profile.userId = user.id')
+      .leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id')
+      .leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId')
       .where('user.role = :role', { role: USER_ROLE.PUROHIT })
       .andWhere('user.status = :status', { status: USER_STATUS.ACTIVE });
 
@@ -137,13 +142,14 @@ export class UserRepository extends BaseRepository<User> {
 
     const [users, total] = await query.getManyAndCount();
 
-    const data = users.map((user) => ({
+    const data = users.map((user: any) => ({
       id: user.id,
       profileImage: user.profileImage,
       firstName: user.firstName,
       lastName: user.lastName,
       username: user.username,
       isActive: user.status === USER_STATUS.ACTIVE,
+      services: user.purohitServices || [],
     }));
 
     return {
@@ -185,7 +191,8 @@ export class UserRepository extends BaseRepository<User> {
         'profile.userId = user.id',
       )
       .leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id')
-      .leftJoinAndSelect('user.serviceAreas', 'serviceAreas');
+      .leftJoinAndSelect('user.serviceAreas', 'serviceAreas')
+      .leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id')      .leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId');
     } else if (role === USER_ROLE.CUSTOMER) {
       qb.leftJoinAndSelect('user.addresses', 'addresses');
     }

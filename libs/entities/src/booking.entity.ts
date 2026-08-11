@@ -48,6 +48,11 @@ export enum CANCELLED_BY {
   ADMIN = 'ADMIN',
 }
 
+export enum BOOKING_MODE {
+  ONLINE = 'ONLINE',
+  OFFLINE = 'OFFLINE',
+}
+
 @Entity('bookings')
 export class Booking {
   @PrimaryGeneratedColumn()
@@ -63,6 +68,9 @@ export class Booking {
   @ManyToOne(() => User, (user) => user.bookings, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'customerId' })
   customer!: User;
+
+  @Column({ type: 'enum', enum: BOOKING_MODE, default: BOOKING_MODE.OFFLINE })
+  bookingMode!: BOOKING_MODE;
 
   @Column({ type: 'int' })
   serviceId!: number;

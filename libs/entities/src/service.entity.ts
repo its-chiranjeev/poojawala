@@ -45,12 +45,6 @@ export class Service {
   requiresVenue!: boolean;
 
   @Column({ type: 'boolean', default: true })
-  supportsOnline!: boolean;
-
-  @Column({ type: 'boolean', default: true })
-  supportsOffline!: boolean;
-
-  @Column({ type: 'boolean', default: true })
   isActive!: boolean;
 
   @OneToMany(() => PurohitService, (purohitService) => purohitService.service)

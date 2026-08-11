@@ -53,22 +53,26 @@ export class UpdateServiceDto {
 
   @IsOptional()
   @IsBoolean()
-  supportsOnline?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
-  supportsOffline?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
   isActive?: boolean;
 }
 
 export class UpdatePurohitServiceDto{
- @IsOptional()
- @IsNumber({ maxDecimalPlaces: 2 })
+  @IsOptional()
+  @IsBoolean()
+  isOnline!: boolean;
+
+  @IsBoolean()
+  isOffline!: boolean;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  customPrice!: number;
+  onlinePrice?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  offlinePrice?: number;
 
   @IsOptional()
   @IsInt()

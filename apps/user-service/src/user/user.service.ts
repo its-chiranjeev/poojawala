@@ -436,6 +436,24 @@ export class UserService {
             profile.templeAffiliationProofDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.templeAffiliationProofUrl);
             profile.templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(profile.templeAffiliationProofUrl);
           }
+          if ((safeUser as any).purohitServices) {
+            profile.purohitServices = await Promise.all((safeUser as any).purohitServices.map(async (ps: any) => {
+              let iconDownloadurl: string | null = null;
+              if (ps.service?.iconUrl) {
+                try {
+                  iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
+                } catch(e) {}
+              }
+              return {
+                ...ps,
+                service: {
+                  ...ps.service,
+                  iconDownloadurl
+                }
+              };
+            }));
+            delete (safeUser as any).purohitServices;
+          }
           (safeUser as any).profile = profile;
         }
 
@@ -588,10 +606,42 @@ export class UserService {
       search,
     );
 
+    const dataWithServicesUrls = await Promise.all(result.data.map(async (user: any) => {
+      let profileImage = user.profileImage;
+      if (profileImage) {
+        try {
+          profileImage = await this.s3Service.getDownloadUrl(profileImage);
+        } catch(e) {}
+      }
+
+      const services = user.services ? await Promise.all(user.services.map(async (ps: any) => {
+        let iconDownloadurl: string | null = null;
+        if (ps.service?.iconUrl) {
+          try {
+            iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
+          } catch(e) {}
+        }
+        return {
+          ...ps,
+          service: {
+            ...ps.service,
+            iconDownloadurl
+          }
+        }
+      })) : [];
+
+      return {
+        ...user,
+        profileImage,
+        services,
+      };
+    }));
+
     return {
       success: true,
       message: 'Purohits fetched successfully',
       ...result,
+      data: dataWithServicesUrls,
     };
   }
 
@@ -637,6 +687,22 @@ export class UserService {
       templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(templeAffiliationProofUrl);
     }
 
+    const services = profile?.purohitServices ? await Promise.all(profile.purohitServices.map(async (ps) => {
+      let iconDownloadurl: string | null = null;
+      if (ps.service?.iconUrl) {
+        try {
+          iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
+        } catch(e) {}
+      }
+      return {
+        ...ps,
+        service: {
+          ...ps.service,
+          iconDownloadurl
+        }
+      }
+    })) : [];
+
     return {
       success: true,
       message: 'Purohit fetched successfully',
@@ -674,6 +740,7 @@ export class UserService {
         status: user.status,
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt,
+        services,
       },
     };
   }
@@ -710,6 +777,24 @@ export class UserService {
         if (profile.templeAffiliationProofUrl) {
           profile.templeAffiliationProofDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.templeAffiliationProofUrl);
           profile.templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(profile.templeAffiliationProofUrl);
+        }
+       if ((safeUser as any).purohitServices) {
+          profile.purohitServices = await Promise.all((safeUser as any).purohitServices.map(async (ps: any) => {
+            let iconDownloadurl: string | null = null;
+            if (ps.service?.iconUrl) {
+              try {
+                iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
+              } catch(e) {}
+            }
+            return {
+              ...ps,
+              service: {
+                ...ps.service,
+                iconDownloadurl
+              }
+            };
+          }));
+          delete (safeUser as any).purohitServices;
         }
         (safeUser as any).profile = profile;
       }

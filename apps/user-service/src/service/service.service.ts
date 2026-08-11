@@ -293,7 +293,10 @@ export class ServiceService {
       const serviceDto = new PurohitServiceItemDto();
 
       serviceDto.serviceId = Number(item.serviceId);
-      serviceDto.customPrice = Number(item.customPrice);
+      serviceDto.isOnline = Boolean(item.isOnline);
+      serviceDto.isOffline = Boolean(item.isOffline);
+      serviceDto.onlinePrice = item.onlinePrice ? Number(item.onlinePrice) : undefined;
+      serviceDto.offlinePrice = item.offlinePrice ? Number(item.offlinePrice) : undefined;
       serviceDto.durationMinutes = item.durationMinutes
         ? Number(item.durationMinutes)
         : undefined;
