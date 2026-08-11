@@ -21,6 +21,11 @@ export enum BANK_VERIFICATION_STATUS {
   FAILED = 'FAILED',
 }
 
+export enum BANK_ACCOUNT_TYPE {
+  SAVINGS = 'SAVINGS',
+  CURRENT = 'CURRENT',
+}
+
 @Entity('purohit_bank_accounts')
 export class PurohitBankAccount {
   @PrimaryGeneratedColumn()
@@ -46,6 +51,13 @@ export class PurohitBankAccount {
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   bankName?: string;
+
+  @Column({
+    type: 'enum',
+    enum: BANK_ACCOUNT_TYPE,
+    nullable: true,
+  })
+  accountType?: BANK_ACCOUNT_TYPE;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   upiId?: string;

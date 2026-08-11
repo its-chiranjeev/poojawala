@@ -80,6 +80,9 @@ birthPlace?: string;
   @Column({ type: 'timestamp', nullable: true })
   lastLoginAt?: Date;
 
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  countryCode?: string;
+  
   @Column({ default: 1 })
   tokenVersion!: number;
 
