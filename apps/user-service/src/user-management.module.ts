@@ -3,15 +3,17 @@ import { UserManagementController } from './user-management.controller';
 import { UserModule } from './user/user.module';
 import { BookingModule } from './booking/booking.module';
 import { ComplaintModule } from './complaint/complaint.module';
+import { AssignmentModule } from './assignment/assignment.module';
+import { CouponModule } from './coupon/coupon.module';
+import { ReviewModule } from './review/review.module';
+import { ServiceModule } from './service/service.module';
+import { UserManagementService } from './user-management.service';
 
 import { DatabaseModule } from '@poojawala/database';
-import { UserManagementService } from './user-management.service';
 import { EntitiesModule } from '@poojawala/entities';
 import { ConfigModule } from '@nestjs/config';
-import { ServiceModule } from './service/service.module';
-import { ReviewModule } from './review/review.module';
 import { ScheduleModule } from '@nestjs/schedule';
-import { CouponModule } from './coupon/coupon.module';
+
 
 @Module({
   imports: [
@@ -27,6 +29,7 @@ import { CouponModule } from './coupon/coupon.module';
     BookingModule,
     ComplaintModule,
     CouponModule,
+    AssignmentModule,
   ],
   controllers: [UserManagementController],
   providers: [UserManagementService],

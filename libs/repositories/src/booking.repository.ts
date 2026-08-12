@@ -1,9 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
-
-import { Booking, BOOKING_STATUS, USER_ROLE } from '@poojawala/entities';
-
+import { Booking, BOOKING_STATUS, USER_ROLE, ASSIGNMENT_TYPE } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 interface FindBookingsByRoleOptions {
@@ -498,5 +496,27 @@ export class BookingRepository extends BaseRepository<Booking> {
       bookings,
       total,
     };
+  }
+
+  async markExpiredAsManual(): Promise<number> {
+    const result = await this.bookingRepo
+      .createQueryBuilder()
+      .update(Booking)
+      .set({
+        assignmentType: ASSIGNMENT_TYPE.MANUAL,
+      })
+      .where('"status" = :status', {
+        status: BOOKING_STATUS.PENDING,
+      })
+      .andWhere('"assignmentType" = :assignmentType', {
+        assignmentType: ASSIGNMENT_TYPE.AUTO,
+      })
+      .andWhere('"purohitId" IS NULL')
+      .andWhere(
+        `"createdAt" <= CURRENT_TIMESTAMP - INTERVAL '5 minutes'`,
+      )
+      .execute();
+
+    return result.affected ?? 0;
   }
 }
