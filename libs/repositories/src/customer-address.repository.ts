@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { CustomerAddress } from '@likemyproduct/entities';
+import { CustomerAddress } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 @Injectable()

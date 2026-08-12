@@ -1,8 +1,9 @@
-import { CreateReviewDto } from '@likemyproduct/dtos/review/create-review.dto';
+import { CreateReviewDto } from '@poojawala/dtos/review/create-review.dto';
+import { UpdateReviewStatusDto } from '@poojawala/dtos';
+import { ReviewQueryDto } from '@poojawala/dtos/review/review-query.dto';
 import {
   Body,
   Controller,
-  DefaultValuePipe,
   Delete,
   Get,
   Param,
@@ -14,51 +15,63 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ReviewService } from './review.service';
-import { CsrfGuard, JwtAuthGuard } from '@likemyproduct/common';
-import { UpdateReviewDto } from '@likemyproduct/dtos/review/update-review.dto';
+import { CsrfGuard, JwtAuthGuard, RolesGuard, Roles } from '@poojawala/common';
+import { USER_ROLE } from '@poojawala/entities';
 
 @Controller('review')
 export class ReviewController {
   constructor(private readonly reviewService: ReviewService) {}
-  @Post()
-  @UseGuards(JwtAuthGuard, CsrfGuard)
-  create(@Req() req: any, @Body() dto: CreateReviewDto) {
-    return this.reviewService.create(req.user.id, dto);
-  }
 
-  @Patch(':id')
-  @UseGuards(JwtAuthGuard, CsrfGuard)
-  update(
-    @Param('id', ParseIntPipe) id: number,
-    @Req() req: any,
-    @Body() dto: UpdateReviewDto,
-  ) {
-    return this.reviewService.update(id, req.user.id, dto);
-  }
-
-  @Delete(':id')
-  @UseGuards(JwtAuthGuard, CsrfGuard)
-  remove(
-    @Param('id', ParseIntPipe) id: number,
-    @Req() req: any,
-    @Query('bookingId', ParseIntPipe) bookingId: number,
-  ) {
-    return this.reviewService.remove(id, req.user.id, bookingId);
-  }
-
-  @Get('booking/:bookingId')
-  findByBooking(
+  @Post(':bookingId')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
+  create(
+    @Req() req: any, 
     @Param('bookingId', ParseIntPipe) bookingId: number,
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
-    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Body() dto: CreateReviewDto
   ) {
-    return this.reviewService.findByBooking(bookingId, page, limit);
+    return this.reviewService.create(req.user, bookingId, dto);
+  }
+
+  @Get()
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
+  findAll(@Req() req: any, @Query() query: ReviewQueryDto) {
+    return this.reviewService.findAll(req.user, query);
+  }
+
+  @Get(':bookingId')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
+  findOne(
+    @Req() req: any, 
+    @Param('bookingId', ParseIntPipe) bookingId: number
+  ) {
+    return this.reviewService.findOne(req.user, bookingId);
+  }
+
+  @Patch(':bookingId/status')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  updateStatus(
+    @Param('bookingId', ParseIntPipe) bookingId: number,
+    @Body() dto: UpdateReviewStatusDto,
+  ) {
+    return this.reviewService.updateStatus(bookingId, dto);
+  }
+
+  @Delete(':bookingId')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  remove(
+    @Param('bookingId', ParseIntPipe) bookingId: number,
+  ) {
+    return this.reviewService.remove(bookingId);
   }
 
   @Get('purohit/:purohitId/rating')
   async getPurohitOverallRating(
-    @Param('purohitId', ParseIntPipe)
-    purohitId: number,
+    @Param('purohitId', ParseIntPipe) purohitId: number,
   ) {
     return await this.reviewService.getPurohitOverallRating(purohitId);
   }

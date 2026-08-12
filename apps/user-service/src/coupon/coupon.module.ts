@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Coupon } from '@likemyproduct/entities';
+import { Coupon } from '@poojawala/entities';
 import { CouponController } from './coupon.controller';
 import { CouponService } from './coupon.service';
-import { CouponRepository } from '@likemyproduct/repositories';
+import { CouponRepository } from '@poojawala/repositories';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Coupon])],

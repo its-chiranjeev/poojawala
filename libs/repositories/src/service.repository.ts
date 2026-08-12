@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
-import { Service } from '@likemyproduct/entities';
+import { Service } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
-import { GetServicesQueryDto } from '@likemyproduct/dtos/service/get.services.query.dto';
+import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
 
 @Injectable()
 export class ServiceRepository extends BaseRepository<Service> {
@@ -15,10 +15,19 @@ export class ServiceRepository extends BaseRepository<Service> {
   }
 
   async findAllServices(query: GetServicesQueryDto) {
-    const { page = 1, limit = 10, search } = query;
+    const { page = 1, limit = 10, search, isActive } = query;
+    console.log("=== API REQUEST RECEIVED ===");
+    console.log("Original query object:", query);
+    
+    let parsedIsActive: boolean | undefined = undefined;
+    if (isActive !== undefined) {
+      parsedIsActive = String(isActive) === 'true';
+    }
+    
+    console.log("Parsed isActive:", parsedIsActive);
 
-    const where = {
-      isActive: true,
+    const where: any = {
+      ...(parsedIsActive !== undefined && { isActive: parsedIsActive }),
       ...(search && {
         name: ILike(`%${search}%`),
       }),
@@ -42,8 +51,6 @@ export class ServiceRepository extends BaseRepository<Service> {
         commissionPercentage: true,
         durationMinutes: true,
         requiresVenue: true,
-        supportsOnline: true,
-        supportsOffline: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,
@@ -84,8 +91,6 @@ export class ServiceRepository extends BaseRepository<Service> {
         commissionPercentage: true,
         durationMinutes: true,
         requiresVenue: true,
-        supportsOnline: true,
-        supportsOffline: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,

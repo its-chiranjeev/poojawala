@@ -2,11 +2,11 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { DatabaseModule } from '@likemyproduct/database';
-import { EntitiesModule } from '@likemyproduct/entities';
+import { DatabaseModule } from '@poojawala/database';
+import { EntitiesModule } from '@poojawala/entities';
 import { AuthModuleModule } from './auth/auth-module.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { User } from '@likemyproduct/entities';
+import { User } from '@poojawala/entities';
 
 @Module({
   imports: [

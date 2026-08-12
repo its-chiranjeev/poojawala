@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { Logger, UnprocessableEntityException, ValidationPipe, } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
-import { ResponseInterceptor, GlobalExceptionFilter, } from '@likemyproduct/common';
+import { ResponseInterceptor, GlobalExceptionFilter, } from '@poojawala/common';
 import { PaymentManagementModule } from './payment-management.module';
 
 async function bootstrap(): Promise<void> {

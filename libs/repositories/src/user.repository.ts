@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from '@likemyproduct/entities';
+import { User } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 import { Brackets } from 'typeorm';
-import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
+import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { Not } from 'typeorm';
-import { GetAllUsersDto } from '@likemyproduct/dtos/user/get-all-users.dto';
+import { GetAllUsersDto } from '@poojawala/dtos/user/get-all-users.dto';
 
 @Injectable()
 export class UserRepository extends BaseRepository<User> {
@@ -31,10 +31,7 @@ export class UserRepository extends BaseRepository<User> {
     });
   }
 
-  async updateUser(
-    id: string | number,
-    payload: Partial<User>,
-  ) {
+  async updateUser(id: string | number, payload: Partial<User>) {
     await this.repo.update(id, payload);
 
     return this.repo.findOne({
@@ -50,6 +47,12 @@ export class UserRepository extends BaseRepository<User> {
     const { page, limit, search, role, status, sortBy, order } = query;
 
     const qb = this.repo.createQueryBuilder('user');
+    qb.leftJoinAndMapOne('user.profile', 'purohit_profiles', 'profile', 'profile.userId = user.id');
+    qb.leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id');
+    qb.leftJoinAndSelect('user.serviceAreas', 'serviceAreas');
+    qb.leftJoinAndSelect('user.addresses', 'addresses');
+    qb.leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id');
+    qb.leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId');
     if (search) {
       qb.andWhere(
         new Brackets((qb) => {
@@ -80,6 +83,12 @@ export class UserRepository extends BaseRepository<User> {
       qb.andWhere('user.status = :status', { status });
     }
 
+    if (query.verificationStatus && role === 'PUROHIT') {
+      qb.andWhere('profile.verificationStatus = :verificationStatus', {
+        verificationStatus: query.verificationStatus,
+      });
+    }
+
     qb.orderBy(`user.${sortBy}`, order);
 
     qb.skip((page - 1) * limit);
@@ -95,16 +104,16 @@ export class UserRepository extends BaseRepository<User> {
   }
 
   async findById(id: string | number) {
-    return this.repo.findOne({where: { id } as any});}
-  async findApprovedPurohits(
-    page = 1,
-    limit = 10,
-    search?: string,
-  ) {
+    return this.repo.findOne({ where: { id } as any });
+  }
+  async findApprovedPurohits(page = 1, limit = 10, search?: string) {
     const query = this.repo
-    .createQueryBuilder('user')
-    .where('user.role = :role', { role: USER_ROLE.PUROHIT })
-    .andWhere('user.status = :status', { status: USER_STATUS.ACTIVE });
+      .createQueryBuilder('user')
+      .leftJoinAndMapOne('user.profile', 'purohit_profiles', 'profile', 'profile.userId = user.id')
+      .leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id')
+      .leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId')
+      .where('user.role = :role', { role: USER_ROLE.PUROHIT })
+      .andWhere('user.status = :status', { status: USER_STATUS.ACTIVE });
 
     if (search) {
       const isNumber = !isNaN(Number(search));
@@ -129,19 +138,18 @@ export class UserRepository extends BaseRepository<User> {
       }
     }
 
-    query
-    .skip((page - 1) * limit)
-    .take(limit);
+    query.skip((page - 1) * limit).take(limit);
 
     const [users, total] = await query.getManyAndCount();
 
-    const data = users.map((user) => ({
+    const data = users.map((user: any) => ({
       id: user.id,
       profileImage: user.profileImage,
       firstName: user.firstName,
       lastName: user.lastName,
       username: user.username,
       isActive: user.status === USER_STATUS.ACTIVE,
+      services: user.purohitServices || [],
     }));
 
     return {
@@ -169,5 +177,26 @@ export class UserRepository extends BaseRepository<User> {
       },
     });
   }
-  }
 
+  async getFullProfile(userId: number, role: USER_ROLE) {
+    const qb = this.repo
+      .createQueryBuilder('user')
+      .where('user.id = :id', { id: userId });
+
+    if (role === USER_ROLE.PUROHIT) {
+      qb.leftJoinAndMapOne(
+        'user.profile',
+        'purohit_profiles',
+        'profile',
+        'profile.userId = user.id',
+      )
+      .leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id')
+      .leftJoinAndSelect('user.serviceAreas', 'serviceAreas')
+      .leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id')      .leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId');
+    } else if (role === USER_ROLE.CUSTOMER) {
+      qb.leftJoinAndSelect('user.addresses', 'addresses');
+    }
+
+    return qb.getOne();
+  }
+}

@@ -7,7 +7,7 @@ import {
   PAYMENT_TYPE,
   USER_ROLE,
   PAYMENT_METHOD,
-} from '@likemyproduct/entities';
+} from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 export interface FindMyPaymentsOptions {

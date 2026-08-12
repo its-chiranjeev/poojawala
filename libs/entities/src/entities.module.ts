@@ -14,7 +14,6 @@ import { CustomerFavorite } from './customer-favorite.entity';
 import { Booking } from './booking.entity';
 import { Payment } from './payment.entity';
 import { PaymentBooking } from './payment-booking.entity';
-import { Review } from './review.entity';
 import { Complaint } from './complaint.entity';
 import { PlatformSetting } from './platform-setting.entity';
 import { Coupon } from './coupon.entity';
@@ -38,7 +37,6 @@ import { EntitiesService } from './entities.service';
       Booking,
       Payment,
       PaymentBooking,
-      Review,
       Complaint,
       PlatformSetting,
       Coupon,

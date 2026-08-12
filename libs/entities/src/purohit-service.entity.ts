@@ -37,8 +37,17 @@ export class PurohitService {
   @JoinColumn({ name: 'serviceId' })
   service!: Service;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
-  customPrice!: number;
+  @Column({ type: 'boolean', default: false })
+  isOnline!: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  isOffline!: boolean;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  onlinePrice?: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  offlinePrice?: number;
 
   @Column({ type: 'int', nullable: true })
   durationMinutes?: number;

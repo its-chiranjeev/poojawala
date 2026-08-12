@@ -1,4 +1,4 @@
-import { USER_ROLE, QUALIFICATION, BANK_ACCOUNT_TYPE } from '@likemyproduct/entities';
+import { USER_ROLE, QUALIFICATION, PUROHIT_PAYMENT_METHOD } from '@poojawala/entities';
 import { Transform } from 'class-transformer';
 import { IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, } from 'class-validator';
 
@@ -13,6 +13,11 @@ export class OtpDto {
   @Transform(({ value }) => value?.trim())
   @MaxLength(15)
   phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  countryCode?: string;
 
   @IsEnum(USER_ROLE)
   @IsNotEmpty()
@@ -34,6 +39,11 @@ export class RegisterNormalUserDto {
   @MaxLength(15)
   phone?: string;
   
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  countryCode?: string;
+
   // @IsOptional()
   // @IsString()
   // @IsNotEmpty()
@@ -118,11 +128,13 @@ export class RegisterNormalUserDto {
   @IsOptional()
   specializations?: string[];
 
+  @IsOptional()
   @IsDateString()
   dob?: string;
 
+  @IsOptional()
   @IsString()
-  birthPlace!: string;
+  birthPlace?: string;
 
   @IsOptional()
   @IsString()
@@ -149,8 +161,13 @@ export class RegisterNormalUserDto {
   bankName?: string;
 
   @IsOptional()
-  @IsEnum(BANK_ACCOUNT_TYPE)
-  accountType?: BANK_ACCOUNT_TYPE;
+  @IsEnum(PUROHIT_PAYMENT_METHOD)
+  paymentMethod?: PUROHIT_PAYMENT_METHOD;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  upiId?: string;
 }
 
 export class GenerateOtpDto {
@@ -161,6 +178,11 @@ export class GenerateOtpDto {
   @IsOptional()
   @IsString()
   phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  countryCode?: string;
 
   @IsEnum(USER_ROLE)
   role!: USER_ROLE;
@@ -177,6 +199,11 @@ export class resetPasswordDto {
   @Transform(({ value }) => value?.trim())
   @MaxLength(15)
   phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  countryCode?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -202,6 +229,11 @@ export class forgotPasswordDto {
   @Transform(({ value }) => value?.trim())
   @MaxLength(15)
   phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  countryCode?: string;
 }
 
 export function Match(property: string, validationOptions?: ValidationOptions) {

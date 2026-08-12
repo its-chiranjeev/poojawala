@@ -24,19 +24,19 @@ import {
   PAYMENT_TYPE,
   User,
   USER_ROLE,
-} from '@likemyproduct/entities';
+} from '@poojawala/entities';
 
 import {
   BookingRepository,
   PaymentRepository,
-} from '@likemyproduct/repositories';
+} from '@poojawala/repositories';
 
 import {
   CreatePaymentLinkDto,
   PaymentQueryDto,
   AdminPaymentQueryDto,
   CreateRefundDto,
-} from '@likemyproduct/dtos';
+} from '@poojawala/dtos';
 
 import { paymentInvoiceTemplate } from './templates/invoice.template';
 

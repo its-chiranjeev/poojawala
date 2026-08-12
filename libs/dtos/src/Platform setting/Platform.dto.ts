@@ -1,5 +1,5 @@
 import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
-import { PLATFORM_SETTING_KEY } from '@likemyproduct/entities';
+import { PLATFORM_SETTING_KEY } from '@poojawala/entities';
 
 export class UpsertPlatformSettingDto {
   @IsEnum(PLATFORM_SETTING_KEY)

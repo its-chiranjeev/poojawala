@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Booking, Complaint, Payment, PurohitProfile } from '@likemyproduct/entities';
-import { ComplaintRepository } from '@likemyproduct/repositories';
-import { S3Module } from '@likemyproduct/s3';
+import { Booking, Complaint, PurohitProfile } from '@poojawala/entities';
+import { ComplaintRepository, BookingRepository } from '@poojawala/repositories';
+import { S3Module } from '@poojawala/s3';
 import { ComplaintController } from './complaint.controller';
 import { ComplaintService } from './complaint.service';
 
@@ -11,13 +11,12 @@ import { ComplaintService } from './complaint.service';
     TypeOrmModule.forFeature([
       Complaint,
       Booking,
-      Payment,
       PurohitProfile,
     ]),
     S3Module,
   ],
   controllers: [ ComplaintController ],
-  providers: [ ComplaintService, ComplaintRepository],
+  providers: [ ComplaintService, ComplaintRepository, BookingRepository],
   exports: [ ComplaintService ],
 })
 export class ComplaintModule {}

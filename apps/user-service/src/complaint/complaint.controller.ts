@@ -1,9 +1,9 @@
 import { Body, Controller, Post, Patch, Param, Get, Delete, Query, Req, UploadedFiles, UseGuards, UseInterceptors, ValidationPipe, ParseIntPipe, HttpCode, HttpStatus, } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { ComplaintService } from './complaint.service';
-import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard, } from '@likemyproduct/common';
-import { USER_ROLE } from '@likemyproduct/entities';
-import { CreateComplaintDto, UpdateComplaintStatusDto, ComplaintQueryDto, } from '@likemyproduct/dtos';
+import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard, } from '@poojawala/common';
+import { USER_ROLE } from '@poojawala/entities';
+import { CreateComplaintDto, UpdateComplaintStatusDto, ComplaintQueryDto, } from '@poojawala/dtos';
 
 @Controller('complaints')
 export class ComplaintController {
@@ -50,24 +50,6 @@ export class ComplaintController {
     query: ComplaintQueryDto,
   ) {
     return this.complaintService.getComplaints(req.user, query);
-  }
-
-  @Get('against-me')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
-  @HttpCode(HttpStatus.OK)
-  async getComplaintsAgainstMe(
-    @Req() req: any,
-    @Query(
-      new ValidationPipe({
-        whitelist: true,
-        forbidNonWhitelisted: true,
-        transform: true,
-      }),
-    )
-    query: ComplaintQueryDto,
-  ) {
-    return this.complaintService.getComplaintsAgainstMe(req.user, query);
   }
 
   @Patch(':id/status')

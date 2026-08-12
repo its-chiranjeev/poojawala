@@ -4,15 +4,14 @@ import { UserService } from "./user.service";
 import type { Response } from 'express';
 import * as crypto from 'crypto';
 import { AuthGuard } from "@nestjs/passport";
-import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@likemyproduct/common";
-import { UpdateUserDto, UpdateUserStatusDto, RegisterNormalUserDto, GenerateOtpDto, CustomerFavoriteDto, VerifyPurohitDto } from "@likemyproduct/dtos";
-import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
+import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@poojawala/common";
+import { UpdateUserDto, UpdateUserStatusDto, RegisterNormalUserDto, GenerateOtpDto, CustomerFavoriteDto, VerifyPurohitDto, CreatePurohitByAdminDto } from "@poojawala/dtos";import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { filter } from 'rxjs';
-import { UpsertPlatformSettingDto } from "@likemyproduct/dtos/Platform setting/Platform.dto";
-import { GetAllUsersDto } from "@likemyproduct/dtos/user/get-all-users.dto";
-import { CreateCustomerAddressDto } from "@likemyproduct/dtos/user/add-customer-address.dto";
-import { CreatePurohitServiceAreaDto } from "@likemyproduct/dtos/user/add-purohit-address.dto";
-import { UpdatePurohitServiceAreaDto } from "@likemyproduct/dtos/user/update-purohit-address.dto";
+import { UpsertPlatformSettingDto } from "@poojawala/dtos/Platform setting/Platform.dto";
+import { GetAllUsersDto } from "@poojawala/dtos/user/get-all-users.dto";
+import { CreateCustomerAddressDto } from "@poojawala/dtos/user/add-customer-address.dto";
+import { CreatePurohitServiceAreaDto } from "@poojawala/dtos/user/add-purohit-address.dto";
+import { UpdatePurohitServiceAreaDto } from "@poojawala/dtos/user/update-purohit-address.dto";
 import { Cron } from '@nestjs/schedule';
 
 @Controller('users')
@@ -109,23 +108,33 @@ export class UserController {
     );
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @Post('admin/add-purohit')
+  @HttpCode(HttpStatus.CREATED)
+  async addPurohitByAdmin(
+    @Body(new ValidationPipe({ whitelist: true }))
+    dto: CreatePurohitByAdminDto,
+  ) {
+    return this.userService.createPurohitByAdmin(dto);
+  }
 
-@UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-@Roles(USER_ROLE.ADMIN)
-@Patch('platform-upsert')
-@HttpCode(HttpStatus.OK)
-async upsertPlatformSetting(
-  @Req() req: Request,
-  @Body(new ValidationPipe({ whitelist: true }))
-  dto: UpsertPlatformSettingDto,
-) {
-  const user = (req as any).user;
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @Patch('platform-upsert')
+  @HttpCode(HttpStatus.OK)
+  async upsertPlatformSetting(
+    @Req() req: Request,
+    @Body(new ValidationPipe({ whitelist: true }))
+    dto: UpsertPlatformSettingDto,
+  ) {
+    const user = (req as any).user;
 
-  return this.userService.upsertPlatformSetting(
-    dto,
-    user.id,
-  );
-}
+    return this.userService.upsertPlatformSetting(
+      dto,
+      user.id,
+    );
+  }
 
 @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
 @Roles(USER_ROLE.ADMIN)

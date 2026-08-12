@@ -2,18 +2,16 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
-import { Booking, COMPLAINT_STATUS, Payment, PurohitProfile, User, USER_ROLE, COMPLAINT_CATEGORY, } from '@likemyproduct/entities';
-import { ComplaintRepository } from '@likemyproduct/repositories';
-import { CreateComplaintDto, ComplaintQueryDto, UpdateComplaintStatusDto, } from '@likemyproduct/dtos';
-import { S3Service } from '@likemyproduct/s3';
+import { Booking, COMPLAINT_STATUS, Payment, PurohitProfile, User, USER_ROLE, COMPLAINT_CATEGORY, } from '@poojawala/entities';
+import { ComplaintRepository } from '@poojawala/repositories';
+import { CreateComplaintDto, ComplaintQueryDto, UpdateComplaintStatusDto, } from '@poojawala/dtos';
+import { S3Service } from '@poojawala/s3';
 
 @Injectable()
 export class ComplaintService {
   constructor(
     @InjectRepository(Booking)
     private readonly bookingRepository: Repository<Booking>,
-    @InjectRepository(Payment)
-    private readonly paymentRepository: Repository<Payment>,
     @InjectRepository(PurohitProfile)
     private readonly purohitProfileRepository: Repository<PurohitProfile>,
     private readonly complaintRepository: ComplaintRepository,
@@ -38,17 +36,13 @@ export class ComplaintService {
       ? await this.findBookingForComplaint(dto.bookingId)
       : null;
 
-    const raisedAgainstId = booking
-      ? await this.validateBookingComplaintAccess(user, booking)
-      : undefined;
+    if (booking) {
+      await this.validateBookingComplaintAccess(user, booking);
+    }
 
     if (booking) {
       await this.validateDuplicateComplaint(booking.id, user.id, dto.category);
     }
-
-    const linkedPayment = dto.linkedPaymentId
-      ? await this.validateLinkedPayment(dto.linkedPaymentId, user, booking)
-      : null;
 
     const complaintNumber = await this.generateUniqueComplaintNumber();
 
@@ -79,12 +73,11 @@ export class ComplaintService {
         complaintNumber,
         bookingId: booking?.id,
         raisedById: user.id,
-        raisedAgainstId,
+
         category: dto.category,
         subject: dto.subject?.trim(),
         description: dto.description.trim(),
         evidenceUrls: uploadedFiles.map(({ url }) => url),
-        linkedPaymentId: linkedPayment?.id,
         status: COMPLAINT_STATUS.OPEN,
       });
 
@@ -156,7 +149,7 @@ export class ComplaintService {
   private async validatePurohitComplaintAccess(
     user: User,
     booking: Booking,
-  ): Promise<number> {
+  ): Promise<void> {
     const purohitProfile = await this.purohitProfileRepository.findOne({
       where: {
         userId: user.id,
@@ -172,20 +165,20 @@ export class ComplaintService {
         'You cannot raise a complaint for this booking',
       );
     }
-
-    return booking.customerId;
   }
 
   private async validateBookingComplaintAccess(
     user: User,
     booking: Booking,
-  ): Promise<number> {
+  ): Promise<void> {
     switch (user.role) {
       case USER_ROLE.CUSTOMER:
-        return this.validateCustomerComplaintAccess(user, booking);
+        this.validateCustomerComplaintAccess(user, booking);
+        break;
 
       case USER_ROLE.PUROHIT:
-        return this.validatePurohitComplaintAccess(user, booking);
+        await this.validatePurohitComplaintAccess(user, booking);
+        break;
 
       default:
         throw new ForbiddenException(
@@ -219,20 +212,12 @@ export class ComplaintService {
   private validateCustomerComplaintAccess(
     user: User,
     booking: Booking,
-  ): number {
+  ): void {
     if (booking.customerId !== user.id) {
       throw new ForbiddenException(
         'You cannot raise a complaint for this booking',
       );
     }
-
-    const purohitUserId = booking.purohit?.userId;
-
-    if (!purohitUserId) {
-      throw new BadRequestException('No purohit is assigned to this booking');
-    }
-
-    return purohitUserId;
   }
 
   private async findBookingForComplaint(bookingId: number): Promise<Booking> {
@@ -251,42 +236,6 @@ export class ComplaintService {
     }
 
     return booking;
-  }
-
-  private async validateLinkedPayment(
-    paymentId: number,
-    user: User,
-    booking: Booking | null,
-  ): Promise<Payment> {
-    const payment = await this.paymentRepository.findOne({
-      where: {
-        id: paymentId,
-      },
-      relations: {
-        booking: true,
-      },
-    });
-
-    if (!payment) {
-      throw new NotFoundException('Payment not found');
-    }
-
-    if (booking && payment.bookingId !== booking.id) {
-      throw new BadRequestException(
-        'The selected payment does not belong to this booking',
-      );
-    }
-
-    if (
-      user.role === USER_ROLE.CUSTOMER &&
-      payment.booking?.customerId !== user.id
-    ) {
-      throw new ForbiddenException(
-        'You cannot link this payment to the complaint',
-      );
-    }
-
-    return payment;
   }
 
   private generateComplaintNumber(): string {
@@ -334,10 +283,12 @@ export class ComplaintService {
 
     const resolvedStatuses = [
       COMPLAINT_STATUS.RESOLVED,
-      COMPLAINT_STATUS.RESOLVED_CUSTOMER_FAVOR,
-      COMPLAINT_STATUS.RESOLVED_PUROHIT_FAVOR,
       COMPLAINT_STATUS.CLOSED,
+      COMPLAINT_STATUS.REJECTED,
     ];
+    if (dto.status === COMPLAINT_STATUS.REJECTED && !dto.resolutionNotes?.trim()) {
+      throw new BadRequestException('Rejection message (resolution notes) is required when rejecting a complaint');
+    }
 
     if (resolvedStatuses.includes(dto.status) && !dto.resolutionNotes?.trim()) {
       throw new BadRequestException('Resolution notes are required');
@@ -370,22 +321,17 @@ export class ComplaintService {
       [COMPLAINT_STATUS.OPEN]: [
         COMPLAINT_STATUS.UNDER_REVIEW,
         COMPLAINT_STATUS.RESOLVED,
-        COMPLAINT_STATUS.RESOLVED_CUSTOMER_FAVOR,
-        COMPLAINT_STATUS.RESOLVED_PUROHIT_FAVOR,
+        COMPLAINT_STATUS.REJECTED,
+
       ],
 
       [COMPLAINT_STATUS.UNDER_REVIEW]: [
         COMPLAINT_STATUS.RESOLVED,
-        COMPLAINT_STATUS.RESOLVED_CUSTOMER_FAVOR,
-        COMPLAINT_STATUS.RESOLVED_PUROHIT_FAVOR,
+        COMPLAINT_STATUS.REJECTED,
       ],
 
       [COMPLAINT_STATUS.RESOLVED]: [COMPLAINT_STATUS.CLOSED],
-
-      [COMPLAINT_STATUS.RESOLVED_CUSTOMER_FAVOR]: [COMPLAINT_STATUS.CLOSED],
-
-      [COMPLAINT_STATUS.RESOLVED_PUROHIT_FAVOR]: [COMPLAINT_STATUS.CLOSED],
-
+      [COMPLAINT_STATUS.REJECTED]: [COMPLAINT_STATUS.CLOSED],
       [COMPLAINT_STATUS.CLOSED]: [],
     };
 
@@ -432,37 +378,13 @@ export class ComplaintService {
 
     const canAccess =
       user.role === USER_ROLE.ADMIN ||
-      complaint.raisedById === user.id ||
-      complaint.raisedAgainstId === user.id;
+      complaint.raisedById === user.id;
 
     if (!canAccess) {
       throw new ForbiddenException('You cannot access this complaint');
     }
 
     return complaint;
-  }
-
-  async getComplaintsAgainstMe(user: User, query: ComplaintQueryDto) {
-    const { complaints, total } = await this.complaintRepository.findComplaints(
-      {
-        page: query.page,
-        limit: query.limit,
-        status: query.status,
-        category: query.category,
-        search: query.search,
-        raisedAgainstId: user.id,
-      },
-    );
-
-    return {
-      complaints,
-      meta: {
-        page: query.page,
-        limit: query.limit,
-        total,
-        totalPages: Math.ceil(total / query.limit),
-      },
-    };
   }
 
   async deleteComplaint(complaintId: number) {
@@ -475,8 +397,7 @@ export class ComplaintService {
 
     const deletableStatuses: COMPLAINT_STATUS[] = [
       COMPLAINT_STATUS.RESOLVED,
-      COMPLAINT_STATUS.RESOLVED_CUSTOMER_FAVOR,
-      COMPLAINT_STATUS.RESOLVED_PUROHIT_FAVOR,
+      COMPLAINT_STATUS.REJECTED,
       COMPLAINT_STATUS.CLOSED,
     ];
 

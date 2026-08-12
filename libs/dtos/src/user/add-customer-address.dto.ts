@@ -8,7 +8,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { VENUE_TYPE } from '@likemyproduct/entities';
+import { VENUE_TYPE } from '@poojawala/entities';
 import { Type } from 'class-transformer';
 
 export class CreateCustomerAddressDto {

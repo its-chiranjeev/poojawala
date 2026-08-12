@@ -13,7 +13,6 @@ export * from './customer-favorite.repository';
 export * from './booking.repository';
 export * from './payment.repository';
 export * from './payment-booking.repository';
-export * from './review.repository';
 export * from './complaint.repository';
 export * from './platform-setting.repository';
 export * from './coupon.repository';

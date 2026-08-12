@@ -13,7 +13,6 @@ export * from './customer-favorite.entity';
 export * from './booking.entity';
 export * from './payment.entity';
 export * from './payment-booking.entity';
-export * from './review.entity';
 export * from './complaint.entity';
 export * from './platform-setting.entity';
 export * from './coupon.entity';

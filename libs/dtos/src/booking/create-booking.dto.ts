@@ -8,6 +8,7 @@ import {
   IsString,
   MaxLength,
   Min,
+  IsIn,
 } from 'class-validator';
 
 export class CreateBookingDto {
@@ -23,6 +24,10 @@ export class CreateBookingDto {
 
   @IsDateString()
   scheduledAt!: string;
+
+  @IsString()
+  @IsIn(['ONLINE', 'OFFLINE'])
+  bookingMode!: 'ONLINE' | 'OFFLINE';
 
   @IsOptional()
   @IsString()

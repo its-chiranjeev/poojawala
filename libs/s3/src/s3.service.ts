@@ -15,7 +15,7 @@ import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { MulterFile } from '@likemyproduct/dtos';
+import { MulterFile } from '@poojawala/dtos';
 
 // TODO: For utho s3 code
 @Injectable()
@@ -180,6 +180,24 @@ export class S3Service {
     const command = new GetObjectCommand({
       Bucket: this.bucketName,
       Key: normalizedKey,
+    });
+
+    return await getSignedUrl(this.s3Client, command, {
+      expiresIn: 60 * 60,
+    });
+  }
+
+  async getAttachmentDownloadUrl(fileKey: string): Promise<string> {
+    if (!fileKey) {
+      throw new Error('File key is required');
+    }
+
+    const normalizedKey = this.normalizeS3Key(fileKey);
+
+    const command = new GetObjectCommand({
+      Bucket: this.bucketName,
+      Key: normalizedKey,
+      ResponseContentDisposition: 'attachment',
     });
 
     return await getSignedUrl(this.s3Client, command, {

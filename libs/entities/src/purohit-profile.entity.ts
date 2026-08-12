@@ -16,7 +16,6 @@ import { PurohitMedia } from './purohit-media.entity';
 import { PurohitService } from './purohit-service.entity';
 import { CustomerFavorite } from './customer-favorite.entity';
 import { Booking } from './booking.entity';
-import { Review } from './review.entity';
 
 export enum QUALIFICATION {
   SHASTRI = 'SHASTRI',
@@ -94,9 +93,6 @@ export class PurohitProfile {
   @Column({ type: 'decimal', precision: 2, scale: 1, default: 0.0 })
   avgRating!: number;
 
-  @Column({ type: 'int', default: 0 })
-  totalReviews!: number;
-
   @Column({ type: 'boolean', default: false })
   isOnlineAvailable!: boolean;
 
@@ -120,9 +116,6 @@ export class PurohitProfile {
 
   @OneToMany(() => Booking, (booking) => booking.purohit)
   bookings!: Booking[];
-
-  @OneToMany(() => Review, (review) => review.purohit)
-  reviews!: Review[];
 
   @CreateDateColumn()
   createdAt!: Date;

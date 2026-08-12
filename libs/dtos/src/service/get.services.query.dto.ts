@@ -1,5 +1,5 @@
-import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
+import { IsInt, IsOptional, IsString, Max, Min, IsBoolean } from 'class-validator';
 
 export class GetServicesQueryDto {
   @IsOptional()
@@ -18,4 +18,8 @@ export class GetServicesQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @IsString()
+  isActive?: string;
 }

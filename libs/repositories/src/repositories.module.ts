@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { RepositoriesService } from './repositories.service';
-import { EntitiesModule } from '@likemyproduct/entities';
+import { EntitiesModule } from '@poojawala/entities';
 import { UserRepository } from './user.repository';
 import { OtpRepository } from './otp.repository';
 import { PurohitProfileRepository } from './purohit-profile.repository';
@@ -13,8 +13,6 @@ import { CustomerAddressRepository } from './customer-address.repository';
 import { CustomerFavoriteRepository } from './customer-favorite.repository';
 import { BookingRepository } from './booking.repository';
 import { PaymentRepository } from './payment.repository';
-import { PaymentBookingRepository } from './payment-booking.repository';
-import { ReviewRepository } from './review.repository';
 import { ComplaintRepository } from './complaint.repository';
 import { PlatformSettingRepository } from './platform-setting.repository';
 import { CouponRepository } from './coupon.repository';
@@ -37,8 +35,6 @@ import { CmsContentRepository } from './cms-content.repository';
     CustomerFavoriteRepository,
     BookingRepository,
     PaymentRepository,
-    PaymentBookingRepository,
-    ReviewRepository,
     ComplaintRepository,
     PlatformSettingRepository,
     CouponRepository,
@@ -59,8 +55,6 @@ import { CmsContentRepository } from './cms-content.repository';
     CustomerFavoriteRepository,
     BookingRepository,
     PaymentRepository,
-    PaymentBookingRepository,
-    ReviewRepository,
     ComplaintRepository,
     PlatformSettingRepository,
     CouponRepository,

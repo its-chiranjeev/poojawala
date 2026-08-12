@@ -1,14 +1,14 @@
-import { EmailServicesModule } from '@likemyproduct/email-services';
-import { SmsServicesModule } from '@likemyproduct/sms-services';
+import { EmailServicesModule } from '@poojawala/email-services';
+import { SmsServicesModule } from '@poojawala/sms-services';
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { UserController } from './user.controller';
 import { UserService } from './user.service';
-import { EntitiesModule } from '@likemyproduct/entities';
-import { RepositoriesModule } from '@likemyproduct/repositories';
-import { CommonAuthModule } from '@likemyproduct/common';
+import { EntitiesModule } from '@poojawala/entities';
+import { RepositoriesModule } from '@poojawala/repositories';
+import { CommonAuthModule } from '@poojawala/common';
 import { AuthModuleModule } from 'apps/auth-service/src/auth/auth-module.module';
-import { S3Module } from '@likemyproduct/s3';
+import { S3Module } from '@poojawala/s3';
 
 
 @Module({

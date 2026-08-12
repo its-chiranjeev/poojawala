@@ -16,7 +16,6 @@ import { Service } from './service.entity';
 import { PurohitProfile } from './purohit-profile.entity';
 import { CustomerAddress } from './customer-address.entity';
 import { Payment } from './payment.entity';
-import { Review } from './review.entity';
 import { Complaint } from './complaint.entity';
 
 export enum BOOKING_STATUS {
@@ -48,6 +47,16 @@ export enum CANCELLED_BY {
   ADMIN = 'ADMIN',
 }
 
+export enum BOOKING_MODE {
+  ONLINE = 'ONLINE',
+  OFFLINE = 'OFFLINE',
+}
+
+export enum REVIEW_STATUS {
+  DRAFT = 'DRAFT',
+  PUBLISHED = 'PUBLISHED',
+}
+
 @Entity('bookings')
 export class Booking {
   @PrimaryGeneratedColumn()
@@ -64,10 +73,15 @@ export class Booking {
   @JoinColumn({ name: 'customerId' })
   customer!: User;
 
+  @Column({ type: 'enum', enum: BOOKING_MODE, default: BOOKING_MODE.OFFLINE })
+  bookingMode!: BOOKING_MODE;
+
   @Column({ type: 'int' })
   serviceId!: number;
 
-  @ManyToOne(() => Service, (service) => service.bookings, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Service, (service) => service.bookings, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'serviceId' })
   service!: Service;
 
@@ -176,8 +190,24 @@ export class Booking {
   @OneToMany(() => Payment, (payment) => payment.booking)
   payments!: Payment[];
 
-  @OneToOne(() => Review, (review) => review.booking)
-  review?: Review;
+  @Column({ type: 'text', nullable: true })
+  customerReview?: string;
+
+  @Column({ type: 'decimal', precision: 2, scale: 1, nullable: true })
+  customerRating?: number;
+
+  @Column({ type: 'text', nullable: true })
+  purohitReview?: string;
+
+  @Column({ type: 'decimal', precision: 2, scale: 1, nullable: true })
+  purohitRating?: number;
+
+  @Column({
+    type: 'enum',
+    enum: REVIEW_STATUS,
+    default: REVIEW_STATUS.DRAFT,
+  })
+  reviewStatus!: REVIEW_STATUS;
 
   @OneToMany(() => Complaint, (complaint) => complaint.booking)
   complaints!: Complaint[];

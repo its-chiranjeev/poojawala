@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsNumber,
@@ -52,22 +53,26 @@ export class UpdateServiceDto {
 
   @IsOptional()
   @IsBoolean()
-  supportsOnline?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
-  supportsOffline?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
   isActive?: boolean;
 }
 
 export class UpdatePurohitServiceDto{
   @IsOptional()
- @IsNumber({ maxDecimalPlaces: 2 })
+  @IsBoolean()
+  isOnline!: boolean;
+
+  @IsBoolean()
+  isOffline!: boolean;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  customPrice: number;
+  onlinePrice?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  offlinePrice?: number;
 
   @IsOptional()
   @IsInt()
@@ -80,3 +85,8 @@ export class UpdatePurohitServiceDto{
 
 } 
  
+export class UpdateServiceStatusDto {
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  isActive!: boolean;
+}

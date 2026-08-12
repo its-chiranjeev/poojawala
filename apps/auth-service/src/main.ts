@@ -5,8 +5,8 @@ import {
   UnprocessableEntityException,
   ValidationPipe,
 } from '@nestjs/common';
-import { ResponseInterceptor } from '@likemyproduct/common';
-import { GlobalExceptionFilter } from '@likemyproduct/common';
+import { ResponseInterceptor } from '@poojawala/common';
+import { GlobalExceptionFilter } from '@poojawala/common';
 import { Request, Response, NextFunction } from 'express';
 
 async function bootstrap() {

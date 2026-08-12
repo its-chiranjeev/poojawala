@@ -17,13 +17,12 @@ import {
   Request
 } from '@nestjs/common';
 import { ServiceService } from './service.service';
-import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@likemyproduct/common';
-import { USER_ROLE } from '@likemyproduct/entities';
-import { CreateServiceDto, CreatePurohitServiceDto } from '@likemyproduct/dtos/service/create.service.dto';
-import { UpdateServiceDto, UpdatePurohitServiceDto } from '@likemyproduct/dtos/service/update.service.dto';
+import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@poojawala/common';
+import { USER_ROLE } from '@poojawala/entities';
+import { CreateServiceDto, CreatePurohitServiceDto } from '@poojawala/dtos/service/create.service.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { GetServicesQueryDto } from '@likemyproduct/dtos/service/get.services.query.dto';
-
+import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
+import { UpdateServiceDto, UpdatePurohitServiceDto, UpdateServiceStatusDto } from '@poojawala/dtos/service/update.service.dto';
 @Controller('service')
 export class ServiceController {
   constructor(private readonly serviceService: ServiceService) { }
@@ -66,6 +65,19 @@ export class ServiceController {
     return this.serviceService.deletePurohitService(id, user.id);
   }
 
+  @Get('debug-where')
+  async debugWhere(@Req() req: Request, @Query() query: any) {
+    let isActive = query.isActive;
+    let parsedIsActive: boolean | undefined = undefined;
+    if (isActive !== undefined) {
+      parsedIsActive = String(isActive) === 'true';
+    }
+    const where: any = {
+      ...(parsedIsActive !== undefined && { isActive: parsedIsActive }),
+    };
+    return { isActive, parsedIsActive, where };
+  }
+
   //update purohit service
   @Patch('purohit-service/:id')
   @Roles(USER_ROLE.PUROHIT)
@@ -82,8 +94,22 @@ export class ServiceController {
 
 
   @Get()
-  async findAllServices(@Query() query: GetServicesQueryDto) {
+  async findAllServices(@Req() req: Request, @Query() query: GetServicesQueryDto) {
+    if (query.isActive === undefined && (req as any).query.isActive !== undefined) {
+      query.isActive = (req as any).query.isActive;
+    }
     return this.serviceService.findAllServices(query);
+  }
+
+ @Patch(':id/status')
+ @Roles(USER_ROLE.ADMIN)
+ @UseGuards(JwtAuthGuard, RolesGuard)
+ @HttpCode(HttpStatus.OK)
+ async updateServiceStatus(
+  @Param('id', ParseIntPipe) id: number,
+   @Body() dto: UpdateServiceStatusDto,
+ ) {
+   return this.serviceService.updateServiceStatus(id, dto.isActive);
   }
 
   @Post()

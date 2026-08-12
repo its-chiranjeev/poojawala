@@ -23,16 +23,16 @@ import {
   Roles,
   RolesGuard,
   CsrfGuard,
-} from '@likemyproduct/common';
+} from '@poojawala/common';
 
-import { USER_ROLE, User } from '@likemyproduct/entities';
+import { USER_ROLE, User } from '@poojawala/entities';
 
 import {
   CreatePaymentLinkDto,
   PaymentQueryDto,
   AdminPaymentQueryDto,
   CreateRefundDto,
-} from '@likemyproduct/dtos';
+} from '@poojawala/dtos';
 
 import { PaymentService, RazorpayWebhookPayload } from './payment.service';
 

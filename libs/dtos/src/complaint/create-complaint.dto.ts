@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
-import { COMPLAINT_CATEGORY } from '@likemyproduct/entities';
+import { COMPLAINT_CATEGORY } from '@poojawala/entities';
 
 export class CreateComplaintDto {
   @IsOptional()
@@ -20,9 +20,4 @@ export class CreateComplaintDto {
   @MinLength(10)
   @MaxLength(5000)
   description!: string;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  linkedPaymentId?: number;
 }

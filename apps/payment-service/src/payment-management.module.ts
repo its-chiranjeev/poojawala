@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { DatabaseModule } from '@likemyproduct/database';
-import { EntitiesModule } from '@likemyproduct/entities';
-import { RepositoriesModule } from '@likemyproduct/repositories';
-import { CommonAuthModule } from '@likemyproduct/common';
+import { DatabaseModule } from '@poojawala/database';
+import { EntitiesModule } from '@poojawala/entities';
+import { RepositoriesModule } from '@poojawala/repositories';
+import { CommonAuthModule } from '@poojawala/common';
 import { PaymentModule } from './payment/payment.module';
 
 @Module({

@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { AuthModuleService } from './auth-module.service';
 import { AuthModuleController } from './auth-module.controller';
-import { EntitiesModule } from '@likemyproduct/entities';
-import { RepositoriesModule } from '@likemyproduct/repositories';
-import { CommonAuthModule } from '@likemyproduct/common';
-import { EmailServicesModule } from '@likemyproduct/email-services';
-import { SmsServicesModule } from '@likemyproduct/sms-services';
-import { S3Module } from '@likemyproduct/s3';
+import { EntitiesModule } from '@poojawala/entities';
+import { RepositoriesModule } from '@poojawala/repositories';
+import { CommonAuthModule } from '@poojawala/common';
+import { EmailServicesModule } from '@poojawala/email-services';
+import { SmsServicesModule } from '@poojawala/sms-services';
+import { S3Module } from '@poojawala/s3';
 
 @Module({
   imports: [

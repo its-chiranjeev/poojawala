@@ -1,6 +1,6 @@
 import { Injectable,UnauthorizedException } from '@nestjs/common';
-import { LoginDto } from '@likemyproduct/dtos';
-import { User } from '@likemyproduct/entities';
+import { LoginDto } from '@poojawala/dtos';
+import { User } from '@poojawala/entities';
 import { InjectRepository } from '@nestjs/typeorm/dist/common/typeorm.decorators';
 
 

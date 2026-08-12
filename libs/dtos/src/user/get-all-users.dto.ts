@@ -8,7 +8,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { USER_ROLE, USER_STATUS } from '@likemyproduct/entities';
+import { USER_ROLE, USER_STATUS, PUROHIT_VERIFICATION_STATUS } from '@poojawala/entities';
 
 export class GetAllUsersDto {
   @IsOptional()
@@ -35,6 +35,10 @@ export class GetAllUsersDto {
   @IsOptional()
   @IsEnum(USER_STATUS)
   status?: USER_STATUS;
+
+  @IsOptional()
+  @IsEnum(PUROHIT_VERIFICATION_STATUS)
+  verificationStatus?: PUROHIT_VERIFICATION_STATUS;
 
   @IsOptional()
   @IsIn(['createdAt', 'updatedAt', 'username', 'email'])

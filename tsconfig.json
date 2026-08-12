@@ -22,61 +22,61 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
     "paths": {
-      "@likemyproduct/common": [
+      "@poojawala/common": [
         "libs/common/src"
       ],
-      "@likemyproduct/common/*": [
+      "@poojawala/common/*": [
         "libs/common/src/*"
       ],
-      "@likemyproduct/database": [
+      "@poojawala/database": [
         "libs/database/src"
       ],
-      "@likemyproduct/database/*": [
+      "@poojawala/database/*": [
         "libs/database/src/*"
       ],
-      "@likemyproduct/dtos": [
+      "@poojawala/dtos": [
         "libs/dtos/src"
       ],
-      "@likemyproduct/dtos/*": [
+      "@poojawala/dtos/*": [
         "libs/dtos/src/*"
       ],
-      "@likemyproduct/email-services": [
+      "@poojawala/email-services": [
         "libs/email-services/src/index.ts"
       ],
-      "@likemyproduct/entities": [
+      "@poojawala/entities": [
         "libs/entities/src"
       ],
-      "@likemyproduct/entities/*": [
+      "@poojawala/entities/*": [
         "libs/entities/src/*"
       ],
-      "@likemyproduct/gateway": [
+      "@poojawala/gateway": [
         "libs/gateway/src"
       ],
-      "@likemyproduct/gateway/*": [
+      "@poojawala/gateway/*": [
         "libs/gateway/src/*"
       ],
-      "@likemyproduct/payment": [
+      "@poojawala/payment": [
         "libs/payment/src"
       ],
-      "@likemyproduct/payment/*": [
+      "@poojawala/payment/*": [
         "libs/payment/src/*"
       ],
-      "@likemyproduct/repositories": [
+      "@poojawala/repositories": [
         "libs/repositories/src"
       ],
-      "@likemyproduct/repositories/*": [
+      "@poojawala/repositories/*": [
         "libs/repositories/src/*"
       ],
-      "@likemyproduct/s3": [
+      "@poojawala/s3": [
         "libs/s3/src"
       ],
-      "@likemyproduct/s3/*": [
+      "@poojawala/s3/*": [
         "libs/s3/src/*"
       ],
-      "@likemyproduct/sms-services": [
+      "@poojawala/sms-services": [
         "libs/sms-services/src"
       ],
-      "@likemyproduct/sms-services/*": [
+      "@poojawala/sms-services/*": [
         "libs/sms-services/src/*"
       ]
     }

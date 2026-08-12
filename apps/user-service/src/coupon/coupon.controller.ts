@@ -1,7 +1,7 @@
 import { Body, Controller, HttpCode, HttpStatus, Post, Get, Patch, Delete, Query, Req, UseGuards, Param, ParseIntPipe, ValidationPipe,} from '@nestjs/common';
-import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard,} from '@likemyproduct/common';
-import { USER_ROLE, DISCOUNT_TYPE } from '@likemyproduct/entities';
-import { CreateCouponDto } from '@likemyproduct/dtos';
+import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard,} from '@poojawala/common';
+import { USER_ROLE, DISCOUNT_TYPE } from '@poojawala/entities';
+import { CreateCouponDto } from '@poojawala/dtos';
 import { CouponService } from './coupon.service';
 
 @Controller('coupons')
