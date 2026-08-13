@@ -21,20 +21,12 @@ export class AssignmentService {
       this.logger.warn(
         `Booking ${booking.id} does not contain valid customer coordinates`,
       );
-
       return [];
     }
 
     const { latitude: customerLatitude, longitude: customerLongitude } = customerLocation;
 
-    /*
-     * First find all Purohits who satisfy
-     * business requirements.
-     *
-     * Location distance is checked separately
-     * using Haversine.
-     */
-    const candidatePurohits = await purohitProfileRepository
+    const candidateQueryBuilder = purohitProfileRepository
       .createQueryBuilder('profile')
 
       .innerJoin('profile.user', 'purohit_user')
@@ -43,9 +35,9 @@ export class AssignmentService {
         'profile.purohitServices',
         'purohit_service',
         `
-            purohit_service.serviceId = :serviceId
-            AND purohit_service.isActive = :isServiceActive
-          `,
+          purohit_service.serviceId = :serviceId
+          AND purohit_service.isActive = :isServiceActive
+        `,
         {
           serviceId: booking.serviceId,
           isServiceActive: true,
@@ -56,8 +48,8 @@ export class AssignmentService {
         PurohitServiceArea,
         'service_area',
         `
-            service_area.purohitId = purohit_user.id
-          `,
+    service_area.purohitId = purohit_user.id
+  `,
       )
 
       .where('profile.verificationStatus = :verificationStatus', {
@@ -86,13 +78,14 @@ export class AssignmentService {
 
       .addSelect('service_area.latitude', 'latitude')
 
-      .addSelect('service_area.longitude', 'longitude')
+      .addSelect('service_area.longitude', 'longitude');
 
-      .getRawMany<{
-        purohitProfileId: string;
-        latitude: string;
-        longitude: string;
-      }>();
+
+    const candidatePurohits = await candidateQueryBuilder.getRawMany<{
+      purohitProfileId: string;
+      latitude: string;
+      longitude: string;
+    }>();
 
     /*
      * Haversine filtering.
@@ -128,7 +121,6 @@ export class AssignmentService {
       this.logger.log(
         `No Purohits found within ${this.serviceRadiusKm} KM for booking ${booking.id}`,
       );
-
       return [];
     }
 
@@ -145,19 +137,15 @@ export class AssignmentService {
     );
 
     const busyPurohits = await bookingRepository
-      .createQueryBuilder('busyBooking')
-
-      .select('busyBooking.purohitId', 'purohitId')
-
-      .where('busyBooking.purohitId IN (:...purohitIds)', {
+      .createQueryBuilder('busy_booking')
+      .select('busy_booking.purohitId', 'purohitId')
+      .where('busy_booking.purohitId IN (:...purohitIds)', {
         purohitIds: matchingPurohitIds,
       })
-
-      .andWhere('busyBooking.id != :currentBookingId', {
+      .andWhere('busy_booking.id != :currentBookingId', {
         currentBookingId: booking.id,
       })
-
-      .andWhere('busyBooking.status IN (:...busyStatuses)', {
+      .andWhere('busy_booking.status IN (:...busyStatuses)', {
         busyStatuses: [
           BOOKING_STATUS.ACCEPTED,
           BOOKING_STATUS.ENROUTE,
@@ -165,22 +153,15 @@ export class AssignmentService {
           BOOKING_STATUS.ONGOING,
         ],
       })
-
       .andWhere(
-        `
-            busyBooking.scheduledAt
-            BETWEEN :conflictStart
-            AND :conflictEnd
-          `,
+        'busy_booking."scheduledAt" BETWEEN :conflictStart AND :conflictEnd',
         {
           conflictStart,
           conflictEnd,
         },
       )
+      .getRawMany<{ purohitId: string }>();
 
-      .getRawMany<{
-        purohitId: string;
-      }>();
 
     const busyPurohitIds = new Set(
       busyPurohits
@@ -194,8 +175,8 @@ export class AssignmentService {
 
     this.logger.log(
       `Booking ${booking.id}: ` +
-        `${matchingPurohitIds.length} nearby Purohits, ` +
-        `${availablePurohitIds.length} available.`,
+      `${matchingPurohitIds.length} nearby Purohits, ` +
+      `${availablePurohitIds.length} available.`,
     );
 
     return availablePurohitIds;

@@ -31,10 +31,14 @@ export class BookingGateway
     });
   }
 
-  notifyUser(userId: string | number, booking: any): boolean {
+  notifyUser(
+    userId: string | number,
+    eventName: string,
+    data: any,
+  ): boolean {
     const socketId = this.userSockets.get(userId);
     if (socketId) {
-      this.server.to(socketId).emit('new_booking', booking);
+      this.server.to(socketId).emit(eventName, data);
       return true; // user is online
     }
     return false; // user is offline
