@@ -29,6 +29,8 @@ export * from './payment/create-payment-link.dto';
 export * from './payment/create-refund.dto';
 export * from './payment/payment-query.dto';
 export * from './user/verify-purohit.dto';
+export * from './user/add-purohit-bank-account.dto';
+export * from './user/update-purohit-bank-account.dto';
 export * from './review/create-review.dto';
 export * from './review/update-review-status.dto';
 export * from './review/review-query.dto';

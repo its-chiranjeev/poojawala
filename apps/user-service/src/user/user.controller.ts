@@ -5,7 +5,7 @@ import type { Response } from 'express';
 import * as crypto from 'crypto';
 import { AuthGuard } from "@nestjs/passport";
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@poojawala/common";
-import { UpdateUserDto, UpdateUserStatusDto, RegisterNormalUserDto, GenerateOtpDto, CustomerFavoriteDto, VerifyPurohitDto, CreatePurohitByAdminDto } from "@poojawala/dtos";import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
+import { UpdateUserDto, UpdateUserStatusDto, RegisterNormalUserDto, GenerateOtpDto, CustomerFavoriteDto, VerifyPurohitDto, CreatePurohitByAdminDto, CreatePurohitBankAccountDto, UpdatePurohitBankAccountDto } from "@poojawala/dtos";import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { filter } from 'rxjs';
 import { UpsertPlatformSettingDto } from "@poojawala/dtos/Platform setting/Platform.dto";
 import { GetAllUsersDto } from "@poojawala/dtos/user/get-all-users.dto";
@@ -437,5 +437,60 @@ async verifyPurohitByAdmin(
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.userService.deleteServiceArea(req.user.id, id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Post('purohit/bank-account')
+  @HttpCode(HttpStatus.CREATED)
+  async addPurohitBankAccount(
+    @Req() req: any,
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    dto: CreatePurohitBankAccountDto,
+  ) {
+    return this.userService.addPurohitBankAccount(req.user.id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Get('purohit/bank-accounts')
+  @HttpCode(HttpStatus.OK)
+  async getPurohitBankAccounts(@Req() req: any) {
+    return this.userService.getPurohitBankAccounts(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Get('purohit/bank-account/:id')
+  @HttpCode(HttpStatus.OK)
+  async getPurohitBankAccountById(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.userService.getPurohitBankAccountById(req.user.id, id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Patch('purohit/bank-account/:id')
+  @HttpCode(HttpStatus.OK)
+  async updatePurohitBankAccount(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    dto: UpdatePurohitBankAccountDto,
+  ) {
+    return this.userService.updatePurohitBankAccount(req.user.id, id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Delete('purohit/bank-account/:id')
+  @HttpCode(HttpStatus.OK)
+  async deletePurohitBankAccount(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.userService.deletePurohitBankAccount(req.user.id, id);
   }
 }
