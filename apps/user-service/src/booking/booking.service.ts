@@ -461,7 +461,7 @@ export class BookingService {
         savedBooking = await bookingRepository.save(savedBooking);
 
 
-        if (eligiblePurohitIds.length > 0) { 
+        if (eligiblePurohitIds.length > 0) {
           const purohitProfiles =
             await manager
               .getRepository(PurohitProfile)
@@ -484,7 +484,7 @@ export class BookingService {
               (profile) => profile.userId,
             );
 
-    
+
           for (const purohitUserId of eligiblePurohitUserIds) {
 
             this.bookingGateway.notifyUser(
@@ -1631,6 +1631,16 @@ export class BookingService {
             },
           });
 
+          // real time socket event for booking.customerId
+          this.bookingGateway.notifyUser(
+            booking.customerId,
+            'booking_accepted',
+            {
+              message: 'Booking accepted successfully',
+              booking: acceptedBooking ?? savedBooking,
+            },
+          );
+
           return {
             message: 'Booking accepted successfully',
             booking: acceptedBooking ?? savedBooking,
@@ -1819,6 +1829,21 @@ export class BookingService {
         },
       });
 
+      // real time socket event for booking.customerId and dto.purohitId
+      this.bookingGateway.notifyUser(
+        savedBooking.customerId,
+        'booking_assigned_by_admin',
+        {
+          message: 'Booking assigned to Purohit successfully',
+          booking: assignedBooking ?? savedBooking,
+        },
+      );
+
+      this.bookingGateway.notifyUser(dto.purohitId, 'booking_assigned_by_admin', {
+        message: 'Booking assigned to you by admin',
+        booking: assignedBooking ?? savedBooking,
+      });
+
       return {
         message: 'Booking assigned to Purohit successfully',
         booking: assignedBooking ?? savedBooking,
@@ -1926,6 +1951,16 @@ export class BookingService {
       }
 
       const updatedBooking = await bookingRepository.save(booking);
+
+      // Notify customer for status change
+      this.bookingGateway.notifyUser(
+        updatedBooking.customerId,
+        'booking_status_updated',
+        {
+          message: `Booking status updated to ${updatedBooking.status}`,
+          booking: updatedBooking,
+        },
+      );
 
       return {
         message: 'Booking status updated successfully',
@@ -3191,7 +3226,7 @@ export class BookingService {
         if (dto.purohitId) {
           this.bookingGateway.notifyUser(
             dto.purohitId,
-            "create_booking",
+            "create_booking_by_admin",
             {
               ...savedBooking,
               scheduledAtIst: this.toIstString(savedBooking.scheduledAt),
@@ -3200,6 +3235,18 @@ export class BookingService {
             }
           );
         }
+
+        // send notification to the customer
+        this.bookingGateway.notifyUser(
+          customer.id,
+          "create_booking_by_admin",
+          {
+            ...savedBooking,
+            scheduledAtIst: this.toIstString(savedBooking.scheduledAt),
+            createdAtIst: this.toIstString(savedBooking.createdAt),
+            updatedAtIst: this.toIstString(savedBooking.updatedAt),
+          }
+        );
 
         return {
           ...savedBooking,
