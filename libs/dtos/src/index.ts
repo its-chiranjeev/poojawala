@@ -14,7 +14,7 @@ export * from './booking/repeat-booking.dto';
 export * from './booking/respond-booking.dto';
 export * from './booking/update-booking-status.dto';
 export * from './booking/update-booking.dto';
-export * from './booking/verify-completion-otp.dto';
+export * from './booking/verify-start-otp.dto';
 export * from './booking/reschedule-booking.dto';
 export * from './complaint/complaint-query.dto';
 export * from './complaint/create-complaint.dto';
