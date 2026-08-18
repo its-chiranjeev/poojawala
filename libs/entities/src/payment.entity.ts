@@ -95,6 +95,9 @@ export class Payment {
   razorpayOrderId?: string;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
+  razorpayPaymentLinkId?: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
   razorpayPaymentId?: string;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
