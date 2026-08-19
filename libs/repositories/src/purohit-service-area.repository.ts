@@ -60,6 +60,35 @@ export class PurohitServiceAreaRepository extends BaseRepository<PurohitServiceA
     });
   }
 
+  async findServiceAreas(
+    purohitId: number,
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+  ) {
+    const query = this.repo
+      .createQueryBuilder('area')
+      .where('area.purohitId = :purohitId', { purohitId });
+
+    if (search) {
+      query.andWhere(
+        '(area.addressLabel ILIKE :search OR area.streetName ILIKE :search OR area.fullAddress ILIKE :search OR area.city ILIKE :search OR area.pincode ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
+    query
+      .orderBy('area.isDefault', 'DESC')
+      .addOrderBy('area.createdAt', 'DESC');
+
+    const [data, total] = await query
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return { data, total };
+  }
+
   async deleteArea(id: number): Promise<void> {
     await this.repo.softDelete(id);
   }

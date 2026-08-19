@@ -1,6 +1,7 @@
 import { CreatePurohitBankAccountDto, CreatePurohitByAdminDto, CustomerFavoriteDto, GenerateOtpDto, RegisterNormalUserDto, UpdatePurohitBankAccountDto, UpdateUserDto, VerifyPurohitDto } from '@poojawala/dtos';
 import { UpsertPlatformSettingDto } from '@poojawala/dtos/Platform setting/Platform.dto';
 import { CreateCustomerAddressDto } from '@poojawala/dtos/user/add-customer-address.dto';
+import { UpdateCustomerAddressDto } from '@poojawala/dtos/user/update-customer-address.dto';
 import { CreatePurohitServiceAreaDto } from '@poojawala/dtos/user/add-purohit-address.dto';
 import { GetAllUsersDto } from '@poojawala/dtos/user/get-all-users.dto';
 import { UpdatePurohitServiceAreaDto } from '@poojawala/dtos/user/update-purohit-address.dto';
@@ -34,7 +35,7 @@ export class UserService {
     private readonly configService: ConfigService,
     private readonly purohitMediaRepository: PurohitMediaRepository,
     private readonly purohitBankAccountRepository: PurohitBankAccountRepository,
-  ) {}
+  ) { }
 
   async deleteExpiredOtps(): Promise<number> {
     const result = await this.dataSource
@@ -419,7 +420,7 @@ export class UserService {
           );
         }
         if ((safeUser as any).profile) {
-        const profile = { ...(safeUser as any).profile };
+          const profile = { ...(safeUser as any).profile };
           if (profile.aadhaarDocUrl) {
             profile.aadhaarDocDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.aadhaarDocUrl);
             profile.aadhaarDocUrl = await this.s3Service.getDownloadUrl(profile.aadhaarDocUrl);
@@ -442,7 +443,7 @@ export class UserService {
               if (ps.service?.iconUrl) {
                 try {
                   iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
-                } catch(e) {}
+                } catch (e) { }
               }
               return {
                 ...ps,
@@ -611,7 +612,7 @@ export class UserService {
       if (profileImage) {
         try {
           profileImage = await this.s3Service.getDownloadUrl(profileImage);
-        } catch(e) {}
+        } catch (e) { }
       }
 
       const services = user.services ? await Promise.all(user.services.map(async (ps: any) => {
@@ -619,7 +620,7 @@ export class UserService {
         if (ps.service?.iconUrl) {
           try {
             iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
-          } catch(e) {}
+          } catch (e) { }
         }
         return {
           ...ps,
@@ -692,7 +693,7 @@ export class UserService {
       if (ps.service?.iconUrl) {
         try {
           iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
-        } catch(e) {}
+        } catch (e) { }
       }
       return {
         ...ps,
@@ -777,13 +778,13 @@ export class UserService {
           profile.templeAffiliationProofDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.templeAffiliationProofUrl);
           profile.templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(profile.templeAffiliationProofUrl);
         }
-       if ((safeUser as any).purohitServices) {
+        if ((safeUser as any).purohitServices) {
           profile.purohitServices = await Promise.all((safeUser as any).purohitServices.map(async (ps: any) => {
             let iconDownloadurl: string | null = null;
             if (ps.service?.iconUrl) {
               try {
                 iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
-              } catch(e) {}
+              } catch (e) { }
             }
             return {
               ...ps,
@@ -821,13 +822,22 @@ export class UserService {
         throw new NotFoundException('User not found');
       }
 
-      if (dto.isDefault) {
+      const existingAddresses = await this.customerAddressRepository.find({
+        where: { customerId: userId } as any,
+      });
+
+      let isDefault = dto.isDefault || false;
+
+      if (existingAddresses.length === 0) {
+        isDefault = true;
+      } else if (isDefault) {
         await this.customerAddressRepository.clearDefaultAddress(userId);
       }
 
       const address = await this.customerAddressRepository.createAddress({
         customerId: userId,
         ...dto,
+        isDefault,
       });
 
       return {
@@ -844,6 +854,93 @@ export class UserService {
 
       throw new InternalServerErrorException('Failed to add address');
     }
+  }
+
+  async getMyAddresses(
+    userId: number,
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+  ) {
+    const { data, total } = await this.customerAddressRepository.findAddresses(
+      userId,
+      page,
+      limit,
+      search,
+    );
+
+    return {
+      success: true,
+      message: 'Addresses fetched successfully',
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getAddressById(userId: number, id: number) {
+    const address = await this.customerAddressRepository.findById(id);
+
+    if (!address) {
+      throw new NotFoundException('Address not found');
+    }
+
+    if (address.customerId !== userId) {
+      throw new ForbiddenException('You can access only your own address');
+    }
+
+    return {
+      success: true,
+      message: 'Address fetched successfully',
+      data: address,
+    };
+  }
+
+  async updateAddress(userId: number, id: number, dto: UpdateCustomerAddressDto) {
+    const address = await this.customerAddressRepository.findById(id);
+
+    if (!address) {
+      throw new NotFoundException('Address not found');
+    }
+
+    if (address.customerId !== userId) {
+      throw new ForbiddenException('You can update only your own address');
+    }
+
+    if (dto.isDefault) {
+      await this.customerAddressRepository.clearDefaultAddress(userId);
+    }
+
+    const updated = await this.customerAddressRepository.update(id, dto);
+
+    return {
+      success: true,
+      message: 'Address updated successfully',
+      data: updated,
+    };
+  }
+
+  async deleteAddress(userId: number, id: number) {
+    const address = await this.customerAddressRepository.findById(id);
+
+    if (!address) {
+      throw new NotFoundException('Address not found');
+    }
+
+    if (address.customerId !== userId) {
+      throw new ForbiddenException('You can delete only your own address');
+    }
+
+    await this.customerAddressRepository.softDelete(id);
+
+    return {
+      success: true,
+      message: 'Address deleted successfully',
+    };
   }
 
   async addServiceArea(userId: number, dto: CreatePurohitServiceAreaDto) {
@@ -925,14 +1022,30 @@ export class UserService {
     };
   }
 
-  async getMyServiceAreas(userId: number) {
-    const areas =
-      await this.purohitServiceAreaRepository.findByPurohitId(userId);
+  async getMyServiceAreas(
+    userId: number,
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+  ) {
+    const { data, total } =
+      await this.purohitServiceAreaRepository.findServiceAreas(
+        userId,
+        page,
+        limit,
+        search,
+      );
 
     return {
       success: true,
       message: 'Service areas fetched successfully',
-      data: areas,
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
     };
   }
 
@@ -1034,7 +1147,12 @@ export class UserService {
     };
   }
 
-  async getPurohitBankAccounts(userId: number) {
+  async getPurohitBankAccounts(
+    userId: number,
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+  ) {
     const profile = await this.purohitProfileRepository.findOne({
       where: { userId },
     });
@@ -1043,14 +1161,23 @@ export class UserService {
       throw new NotFoundException('Purohit profile not found');
     }
 
-    const accounts = await this.purohitBankAccountRepository.findByPurohitId(
+    const { data, total } = await this.purohitBankAccountRepository.findBankAccounts(
       profile.id,
+      page,
+      limit,
+      search,
     );
 
     return {
       success: true,
       message: 'Bank accounts fetched successfully',
-      data: accounts,
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
     };
   }
 
@@ -1266,12 +1393,12 @@ export class UserService {
     const missingFields = Object.entries(requiredFields)
       .filter(([, value]) => this.isEmptyValue(value))
       .map(([fieldName]) => fieldName);
-      const hasAadhaar = !this.isEmptyValue(profile.aadhaarDocUrl);
-      const hasPan = !this.isEmptyValue(profile.panDocUrl);
+    const hasAadhaar = !this.isEmptyValue(profile.aadhaarDocUrl);
+    const hasPan = !this.isEmptyValue(profile.panDocUrl);
 
-      if (!hasAadhaar && !hasPan) {
-        missingFields.push('Aadhaar or PAN document');
-      }
+    if (!hasAadhaar && !hasPan) {
+      missingFields.push('Aadhaar or PAN document');
+    }
 
     if (missingFields.length > 0) {
       throw new BadRequestException(
@@ -1658,7 +1785,6 @@ export class UserService {
         throw new ConflictException('Email already in use');
     }
 
-    const bcrypt = require('bcryptjs'); // Assuming bcrypt is used for password hashing, using require to avoid import issues
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     const result = await this.dataSource.transaction(async (manager) => {
@@ -1963,42 +2089,42 @@ export class UserService {
 
       const aadhaarDocUrl = files.aadhaarDoc?.length
         ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'aadhaarDoc',
-            files.aadhaarDoc,
-          )
+          saved.id,
+          'aadhaarDoc',
+          files.aadhaarDoc,
+        )
         : dto.aadhaarDoc;
 
       const panDocUrl = files.panDoc?.length
         ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'panDoc',
-            files.panDoc,
-          )
+          saved.id,
+          'panDoc',
+          files.panDoc,
+        )
         : dto.panDoc;
 
       const certificateUrl = files.certificate?.length
         ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'certificate',
-            files.certificate,
-          )
+          saved.id,
+          'certificate',
+          files.certificate,
+        )
         : dto.certificate;
 
       const templeAffiliationProofUrl = files.templeAffiliationProof?.length
         ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'templeAffiliationProof',
-            files.templeAffiliationProof,
-          )
+          saved.id,
+          'templeAffiliationProof',
+          files.templeAffiliationProof,
+        )
         : dto.templeAffiliationProof;
 
       const profileImageUrl = files.profileImage?.length
         ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'profileImage',
-            files.profileImage,
-          )
+          saved.id,
+          'profileImage',
+          files.profileImage,
+        )
         : undefined;
 
       if (profileImageUrl) {

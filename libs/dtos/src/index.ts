@@ -34,3 +34,5 @@ export * from './user/update-purohit-bank-account.dto';
 export * from './review/create-review.dto';
 export * from './review/update-review-status.dto';
 export * from './review/review-query.dto';
+export * from './user/add-customer-address.dto';
+export * from './user/update-customer-address.dto';

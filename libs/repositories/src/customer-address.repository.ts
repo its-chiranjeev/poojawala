@@ -26,4 +26,31 @@ export class CustomerAddressRepository extends BaseRepository<CustomerAddress> {
     const address = this.repo.create(payload);
     return await this.repo.save(address);
   }
+
+  async findAddresses(
+    customerId: number,
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+  ) {
+    const query = this.repo.createQueryBuilder('address')
+      .where('address.customerId = :customerId', { customerId });
+
+    if (search) {
+      query.andWhere(
+        '(address.addressLabel ILIKE :search OR address.fullAddress ILIKE :search OR address.city ILIKE :search OR address.pincode ILIKE :search)',
+        { search: `%${search}%` }
+      );
+    }
+
+    query.orderBy('address.isDefault', 'DESC')
+         .addOrderBy('address.createdAt', 'DESC');
+
+    const [data, total] = await query
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return { data, total };
+  }
 }
