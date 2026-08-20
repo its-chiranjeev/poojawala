@@ -29,19 +29,13 @@ import {
 import { UserService } from './user.service';
 import type { Response } from 'express';
 import * as crypto from 'crypto';
-import { AuthGuard } from '@nestjs/passport';
-import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@poojawala/common';
 import {
-  UpdateUserDto,
-  UpdateUserStatusDto,
-  RegisterNormalUserDto,
-  GenerateOtpDto,
-  CustomerFavoriteDto,
-  VerifyPurohitDto,
-  CreatePurohitByAdminDto,
   CreatePurohitBankAccountDto,
   UpdatePurohitBankAccountDto,
 } from '@poojawala/dtos';
+import { AuthGuard } from "@nestjs/passport";
+import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@poojawala/common";
+import { UpdateUserDto, UpdateUserStatusDto, RegisterNormalUserDto, GenerateOtpDto, CustomerFavoriteDto, VerifyPurohitDto, CreatePurohitByAdminDto } from "@poojawala/dtos";
 import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { filter } from 'rxjs';
 import { UpsertPlatformSettingDto } from '@poojawala/dtos/Platform setting/Platform.dto';
