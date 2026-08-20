@@ -1,49 +1,78 @@
-import { FileInterceptor, FileFieldsInterceptor } from "@nestjs/platform-express";
-import { Body, Controller, UploadedFiles, Res, Query, Get, Put, Patch, Delete, Param, ParseIntPipe, HttpCode, HttpStatus, Post, Req, UnauthorizedException, UseGuards, UseInterceptors, ValidationPipe, UploadedFile, UnprocessableEntityException,  Logger } from "@nestjs/common";
-import { UserService } from "./user.service";
+import {
+  FileInterceptor,
+  FileFieldsInterceptor,
+} from '@nestjs/platform-express';
+import {
+  Body,
+  Controller,
+  UploadedFiles,
+  Res,
+  Query,
+  Get,
+  Put,
+  Patch,
+  Delete,
+  Param,
+  ParseIntPipe,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+  UnauthorizedException,
+  UseGuards,
+  UseInterceptors,
+  ValidationPipe,
+  UploadedFile,
+  UnprocessableEntityException,
+  Logger,
+} from '@nestjs/common';
+import { UserService } from './user.service';
 import type { Response } from 'express';
 import * as crypto from 'crypto';
-import { AuthGuard } from "@nestjs/passport";
-import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@poojawala/common";
-import { UpdateUserDto, UpdateUserStatusDto, RegisterNormalUserDto, GenerateOtpDto, CustomerFavoriteDto, VerifyPurohitDto, CreatePurohitByAdminDto } from "@poojawala/dtos";import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
+import { AuthGuard } from '@nestjs/passport';
+import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@poojawala/common';
+import {
+  UpdateUserDto,
+  UpdateUserStatusDto,
+  RegisterNormalUserDto,
+  GenerateOtpDto,
+  CustomerFavoriteDto,
+  VerifyPurohitDto,
+  CreatePurohitByAdminDto,
+  CreatePurohitBankAccountDto,
+  UpdatePurohitBankAccountDto,
+} from '@poojawala/dtos';
+import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { filter } from 'rxjs';
-import { UpsertPlatformSettingDto } from "@poojawala/dtos/Platform setting/Platform.dto";
-import { GetAllUsersDto } from "@poojawala/dtos/user/get-all-users.dto";
-import { CreateCustomerAddressDto } from "@poojawala/dtos/user/add-customer-address.dto";
-import { CreatePurohitServiceAreaDto } from "@poojawala/dtos/user/add-purohit-address.dto";
-import { UpdatePurohitServiceAreaDto } from "@poojawala/dtos/user/update-purohit-address.dto";
+import { UpsertPlatformSettingDto } from '@poojawala/dtos/Platform setting/Platform.dto';
+import { GetAllUsersDto } from '@poojawala/dtos/user/get-all-users.dto';
+import { CreateCustomerAddressDto } from '@poojawala/dtos/user/add-customer-address.dto';
+import { UpdateCustomerAddressDto } from '@poojawala/dtos/user/update-customer-address.dto';
+import { CreatePurohitServiceAreaDto } from '@poojawala/dtos/user/add-purohit-address.dto';
+import { UpdatePurohitServiceAreaDto } from '@poojawala/dtos/user/update-purohit-address.dto';
 import { Cron } from '@nestjs/schedule';
 
 @Controller('users')
 export class UserController {
-    private readonly logger = new Logger(UserController.name);
+  private readonly logger = new Logger(UserController.name);
 
-  constructor(
-    private readonly userService: UserService
-  ) { }
+  constructor(private readonly userService: UserService) { }
 
   @Cron('0 0 */6 * * *', {
     name: 'delete-expired-otps',
     timeZone: 'Asia/Kolkata',
   })
   async deleteExpiredOtpsCron(): Promise<void> {
-    this.logger.log(
-      'Expired OTP cleanup cron started',
-    );
+    this.logger.log('Expired OTP cleanup cron started');
 
     try {
-      const deletedCount =
-        await this.userService.deleteExpiredOtps();
+      const deletedCount = await this.userService.deleteExpiredOtps();
 
-      this.logger.log(
-        `${deletedCount} expired OTP(s) deleted`,
-      );
+      this.logger.log(`${deletedCount} expired OTP(s) deleted`);
     } catch (error) {
       this.logger.error(
         'Expired OTP cleanup cron failed',
-        error instanceof Error
-          ? error.stack
-          : String(error),
+        error instanceof Error ? error.stack : String(error),
       );
     }
   }
@@ -84,13 +113,8 @@ export class UserController {
   ) {
     const userId = req.user.id;
 
-    return this.userService.updateProfileByUser(
-      userId,
-      dto,
-      files,
-    );
+    return this.userService.updateProfileByUser(userId, dto, files);
   }
-
 
   // cahnge user status ACTIVE,PENDING,INACTIVE,BLOCKED,REJECTED
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
@@ -102,10 +126,7 @@ export class UserController {
     @Body(new ValidationPipe({ whitelist: true }))
     dto: UpdateUserStatusDto,
   ) {
-    return this.userService.updateUserStatus(
-      id,
-      dto.status,
-    );
+    return this.userService.updateUserStatus(id, dto.status);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
@@ -130,34 +151,31 @@ export class UserController {
   ) {
     const user = (req as any).user;
 
-    return this.userService.upsertPlatformSetting(
-      dto,
-      user.id,
-    );
+    return this.userService.upsertPlatformSetting(dto, user.id);
   }
 
-@UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-@Roles(USER_ROLE.ADMIN)
-@Patch('purohits/:id/verification')
-@HttpCode(HttpStatus.OK)
-async verifyPurohitByAdmin(
-  @Req() req: any,
-  @Param('id', ParseIntPipe) purohitUserId: number,
-  @Body(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  )
-  dto: VerifyPurohitDto,
-) {
-  return this.userService.verifyPurohitByAdmin(
-    req.user.id,
-    purohitUserId,
-    dto,
-  );
-}
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @Patch('purohits/:id/verification')
+  @HttpCode(HttpStatus.OK)
+  async verifyPurohitByAdmin(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) purohitUserId: number,
+    @Body(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
+    )
+    dto: VerifyPurohitDto,
+  ) {
+    return this.userService.verifyPurohitByAdmin(
+      req.user.id,
+      purohitUserId,
+      dto,
+    );
+  }
   // @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   // @Roles(USER_ROLE.ADMIN)
   // @Patch('platform-upsert')
@@ -183,7 +201,6 @@ async verifyPurohitByAdmin(
       { name: 'profileImage', maxCount: 1 },
     ]),
   )
-
   async registerUser(
     @UploadedFiles()
     files: {
@@ -221,11 +238,11 @@ async verifyPurohitByAdmin(
   @HttpCode(HttpStatus.OK)
   async generateOtp(
     @Body(new ValidationPipe({ whitelist: true, transform: true }))
-    dto:  GenerateOtpDto,
+    dto: GenerateOtpDto,
   ) {
     return this.userService.generateOtp(dto);
   }
-  
+
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
   async verifyOtp(
@@ -265,12 +282,9 @@ async verifyPurohitByAdmin(
 
   @Get('purohits/:id')
   @Roles(USER_ROLE.ADMIN)
-  getApprovedPurohitById(
-    @Param('id', ParseIntPipe) id: number,
-  ) {
+  getApprovedPurohitById(@Param('id', ParseIntPipe) id: number) {
     return this.userService.getApprovedPurohitById(id);
   }
-  
 
   @Post('favorites')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
@@ -281,22 +295,15 @@ async verifyPurohitByAdmin(
     @Body(new ValidationPipe({ whitelist: true }))
     dto: CustomerFavoriteDto,
   ) {
-    return this.userService.addFavorite(
-      req.user.id,
-      dto,
-    );
+    return this.userService.addFavorite(req.user.id, dto);
   }
 
   @Get('favorites')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.CUSTOMER)
   @HttpCode(HttpStatus.OK)
-  getMyFavorites(
-    @Req() req: any,
-  ) {
-    return this.userService.getMyFavorites(
-      req.user.id,
-    );
+  getMyFavorites(@Req() req: any) {
+    return this.userService.getMyFavorites(req.user.id);
   }
 
   @Delete('favorites/:purohitId')
@@ -307,13 +314,9 @@ async verifyPurohitByAdmin(
     @Req() req: any,
     @Param('purohitId', ParseIntPipe) purohitId: number,
   ) {
-    return this.userService.removeFavorite(
-      req.user.id,
-      purohitId,
-    );
+    return this.userService.removeFavorite(req.user.id, purohitId);
   }
 
-    
   private setAuthCookies(
     res: Response,
     accessToken: string,
@@ -347,18 +350,14 @@ async verifyPurohitByAdmin(
     });
   }
 
-
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   @Get('platform-setting')
   @HttpCode(HttpStatus.OK)
-  async getPlatformSetting(
-    @Req() req: Request,
-  ) {
+  async getPlatformSetting(@Req() req: Request) {
     const user = (req as any).user;
 
-    return this.userService.getPlatformSetting(user.id);  
-    
+    return this.userService.getPlatformSetting(user.id);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
@@ -371,9 +370,8 @@ async verifyPurohitByAdmin(
   ) {
     const user = (req as any).user;
 
-    return this.userService.deletePlatformSetting(id, user.id); 
+    return this.userService.deletePlatformSetting(id, user.id);
   }
-
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
@@ -393,7 +391,8 @@ async verifyPurohitByAdmin(
     return this.userService.getUserById(id);
   }
 
-  @UseGuards(JwtAuthGuard, CsrfGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER)
   @Post('addresses')
   @HttpCode(HttpStatus.CREATED)
   async addAddress(
@@ -405,8 +404,52 @@ async verifyPurohitByAdmin(
     return this.userService.addAddress(userId as number, dto);
   }
 
-  @UseGuards(JwtAuthGuard, CsrfGuard)
-  @Post('purohit/add-address')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER)
+  @Get('addresses')
+  async getMyAddresses(
+    @Req() req: any,
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '10',
+    @Query('search') search?: string,
+  ) {
+    return this.userService.getMyAddresses(
+      req.user.id,
+      Number(page),
+      Number(limit),
+      search,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER)
+  @Get('addresses/:id')
+  async getAddressById(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.userService.getAddressById(req.user.id, id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER)
+  @Patch('addresses/:id')
+  async updateAddress(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body(new ValidationPipe({ whitelist: true }))
+    dto: UpdateCustomerAddressDto,
+  ) {
+    return this.userService.updateAddress(req.user.id, id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER)
+  @Delete('addresses/:id')
+  async deleteAddress(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    return this.userService.deleteAddress(req.user.id, id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Post('purohit/service-area')
   async addServiceArea(
     @Req() req: any,
     @Body() dto: CreatePurohitServiceAreaDto,
@@ -414,8 +457,9 @@ async verifyPurohitByAdmin(
     return this.userService.addServiceArea(req.user.id, dto);
   }
 
-  @UseGuards(JwtAuthGuard, CsrfGuard)
-  @Patch('purohit/update-address/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Patch('purohit/service-area/:id')
   async updateServiceArea(
     @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
@@ -424,18 +468,95 @@ async verifyPurohitByAdmin(
     return this.userService.updateServiceArea(req.user.id, id, dto);
   }
 
-  @UseGuards(JwtAuthGuard, CsrfGuard)
-  @Get('purohit/addresses')
-  async getMyServiceAreas(@Req() req: any) {
-    return this.userService.getMyServiceAreas(req.user.id);
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Get('purohit/service-areas')
+  async getMyServiceAreas(
+    @Req() req: any,
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '10',
+    @Query('search') search?: string,
+  ) {
+    return this.userService.getMyServiceAreas(
+      req.user.id,
+      Number(page),
+      Number(limit),
+      search,
+    );
   }
 
-  @UseGuards(JwtAuthGuard, CsrfGuard)
-  @Delete('purohit/address/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Delete('purohit/service-area/:id')
   async deleteServiceArea(
     @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.userService.deleteServiceArea(req.user.id, id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Post('purohit/bank-account')
+  @HttpCode(HttpStatus.CREATED)
+  async addPurohitBankAccount(
+    @Req() req: any,
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    dto: CreatePurohitBankAccountDto,
+  ) {
+    return this.userService.addPurohitBankAccount(req.user.id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Get('purohit/bank-accounts')
+  @HttpCode(HttpStatus.OK)
+  async getPurohitBankAccounts(
+    @Req() req: any,
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '10',
+    @Query('search') search?: string,
+  ) {
+    return this.userService.getPurohitBankAccounts(
+      req.user.id,
+      Number(page),
+      Number(limit),
+      search,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Get('purohit/bank-account/:id')
+  @HttpCode(HttpStatus.OK)
+  async getPurohitBankAccountById(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.userService.getPurohitBankAccountById(req.user.id, id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Patch('purohit/bank-account/:id')
+  @HttpCode(HttpStatus.OK)
+  async updatePurohitBankAccount(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    dto: UpdatePurohitBankAccountDto,
+  ) {
+    return this.userService.updatePurohitBankAccount(req.user.id, id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  @Delete('purohit/bank-account/:id')
+  @HttpCode(HttpStatus.OK)
+  async deletePurohitBankAccount(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.userService.deletePurohitBankAccount(req.user.id, id);
   }
 }

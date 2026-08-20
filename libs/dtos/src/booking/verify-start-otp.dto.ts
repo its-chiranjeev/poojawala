@@ -1,6 +1,6 @@
 import { IsString,Length,Matches } from 'class-validator';
 
-export class VerifyCompletionOtpDto {
+export class VerifyStartOtpDto {
   @IsString()
   @Length(6, 6)
   @Matches(/^\d{6}$/, {

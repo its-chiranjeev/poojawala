@@ -47,7 +47,7 @@ import {
   RespondBookingDto,
   UpdateBookingDto,
   UpdateBookingStatusDto,
-  VerifyCompletionOtpDto,
+  VerifyStartOtpDto,
   RepeatBookingDto,
   RescheduleBookingDto,
 } from '@poojawala/dtos';
@@ -1974,7 +1974,6 @@ export class BookingService {
     nextStatus: BOOKING_STATUS,
   ): void {
     const paymentRequiredStatuses: BOOKING_STATUS[] = [
-      BOOKING_STATUS.ONGOING,
       BOOKING_STATUS.COMPLETED,
     ];
 
@@ -1996,12 +1995,18 @@ export class BookingService {
     if (role === USER_ROLE.ADMIN) {
       return;
     }
+    if (currentStatus === BOOKING_STATUS.ARRIVED && nextStatus === BOOKING_STATUS.ONGOING) {
+      throw new BadRequestException(
+        'Start OTP verification is required to change status to ONGOING',
+      );
+    }
+
     const allowedTransitions: Partial<
       Record<BOOKING_STATUS, BOOKING_STATUS[]>
     > = {
       [BOOKING_STATUS.ACCEPTED]: [BOOKING_STATUS.ENROUTE],
       [BOOKING_STATUS.ENROUTE]: [BOOKING_STATUS.ARRIVED],
-      [BOOKING_STATUS.ARRIVED]: [BOOKING_STATUS.ONGOING],
+      [BOOKING_STATUS.ONGOING]: [BOOKING_STATUS.COMPLETED],
     };
 
     const allowedNextStatuses = allowedTransitions[currentStatus] ?? [];
@@ -2200,30 +2205,25 @@ export class BookingService {
     return extension;
   }
 
-  async generateCompletionOtp(user: User, bookingId: number) {
+  async generateStartOtp(user: User, bookingId: number) {
     const booking = await this.bookingRepository.findBookingById(bookingId);
 
     if (!booking) {
       throw new NotFoundException('Booking not found');
     }
 
-    await this.validateCompletionOtpGenerationAccess(user, booking);
+    await this.validateStartOtpGenerationAccess(user, booking);
 
-    if (booking.status !== BOOKING_STATUS.ONGOING) {
+    if (booking.status !== BOOKING_STATUS.ARRIVED) {
       throw new BadRequestException(
-        'Completion OTP can only be generated for an ongoing booking',
+        'Start OTP can only be generated for an arrived booking',
       );
     }
 
-    if (booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID) {
-      throw new BadRequestException(
-        'Booking payment must be completed before generating the completion OTP',
-      );
-    }
 
     if (booking.completionConfirmedAt) {
       throw new BadRequestException(
-        'Booking completion has already been confirmed',
+        'Booking has already been completed',
       );
     }
 
@@ -2249,9 +2249,9 @@ export class BookingService {
     const deliveryResults = await Promise.allSettled([
       customerPhone
         ? this.smsService.sendSms(
-          customerPhone,
-          `Your Poojawala booking completion OTP is ${otp}. Share this OTP only after the Puja service is completed.`,
-        )
+            customerPhone,
+            `Your Poojawala booking start OTP is ${otp}. Share this OTP with the Purohit to start the Puja.`,
+          )
         : Promise.resolve(null),
 
       customerEmail
@@ -2275,12 +2275,12 @@ export class BookingService {
       await this.bookingRepository.saveBooking(booking);
 
       throw new InternalServerErrorException(
-        'Unable to send completion OTP. Please try again',
+        'Unable to send start OTP. Please try again',
       );
     }
 
     return {
-      message: 'Booking completion OTP sent successfully',
+      message: 'Booking start OTP sent successfully',
 
       bookingId: booking.id,
 
@@ -2296,7 +2296,7 @@ export class BookingService {
     };
   }
 
-  private async validateCompletionOtpGenerationAccess(
+  private async validateStartOtpGenerationAccess(
     user: User,
     booking: Booking,
   ): Promise<void> {
@@ -2310,15 +2310,15 @@ export class BookingService {
 
       default:
         throw new ForbiddenException(
-          'Only the assigned Purohit or an admin can generate the completion OTP',
+          'Only the assigned Purohit or an admin can generate the start OTP',
         );
     }
   }
 
-  async verifyCompletionOtp(
+  async verifyStartOtp(
     user: User,
     bookingId: number,
-    dto: VerifyCompletionOtpDto,
+    dto: VerifyStartOtpDto,
   ): Promise<{
     message: string;
     booking: {
@@ -2326,12 +2326,11 @@ export class BookingService {
       bookingNumber: string;
       status: BOOKING_STATUS;
       paymentStatus: BOOKING_PAYMENT_STATUS;
-      completionConfirmedAt: Date | undefined;
     };
   }> {
     if (user.role !== USER_ROLE.PUROHIT && user.role !== USER_ROLE.ADMIN) {
       throw new ForbiddenException(
-        'Only the assigned Purohit or an admin can verify the completion OTP',
+        'Only the assigned Purohit or an admin can verify the start OTP',
       );
     }
 
@@ -2364,15 +2363,9 @@ export class BookingService {
         }
       }
 
-      if (booking.status !== BOOKING_STATUS.ONGOING) {
+      if (booking.status !== BOOKING_STATUS.ARRIVED) {
         throw new BadRequestException(
-          'Completion OTP can only be verified for an ongoing booking',
-        );
-      }
-
-      if (booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID) {
-        throw new BadRequestException(
-          'Booking payment must be completed before confirming completion',
+          'Start OTP can only be verified for an arrived booking',
         );
       }
 
@@ -2383,29 +2376,27 @@ export class BookingService {
       }
 
       if (!booking.completionOtp) {
-        throw new BadRequestException('Completion OTP has not been generated');
+        throw new BadRequestException('Start OTP has not been generated');
       }
 
       const submittedOtp = dto.otp?.trim();
 
       if (!submittedOtp || booking.completionOtp !== submittedOtp) {
-        throw new BadRequestException('Invalid completion OTP');
+        throw new BadRequestException('Invalid start OTP');
       }
 
-      booking.status = BOOKING_STATUS.COMPLETED;
-      booking.completionConfirmedAt = new Date();
+      booking.status = BOOKING_STATUS.ONGOING;
       booking.completionOtp = undefined;
 
       const updatedBooking = await bookingRepository.save(booking);
 
       return {
-        message: 'Completion OTP verified and booking completed successfully',
+        message: 'Start OTP verified and booking started successfully',
         booking: {
           id: updatedBooking.id,
           bookingNumber: updatedBooking.bookingNumber,
           status: updatedBooking.status,
           paymentStatus: updatedBooking.paymentStatus,
-          completionConfirmedAt: updatedBooking.completionConfirmedAt,
         },
       };
     });

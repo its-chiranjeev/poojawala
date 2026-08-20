@@ -1,20 +1,46 @@
-import { Body, Controller, Get, Delete, Param, ParseIntPipe, Patch, Post, Query, Req, UseGuards, UseInterceptors, UploadedFiles, BadRequestException } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Delete,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+  UseInterceptors,
+  UploadedFiles,
+  BadRequestException,
+} from '@nestjs/common';
 import { BookingService } from './booking.service';
-import { CreateBookingDto, UpdateBookingDto, BookingQueryDto, CancelBookingDto, RespondBookingDto, AssignBookingDto, UpdateBookingStatusDto, VerifyCompletionOtpDto, CreateBookingByAdminDto, RescheduleBookingDto, RepeatBookingDto } from '@poojawala/dtos';
+import {
+  CreateBookingDto,
+  UpdateBookingDto,
+  BookingQueryDto,
+  CancelBookingDto,
+  RespondBookingDto,
+  AssignBookingDto,
+  UpdateBookingStatusDto,
+  VerifyStartOtpDto,
+  CreateBookingByAdminDto,
+  RescheduleBookingDto,
+  RepeatBookingDto,
+} from '@poojawala/dtos';
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@poojawala/common';
 import { USER_ROLE, User } from '@poojawala/entities';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 
-interface AuthenticatedRequest extends Request {user: User}
+interface AuthenticatedRequest extends Request {
+  user: User;
+}
 
 @Controller('bookings')
 @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
 export class BookingController {
-  constructor(
-    private readonly bookingService: BookingService,
-    ) {}
-
+  constructor(private readonly bookingService: BookingService) {}
 
   @Post('admin/add')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
@@ -33,11 +59,9 @@ export class BookingController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: CreateBookingDto,
   ) {
-    return this.bookingService.createBooking(
-      req.user,
-      dto,
-    );
+    return this.bookingService.createBooking(req.user, dto);
   }
+
   @Get('all')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
@@ -45,10 +69,7 @@ export class BookingController {
     @Req() req: AuthenticatedRequest,
     @Query() query: BookingQueryDto,
   ) {
-    return this.bookingService.getBookings(
-      req.user,
-      query,
-    );
+    return this.bookingService.getBookings(req.user, query);
   }
 
   @Patch(':id')
@@ -60,26 +81,18 @@ export class BookingController {
     id: number,
     @Body() dto: UpdateBookingDto,
   ) {
-    return this.bookingService.updateBooking(
-      req.user,
-      id,
-      dto,
-    );
+    return this.bookingService.updateBooking(req.user, id, dto);
   }
 
   @Patch(':id/cancel')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles( USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN )
+  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   cancelBooking(
     @Req() req: AuthenticatedRequest,
     @Param('id', ParseIntPipe) bookingId: number,
     @Body() dto: CancelBookingDto,
   ) {
-    return this.bookingService.cancelBooking(
-      req.user,
-      bookingId,
-      dto,
-    );
+    return this.bookingService.cancelBooking(req.user, bookingId, dto);
   }
 
   @Delete(':id')
@@ -90,10 +103,7 @@ export class BookingController {
     @Param('id', ParseIntPipe)
     bookingId: number,
   ) {
-    return this.bookingService.softDeleteBooking(
-      req.user,
-      bookingId,
-    );
+    return this.bookingService.softDeleteBooking(req.user, bookingId);
   }
 
   @Patch(':id/restore')
@@ -103,9 +113,7 @@ export class BookingController {
     @Param('id', ParseIntPipe)
     bookingId: number,
   ) {
-    return this.bookingService.restoreBooking(
-      bookingId,
-    );
+    return this.bookingService.restoreBooking(bookingId);
   }
 
   @Patch(':bookingId/reschedule')
@@ -116,11 +124,7 @@ export class BookingController {
     @Param('bookingId', ParseIntPipe) bookingId: number,
     @Body() dto: RescheduleBookingDto,
   ) {
-    return this.bookingService.rescheduleBooking(
-      req.user,
-      bookingId,
-      dto,
-    );
+    return this.bookingService.rescheduleBooking(req.user, bookingId, dto);
   }
 
   @Post(':bookingId/repeat')
@@ -131,24 +135,17 @@ export class BookingController {
     @Param('bookingId', ParseIntPipe) bookingId: number,
     @Body() dto: RepeatBookingDto,
   ) {
-    return this.bookingService.repeatBooking(
-      req.user,
-      bookingId,
-      dto,
-    );
+    return this.bookingService.repeatBooking(req.user, bookingId, dto);
   }
 
   @Get('active')
-  @UseGuards(JwtAuthGuard,RolesGuard,CsrfGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
   async getActiveBookings(
     @Req() req: AuthenticatedRequest,
     @Query() query: BookingQueryDto,
   ) {
-    return this.bookingService.getActiveBookings(
-      req.user,
-      query,
-    );
+    return this.bookingService.getActiveBookings(req.user, query);
   }
 
   @Patch(':id/respond')
@@ -159,11 +156,7 @@ export class BookingController {
     @Param('id', ParseIntPipe) bookingId: number,
     @Body() dto: RespondBookingDto,
   ) {
-    return this.bookingService.respondToBooking(
-      req.user,
-      bookingId,
-      dto,
-    );
+    return this.bookingService.respondToBooking(req.user, bookingId, dto);
   }
 
   @Patch(':id/assign')
@@ -174,11 +167,7 @@ export class BookingController {
     @Param('id', ParseIntPipe) bookingId: number,
     @Body() dto: AssignBookingDto,
   ) {
-    return this.bookingService.assignBookingToPurohit(
-      req.user,
-      bookingId,
-      dto,
-    );
+    return this.bookingService.assignBookingToPurohit(req.user, bookingId, dto);
   }
 
   @Get('available')
@@ -188,10 +177,7 @@ export class BookingController {
     @Req() req: AuthenticatedRequest,
     @Query() query: BookingQueryDto,
   ) {
-    return this.bookingService.getAvailableBookings(
-        req.user,
-        query,
-      );
+    return this.bookingService.getAvailableBookings(req.user, query);
   }
 
   @Patch(':id/status')
@@ -202,57 +188,44 @@ export class BookingController {
     @Param('id', ParseIntPipe) bookingId: number,
     @Body() dto: UpdateBookingStatusDto,
   ) {
-    return this.bookingService.updateBookingStatus(
-      req.user,
-      bookingId,
-      dto,
-    );
+    return this.bookingService.updateBookingStatus(req.user, bookingId, dto);
   }
 
-  @Post(':id/completion-otp')
+  @Post(':id/start-otp')
   @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
-  generateCompletionOtp(
+  generateStartOtp(
     @Req() req: AuthenticatedRequest,
     @Param('id', ParseIntPipe)
     bookingId: number,
   ) {
-    return this.bookingService.generateCompletionOtp(
-      req.user,
-      bookingId,
-    );
+    return this.bookingService.generateStartOtp(req.user, bookingId);
   }
 
-  @Post(':id/verify-completion-otp')
+  @Post(':id/verify-start-otp')
   @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
-  verifyCompletionOtp(
+  verifyStartOtp(
     @Req() req: AuthenticatedRequest,
     @Param('id', ParseIntPipe)
     bookingId: number,
     @Body()
-    dto: VerifyCompletionOtpDto,
+    dto: VerifyStartOtpDto,
   ) {
-    return this.bookingService.verifyCompletionOtp(
-      req.user,
-      bookingId,
-      dto,
-    );
+    return this.bookingService.verifyStartOtp(req.user, bookingId, dto);
   }
 
- @Post(':id/completion-proof')
-  @Roles(USER_ROLE.PUROHIT,USER_ROLE.ADMIN)
+  @Post(':id/completion-proof')
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   @UseInterceptors(
     FilesInterceptor('files', 5, {
       storage: memoryStorage(),
-      limits: {fileSize: 5 * 1024 * 1024,},
-      fileFilter: (
-        request,
-        file,
-        callback,
-      ) => {
-        const allowedMimeTypes = ['image/jpeg','image/png','image/webp'];
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (request, file, callback) => {
+        const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
         if (!allowedMimeTypes.includes(file.mimetype)) {
           return callback(
-            new BadRequestException('Only JPG, PNG and WEBP images are allowed'),
+            new BadRequestException(
+              'Only JPG, PNG and WEBP images are allowed',
+            ),
             false,
           );
         }
@@ -268,10 +241,10 @@ export class BookingController {
     files: Express.Multer.File[],
   ) {
     return this.bookingService.uploadCompletionProof(
-        req.user,
-        bookingId,
-        files,
-      );
+      req.user,
+      bookingId,
+      files,
+    );
   }
 
   @Get(':id')
@@ -282,9 +255,6 @@ export class BookingController {
     @Param('id', ParseIntPipe)
     id: number,
   ) {
-    return this.bookingService.getBookingById(
-      req.user,
-      id,
-    );
+    return this.bookingService.getBookingById(req.user, id);
   }
 }
