@@ -8,6 +8,7 @@ import { S3Module } from '@poojawala/s3';
 import { SmsServicesModule } from '@poojawala/sms-services';
 import { EmailServicesModule } from '@poojawala/email-services';
 import { AssignmentModule } from '../assignment/assignment.module';
+import { GatewayModule } from '@poojawala/gateway';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { AssignmentModule } from '../assignment/assignment.module';
     AssignmentModule,
     S3Module,
     SmsServicesModule,
+    GatewayModule,
     EmailServicesModule,
   ],
   controllers: [BookingController],

@@ -55,6 +55,8 @@ import { S3Service } from '@poojawala/s3';
 import { SmsService } from '@poojawala/sms-services';
 import { EmailService } from '@poojawala/email-services';
 import { AssignmentService } from '../assignment/assignment.service';
+import { BookingGateway } from '@poojawala/gateway';
+import { console } from 'inspector';
 
 interface CouponCalculationResult {
   coupon: Coupon;
@@ -71,7 +73,8 @@ export class BookingService {
     private readonly smsService: SmsService,
     private readonly emailService: EmailService,
     private readonly assignmentService: AssignmentService,
-  ) {}
+    private readonly bookingGateway: BookingGateway,
+  ) { }
 
   private getIstDateParts(date: Date) {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -456,6 +459,41 @@ export class BookingService {
 
         savedBooking.filteredPurohitIds = eligiblePurohitIds;
         savedBooking = await bookingRepository.save(savedBooking);
+
+
+        if (eligiblePurohitIds.length > 0) {
+          const purohitProfiles =
+            await manager
+              .getRepository(PurohitProfile)
+              .createQueryBuilder('profile')
+              .select([
+                'profile.id',
+                'profile.userId',
+              ])
+              .where(
+                'profile.id IN (:...purohitProfileIds)',
+                {
+                  purohitProfileIds:
+                    eligiblePurohitIds,
+                },
+              )
+              .getMany();
+
+          const eligiblePurohitUserIds =
+            purohitProfiles.map(
+              (profile) => profile.userId,
+            );
+
+
+          for (const purohitUserId of eligiblePurohitUserIds) {
+
+            this.bookingGateway.notifyUser(
+              purohitUserId,
+              'create_booking',
+              savedBooking,
+            );
+          }
+        }
 
         this.logger.log(
           `Booking ${savedBooking.id} created with ${eligiblePurohitIds.length} eligible Purohits`,
@@ -1040,6 +1078,20 @@ export class BookingService {
 
       let cancelledBy: CANCELLED_BY;
       let message = 'Booking cancelled successfully';
+      const assignedPurohitProfileId = booking.purohitId;
+      let assignedPurohitUserId: number | undefined;
+
+      if (assignedPurohitProfileId) {
+        const purohitProfile = await manager
+          .getRepository(PurohitProfile)
+          .findOne({
+            where: {
+              id: assignedPurohitProfileId,
+            },
+          });
+
+        assignedPurohitUserId = purohitProfile?.userId;
+      }
 
       switch (user.role) {
         case USER_ROLE.CUSTOMER:
@@ -1119,6 +1171,58 @@ export class BookingService {
       booking.cancellationReason = cancellationReason || undefined;
 
       const savedBooking = await bookingRepository.save(booking);
+
+      if (cancelledBy === CANCELLED_BY.CUSTOMER) {
+        if (assignedPurohitUserId) {
+          this.bookingGateway.notifyUser(
+            assignedPurohitUserId,
+            'booking_cancelled',
+            savedBooking,
+          );
+        }
+      }
+
+      // PUROHIT → CUSTOMER + ADMINS
+      if (cancelledBy === CANCELLED_BY.PUROHIT) {
+        this.bookingGateway.notifyUser(
+          savedBooking.customerId,
+          'booking_released',
+          savedBooking,
+        );
+
+        const admins = await manager.getRepository(User).find({
+          where: {
+            role: USER_ROLE.ADMIN,
+            status: USER_STATUS.ACTIVE,
+          },
+          select: ['id'],
+        });
+
+        for (const admin of admins) {
+          this.bookingGateway.notifyUser(
+            admin.id,
+            'booking_released',
+            savedBooking,
+          );
+        }
+      }
+
+      // ADMIN → PUROHIT + CUSTOMER
+      if (cancelledBy === CANCELLED_BY.ADMIN) {
+        this.bookingGateway.notifyUser(
+          savedBooking.customerId,
+          'booking_cancelled',
+          savedBooking,
+        );
+
+        if (assignedPurohitUserId) {
+          this.bookingGateway.notifyUser(
+            assignedPurohitUserId,
+            'booking_cancelled',
+            savedBooking,
+          );
+        }
+      }
 
       return {
         message,
@@ -1527,6 +1631,16 @@ export class BookingService {
             },
           });
 
+          // real time socket event for booking.customerId
+          this.bookingGateway.notifyUser(
+            booking.customerId,
+            'booking_accepted',
+            {
+              message: 'Booking accepted successfully',
+              booking: acceptedBooking ?? savedBooking,
+            },
+          );
+
           return {
             message: 'Booking accepted successfully',
             booking: acceptedBooking ?? savedBooking,
@@ -1715,6 +1829,21 @@ export class BookingService {
         },
       });
 
+      // real time socket event for booking.customerId and dto.purohitId
+      this.bookingGateway.notifyUser(
+        savedBooking.customerId,
+        'booking_assigned_by_admin',
+        {
+          message: 'Booking assigned to Purohit successfully',
+          booking: assignedBooking ?? savedBooking,
+        },
+      );
+
+      this.bookingGateway.notifyUser(dto.purohitId, 'booking_assigned_by_admin', {
+        message: 'Booking assigned to you by admin',
+        booking: assignedBooking ?? savedBooking,
+      });
+
       return {
         message: 'Booking assigned to Purohit successfully',
         booking: assignedBooking ?? savedBooking,
@@ -1822,6 +1951,16 @@ export class BookingService {
       }
 
       const updatedBooking = await bookingRepository.save(booking);
+
+      // Notify customer for status change
+      this.bookingGateway.notifyUser(
+        updatedBooking.customerId,
+        'booking_status_updated',
+        {
+          message: `Booking status updated to ${updatedBooking.status}`,
+          booking: updatedBooking,
+        },
+      );
 
       return {
         message: 'Booking status updated successfully',
@@ -2110,17 +2249,17 @@ export class BookingService {
     const deliveryResults = await Promise.allSettled([
       customerPhone
         ? this.smsService.sendSms(
-            customerPhone,
-            `Your Poojawala booking completion OTP is ${otp}. Share this OTP only after the Puja service is completed.`,
-          )
+          customerPhone,
+          `Your Poojawala booking completion OTP is ${otp}. Share this OTP only after the Puja service is completed.`,
+        )
         : Promise.resolve(null),
 
       customerEmail
         ? this.emailService.sendOtpEmail(
-            customerEmail,
-            otp,
-            booking.customer.firstName,
-          )
+          customerEmail,
+          otp,
+          booking.customer.firstName,
+        )
         : Promise.resolve(null),
     ]);
 
@@ -2365,14 +2504,14 @@ export class BookingService {
 
         purohit: booking.purohit
           ? {
-              profileId: booking.purohit.id,
-              userId: booking.purohit.userId,
-              name: purohitName || '-',
-              email: purohitUser?.email ?? null,
-              phone: purohitUser?.phone ?? null,
-              profileImage: purohitUser?.profileImage ?? null,
-              avgRating: Number(booking.purohit.avgRating ?? 0),
-            }
+            profileId: booking.purohit.id,
+            userId: booking.purohit.userId,
+            name: purohitName || '-',
+            email: purohitUser?.email ?? null,
+            phone: purohitUser?.phone ?? null,
+            profileImage: purohitUser?.profileImage ?? null,
+            avgRating: Number(booking.purohit.avgRating ?? 0),
+          }
           : null,
 
         address: {
@@ -2391,7 +2530,7 @@ export class BookingService {
 
           latitude:
             customerAddress?.latitude !== null &&
-            customerAddress?.latitude !== undefined
+              customerAddress?.latitude !== undefined
               ? Number(customerAddress.latitude)
               : snapshot['latitude'] !== undefined
                 ? Number(snapshot['latitude'])
@@ -2399,7 +2538,7 @@ export class BookingService {
 
           longitude:
             customerAddress?.longitude !== null &&
-            customerAddress?.longitude !== undefined
+              customerAddress?.longitude !== undefined
               ? Number(customerAddress.longitude)
               : snapshot['longitude'] !== undefined
                 ? Number(snapshot['longitude'])
@@ -2756,14 +2895,14 @@ export class BookingService {
 
       purohit: booking.purohit
         ? {
-            profileId: booking.purohit.id,
-            userId: booking.purohit.userId,
-            name: purohitName || null,
-            email: purohitUser?.email ?? null,
-            phone: purohitUser?.phone ?? null,
-            profileImage: purohitUser?.profileImage ?? null,
-            avgRating: Number(booking.purohit.avgRating ?? 0),
-          }
+          profileId: booking.purohit.id,
+          userId: booking.purohit.userId,
+          name: purohitName || null,
+          email: purohitUser?.email ?? null,
+          phone: purohitUser?.phone ?? null,
+          profileImage: purohitUser?.profileImage ?? null,
+          avgRating: Number(booking.purohit.avgRating ?? 0),
+        }
         : null,
 
       address: {
@@ -2783,14 +2922,14 @@ export class BookingService {
           null,
         latitude:
           latitude !== null &&
-          latitude !== undefined &&
-          Number.isFinite(Number(latitude))
+            latitude !== undefined &&
+            Number.isFinite(Number(latitude))
             ? Number(latitude)
             : null,
         longitude:
           longitude !== null &&
-          longitude !== undefined &&
-          Number.isFinite(Number(longitude))
+            longitude !== undefined &&
+            Number.isFinite(Number(longitude))
             ? Number(longitude)
             : null,
       },
@@ -3083,6 +3222,31 @@ export class BookingService {
             }),
           );
         }
+        // send notification to the assigned Purohit
+        if (dto.purohitId) {
+          this.bookingGateway.notifyUser(
+            dto.purohitId,
+            "create_booking_by_admin",
+            {
+              ...savedBooking,
+              scheduledAtIst: this.toIstString(savedBooking.scheduledAt),
+              createdAtIst: this.toIstString(savedBooking.createdAt),
+              updatedAtIst: this.toIstString(savedBooking.updatedAt),
+            }
+          );
+        }
+
+        // send notification to the customer
+        this.bookingGateway.notifyUser(
+          customer.id,
+          "create_booking_by_admin",
+          {
+            ...savedBooking,
+            scheduledAtIst: this.toIstString(savedBooking.scheduledAt),
+            createdAtIst: this.toIstString(savedBooking.createdAt),
+            updatedAtIst: this.toIstString(savedBooking.updatedAt),
+          }
+        );
 
         return {
           ...savedBooking,
