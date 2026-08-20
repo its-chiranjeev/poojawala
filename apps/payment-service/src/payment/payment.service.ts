@@ -186,6 +186,7 @@ export interface PaymentDetailsResponse {
   paymentMethod: PAYMENT_METHOD | null;
 
   razorpayOrderId: string | null;
+  razorpayPaymentLinkId: string | null;
   razorpayPaymentId: string | null;
   razorpayRefundId: string | null;
 
@@ -354,11 +355,50 @@ export class PaymentService {
       await this.paymentRepository.findActivePaymentByBookingId(booking.id);
 
     if (existingPayment) {
-      throw new ConflictException(
-        existingPayment.status === PAYMENT_STATUS.SUCCESS
-          ? 'This booking is already paid'
-          : 'An active payment already exists for this booking',
-      );
+      if (existingPayment.status === PAYMENT_STATUS.SUCCESS) {
+        throw new ConflictException('This booking is already paid');
+      }
+
+      let isUsable = false;
+
+      if (existingPayment.razorpayPaymentLinkId) {
+        try {
+          const paymentLink = await this.razorpay.paymentLink.fetch(
+            existingPayment.razorpayPaymentLinkId,
+          );
+
+          if (paymentLink && paymentLink.status === 'created') {
+            return {
+              paymentId: existingPayment.id,
+              paymentUrl: paymentLink.short_url,
+              amount,
+              amountInPaise: Math.round(amount * 100),
+              currency: paymentLink.currency ?? 'INR',
+              bookingId: booking.id,
+              bookingNumber: booking.bookingNumber,
+              status: existingPayment.status,
+            };
+          } else {
+            // Status is cancelled, expired, paid, or partially_paid
+            existingPayment.status = PAYMENT_STATUS.FAILED;
+            existingPayment.failureReason = 'Previous payment link is no longer usable';
+            await this.paymentRepository.savePayment(existingPayment);
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Failed to verify payment link for payment ${existingPayment.id}: ${
+              error instanceof Error ? error.message : 'Unknown error'
+            }`,
+          );
+          existingPayment.status = PAYMENT_STATUS.FAILED;
+          existingPayment.failureReason = 'Failed to verify previous payment link';
+          await this.paymentRepository.savePayment(existingPayment);
+        }
+      } else {
+        existingPayment.status = PAYMENT_STATUS.FAILED;
+        existingPayment.failureReason = 'Previous active payment was incomplete';
+        await this.paymentRepository.savePayment(existingPayment);
+      }
     }
 
     // Create the new payment only after the check passes
@@ -563,6 +603,9 @@ export class PaymentService {
           'Invalid payment-link response received from Razorpay',
         );
       }
+
+      payment.razorpayPaymentLinkId = paymentLink.id;
+      await this.paymentRepository.savePayment(payment);
 
       return paymentLink as unknown as RazorpayPaymentLinkData;
     } catch (error) {
@@ -1536,6 +1579,8 @@ export class PaymentService {
 
       razorpayOrderId:
         razorpayPayment?.order_id ?? payment.razorpayOrderId ?? null,
+
+      razorpayPaymentLinkId: payment.razorpayPaymentLinkId ?? null,
 
       razorpayPaymentId:
         razorpayPayment?.id ?? payment.razorpayPaymentId ?? null,

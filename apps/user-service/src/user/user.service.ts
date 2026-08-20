@@ -1,11 +1,12 @@
-import { CreatePurohitByAdminDto, CustomerFavoriteDto, GenerateOtpDto, RegisterNormalUserDto, UpdateUserDto, VerifyPurohitDto } from '@poojawala/dtos';
+import { CreatePurohitBankAccountDto, CreatePurohitByAdminDto, CustomerFavoriteDto, GenerateOtpDto, RegisterNormalUserDto, UpdatePurohitBankAccountDto, UpdateUserDto, VerifyPurohitDto } from '@poojawala/dtos';
 import { UpsertPlatformSettingDto } from '@poojawala/dtos/Platform setting/Platform.dto';
 import { CreateCustomerAddressDto } from '@poojawala/dtos/user/add-customer-address.dto';
+import { UpdateCustomerAddressDto } from '@poojawala/dtos/user/update-customer-address.dto';
 import { CreatePurohitServiceAreaDto } from '@poojawala/dtos/user/add-purohit-address.dto';
 import { GetAllUsersDto } from '@poojawala/dtos/user/get-all-users.dto';
 import { UpdatePurohitServiceAreaDto } from '@poojawala/dtos/user/update-purohit-address.dto';
 import { EmailService } from '@poojawala/email-services';
-import { BANK_VERIFICATION_STATUS, Otp, OTP_TYPE, PUROHIT_MEDIA_TYPE, PUROHIT_MEDIA_VERIFICATION_STATUS, PUROHIT_VERIFICATION_STATUS, PurohitBankAccount, PurohitMedia, PurohitProfile, User, USER_ROLE, USER_STATUS, } from '@poojawala/entities';
+import { BANK_VERIFICATION_STATUS, Otp, OTP_TYPE, PUROHIT_MEDIA_TYPE, PUROHIT_MEDIA_VERIFICATION_STATUS, PUROHIT_PAYMENT_METHOD, PUROHIT_VERIFICATION_STATUS, PurohitBankAccount, PurohitMedia, PurohitProfile, User, USER_ROLE, USER_STATUS, } from '@poojawala/entities';
 import { CustomerAddressRepository, CustomerFavoriteRepository, OtpRepository, PlatformSettingRepository, PurohitBankAccountRepository, PurohitMediaRepository, PurohitProfileRepository, PurohitServiceAreaRepository, UserRepository, } from '@poojawala/repositories';
 import { S3Service } from '@poojawala/s3';
 import { SmsService } from '@poojawala/sms-services';
@@ -34,7 +35,7 @@ export class UserService {
     private readonly configService: ConfigService,
     private readonly purohitMediaRepository: PurohitMediaRepository,
     private readonly purohitBankAccountRepository: PurohitBankAccountRepository,
-  ) {}
+  ) { }
 
   async deleteExpiredOtps(): Promise<number> {
     const result = await this.dataSource
@@ -419,7 +420,7 @@ export class UserService {
           );
         }
         if ((safeUser as any).profile) {
-        const profile = { ...(safeUser as any).profile };
+          const profile = { ...(safeUser as any).profile };
           if (profile.aadhaarDocUrl) {
             profile.aadhaarDocDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.aadhaarDocUrl);
             profile.aadhaarDocUrl = await this.s3Service.getDownloadUrl(profile.aadhaarDocUrl);
@@ -442,7 +443,7 @@ export class UserService {
               if (ps.service?.iconUrl) {
                 try {
                   iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
-                } catch(e) {}
+                } catch (e) { }
               }
               return {
                 ...ps,
@@ -611,7 +612,7 @@ export class UserService {
       if (profileImage) {
         try {
           profileImage = await this.s3Service.getDownloadUrl(profileImage);
-        } catch(e) {}
+        } catch (e) { }
       }
 
       const services = user.services ? await Promise.all(user.services.map(async (ps: any) => {
@@ -619,7 +620,7 @@ export class UserService {
         if (ps.service?.iconUrl) {
           try {
             iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
-          } catch(e) {}
+          } catch (e) { }
         }
         return {
           ...ps,
@@ -692,7 +693,7 @@ export class UserService {
       if (ps.service?.iconUrl) {
         try {
           iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
-        } catch(e) {}
+        } catch (e) { }
       }
       return {
         ...ps,
@@ -777,13 +778,13 @@ export class UserService {
           profile.templeAffiliationProofDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.templeAffiliationProofUrl);
           profile.templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(profile.templeAffiliationProofUrl);
         }
-       if ((safeUser as any).purohitServices) {
+        if ((safeUser as any).purohitServices) {
           profile.purohitServices = await Promise.all((safeUser as any).purohitServices.map(async (ps: any) => {
             let iconDownloadurl: string | null = null;
             if (ps.service?.iconUrl) {
               try {
                 iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
-              } catch(e) {}
+              } catch (e) { }
             }
             return {
               ...ps,
@@ -821,13 +822,22 @@ export class UserService {
         throw new NotFoundException('User not found');
       }
 
-      if (dto.isDefault) {
+      const existingAddresses = await this.customerAddressRepository.find({
+        where: { customerId: userId } as any,
+      });
+
+      let isDefault = dto.isDefault || false;
+
+      if (existingAddresses.length === 0) {
+        isDefault = true;
+      } else if (isDefault) {
         await this.customerAddressRepository.clearDefaultAddress(userId);
       }
 
       const address = await this.customerAddressRepository.createAddress({
         customerId: userId,
         ...dto,
+        isDefault,
       });
 
       return {
@@ -844,6 +854,93 @@ export class UserService {
 
       throw new InternalServerErrorException('Failed to add address');
     }
+  }
+
+  async getMyAddresses(
+    userId: number,
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+  ) {
+    const { data, total } = await this.customerAddressRepository.findAddresses(
+      userId,
+      page,
+      limit,
+      search,
+    );
+
+    return {
+      success: true,
+      message: 'Addresses fetched successfully',
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getAddressById(userId: number, id: number) {
+    const address = await this.customerAddressRepository.findById(id);
+
+    if (!address) {
+      throw new NotFoundException('Address not found');
+    }
+
+    if (address.customerId !== userId) {
+      throw new ForbiddenException('You can access only your own address');
+    }
+
+    return {
+      success: true,
+      message: 'Address fetched successfully',
+      data: address,
+    };
+  }
+
+  async updateAddress(userId: number, id: number, dto: UpdateCustomerAddressDto) {
+    const address = await this.customerAddressRepository.findById(id);
+
+    if (!address) {
+      throw new NotFoundException('Address not found');
+    }
+
+    if (address.customerId !== userId) {
+      throw new ForbiddenException('You can update only your own address');
+    }
+
+    if (dto.isDefault) {
+      await this.customerAddressRepository.clearDefaultAddress(userId);
+    }
+
+    const updated = await this.customerAddressRepository.update(id, dto);
+
+    return {
+      success: true,
+      message: 'Address updated successfully',
+      data: updated,
+    };
+  }
+
+  async deleteAddress(userId: number, id: number) {
+    const address = await this.customerAddressRepository.findById(id);
+
+    if (!address) {
+      throw new NotFoundException('Address not found');
+    }
+
+    if (address.customerId !== userId) {
+      throw new ForbiddenException('You can delete only your own address');
+    }
+
+    await this.customerAddressRepository.softDelete(id);
+
+    return {
+      success: true,
+      message: 'Address deleted successfully',
+    };
   }
 
   async addServiceArea(userId: number, dto: CreatePurohitServiceAreaDto) {
@@ -925,14 +1022,30 @@ export class UserService {
     };
   }
 
-  async getMyServiceAreas(userId: number) {
-    const areas =
-      await this.purohitServiceAreaRepository.findByPurohitId(userId);
+  async getMyServiceAreas(
+    userId: number,
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+  ) {
+    const { data, total } =
+      await this.purohitServiceAreaRepository.findServiceAreas(
+        userId,
+        page,
+        limit,
+        search,
+      );
 
     return {
       success: true,
       message: 'Service areas fetched successfully',
-      data: areas,
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
     };
   }
 
@@ -952,6 +1065,265 @@ export class UserService {
     return {
       success: true,
       message: 'Service area deleted successfully',
+    };
+  }
+
+  async addPurohitBankAccount(userId: number, dto: CreatePurohitBankAccountDto) {
+    const profile = await this.purohitProfileRepository.findOne({
+      where: { userId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Purohit profile not found');
+    }
+
+    if (dto.paymentMethod === PUROHIT_PAYMENT_METHOD.BANK) {
+      if (!dto.accountHolderName || !dto.accountNumber || !dto.ifscCode) {
+        throw new BadRequestException(
+          'accountHolderName, accountNumber, and ifscCode are required for BANK payment method',
+        );
+      }
+    } else if (dto.paymentMethod === PUROHIT_PAYMENT_METHOD.UPI) {
+      if (!dto.upiId) {
+        throw new BadRequestException(
+          'upiId is required for UPI payment method',
+        );
+      }
+    }
+
+    if (dto.accountNumber) {
+      const existingAccount = await this.purohitBankAccountRepository.findByAccountNumber(
+        dto.accountNumber,
+      );
+
+      if (existingAccount) {
+        throw new ConflictException('Bank account number already in use');
+      }
+    }
+
+    const existingAccounts = await this.purohitBankAccountRepository.findByPurohitId(
+      profile.id,
+    );
+
+    let isPrimary = false;
+    if (dto.isPrimary !== undefined && dto.isPrimary !== null) {
+      if (typeof dto.isPrimary === 'string') {
+        isPrimary =
+          (dto.isPrimary as string).trim().toLowerCase() === 'true' ||
+          (dto.isPrimary as string) === '1';
+      } else {
+        isPrimary = Boolean(dto.isPrimary);
+      }
+    }
+
+    if (existingAccounts.length === 0) {
+      isPrimary = true;
+    } else if (isPrimary) {
+      await this.purohitBankAccountRepository.clearPrimaryAccount(profile.id);
+    }
+
+    const initialVerificationStatus =
+      profile.verificationStatus === PUROHIT_VERIFICATION_STATUS.APPROVED
+        ? BANK_VERIFICATION_STATUS.VERIFIED
+        : BANK_VERIFICATION_STATUS.PENDING;
+
+    const account = await this.purohitBankAccountRepository.createAccount({
+      purohitId: profile.id,
+      paymentMethod: dto.paymentMethod,
+      accountHolderName: dto.accountHolderName,
+      accountNumber: dto.accountNumber,
+      ifscCode: dto.ifscCode,
+      bankName: dto.bankName,
+      accountType: dto.accountType,
+      upiId: dto.upiId,
+      isPrimary,
+      verificationStatus: initialVerificationStatus,
+    });
+
+    return {
+      success: true,
+      message: 'Bank account added successfully',
+      data: account,
+    };
+  }
+
+  async getPurohitBankAccounts(
+    userId: number,
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+  ) {
+    const profile = await this.purohitProfileRepository.findOne({
+      where: { userId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Purohit profile not found');
+    }
+
+    const { data, total } = await this.purohitBankAccountRepository.findBankAccounts(
+      profile.id,
+      page,
+      limit,
+      search,
+    );
+
+    return {
+      success: true,
+      message: 'Bank accounts fetched successfully',
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getPurohitBankAccountById(userId: number, id: number) {
+    const profile = await this.purohitProfileRepository.findOne({
+      where: { userId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Purohit profile not found');
+    }
+
+    const account = await this.purohitBankAccountRepository.findById(id);
+
+    if (!account) {
+      throw new NotFoundException('Bank account not found');
+    }
+
+    if (account.purohitId !== profile.id) {
+      throw new ForbiddenException('You can access only your own bank account');
+    }
+
+    return {
+      success: true,
+      message: 'Bank account fetched successfully',
+      data: account,
+    };
+  }
+
+  async updatePurohitBankAccount(
+    userId: number,
+    id: number,
+    dto: UpdatePurohitBankAccountDto,
+  ) {
+    const profile = await this.purohitProfileRepository.findOne({
+      where: { userId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Purohit profile not found');
+    }
+
+    const account = await this.purohitBankAccountRepository.findById(id);
+
+    if (!account) {
+      throw new NotFoundException('Bank account not found');
+    }
+
+    if (account.purohitId !== profile.id) {
+      throw new ForbiddenException('You can update only your own bank account');
+    }
+
+    if (dto.accountNumber && dto.accountNumber !== account.accountNumber) {
+      const existingAccount = await this.purohitBankAccountRepository.findByAccountNumber(
+        dto.accountNumber,
+      );
+
+      if (existingAccount && existingAccount.id !== id) {
+        throw new ConflictException('Bank account number already in use');
+      }
+    }
+
+    let isPrimary: boolean | undefined = undefined;
+    if (dto.isPrimary !== undefined && dto.isPrimary !== null) {
+      const valStr = String(dto.isPrimary).trim().toLowerCase();
+      isPrimary = valStr === 'true' || valStr === '1';
+    }
+
+    if (isPrimary === true) {
+      await this.purohitBankAccountRepository.clearPrimaryAccount(profile.id);
+    } else if (isPrimary === false && account.isPrimary) {
+      const allAccounts = await this.purohitBankAccountRepository.findByPurohitId(
+        profile.id,
+      );
+      const otherAccounts = allAccounts.filter((acc) => acc.id !== id);
+
+      if (otherAccounts.length === 0) {
+        throw new BadRequestException(
+          'At least one bank account must remain primary',
+        );
+      }
+
+      await this.purohitBankAccountRepository.updateAccount(otherAccounts[0].id, {
+        isPrimary: true,
+      });
+    }
+
+    const updatedData: Partial<PurohitBankAccount> = {
+      ...dto,
+      ...(isPrimary !== undefined && { isPrimary }),
+      verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
+    };
+
+    await this.purohitBankAccountRepository.updateAccount(
+      id,
+      updatedData,
+    );
+
+    const freshUpdatedAccount = await this.purohitBankAccountRepository.findById(id);
+
+    return {
+      success: true,
+      message: 'Bank account updated successfully',
+      data: freshUpdatedAccount,
+    };
+  }
+
+  async deletePurohitBankAccount(userId: number, id: number) {
+    const profile = await this.purohitProfileRepository.findOne({
+      where: { userId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Purohit profile not found');
+    }
+
+    const account = await this.purohitBankAccountRepository.findById(id);
+
+    if (!account) {
+      throw new NotFoundException('Bank account not found');
+    }
+
+    if (account.purohitId !== profile.id) {
+      throw new ForbiddenException('You can delete only your own bank account');
+    }
+
+    const wasPrimary = account.isPrimary;
+
+    await this.purohitBankAccountRepository.deleteAccount(id);
+
+    if (wasPrimary) {
+      const remainingAccounts = await this.purohitBankAccountRepository.findByPurohitId(
+        profile.id,
+      );
+
+      if (remainingAccounts.length > 0) {
+        await this.purohitBankAccountRepository.updateAccount(
+          remainingAccounts[0].id,
+          { isPrimary: true },
+        );
+      }
+    }
+
+    return {
+      success: true,
+      message: 'Bank account deleted successfully',
     };
   }
 
@@ -1021,12 +1393,12 @@ export class UserService {
     const missingFields = Object.entries(requiredFields)
       .filter(([, value]) => this.isEmptyValue(value))
       .map(([fieldName]) => fieldName);
-      const hasAadhaar = !this.isEmptyValue(profile.aadhaarDocUrl);
-      const hasPan = !this.isEmptyValue(profile.panDocUrl);
+    const hasAadhaar = !this.isEmptyValue(profile.aadhaarDocUrl);
+    const hasPan = !this.isEmptyValue(profile.panDocUrl);
 
-      if (!hasAadhaar && !hasPan) {
-        missingFields.push('Aadhaar or PAN document');
-      }
+    if (!hasAadhaar && !hasPan) {
+      missingFields.push('Aadhaar or PAN document');
+    }
 
     if (missingFields.length > 0) {
       throw new BadRequestException(
@@ -1088,6 +1460,7 @@ export class UserService {
     const userRepository = manager.getRepository(User);
     const profileRepository = manager.getRepository(PurohitProfile);
     const mediaRepository = manager.getRepository(PurohitMedia);
+    const bankAccountRepository = manager.getRepository(PurohitBankAccount);
 
     await userRepository
       .createQueryBuilder()
@@ -1121,6 +1494,18 @@ export class UserService {
       })
       .andWhere('"deletedAt" IS NULL')
       .execute();
+
+    await bankAccountRepository
+      .createQueryBuilder()
+      .update(PurohitBankAccount)
+      .set({
+        verificationStatus: BANK_VERIFICATION_STATUS.VERIFIED,
+      })
+      .where('"purohitId" = :profileId', {
+        profileId,
+      })
+      .andWhere('"deletedAt" IS NULL')
+      .execute();
   }
 
   private async rejectPurohit(
@@ -1132,6 +1517,7 @@ export class UserService {
     const userRepository = manager.getRepository(User);
     const profileRepository = manager.getRepository(PurohitProfile);
     const mediaRepository = manager.getRepository(PurohitMedia);
+    const bankAccountRepository = manager.getRepository(PurohitBankAccount);
 
     await userRepository.update(
       { id: userId },
@@ -1157,6 +1543,18 @@ export class UserService {
       .set({
         verificationStatus: PUROHIT_MEDIA_VERIFICATION_STATUS.REJECTED,
         rejectionReason,
+      })
+      .where('"purohitId" = :profileId', {
+        profileId,
+      })
+      .andWhere('"deletedAt" IS NULL')
+      .execute();
+
+    await bankAccountRepository
+      .createQueryBuilder()
+      .update(PurohitBankAccount)
+      .set({
+        verificationStatus: BANK_VERIFICATION_STATUS.FAILED,
       })
       .where('"purohitId" = :profileId', {
         profileId,
@@ -1319,6 +1717,10 @@ export class UserService {
         dto.status === PUROHIT_VERIFICATION_STATUS.APPROVED
           ? PUROHIT_MEDIA_VERIFICATION_STATUS.APPROVED
           : PUROHIT_MEDIA_VERIFICATION_STATUS.REJECTED;
+      const bankVerificationStatus =
+        dto.status === PUROHIT_VERIFICATION_STATUS.APPROVED
+          ? BANK_VERIFICATION_STATUS.VERIFIED
+          : BANK_VERIFICATION_STATUS.FAILED;
 
       return {
         userId: purohitUser.id,
@@ -1328,6 +1730,7 @@ export class UserService {
         userStatus,
         verificationStatus: dto.status,
         mediaStatus,
+        bankVerificationStatus,
         updatedMediaCount: media.length,
         rejectionReason:
           dto.status === PUROHIT_VERIFICATION_STATUS.REJECTED
@@ -1352,6 +1755,7 @@ export class UserService {
         userStatus: result.userStatus,
         verificationStatus: result.verificationStatus,
         mediaStatus: result.mediaStatus,
+        bankVerificationStatus: result.bankVerificationStatus,
         updatedMediaCount: result.updatedMediaCount,
         rejectionReason: result.rejectionReason,
         emailSent,
@@ -1381,7 +1785,6 @@ export class UserService {
         throw new ConflictException('Email already in use');
     }
 
-    const bcrypt = require('bcryptjs'); // Assuming bcrypt is used for password hashing, using require to avoid import issues
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     const result = await this.dataSource.transaction(async (manager) => {
@@ -1686,42 +2089,42 @@ export class UserService {
 
       const aadhaarDocUrl = files.aadhaarDoc?.length
         ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'aadhaarDoc',
-            files.aadhaarDoc,
-          )
+          saved.id,
+          'aadhaarDoc',
+          files.aadhaarDoc,
+        )
         : dto.aadhaarDoc;
 
       const panDocUrl = files.panDoc?.length
         ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'panDoc',
-            files.panDoc,
-          )
+          saved.id,
+          'panDoc',
+          files.panDoc,
+        )
         : dto.panDoc;
 
       const certificateUrl = files.certificate?.length
         ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'certificate',
-            files.certificate,
-          )
+          saved.id,
+          'certificate',
+          files.certificate,
+        )
         : dto.certificate;
 
       const templeAffiliationProofUrl = files.templeAffiliationProof?.length
         ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'templeAffiliationProof',
-            files.templeAffiliationProof,
-          )
+          saved.id,
+          'templeAffiliationProof',
+          files.templeAffiliationProof,
+        )
         : dto.templeAffiliationProof;
 
       const profileImageUrl = files.profileImage?.length
         ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'profileImage',
-            files.profileImage,
-          )
+          saved.id,
+          'profileImage',
+          files.profileImage,
+        )
         : undefined;
 
       if (profileImageUrl) {
