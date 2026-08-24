@@ -18,6 +18,7 @@ import { PlatformSettingRepository } from './platform-setting.repository';
 import { CouponRepository } from './coupon.repository';
 import { CouponUsageRepository } from './coupon-usage.repository';
 import { CmsContentRepository } from './cms-content.repository';
+import { NotificationRepository } from './notification.repository';
 
 @Module({
   imports: [EntitiesModule],
@@ -40,6 +41,7 @@ import { CmsContentRepository } from './cms-content.repository';
     CouponRepository,
     CouponUsageRepository,
     CmsContentRepository,
+    NotificationRepository,
   ],
   exports: [
     RepositoriesService,
@@ -60,6 +62,7 @@ import { CmsContentRepository } from './cms-content.repository';
     CouponRepository,
     CouponUsageRepository,
     CmsContentRepository,
+    NotificationRepository,
   ],
 })
 export class RepositoriesModule { }

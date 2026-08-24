@@ -41,6 +41,7 @@ import {
   CreatePurohitByAdminDto,
   CreatePurohitBankAccountDto,
   UpdatePurohitBankAccountDto,
+  NotificationQueryDto,
 } from '@poojawala/dtos';
 import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { filter } from 'rxjs';
@@ -51,12 +52,16 @@ import { UpdateCustomerAddressDto } from '@poojawala/dtos/user/update-customer-a
 import { CreatePurohitServiceAreaDto } from '@poojawala/dtos/user/add-purohit-address.dto';
 import { UpdatePurohitServiceAreaDto } from '@poojawala/dtos/user/update-purohit-address.dto';
 import { Cron } from '@nestjs/schedule';
+import { NotificationService } from '@poojawala/notification';
 
 @Controller('users')
 export class UserController {
   private readonly logger = new Logger(UserController.name);
 
-  constructor(private readonly userService: UserService) { }
+  constructor(
+    private readonly userService: UserService,
+    private readonly notificationService: NotificationService,
+  ) { }
 
   @Cron('0 0 */6 * * *', {
     name: 'delete-expired-otps',
@@ -526,14 +531,14 @@ export class UserController {
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   @Get('purohit/bank-account/:id')
   @HttpCode(HttpStatus.OK)
   async getPurohitBankAccountById(
     @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
   ) {
-    return this.userService.getPurohitBankAccountById(req.user.id, id);
+    return this.userService.getPurohitBankAccountById(req.user, id);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
@@ -558,5 +563,54 @@ export class UserController {
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.userService.deletePurohitBankAccount(req.user.id, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('notifications')
+  @HttpCode(HttpStatus.OK)
+  async getUserNotifications(
+    @Req() req: any,
+    @Query() query: NotificationQueryDto,
+  ) {
+    const user = (req as any).user;
+    return this.notificationService.getUserNotifications(user.id, query);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('notifications/unread-count')
+  @HttpCode(HttpStatus.OK)
+  async getUnreadCount(@Req() req: any) {
+    const user = (req as any).user;
+    return this.notificationService.getUnreadCount(user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('notifications/read-all')
+  @HttpCode(HttpStatus.OK)
+  async markAllAsRead(@Req() req: any) {
+    const user = (req as any).user;
+    return this.notificationService.markAllAsRead(user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('notifications/:id/read')
+  @HttpCode(HttpStatus.OK)
+  async markAsRead(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const user = (req as any).user;
+    return this.notificationService.markAsRead(user.id, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('notifications/:id')
+  @HttpCode(HttpStatus.OK)
+  async deleteNotification(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const user = (req as any).user;
+    return this.notificationService.deleteNotification(user.id, id);
   }
 }

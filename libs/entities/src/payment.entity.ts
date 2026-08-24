@@ -12,6 +12,7 @@ import {
 import { Booking } from './booking.entity';
 import { User } from './user.entity';
 import { PaymentBooking } from './payment-booking.entity';
+import { PurohitBankAccount } from './purohit-bank-account.entity';
 
 export enum PAYMENT_TYPE {
   BOOKING_PAYMENT = 'BOOKING_PAYMENT',
@@ -118,6 +119,19 @@ export class Payment {
 
   @Column({ type: 'timestamp', nullable: true })
   paidAt?: Date;
+
+  @Column({ type: 'varchar', length: 100, nullable: true, unique: true })
+  idempotencyKey?: string;
+
+  @Column({ type: 'int', nullable: true })
+  purohitBankAccountId?: number;
+
+  @ManyToOne(() => PurohitBankAccount, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'purohitBankAccountId' })
+  purohitBankAccount?: PurohitBankAccount;
+
+  @Column({ type: 'text', nullable: true })
+  remark?: string;
 
   @OneToMany(() => PaymentBooking, (paymentBooking) => paymentBooking.payment)
   paymentBookings!: PaymentBooking[];

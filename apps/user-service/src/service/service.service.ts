@@ -24,7 +24,7 @@ import {
 } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { QueryFailedError } from 'typeorm';
+import { QueryFailedError, ILike } from 'typeorm';
 
 // 177 87
 
@@ -363,7 +363,7 @@ export class ServiceService {
     };
   }
 
-  async getPurohitServices(userId: number) {
+  async getPurohitServices(userId: number, query: GetServicesQueryDto) {
     const purohitProfile = await this.PurohitProfileRepository.findOne({
       where: { userId: userId },
     });
@@ -372,15 +372,35 @@ export class ServiceService {
       throw new NotFoundException('Purohit profile not found');
     }
 
-    const services = await this.PurohitServiceRepository.findAndCount({
-      where: { purohitId: purohitProfile.id },
+    const { page = 1, limit = 10, search } = query;
+    const skip = (page - 1) * limit;
+
+    const whereCondition: any = {
+      purohitId: purohitProfile.id,
+    };
+
+    if (search) {
+      whereCondition.service = { name: ILike(`%${search}%`) };
+    }
+
+    const [data, total] = await this.PurohitServiceRepository.findAndCount({
+      where: whereCondition,
       relations: ['service'], // Assuming you have a relation to the Service entity
+      skip,
+      take: limit,
+      order: { createdAt: 'DESC' },
     });
 
     return {
       success: true,
       message: 'Purohit services fetched successfully',
-      data: services,
+      data,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
     };
   }
 

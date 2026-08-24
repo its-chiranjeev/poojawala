@@ -158,6 +158,19 @@ export class Booking {
   })
   paymentStatus!: BOOKING_PAYMENT_STATUS;
 
+  @Column({ type: 'int', nullable: true })
+  bookingPaymentId?: number;
+
+  @Column({
+    type: 'enum',
+    enum: BOOKING_PAYMENT_STATUS,
+    default: BOOKING_PAYMENT_STATUS.PENDING,
+  })
+  purohitPayoutStatus!: BOOKING_PAYMENT_STATUS;
+
+  @Column({ type: 'int', nullable: true })
+  purohitPaymentId?: number;
+
   @Column({
     type: 'enum',
     enum: ASSIGNMENT_TYPE,

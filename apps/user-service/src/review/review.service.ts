@@ -118,7 +118,7 @@ export class ReviewService {
     const bookings = await queryBuilder.getMany();
 
     return {
-      data: bookings,
+      data: bookings.map((b) => this.mapReviewResponse(b)),
       meta: {
         total,
         page: query.page,
@@ -151,7 +151,7 @@ export class ReviewService {
       throw new NotFoundException('Review not found for this booking.');
     }
 
-    return booking;
+    return this.mapReviewResponse(booking);
   }
 
   async updateStatus(bookingId: number, dto: UpdateReviewStatusDto) {
@@ -261,5 +261,47 @@ export class ReviewService {
     await this.userRepository.update(customerId, {
       avgRating: finalRating,
     });
+  }
+
+  private mapReviewResponse(booking: any) {
+    return {
+      id: booking.id,
+      bookingId: booking.id,
+      bookingNumber: booking.bookingNumber,
+
+      customerId: booking.customerId,
+      customer: booking.customer
+        ? {
+            id: booking.customer.id,
+            firstName: booking.customer.firstName,
+            lastName: booking.customer.lastName,
+            profileImage: booking.customer.profileImage,
+          }
+        : null,
+
+      purohitId: booking.purohitId,
+      purohit: booking.purohit
+        ? {
+            id: booking.purohit.id,
+            userId: booking.purohit.userId,
+            bio: booking.purohit.bio,
+            qualification: booking.purohit.qualification,
+            experienceYears: booking.purohit.experienceYears,
+            languages: booking.purohit.languages,
+            specializations: booking.purohit.specializations,
+            city: booking.purohit.city,
+            avgRating: booking.purohit.avgRating,
+          }
+        : null,
+
+      customerReview: booking.customerReview,
+      customerRating: booking.customerRating,
+      purohitReview: booking.purohitReview,
+      purohitRating: booking.purohitRating,
+      reviewStatus: booking.reviewStatus,
+
+      createdAt: booking.createdAt,
+      updatedAt: booking.updatedAt,
+    };
   }
 }

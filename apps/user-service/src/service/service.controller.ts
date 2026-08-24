@@ -49,10 +49,10 @@ export class ServiceController {
   @Roles(USER_ROLE.PUROHIT)
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @HttpCode(HttpStatus.OK)
-  async getPurohitServices(@Req() req: Request) {
+  async getPurohitServices(@Req() req: Request, @Query() query: GetServicesQueryDto) {
 
     const user = (req as any).user;
-    return this.serviceService.getPurohitServices(user.id);
+    return this.serviceService.getPurohitServices(user.id, query);
   }
 
   //delete purohit service

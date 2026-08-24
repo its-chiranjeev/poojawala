@@ -18,3 +18,4 @@ export * from './platform-setting.entity';
 export * from './coupon.entity';
 export * from './coupon-usage.entity';
 export * from './cms-content.entity';
+export * from './notification.entity';

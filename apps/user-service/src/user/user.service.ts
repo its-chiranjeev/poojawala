@@ -1181,23 +1181,25 @@ export class UserService {
     };
   }
 
-  async getPurohitBankAccountById(userId: number, id: number) {
-    const profile = await this.purohitProfileRepository.findOne({
-      where: { userId },
-    });
-
-    if (!profile) {
-      throw new NotFoundException('Purohit profile not found');
-    }
-
+  async getPurohitBankAccountById(user: any, id: number) {
     const account = await this.purohitBankAccountRepository.findById(id);
 
     if (!account) {
       throw new NotFoundException('Bank account not found');
     }
 
-    if (account.purohitId !== profile.id) {
-      throw new ForbiddenException('You can access only your own bank account');
+    if (user.role !== USER_ROLE.ADMIN) {
+      const profile = await this.purohitProfileRepository.findOne({
+        where: { userId: user.id },
+      });
+
+      if (!profile) {
+        throw new NotFoundException('Purohit profile not found');
+      }
+
+      if (account.purohitId !== profile.id) {
+        throw new ForbiddenException('You can access only your own bank account');
+      }
     }
 
     return {

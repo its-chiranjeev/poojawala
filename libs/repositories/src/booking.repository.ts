@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
-import { Booking, BOOKING_STATUS, USER_ROLE, ASSIGNMENT_TYPE } from '@poojawala/entities';
+import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, USER_ROLE, ASSIGNMENT_TYPE } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 interface FindBookingsByRoleOptions {
@@ -11,6 +11,8 @@ interface FindBookingsByRoleOptions {
   page?: number;
   limit?: number;
   status?: BOOKING_STATUS;
+  bookingPaymentStatus?: BOOKING_PAYMENT_STATUS;
+  purohitPayoutStatus?: BOOKING_PAYMENT_STATUS;
   search?: string;
 }
 
@@ -118,6 +120,8 @@ export class BookingRepository extends BaseRepository<Booking> {
       page = 1,
       limit = 10,
       status,
+      bookingPaymentStatus,
+      purohitPayoutStatus,
       search,
     } = options;
 
@@ -153,7 +157,9 @@ export class BookingRepository extends BaseRepository<Booking> {
         'purohitUser.role',
         'purohitUser.status',
       ])
-      .leftJoinAndSelect('booking.customerAddress', 'customerAddress');
+      .leftJoinAndSelect('booking.customerAddress', 'customerAddress')
+      .leftJoinAndSelect('booking.payments', 'payments')
+      .leftJoinAndSelect('payments.purohitBankAccount', 'purohitBankAccount');
 
     switch (userRole) {
       case USER_ROLE.ADMIN:
@@ -184,6 +190,18 @@ export class BookingRepository extends BaseRepository<Booking> {
     if (status) {
       query.andWhere('booking.status = :status', {
         status,
+      });
+    }
+
+    if (bookingPaymentStatus) {
+      query.andWhere('booking.paymentStatus = :bookingPaymentStatus', {
+        bookingPaymentStatus,
+      });
+    }
+
+    if (purohitPayoutStatus) {
+      query.andWhere('booking.purohitPayoutStatus = :purohitPayoutStatus', {
+        purohitPayoutStatus,
       });
     }
 

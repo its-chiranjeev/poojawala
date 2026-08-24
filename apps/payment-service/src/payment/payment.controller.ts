@@ -32,6 +32,7 @@ import {
   PaymentQueryDto,
   AdminPaymentQueryDto,
   CreateRefundDto,
+  AdminCreatePurohitPayoutDto,
 } from '@poojawala/dtos';
 
 import { PaymentService, RazorpayWebhookPayload } from './payment.service';
@@ -42,7 +43,7 @@ interface AuthenticatedRequest {
 
 @Controller('payments')
 export class PaymentController {
-  constructor(private readonly paymentService: PaymentService) {}
+  constructor(private readonly paymentService: PaymentService) { }
 
   @Get('health')
   @HttpCode(HttpStatus.OK)
@@ -177,4 +178,37 @@ export class PaymentController {
   ) {
     return this.paymentService.createRefund(req.user, paymentId, dto);
   }
+
+
+  @Get('admin/payout/booking/:bookingId')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  async getPurohitPayoutDetails(
+    @Req() req: AuthenticatedRequest,
+    @Param('bookingId', ParseIntPipe) bookingId: number,
+  ) {
+    const data = await this.paymentService.getPurohitPayoutDetails(bookingId);
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  @Post('admin/payout/manual')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @HttpCode(HttpStatus.CREATED)
+  async adminRecordPurohitPayout(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: AdminCreatePurohitPayoutDto,
+  ) {
+    const data = await this.paymentService.adminRecordPurohitPayout(req.user.id, dto);
+    return {
+      success: true,
+      message: 'Purohit payout recorded successfully',
+      data,
+    };
+  }
 }
+

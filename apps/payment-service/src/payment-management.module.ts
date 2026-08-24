@@ -5,6 +5,7 @@ import { EntitiesModule } from '@poojawala/entities';
 import { RepositoriesModule } from '@poojawala/repositories';
 import { CommonAuthModule } from '@poojawala/common';
 import { PaymentModule } from './payment/payment.module';
+import { NotificationModule } from '@poojawala/notification';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { PaymentModule } from './payment/payment.module';
     RepositoriesModule,
     CommonAuthModule,
     PaymentModule,
+    NotificationModule,
   ],
 })
-export class PaymentManagementModule {}
+export class PaymentManagementModule { }

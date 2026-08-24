@@ -30,6 +30,10 @@ export class BaseRepository<T extends ObjectLiteral> {
     return this.repo.findAndCount(options);
   }
 
+  async count(options?: FindManyOptions<T>): Promise<number> {
+    return this.repo.count(options);
+  }
+
   async findById(id: string | number): Promise<T | null> {
     return this.repo.findOne({
       where: { id } as any,
@@ -39,6 +43,10 @@ export class BaseRepository<T extends ObjectLiteral> {
   async update(id: string | number, data: QueryDeepPartialEntity<T>) {
     await this.repo.update(id as any, data);
     return this.findById(id);
+  }
+
+  async updateMany(criteria: any, data: QueryDeepPartialEntity<T>) {
+    return this.repo.update(criteria, data);
   }
 
   async delete(id: string | number) {

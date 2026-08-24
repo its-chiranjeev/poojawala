@@ -35,7 +35,8 @@ import {
   User,
   USER_ROLE,
   USER_STATUS,
-} from '@poojawala/entities';
+  NOTIFICATION_TYPE,
+  PAYMENT_TYPE,} from '@poojawala/entities';
 import { BookingRepository } from '@poojawala/repositories';
 import {
   AssignBookingDto,
@@ -56,7 +57,7 @@ import { SmsService } from '@poojawala/sms-services';
 import { EmailService } from '@poojawala/email-services';
 import { AssignmentService } from '../assignment/assignment.service';
 import { BookingGateway } from '@poojawala/gateway';
-import { console } from 'inspector';
+import { NotificationService } from '@poojawala/notification';
 
 interface CouponCalculationResult {
   coupon: Coupon;
@@ -74,6 +75,7 @@ export class BookingService {
     private readonly emailService: EmailService,
     private readonly assignmentService: AssignmentService,
     private readonly bookingGateway: BookingGateway,
+    private readonly notificationService: NotificationService,
   ) { }
 
   private getIstDateParts(date: Date) {
@@ -168,36 +170,43 @@ export class BookingService {
     }
 
     try {
-      return await this.dataSource.transaction(async (manager) => {
+      const transactionResult = await this.dataSource.transaction(async (manager) => {
         const userRepository = manager.getRepository(User);
         const serviceRepository = manager.getRepository(Service);
         const addressRepository = manager.getRepository(CustomerAddress);
         const bookingRepository = manager.getRepository(Booking);
-        /*
-         * Reload customer from database.
-         */
-        const customer = await userRepository.findOne({
-          where: {
-            id: user.id,
-            role: USER_ROLE.CUSTOMER,
-            status: USER_STATUS.ACTIVE,
-          },
-        });
+        if (!dto.customerAddressId) {
+          throw new BadRequestException(
+            'Customer address is required for booking',
+          );
+        }
+
+        const [customer, service, customerAddress] = await Promise.all([
+          userRepository.findOne({
+            where: {
+              id: user.id,
+              role: USER_ROLE.CUSTOMER,
+              status: USER_STATUS.ACTIVE,
+            },
+          }),
+          serviceRepository.findOne({
+            where: {
+              id: dto.serviceId,
+            },
+          }),
+          addressRepository.findOne({
+            where: {
+              id: dto.customerAddressId,
+              customerId: user.id,
+            },
+          }),
+        ]);
 
         if (!customer) {
           throw new ForbiddenException(
             'Only active customers can create bookings',
           );
         }
-
-        /*
-         * Validate service.
-         */
-        const service = await serviceRepository.findOne({
-          where: {
-            id: dto.serviceId,
-          },
-        });
 
         if (!service) {
           throw new NotFoundException('Service not found');
@@ -206,22 +215,6 @@ export class BookingService {
         if (!service.isActive) {
           throw new BadRequestException('Service is currently inactive');
         }
-
-        /*
-         * Address is required.
-         */
-        if (!dto.customerAddressId) {
-          throw new BadRequestException(
-            'Customer address is required for booking',
-          );
-        }
-
-        const customerAddress = await addressRepository.findOne({
-          where: {
-            id: dto.customerAddressId,
-            customerId: customer.id,
-          },
-        });
 
         if (!customerAddress) {
           throw new NotFoundException(
@@ -398,13 +391,6 @@ export class BookingService {
         const bookingNumber =
           await this.generateUniqueBookingNumber(bookingRepository);
 
-        /*
-         * Initially create booking with
-         * empty filteredPurohitIds.
-         *
-         * AssignmentService will calculate
-         * them after booking is persisted.
-         */
         const booking = bookingRepository.create({
           bookingNumber,
           customerId: customer.id,
@@ -427,23 +413,10 @@ export class BookingService {
           status: BOOKING_STATUS.PENDING,
           paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
           assignmentType: ASSIGNMENT_TYPE.AUTO,
-          /*
-           * AssignmentService fills
-           * this after first save.
-           */
-          filteredPurohitIds: [],
         });
 
         /*
-         * First save generates booking.id.
-         */
-        let savedBooking = await bookingRepository.save(booking);
-
-        /*
-         * NEW ASSIGNMENT FLOW
-         *
          * AssignmentService handles:
-         *
          * - approved Purohits
          * - active Purohit users
          * - service matching
@@ -451,48 +424,29 @@ export class BookingService {
          * - Haversine radius
          * - busy booking filtering
          */
-        const eligiblePurohitIds =
-          await this.assignmentService.findEligiblePurohitIds(
-            manager,
-            savedBooking,
-          );
+        const eligiblePurohitIds = await this.assignmentService.findEligiblePurohitIds(
+          manager,
+          booking,
+        );
 
-        savedBooking.filteredPurohitIds = eligiblePurohitIds;
-        savedBooking = await bookingRepository.save(savedBooking);
+        booking.filteredPurohitIds = eligiblePurohitIds;
 
+        const savedBooking = await bookingRepository.save(booking);
 
+        let eligiblePurohitUserIds: number[] = [];
         if (eligiblePurohitIds.length > 0) {
-          const purohitProfiles =
-            await manager
-              .getRepository(PurohitProfile)
-              .createQueryBuilder('profile')
-              .select([
-                'profile.id',
-                'profile.userId',
-              ])
-              .where(
-                'profile.id IN (:...purohitProfileIds)',
-                {
-                  purohitProfileIds:
-                    eligiblePurohitIds,
-                },
-              )
-              .getMany();
+          const purohitProfiles = await manager
+            .getRepository(PurohitProfile)
+            .createQueryBuilder('profile')
+            .select(['profile.id', 'profile.userId'])
+            .where('profile.id IN (:...purohitProfileIds)', {
+              purohitProfileIds: eligiblePurohitIds,
+            })
+            .getMany();
 
-          const eligiblePurohitUserIds =
-            purohitProfiles.map(
-              (profile) => profile.userId,
-            );
-
-
-          for (const purohitUserId of eligiblePurohitUserIds) {
-
-            this.bookingGateway.notifyUser(
-              purohitUserId,
-              'create_booking',
-              savedBooking,
-            );
-          }
+          eligiblePurohitUserIds = purohitProfiles.map(
+            (profile) => profile.userId,
+          );
         }
 
         this.logger.log(
@@ -509,13 +463,35 @@ export class BookingService {
             coupon: appliedCoupon,
             customer,
             booking: savedBooking,
+            discountApplied: discountAmount,
           });
 
           await couponUsageRepository.save(couponUsage);
         }
 
-        return savedBooking;
+        return { savedBooking, eligiblePurohitUserIds };
       });
+
+      for (const purohitUserId of transactionResult.eligiblePurohitUserIds) {
+        // Emit legacy event
+        this.bookingGateway.notifyUser(
+          purohitUserId,
+          'create_booking',
+          transactionResult.savedBooking,
+        );
+
+        // Save persistent notification
+        await this.notificationService.createNotification(
+          purohitUserId,
+          'New Booking',
+          `You have received a new booking request (Booking #${transactionResult.savedBooking.bookingNumber}).`,
+          NOTIFICATION_TYPE.BOOKING,
+          transactionResult.savedBooking.id,
+          'BOOKING',
+        );
+      }
+
+      return transactionResult.savedBooking;
     } catch (error) {
       if (
         error instanceof QueryFailedError &&
@@ -579,16 +555,30 @@ export class BookingService {
         page,
         limit,
         status,
+        bookingPaymentStatus: query.bookingPaymentStatus,
+        purohitPayoutStatus: query.purohitPayoutStatus,
         search,
       },
     );
 
-    const formattedBookings = bookings.map((booking) => ({
-      ...booking,
-      scheduledAtIst: this.toIstString(booking.scheduledAt),
-      createdAtIst: this.toIstString(booking.createdAt),
-      updatedAtIst: this.toIstString(booking.updatedAt),
-    }));
+    const formattedBookings = bookings.map((booking) => {
+      const payments = booking.payments || [];
+      const bookingPayment = payments.find(
+        (p) => p.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
+      ) || null;
+      const purohitPayout = payments.find(
+        (p) => p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT
+      ) || null;
+
+      return {
+        ...booking,
+        bookingPayment,
+        purohitPayout,
+        scheduledAtIst: this.toIstString(booking.scheduledAt),
+        createdAtIst: this.toIstString(booking.createdAt),
+        updatedAtIst: this.toIstString(booking.updatedAt),
+      };
+    });
 
     return {
       bookings: formattedBookings,
@@ -625,11 +615,21 @@ export class BookingService {
       throw new NotFoundException('Booking not found');
     }
 
+    const payments = booking.payments || [];
+    const bookingPayment = payments.find(
+      (p) => p.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
+    ) || null;
+    const purohitPayout = payments.find(
+      (p) => p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT
+    ) || null;
+
     switch (user.role) {
       case USER_ROLE.ADMIN:
         // Admin can access any booking.
         return {
           ...booking,
+          bookingPayment,
+          purohitPayout,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),
@@ -645,6 +645,8 @@ export class BookingService {
 
         return {
           ...booking,
+          bookingPayment,
+          purohitPayout,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),
@@ -676,6 +678,8 @@ export class BookingService {
 
         return {
           ...booking,
+          bookingPayment,
+          purohitPayout,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),
@@ -1299,34 +1303,40 @@ export class BookingService {
       );
     }
 
+    let totalUsagePromise: Promise<number> | undefined;
+
     if (
       coupon.usageLimitTotal !== null &&
       coupon.usageLimitTotal !== undefined
     ) {
-      const totalUsage = await couponUsageRepository.count({
+      totalUsagePromise = couponUsageRepository.count({
         where: {
           coupon: {
             id: coupon.id,
           },
         },
       });
-
-      if (totalUsage >= coupon.usageLimitTotal) {
-        throw new BadRequestException('Coupon usage limit has been reached');
-      }
     }
 
-    const customerUsage = await couponUsageRepository.count({
+    const customerUsagePromise = couponUsageRepository.count({
       where: {
         coupon: {
           id: coupon.id,
         },
-
         customer: {
           id: customerId,
         },
       },
     });
+
+    const [totalUsage, customerUsage] = await Promise.all([
+      totalUsagePromise ?? Promise.resolve(0),
+      customerUsagePromise,
+    ]);
+
+    if (totalUsagePromise && totalUsage >= coupon.usageLimitTotal!) {
+      throw new BadRequestException('Coupon usage limit has been reached');
+    }
 
     if (customerUsage >= coupon.usageLimitPerCustomer) {
       throw new BadRequestException(
@@ -1639,6 +1649,15 @@ export class BookingService {
               message: 'Booking accepted successfully',
               booking: acceptedBooking ?? savedBooking,
             },
+          );
+
+          await this.notificationService.createNotification(
+            booking.customerId,
+            'Booking Accepted',
+            `Your booking #${savedBooking.bookingNumber} has been accepted by the Purohit.`,
+            NOTIFICATION_TYPE.BOOKING_STATUS,
+            savedBooking.id,
+            'BOOKING',
           );
 
           return {
@@ -1962,11 +1981,43 @@ export class BookingService {
         },
       );
 
+      await this.notificationService.createNotification(
+        updatedBooking.customerId,
+        'Booking Status Updated',
+        `Your booking #${updatedBooking.bookingNumber} status has been updated to ${updatedBooking.status}.`,
+        NOTIFICATION_TYPE.BOOKING_STATUS,
+        updatedBooking.id,
+        'BOOKING',
+      );
+
+      // Also notify purohit if assigned
+      if (updatedBooking.purohitId) {
+        const purohitUserId = await this.getPurohitUserIdFromProfileId(manager, updatedBooking.purohitId);
+        if (purohitUserId) {
+          await this.notificationService.createNotification(
+            purohitUserId,
+            'Booking Status Updated',
+            `Booking #${updatedBooking.bookingNumber} status has been updated to ${updatedBooking.status}.`,
+            NOTIFICATION_TYPE.BOOKING_STATUS,
+            updatedBooking.id,
+            'BOOKING',
+          );
+        }
+      }
+
       return {
         message: 'Booking status updated successfully',
         booking: updatedBooking,
       };
     });
+  }
+
+  private async getPurohitUserIdFromProfileId(manager: EntityManager, profileId: number): Promise<number | undefined> {
+    const profile = await manager.getRepository(PurohitProfile).findOne({
+      where: { id: profileId },
+      select: ['userId'],
+    });
+    return profile?.userId;
   }
 
   private validatePaymentForStatusChange(
@@ -2249,9 +2300,9 @@ export class BookingService {
     const deliveryResults = await Promise.allSettled([
       customerPhone
         ? this.smsService.sendSms(
-            customerPhone,
-            `Your Poojawala booking start OTP is ${otp}. Share this OTP with the Purohit to start the Puja.`,
-          )
+          customerPhone,
+          `Your Poojawala booking start OTP is ${otp}. Share this OTP with the Purohit to start the Puja.`,
+        )
         : Promise.resolve(null),
 
       customerEmail
@@ -3089,32 +3140,35 @@ export class BookingService {
     }
 
     try {
-      return await this.dataSource.transaction(async (manager) => {
+      const transactionResult = await this.dataSource.transaction(async (manager) => {
         const userRepository = manager.getRepository(User);
         const serviceRepository = manager.getRepository(Service);
         const addressRepository = manager.getRepository(CustomerAddress);
         const bookingRepository = manager.getRepository(Booking);
         const purohitProfileRepository = manager.getRepository(PurohitProfile);
 
-        const customer = await userRepository.findOne({
-          where: { id: dto.customerId, role: USER_ROLE.CUSTOMER },
-        });
+        const [customer, purohitProfile, service, customerAddress] = await Promise.all([
+          userRepository.findOne({
+            where: { id: dto.customerId, role: USER_ROLE.CUSTOMER },
+          }),
+          purohitProfileRepository.findOne({
+            where: { userId: dto.purohitId },
+          }),
+          serviceRepository.findOne({
+            where: { id: dto.serviceId },
+          }),
+          addressRepository.findOne({
+            where: { id: dto.customerAddressId, customerId: dto.customerId },
+          }),
+        ]);
 
         if (!customer) {
           throw new NotFoundException('Customer not found');
         }
 
-        const purohitProfile = await purohitProfileRepository.findOne({
-          where: { userId: dto.purohitId },
-        });
-
         if (!purohitProfile) {
           throw new NotFoundException('Purohit profile not found');
         }
-
-        const service = await serviceRepository.findOne({
-          where: { id: dto.serviceId },
-        });
 
         if (!service) {
           throw new NotFoundException('Service not found');
@@ -3123,10 +3177,6 @@ export class BookingService {
         if (!service.isActive) {
           throw new BadRequestException('Service is currently inactive');
         }
-
-        const customerAddress = await addressRepository.findOne({
-          where: { id: dto.customerAddressId, customerId: customer.id },
-        });
 
         if (!customerAddress) {
           throw new NotFoundException('Customer address not found');
@@ -3210,42 +3260,39 @@ export class BookingService {
               coupon: appliedCoupon,
               customer,
               booking: savedBooking,
+              discountApplied: discountAmount,
             }),
           );
         }
-        // send notification to the assigned Purohit
-        if (dto.purohitId) {
-          this.bookingGateway.notifyUser(
-            dto.purohitId,
-            "create_booking_by_admin",
-            {
-              ...savedBooking,
-              scheduledAtIst: this.toIstString(savedBooking.scheduledAt),
-              createdAtIst: this.toIstString(savedBooking.createdAt),
-              updatedAtIst: this.toIstString(savedBooking.updatedAt),
-            }
-          );
-        }
-
-        // send notification to the customer
-        this.bookingGateway.notifyUser(
-          customer.id,
-          "create_booking_by_admin",
-          {
-            ...savedBooking,
-            scheduledAtIst: this.toIstString(savedBooking.scheduledAt),
-            createdAtIst: this.toIstString(savedBooking.createdAt),
-            updatedAtIst: this.toIstString(savedBooking.updatedAt),
-          }
-        );
-
-        return {
+        const formattedSavedBooking = {
           ...savedBooking,
           scheduledAtIst: this.toIstString(savedBooking.scheduledAt),
           createdAtIst: this.toIstString(savedBooking.createdAt),
           updatedAtIst: this.toIstString(savedBooking.updatedAt),
         };
+
+        return {
+          formattedSavedBooking,
+          notifyPurohitId: dto.purohitId,
+          notifyCustomerId: customer.id,
+        };
       });
+
+      if (transactionResult.notifyPurohitId) {
+        this.bookingGateway.notifyUser(
+          transactionResult.notifyPurohitId,
+          'create_booking_by_admin',
+          transactionResult.formattedSavedBooking,
+        );
+      }
+
+      this.bookingGateway.notifyUser(
+        transactionResult.notifyCustomerId,
+        'create_booking_by_admin',
+        transactionResult.formattedSavedBooking,
+      );
+
+      return transactionResult.formattedSavedBooking as any;
     } catch (error) {
       if (
         error instanceof QueryFailedError &&
