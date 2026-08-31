@@ -110,7 +110,7 @@ export class UserController {
     return this.userService.updateProfileByUser(userId, dto, files);
   }
 
-  // cahnge user status ACTIVE,PENDING,INACTIVE,BLOCKED,REJECTED
+  // change user status ACTIVE,PENDING,INACTIVE,BLOCKED,REJECTED
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   @Patch('admin/status/:id')

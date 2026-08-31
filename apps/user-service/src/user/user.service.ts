@@ -80,7 +80,7 @@ export class UserService {
       username: dto.username,
       firstName: dto.firstName,
       lastName: dto.lastName,
-      phone: dto.phone,
+      // phone: dto.phone,
       profileImage: dto.profileImage,
       birthPlace: dto.birthPlace,
     };
@@ -151,6 +151,10 @@ export class UserService {
       throw new NotFoundException('User not found');
     }
 
+    if (dto.phone) {
+      throw new BadRequestException('Phone number cannot be updated');
+    }
+
     // Normal users cannot change their role or status
     if (user.role !== USER_ROLE.ADMIN) {
       delete dto.role;
@@ -164,11 +168,27 @@ export class UserService {
       delete dto.confirmPassword;
     }
 
-    if (files.profileImage?.length) {
+    if (files?.profileImage?.length) {
       dto.profileImage = await this.s3Service.uploadFileHelper(
         id,
         'profileImage',
         files.profileImage,
+      );
+    }
+
+    if (files?.certificate?.length) {
+      dto.certificate = await this.s3Service.uploadFileHelper(
+        id,
+        'certificate',
+        files.certificate,
+      );
+    }
+
+    if (files?.templeAffiliationProof?.length) {
+      dto.templeAffiliationProof = await this.s3Service.uploadFileHelper(
+        id,
+        'templeAffiliationProof',
+        files.templeAffiliationProof,
       );
     }
 
@@ -177,7 +197,6 @@ export class UserService {
       username: dto.username,
       firstName: dto.firstName,
       lastName: dto.lastName,
-      phone: dto.phone,
       profileImage: dto.profileImage,
       birthPlace: dto.birthPlace,
     };
@@ -188,8 +207,44 @@ export class UserService {
 
     const updatedUser = await this.userRepository.updateUser(id, userPayload);
 
+    if (user.role === USER_ROLE.PUROHIT) {
+      const profile = await this.purohitProfileRepository.findByUserId(
+        Number(id),
+      );
+
+      if (profile) {
+        await this.purohitProfileRepository.update(profile.id, {
+          bio: dto.bio,
+          qualification: dto.qualification,
+          experienceYears: dto.experienceYears,
+          aadhaarNumber: dto.aadhaarNumber,
+          city: dto.city,
+          languages: dto.languages,
+          specializations: dto.specializations,
+          ...(dto.certificate && { certificateUrl: dto.certificate }),
+          ...(dto.templeAffiliationProof && {
+            templeAffiliationProofUrl: dto.templeAffiliationProof,
+          }),
+          isOnlineAvailable:
+            dto.isOnlineAvailable === undefined
+              ? profile.isOnlineAvailable
+              : String(dto.isOnlineAvailable) === 'true',
+          isOfflineAvailable:
+            dto.isOfflineAvailable === undefined
+              ? profile.isOfflineAvailable
+              : String(dto.isOfflineAvailable) === 'true',
+        });
+      }
+    }
+
+    const fullUser = await this.userRepository.getFullProfile(
+      Number(id),
+      user.role,
+    );
+
     const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } =
-      updatedUser!;
+      fullUser || updatedUser!;
+
     if (safeUser.profileImage) {
       try {
         safeUser.profileImage = await this.s3Service.getDownloadUrl(
@@ -199,6 +254,37 @@ export class UserService {
         console.error('Failed to generate pre-signed URL for profileImage:', e);
       }
     }
+
+    if ((safeUser as any).profile) {
+      const profile = { ...(safeUser as any).profile };
+      try {
+        if (profile.aadhaarDocUrl) {
+          profile.aadhaarDocUrl = await this.s3Service.getDownloadUrl(
+            profile.aadhaarDocUrl,
+          );
+        }
+        if (profile.panDocUrl) {
+          profile.panDocUrl = await this.s3Service.getDownloadUrl(
+            profile.panDocUrl,
+          );
+        }
+        if (profile.certificateUrl) {
+          profile.certificateUrl = await this.s3Service.getDownloadUrl(
+            profile.certificateUrl,
+          );
+        }
+        if (profile.templeAffiliationProofUrl) {
+          profile.templeAffiliationProofUrl =
+            await this.s3Service.getDownloadUrl(
+              profile.templeAffiliationProofUrl,
+            );
+        }
+      } catch (e) {
+        console.error('Failed to generate pre-signed URLs for profile docs:', e);
+      }
+      (safeUser as any).profile = profile;
+    }
+
     return {
       success: true,
       message: 'Profile updated successfully',
@@ -338,6 +424,7 @@ export class UserService {
     return {
       success: true,
       message: 'OTP sent successfully',
+      otp,
     };
   }
 
