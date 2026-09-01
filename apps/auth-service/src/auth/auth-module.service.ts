@@ -38,7 +38,7 @@ export class AuthModuleService {
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
     private readonly smsService: SmsService,
-  ) {}
+  ) { }
 
   async issueAuthTokens(user: User) {
     const accessSecret =
@@ -81,6 +81,7 @@ export class AuthModuleService {
         lastName: user.lastName,
         role: user.role,
         profileImage: user.profileImage,
+        isAdminCreated: user.isAdminCreated,
       },
     };
   }
@@ -217,11 +218,15 @@ export class AuthModuleService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (user.status === USER_STATUS.REJECTED) {
+      throw new ForbiddenException('Your profile is Rejected By Admin');
+    }
+
     if (user.status === USER_STATUS.BLOCKED) {
       user.hashedRefreshToken = null; // Invalidate existing refresh tokens
 
       await this.userRepository.save(user);
-      throw new ForbiddenException('User is blocked');
+      throw new ForbiddenException('Your Profile Is Blocked');
     }
     const data = await this.issueAuthTokens(user);
     return {
@@ -527,15 +532,15 @@ export class AuthModuleService {
     const otp = await this.otpRepository.findOne({
       where: dto.email
         ? {
-            email: dto.email,
-            expiresAt: MoreThan(new Date()),
-            otpType: OTP_TYPE.RESET_PASSWORD,
-          }
+          email: dto.email,
+          expiresAt: MoreThan(new Date()),
+          otpType: OTP_TYPE.RESET_PASSWORD,
+        }
         : {
-            phone: dto.phone,
-            expiresAt: MoreThan(new Date()),
-            otpType: OTP_TYPE.RESET_PASSWORD,
-          },
+          phone: dto.phone,
+          expiresAt: MoreThan(new Date()),
+          otpType: OTP_TYPE.RESET_PASSWORD,
+        },
     });
 
     if (!otp) {
@@ -602,25 +607,36 @@ export class AuthModuleService {
       }
     }
 
-    // 3. Generate OTP
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-    // 4. Expiry
+    // 3. Find existing OTP or generate new one
+    let otpCode;
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + 2);
 
-    // 5. Save OTP
-    const newOtp = this.otpRepository.create({
-      email: dto.email,
-      phone: dto.phone,
-      otp: otpCode,
-      expiresAt,
-      role: user.role,
-      isVerified: false,
-      otpType: dto.otpType,
+    const existingOtp = await this.otpRepository.findOne({
+      where: dto.phone
+        ? { phone: dto.phone, isVerified: false, otpType: dto.otpType }
+        : { email: dto.email, isVerified: false, otpType: dto.otpType },
+      order: { createdAt: 'DESC' },
     });
 
-    await this.otpRepository.save(newOtp);
+    if (existingOtp) {
+      otpCode = existingOtp.otp;
+      existingOtp.expiresAt = expiresAt;
+      await this.otpRepository.save(existingOtp);
+    } else {
+      otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const newOtp = this.otpRepository.create({
+        email: dto.email,
+        phone: dto.phone,
+        otp: otpCode,
+        expiresAt,
+        role: user.role,
+        isVerified: false,
+        otpType: dto.otpType,
+      });
+
+      await this.otpRepository.save(newOtp);
+    }
 
     // 6. Send OTP
     if (dto.phone) {

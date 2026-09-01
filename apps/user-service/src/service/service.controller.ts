@@ -101,15 +101,15 @@ export class ServiceController {
     return this.serviceService.findAllServices(query);
   }
 
- @Patch(':id/status')
- @Roles(USER_ROLE.ADMIN)
- @UseGuards(JwtAuthGuard, RolesGuard)
- @HttpCode(HttpStatus.OK)
- async updateServiceStatus(
-  @Param('id', ParseIntPipe) id: number,
-   @Body() dto: UpdateServiceStatusDto,
- ) {
-   return this.serviceService.updateServiceStatus(id, dto.isActive);
+  @Patch(':id/status')
+  @Roles(USER_ROLE.ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @HttpCode(HttpStatus.OK)
+  async updateServiceStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateServiceStatusDto,
+  ) {
+    return this.serviceService.updateServiceStatus(id, dto.isActive);
   }
 
   @Post()

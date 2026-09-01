@@ -44,7 +44,7 @@ export class CustomerAddressRepository extends BaseRepository<CustomerAddress> {
     }
 
     query.orderBy('address.isDefault', 'DESC')
-         .addOrderBy('address.createdAt', 'DESC');
+      .addOrderBy('address.createdAt', 'DESC');
 
     const [data, total] = await query
       .skip((page - 1) * limit)

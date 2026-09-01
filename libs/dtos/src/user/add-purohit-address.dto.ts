@@ -46,4 +46,11 @@ export class CreatePurohitServiceAreaDto {
   @Min(-180)
   @Max(180)
   longitude?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  serviceRadiusKm?: number;
 }

@@ -42,6 +42,7 @@ import {
   CreatePurohitBankAccountDto,
   UpdatePurohitBankAccountDto,
   NotificationQueryDto,
+  CreateCustomerByAdminDto,
 } from '@poojawala/dtos';
 import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { filter } from 'rxjs';
@@ -82,6 +83,24 @@ export class UserController {
     }
   }
 
+  // @Cron('*/30 * * * * *', {
+  //   name: 'scramble-phone-numbers',
+  // })
+  // async handlePhoneScramblerCron(): Promise<void> {
+  //   if (process.env['NODE_ENV'] === 'production') {
+  //     return;
+  //   }
+
+  //   try {
+  //     await this.userService.scramblePhoneNumbers();
+  //   } catch (error) {
+  //     this.logger.error(
+  //       'Phone scrambler cron failed',
+  //       error instanceof Error ? error.stack : String(error),
+  //     );
+  //   }
+  // }
+
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   @Patch('admin/update/:id')
@@ -121,7 +140,7 @@ export class UserController {
     return this.userService.updateProfileByUser(userId, dto, files);
   }
 
-  // cahnge user status ACTIVE,PENDING,INACTIVE,BLOCKED,REJECTED
+  // change user status ACTIVE,PENDING,INACTIVE,BLOCKED,REJECTED
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   @Patch('admin/status/:id')
@@ -143,6 +162,17 @@ export class UserController {
     dto: CreatePurohitByAdminDto,
   ) {
     return this.userService.createPurohitByAdmin(dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @Post('admin/create-customer')
+  @HttpCode(HttpStatus.CREATED)
+  async createCustomerByAdmin(
+    @Body(new ValidationPipe({ whitelist: true }))
+    dto: CreateCustomerByAdminDto,
+  ) {
+    return this.userService.createCustomerByAdmin(dto);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
@@ -272,7 +302,7 @@ export class UserController {
   //   );
   // }
   @Get('purohits')
-  @Roles(USER_ROLE.ADMIN)
+  // @Roles(USER_ROLE.ADMIN)
   getApprovedPurohits(
     @Query('page') page = 1,
     @Query('limit') limit = 10,
@@ -563,6 +593,27 @@ export class UserController {
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.userService.deletePurohitBankAccount(req.user.id, id);
+  }
+
+  @Get('purohit/dashboard-stats')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT)
+  async getPurohitDashboardStats(@Req() req: any) {
+    return this.userService.getPurohitDashboardStats(req.user);
+  }
+
+  @Get('customer/dashboard-stats')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER)
+  async getCustomerDashboardStats(@Req() req: any) {
+    return this.userService.getCustomerDashboardStats(req.user);
+  }
+
+  @Get('admin/dashboard-stats')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  async getAdminDashboardStats(@Req() req: any) {
+    return this.userService.getAdminDashboardStats(req.user);
   }
 
   @UseGuards(JwtAuthGuard)

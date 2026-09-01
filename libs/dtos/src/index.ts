@@ -38,3 +38,7 @@ export * from './review/review-query.dto';
 export * from './user/add-customer-address.dto';
 export * from './user/update-customer-address.dto';
 export * from './notification/notification-query.dto';
+export * from './contact-us/create-contact-us.dto';
+export * from './contact-us/get-all-contact-us.dto';
+export * from './contact-us/update-contact-us-status.dto';
+export * from './user/create-customer-by-admin.dto';

@@ -7,7 +7,7 @@ import { CreateComplaintDto, UpdateComplaintStatusDto, ComplaintQueryDto, } from
 
 @Controller('complaints')
 export class ComplaintController {
-  constructor(private readonly complaintService: ComplaintService) {}
+  constructor(private readonly complaintService: ComplaintService) { }
 
   @Post('add')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
@@ -36,7 +36,7 @@ export class ComplaintController {
   }
 
   @Get('all')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
   async getComplaints(
     @Req() req: any,

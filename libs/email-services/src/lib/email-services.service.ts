@@ -167,4 +167,95 @@ export class EmailService {
       html,
     });
   }
+
+  async sendCustomerCreatedByAdminEmail(
+    email: string,
+    name: string,
+    phone: string,
+    address: string,
+    city: string,
+    plainPassword: string,
+  ): Promise<void> {
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+        <h2>Hello ${this.escapeHtml(name)},</h2>
+
+        <p>
+          An administrator has created a Poojawala customer account for you!
+        </p>
+        
+        <h3>Your Account Details:</h3>
+        <ul>
+          <li><strong>Email:</strong> ${this.escapeHtml(email)}</li>
+          <li><strong>Phone:</strong> ${this.escapeHtml(phone)}</li>
+          <li><strong>Address:</strong> ${this.escapeHtml(address)}, ${this.escapeHtml(city)}</li>
+        </ul>
+
+        <h3>Your Login Credentials:</h3>
+        <p><strong>Password:</strong> ${this.escapeHtml(plainPassword)}</p>
+
+        <p style="color: #d9534f; font-weight: bold;">
+          For your privacy and security, please log in and change your password immediately.
+        </p>
+
+        <p>
+          Regards,<br />
+          Poojawala Team
+        </p>
+      </div>
+    `;
+
+    await this.sendMail({
+      to: email,
+      subject: 'Your Poojawala Account Has Been Created',
+      html,
+    });
+  }
+
+  async sendPurohitCreatedByAdminEmail(
+    email: string,
+    name: string,
+    username: string,
+    phone: string,
+    plainPassword: string,
+  ): Promise<void> {
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+        <h2>Hello ${this.escapeHtml(name)},</h2>
+
+        <p>
+          An administrator has created a Poojawala Purohit account for you!
+        </p>
+        
+        <h3>Your Account Details:</h3>
+        <ul>
+          <li><strong>Email:</strong> ${this.escapeHtml(email)}</li>
+          <li><strong>Username:</strong> ${this.escapeHtml(username)}</li>
+          <li><strong>Phone:</strong> ${this.escapeHtml(phone)}</li>
+        </ul>
+
+        <h3>Your Login Credentials:</h3>
+        <p><strong>Password:</strong> ${this.escapeHtml(plainPassword)}</p>
+
+        <p style="color: #d9534f; font-weight: bold;">
+          For your privacy and security, please log in and change your password immediately.
+        </p>
+        
+        <p>
+          Once logged in, please go to your profile to upload your verification documents (Aadhaar, PAN, Certificate) and add your Bank Account details so the Admin can approve your profile.
+        </p>
+
+        <p>
+          Regards,<br />
+          Poojawala Team
+        </p>
+      </div>
+    `;
+
+    await this.sendMail({
+      to: email,
+      subject: 'Your Poojawala Purohit Account Has Been Created',
+      html,
+    });
+  }
 }

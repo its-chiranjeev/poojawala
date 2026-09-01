@@ -52,7 +52,10 @@ export class ReviewService {
       booking.customerRating = dto.rating;
       booking.customerReview = dto.review;
     } else if (user.role === USER_ROLE.PUROHIT) {
-      if (booking.purohitId !== user.id) {
+      const purohitProfile = await this.purohitProfileRepository.findOne({
+        where: { userId: user.id },
+      });
+      if (booking.purohitId !== purohitProfile?.id) {
         throw new ForbiddenException('You cannot review this booking.');
       }
       if (
@@ -86,6 +89,8 @@ export class ReviewService {
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.customer', 'customer')
       .leftJoinAndSelect('booking.purohit', 'purohit')
+      .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('booking.service', 'service')
       .where(
         '(booking.customerRating IS NOT NULL OR booking.purohitRating IS NOT NULL)',
       );
@@ -95,7 +100,7 @@ export class ReviewService {
         userId: user.id,
       });
     } else if (user.role === USER_ROLE.PUROHIT) {
-      queryBuilder.andWhere('booking.purohitId = :userId', { userId: user.id });
+      queryBuilder.andWhere('purohit.userId = :userId', { userId: user.id });
     }
 
     if (query.status) {
@@ -127,11 +132,45 @@ export class ReviewService {
     };
   }
 
+  async getAllCustomerReviews(query: ReviewQueryDto) {
+    const queryBuilder = this.bookingRepository
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.customer', 'customer')
+      .leftJoinAndSelect('booking.purohit', 'purohit')
+      .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('booking.service', 'service')
+      .where('booking.customerRating IS NOT NULL')
+      .andWhere('booking.reviewStatus = :status', {
+        status: REVIEW_STATUS.PUBLISHED,
+      });
+
+    const total = await queryBuilder.getCount();
+
+    queryBuilder
+      .orderBy('booking.updatedAt', 'DESC')
+      .skip((query.page - 1) * query.limit)
+      .take(query.limit);
+
+    const bookings = await queryBuilder.getMany();
+
+    return {
+      data: bookings.map((b) => this.mapReviewResponse(b)),
+      meta: {
+        total,
+        page: query.page,
+        limit: query.limit,
+        totalPages: Math.ceil(total / query.limit),
+      },
+    };
+  }
+
   async findOne(user: User, bookingId: number) {
     const queryBuilder = this.bookingRepository
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.customer', 'customer')
       .leftJoinAndSelect('booking.purohit', 'purohit')
+      .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('booking.service', 'service')
       .where('booking.id = :bookingId', { bookingId })
       .andWhere(
         '(booking.customerRating IS NOT NULL OR booking.purohitRating IS NOT NULL)',
@@ -142,7 +181,7 @@ export class ReviewService {
         userId: user.id,
       });
     } else if (user.role === USER_ROLE.PUROHIT) {
-      queryBuilder.andWhere('booking.purohitId = :userId', { userId: user.id });
+      queryBuilder.andWhere('purohit.userId = :userId', { userId: user.id });
     }
 
     const booking = await queryBuilder.getOne();
@@ -284,6 +323,9 @@ export class ReviewService {
         ? {
             id: booking.purohit.id,
             userId: booking.purohit.userId,
+            firstName: booking.purohit.user?.firstName,
+            lastName: booking.purohit.user?.lastName,
+            profileImage: booking.purohit.user?.profileImage,
             bio: booking.purohit.bio,
             qualification: booking.purohit.qualification,
             experienceYears: booking.purohit.experienceYears,
@@ -291,6 +333,15 @@ export class ReviewService {
             specializations: booking.purohit.specializations,
             city: booking.purohit.city,
             avgRating: booking.purohit.avgRating,
+          }
+        : null,
+
+      serviceId: booking.serviceId,
+      service: booking.service
+        ? {
+            id: booking.service.id,
+            name: booking.service.name,
+            iconUrl: booking.service.iconUrl,
           }
         : null,
 

@@ -5,6 +5,7 @@ import { BookingRepository, PaymentRepository } from '@poojawala/repositories';
 import { PaymentController } from './payment.controller';
 import { PaymentService } from './payment.service';
 import { NotificationModule } from '@poojawala/notification';
+import { GatewayModule } from '@poojawala/gateway';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { NotificationModule } from '@poojawala/notification';
       PaymentBooking,
     ]),
     NotificationModule,
+    GatewayModule,
   ],
   controllers: [PaymentController],
   providers: [

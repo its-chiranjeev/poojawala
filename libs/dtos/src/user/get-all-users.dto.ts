@@ -41,6 +41,18 @@ export class GetAllUsersDto {
   verificationStatus?: PUROHIT_VERIFICATION_STATUS;
 
   @IsOptional()
+  @Transform(({ value }) => value === undefined ? undefined : (value === 'true' || value === true))
+  isOfflineAvailable?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => value === undefined ? undefined : (value === 'true' || value === true))
+  isOnlineAvailable?: boolean;
+
+  @IsOptional()
+  @IsString()
+  city?: string;
+
+  @IsOptional()
   @IsIn(['createdAt', 'updatedAt', 'username', 'email'])
   sortBy: string = 'createdAt';
 

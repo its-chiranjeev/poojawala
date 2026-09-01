@@ -89,6 +89,27 @@ export class UserRepository extends BaseRepository<User> {
       });
     }
 
+    if (query.isOfflineAvailable !== undefined && role === 'PUROHIT') {
+      qb.andWhere('profile.isOfflineAvailable = :isOfflineAvailable', {
+        isOfflineAvailable: query.isOfflineAvailable,
+      });
+    }
+
+    if (query.isOnlineAvailable !== undefined && role === 'PUROHIT') {
+      qb.andWhere('profile.isOnlineAvailable = :isOnlineAvailable', {
+        isOnlineAvailable: query.isOnlineAvailable,
+      });
+    }
+
+    if (query.city) {
+      qb.andWhere(
+        new Brackets((qb) => {
+          qb.where('LOWER(profile.city) LIKE LOWER(:city)', { city: `%${query.city}%` })
+            .orWhere('LOWER(addresses.city) LIKE LOWER(:city)', { city: `%${query.city}%` });
+        })
+      );
+    }
+
     qb.orderBy(`user.${sortBy}`, order);
 
     qb.skip((page - 1) * limit);
@@ -138,7 +159,7 @@ export class UserRepository extends BaseRepository<User> {
       }
     }
 
-    query.skip((page - 1) * limit).take(limit);
+    query.orderBy('user.id', 'DESC').skip((page - 1) * limit).take(limit);
 
     const [users, total] = await query.getManyAndCount();
 
@@ -148,7 +169,9 @@ export class UserRepository extends BaseRepository<User> {
       firstName: user.firstName,
       lastName: user.lastName,
       username: user.username,
-      isActive: user.status === USER_STATUS.ACTIVE,
+      role: user.role,
+      status: user.status,
+      profile: user.profile,
       services: user.purohitServices || [],
     }));
 
@@ -159,15 +182,8 @@ export class UserRepository extends BaseRepository<User> {
       limit,
       totalPages: Math.ceil(total / limit),
     };
-
-    return {
-      data,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
   }
+
   async findApprovedPurohitById(id: number) {
     return this.repo.findOne({
       where: {
@@ -190,9 +206,9 @@ export class UserRepository extends BaseRepository<User> {
         'profile',
         'profile.userId = user.id',
       )
-      .leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id')
-      .leftJoinAndSelect('user.serviceAreas', 'serviceAreas')
-      .leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id')      .leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId');
+        .leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id')
+        .leftJoinAndSelect('user.serviceAreas', 'serviceAreas')
+        .leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id').leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId');
     } else if (role === USER_ROLE.CUSTOMER) {
       qb.leftJoinAndSelect('user.addresses', 'addresses');
     }

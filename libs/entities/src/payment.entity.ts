@@ -21,6 +21,11 @@ export enum PAYMENT_TYPE {
   DONATION = 'DONATION',
 }
 
+export enum CUSTOMER_PAYMENT_METHOD {
+  CASH = 'CASH',
+  ONLINE = 'ONLINE',
+}
+
 export enum PAYMENT_METHOD {
   UPI = 'UPI',
   CARD = 'CARD',
@@ -84,6 +89,13 @@ export class Payment {
 
   @Column({ type: 'varchar', length: 5, default: 'INR' })
   currency!: string;
+
+  @Column({
+    type: 'enum',
+    enum: CUSTOMER_PAYMENT_METHOD,
+    nullable: true,
+  })
+  customerPaymentMethod?: CUSTOMER_PAYMENT_METHOD;
 
   @Column({
     type: 'enum',

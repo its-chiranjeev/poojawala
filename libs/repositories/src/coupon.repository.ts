@@ -43,7 +43,7 @@ export class CouponRepository extends BaseRepository<Coupon> {
       });
     }
 
-    query.skip((page - 1) * limit).take(limit);
+    query.orderBy('coupon.id', 'DESC').skip((page - 1) * limit).take(limit);
 
     const [coupons, total] = await query.getManyAndCount();
 

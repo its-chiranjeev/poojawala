@@ -31,12 +31,14 @@ import {
   PUROHIT_VERIFICATION_STATUS,
   PurohitProfile,
   PurohitService,
+  PurohitServiceArea,
   Service,
   User,
   USER_ROLE,
   USER_STATUS,
   NOTIFICATION_TYPE,
-  PAYMENT_TYPE,} from '@poojawala/entities';
+  PAYMENT_TYPE,
+} from '@poojawala/entities';
 import { BookingRepository } from '@poojawala/repositories';
 import {
   AssignBookingDto,
@@ -347,17 +349,9 @@ export class BookingService {
         }
 
         /*
-         * Pricing.
+         * Pricing logic (platformCommission, purohitPayoutAmount, finalAmount)
+         * has been deferred to when a Purohit accepts the booking or is assigned by an admin.
          */
-        const agreedPrice = minPrice;
-
-        const platformCommission = Number(
-          (agreedPrice * (commissionPercentage / 100)).toFixed(2),
-        );
-
-        const purohitPayoutAmount = Number(
-          (agreedPrice - platformCommission).toFixed(2),
-        );
 
         let appliedCoupon: Coupon | null = null;
         let discountAmount = 0;
@@ -368,24 +362,11 @@ export class BookingService {
             customer.id,
             service.id,
             couponCode,
-            agreedPrice,
+            minPrice, // Use minPrice for initial validation
           );
 
           appliedCoupon = couponResult.coupon;
           discountAmount = couponResult.discountAmount;
-        }
-
-        const finalAmount = Number(
-          (agreedPrice - discountAmount + donationAmount).toFixed(2),
-        );
-
-        if (
-          platformCommission < 0 ||
-          purohitPayoutAmount < 0 ||
-          discountAmount < 0 ||
-          finalAmount < 0
-        ) {
-          throw new BadRequestException('Calculated booking amount is invalid');
         }
 
         const bookingNumber =
@@ -402,14 +383,13 @@ export class BookingService {
           scheduledAt,
           specialInstructions: dto.specialInstructions?.trim() || undefined,
           customFields: dto.customFields ?? undefined,
-          agreedPrice,
           commissionPercentage,
-          platformCommission,
-          purohitPayoutAmount,
+          platformCommission: null as any,
+          purohitPayoutAmount: null as any,
           couponCode: appliedCoupon?.code ?? undefined,
           discountAmount,
           donationAmount,
-          finalAmount,
+          finalAmount: null as any,
           status: BOOKING_STATUS.PENDING,
           paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
           assignmentType: ASSIGNMENT_TYPE.AUTO,
@@ -469,7 +449,7 @@ export class BookingService {
           await couponUsageRepository.save(couponUsage);
         }
 
-        return { savedBooking, eligiblePurohitUserIds };
+        return { savedBooking, eligiblePurohitUserIds, service };
       });
 
       for (const purohitUserId of transactionResult.eligiblePurohitUserIds) {
@@ -491,7 +471,12 @@ export class BookingService {
         );
       }
 
-      return transactionResult.savedBooking;
+      return {
+        ...transactionResult.savedBooking,
+        minPrice: Number(transactionResult.service.minPrice),
+        maxPrice: Number(transactionResult.service.maxPrice),
+        priceRange: `${Number(transactionResult.service.minPrice)} - ${Number(transactionResult.service.maxPrice)}`,
+      } as any;
     } catch (error) {
       if (
         error instanceof QueryFailedError &&
@@ -826,13 +811,16 @@ export class BookingService {
 
         booking.donationAmount = donationAmount;
 
-        booking.finalAmount = Number(
-          (
-            Number(booking.agreedPrice) -
-            Number(booking.discountAmount ?? 0) +
-            donationAmount
-          ).toFixed(2),
-        );
+        if (booking.purohitPayoutAmount != null && booking.platformCommission != null) {
+          booking.finalAmount = Number(
+            (
+              Number(booking.purohitPayoutAmount) +
+              Number(booking.platformCommission) -
+              Number(booking.discountAmount ?? 0) +
+              donationAmount
+            ).toFixed(2),
+          );
+        }
       }
 
       /*
@@ -868,7 +856,7 @@ export class BookingService {
              * Existing Purohit no longer
              * qualifies for new time/location.
              */
-            savedBooking.purohitId = undefined;
+            savedBooking.purohitId = null as unknown as undefined;
 
             savedBooking.status = BOOKING_STATUS.PENDING;
 
@@ -1039,7 +1027,7 @@ export class BookingService {
     dto: CancelBookingDto,
   ): Promise<{
     message: string;
-    booking: Booking;
+    booking: Awaited<ReturnType<BookingService['formatBookingResponse']>>;
   }> {
     const allowedRoles: USER_ROLE[] = [
       USER_ROLE.CUSTOMER,
@@ -1126,7 +1114,7 @@ export class BookingService {
 
           booking.status = BOOKING_STATUS.PENDING;
 
-          booking.purohitId = undefined;
+          booking.purohitId = null as unknown as undefined;
 
           booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
 
@@ -1228,9 +1216,19 @@ export class BookingService {
         }
       }
 
+      const populatedBooking = await bookingRepository.findOne({
+        where: { id: savedBooking.id },
+        relations: {
+          customer: true,
+          service: true,
+          customerAddress: true,
+          purohit: { user: true },
+        },
+      });
+
       return {
         message,
-        booking: savedBooking,
+        booking: await this.formatBookingResponse(populatedBooking as Booking),
       };
     });
   }
@@ -1595,18 +1593,30 @@ export class BookingService {
             );
           }
 
-          booking.agreedPrice = exactPrice;
+          const isOverlapping = await this.assignmentService.hasOverlappingBooking(
+            manager,
+            purohitProfile.id,
+            booking.scheduledAt,
+            booking.id
+          );
+
+          if (isOverlapping) {
+            throw new BadRequestException(
+              'You are not available for the provided date or time due to overlapping bookings',
+            );
+          }
+
+
+          booking.purohitPayoutAmount = exactPrice;
           booking.platformCommission = Number(
             (exactPrice * (Number(booking.commissionPercentage) / 100)).toFixed(
               2,
             ),
           );
-          booking.purohitPayoutAmount = Number(
-            (exactPrice - booking.platformCommission).toFixed(2),
-          );
           booking.finalAmount = Number(
             (
-              exactPrice -
+              exactPrice +
+              booking.platformCommission -
               Number(booking.discountAmount ?? 0) +
               Number(booking.donationAmount ?? 0)
             ).toFixed(2),
@@ -1805,20 +1815,51 @@ export class BookingService {
         await this.assignmentService.findEligiblePurohitIds(manager, booking);
 
       if (!eligiblePurohitIds.includes(purohit.id)) {
+        const isOverlapping = await this.assignmentService.hasOverlappingBooking(
+          manager,
+          purohit.id,
+          booking.scheduledAt,
+          booking.id
+        );
+
+        if (isOverlapping) {
+          throw new BadRequestException(
+            "Selected Purohit isn't available for provided date or time",
+          );
+        }
+
+        if (
+          booking.bookingMode === BOOKING_MODE.OFFLINE &&
+          !purohit.isOfflineAvailable
+        ) {
+          throw new BadRequestException(
+            'Selected Purohit is not available for offline bookings',
+          );
+        }
+
+        const purohitServiceAreaRepository = manager.getRepository(PurohitServiceArea);
+        const serviceArea = await purohitServiceAreaRepository.findOne({
+          where: { purohitId: purohit.userId },
+        });
+
+        if (!serviceArea || serviceArea.latitude === null || serviceArea.longitude === null) {
+          throw new BadRequestException(
+            'Selected Purohit does not have a valid service area configured',
+          );
+        }
+
         throw new BadRequestException(
-          'Selected Purohit is not currently eligible or available for this booking',
+          "Customer location is outside the selected Purohit's service area radius",
         );
       }
-      booking.agreedPrice = exactPrice;
+      booking.purohitPayoutAmount = exactPrice;
       booking.platformCommission = Number(
         (exactPrice * (Number(booking.commissionPercentage) / 100)).toFixed(2),
       );
-      booking.purohitPayoutAmount = Number(
-        (exactPrice - booking.platformCommission).toFixed(2),
-      );
       booking.finalAmount = Number(
         (
-          exactPrice -
+          exactPrice +
+          booking.platformCommission -
           Number(booking.discountAmount ?? 0) +
           Number(booking.donationAmount ?? 0)
         ).toFixed(2),
@@ -2052,6 +2093,12 @@ export class BookingService {
       );
     }
 
+    if (role === USER_ROLE.PUROHIT && nextStatus === BOOKING_STATUS.COMPLETED) {
+      throw new BadRequestException(
+        'Booking completion is handled automatically after successful customer payment.',
+      );
+    }
+
     const allowedTransitions: Partial<
       Record<BOOKING_STATUS, BOOKING_STATUS[]>
     > = {
@@ -2137,9 +2184,9 @@ export class BookingService {
       throw new NotFoundException('Booking not found');
     }
 
-    if (booking.status !== BOOKING_STATUS.ONGOING) {
+    if (booking.status !== BOOKING_STATUS.COMPLETED) {
       throw new BadRequestException(
-        'Completion proof can only be uploaded for an ongoing booking',
+        'Completion proof can only be uploaded for completed booking',
       );
     }
 
@@ -2347,6 +2394,14 @@ export class BookingService {
     };
   }
 
+  async resendStartOtp(user: User, bookingId: number) {
+    const result = await this.generateStartOtp(user, bookingId);
+    return {
+      ...result,
+      message: 'Booking start OTP resent successfully',
+    };
+  }
+
   private async validateStartOtpGenerationAccess(
     user: User,
     booking: Booking,
@@ -2478,12 +2533,18 @@ export class BookingService {
       purohitProfileId = purohitProfile.id;
     }
 
-    const activeStatuses: BOOKING_STATUS[] = [
+    let activeStatuses: BOOKING_STATUS[] = [
       BOOKING_STATUS.ACCEPTED,
       BOOKING_STATUS.ENROUTE,
       BOOKING_STATUS.ARRIVED,
       BOOKING_STATUS.ONGOING,
     ];
+
+    if (query.status) {
+      const queryStatuses = Array.isArray(query.status) ? query.status : [query.status];
+      // Allow querying any valid status if explicitly requested
+      activeStatuses = queryStatuses as BOOKING_STATUS[];
+    }
 
     const { bookings, total } =
       await this.bookingRepository.findActiveBookingsByRole({
@@ -2496,7 +2557,7 @@ export class BookingService {
         activeStatuses,
       });
 
-    const formattedBookings = bookings.map((booking) => {
+    const formattedBookings = await Promise.all(bookings.map(async (booking) => {
       const customerName = [
         booking.customer?.firstName,
         booking.customer?.lastName,
@@ -2516,6 +2577,15 @@ export class BookingService {
 
       const snapshot = booking.addressSnapshot ?? {};
 
+      const serviceIconUrl = booking.service?.iconUrl ?? null;
+      const serviceIconDownloadUrl = serviceIconUrl ? await this.s3Service.getDownloadUrl(serviceIconUrl) : null;
+
+      const customerProfileImage = booking.customer?.profileImage ?? null;
+      const customerProfileImageDownloadUrl = customerProfileImage ? await this.s3Service.getDownloadUrl(customerProfileImage) : null;
+
+      const purohitProfileImage = purohitUser?.profileImage ?? null;
+      const purohitProfileImageDownloadUrl = purohitProfileImage ? await this.s3Service.getDownloadUrl(purohitProfileImage) : null;
+
       return {
         id: booking.id,
         bookingNumber: booking.bookingNumber,
@@ -2532,7 +2602,8 @@ export class BookingService {
         service: {
           id: booking.service?.id ?? booking.serviceId,
           name: booking.service?.name ?? '-',
-          iconUrl: booking.service?.iconUrl ?? null,
+          iconUrl: serviceIconUrl,
+          iconDownloadUrl: serviceIconDownloadUrl,
           durationMinutes: booking.service?.durationMinutes ?? null,
         },
 
@@ -2541,7 +2612,8 @@ export class BookingService {
           name: customerName || '-',
           email: booking.customer?.email ?? null,
           phone: booking.customer?.phone ?? null,
-          profileImage: booking.customer?.profileImage ?? null,
+          profileImage: customerProfileImage,
+          profileImageDownloadUrl: customerProfileImageDownloadUrl,
         },
 
         purohit: booking.purohit
@@ -2551,7 +2623,8 @@ export class BookingService {
             name: purohitName || '-',
             email: purohitUser?.email ?? null,
             phone: purohitUser?.phone ?? null,
-            profileImage: purohitUser?.profileImage ?? null,
+            profileImage: purohitProfileImage,
+            profileImageDownloadUrl: purohitProfileImageDownloadUrl,
             avgRating: Number(booking.purohit.avgRating ?? 0),
           }
           : null,
@@ -2588,7 +2661,13 @@ export class BookingService {
         },
 
         pricing: {
-          agreedPrice: Number(booking.agreedPrice),
+          minPrice: booking.service?.minPrice ? Number(booking.service.minPrice) : null,
+          maxPrice: booking.service?.maxPrice ? Number(booking.service.maxPrice) : null,
+          priceRange: booking.service?.minPrice && booking.service?.maxPrice
+            ? `${Number(booking.service.minPrice)} - ${Number(booking.service.maxPrice)}`
+            : null,
+          purohitPayoutAmount: booking.purohitPayoutAmount ? Number(booking.purohitPayoutAmount) : null,
+          platformCommission: booking.platformCommission ? Number(booking.platformCommission) : null,
           discountAmount: Number(booking.discountAmount ?? 0),
           donationAmount: Number(booking.donationAmount ?? 0),
           finalAmount: Number(booking.finalAmount),
@@ -2598,7 +2677,7 @@ export class BookingService {
         specialInstructions: booking.specialInstructions ?? null,
         customFields: booking.customFields ?? null,
       };
-    });
+    }));
 
     return {
       bookings: formattedBookings,
@@ -2621,7 +2700,7 @@ export class BookingService {
   ): Promise<{
     message: string;
     assignmentChanged: boolean;
-    booking: ReturnType<BookingService['formatBookingResponse']>;
+    booking: Awaited<ReturnType<BookingService['formatBookingResponse']>>;
     reschedule: {
       previousScheduledAt: Date;
       newScheduledAt: Date;
@@ -2824,7 +2903,7 @@ export class BookingService {
             'Booking rescheduled successfully. The assigned Purohit remains available';
         } else {
           assignmentChanged = true;
-          booking.purohitId = undefined;
+          booking.purohitId = null as unknown as undefined;
           booking.status = BOOKING_STATUS.PENDING;
           booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
           booking.filteredPurohitIds = eligiblePurohitIds.filter(
@@ -2837,7 +2916,7 @@ export class BookingService {
               : 'Booking rescheduled successfully, but no eligible Purohit is currently available for the new schedule';
         }
       } else {
-        booking.purohitId = undefined;
+        booking.purohitId = null as unknown as undefined;
         booking.status = BOOKING_STATUS.PENDING;
         booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
         booking.filteredPurohitIds = eligiblePurohitIds;
@@ -2869,7 +2948,7 @@ export class BookingService {
       return {
         message,
         assignmentChanged,
-        booking: this.formatBookingResponse(finalBooking),
+        booking: await this.formatBookingResponse(finalBooking),
         reschedule: {
           previousScheduledAt,
           newScheduledAt,
@@ -2879,7 +2958,7 @@ export class BookingService {
     });
   }
 
-  private formatBookingResponse(booking: Booking) {
+  private async formatBookingResponse(booking: Booking) {
     const customerName = [
       booking.customer?.firstName,
       booking.customer?.lastName,
@@ -2907,6 +2986,23 @@ export class BookingService {
     const longitude =
       customerAddress?.longitude ?? addressSnapshot['longitude'];
 
+    const serviceIconUrl = booking.service?.iconUrl ?? null;
+    const serviceIconDownloadUrl = serviceIconUrl ? await this.s3Service.getDownloadUrl(serviceIconUrl) : null;
+
+    const customerProfileImage = booking.customer?.profileImage ?? null;
+    const customerProfileImageDownloadUrl = customerProfileImage ? await this.s3Service.getDownloadUrl(customerProfileImage) : null;
+
+    const purohitProfileImage = purohitUser?.profileImage ?? null;
+    const purohitProfileImageDownloadUrl = purohitProfileImage ? await this.s3Service.getDownloadUrl(purohitProfileImage) : null;
+
+    const completionPhotoUrls = booking.completionPhotoUrls ?? [];
+    let completionPhotoDownloadUrls: string[] = [];
+    if (completionPhotoUrls.length > 0) {
+      completionPhotoDownloadUrls = await Promise.all(
+        completionPhotoUrls.map((url) => this.s3Service.getDownloadUrl(url))
+      );
+    }
+
     return {
       id: booking.id,
       bookingNumber: booking.bookingNumber,
@@ -2923,7 +3019,8 @@ export class BookingService {
       service: {
         id: booking.service?.id ?? booking.serviceId,
         name: booking.service?.name ?? null,
-        iconUrl: booking.service?.iconUrl ?? null,
+        iconUrl: serviceIconUrl,
+        iconDownloadUrl: serviceIconDownloadUrl,
         durationMinutes: booking.service?.durationMinutes ?? null,
       },
 
@@ -2932,7 +3029,8 @@ export class BookingService {
         name: customerName || null,
         email: booking.customer?.email ?? null,
         phone: booking.customer?.phone ?? null,
-        profileImage: booking.customer?.profileImage ?? null,
+        profileImage: customerProfileImage,
+        profileImageDownloadUrl: customerProfileImageDownloadUrl,
       },
 
       purohit: booking.purohit
@@ -2942,7 +3040,8 @@ export class BookingService {
           name: purohitName || null,
           email: purohitUser?.email ?? null,
           phone: purohitUser?.phone ?? null,
-          profileImage: purohitUser?.profileImage ?? null,
+          profileImage: purohitProfileImage,
+          profileImageDownloadUrl: purohitProfileImageDownloadUrl,
           avgRating: Number(booking.purohit.avgRating ?? 0),
         }
         : null,
@@ -2977,7 +3076,11 @@ export class BookingService {
       },
 
       pricing: {
-        agreedPrice: Number(booking.agreedPrice),
+        minPrice: booking.service?.minPrice ? Number(booking.service.minPrice) : null,
+        maxPrice: booking.service?.maxPrice ? Number(booking.service.maxPrice) : null,
+        priceRange: booking.service?.minPrice && booking.service?.maxPrice
+          ? `${Number(booking.service.minPrice)} - ${Number(booking.service.maxPrice)}`
+          : null,
         platformCommission: Number(booking.platformCommission),
         purohitPayoutAmount: Number(booking.purohitPayoutAmount),
         discountAmount: Number(booking.discountAmount ?? 0),
@@ -2989,6 +3092,8 @@ export class BookingService {
       specialInstructions: booking.specialInstructions ?? null,
       customFields: booking.customFields ?? null,
       eligiblePurohitCount: booking.filteredPurohitIds?.length ?? 0,
+      completionPhotoUrls,
+      completionPhotoDownloadUrls,
     };
   }
 
@@ -3192,14 +3297,31 @@ export class BookingService {
           duplicateLockKey,
         ]);
 
-        const minPrice = Number(service.minPrice);
+        const purohitServiceRepository = manager.getRepository(PurohitService);
+        const matchingPurohitService = await purohitServiceRepository.findOne({
+          where: {
+            purohitId: purohitProfile.id,
+            serviceId: service.id,
+            isActive: true,
+          },
+        });
+
+        if (!matchingPurohitService) {
+          throw new BadRequestException('Selected Purohit does not provide the service required for this booking');
+        }
+
+        const exactPrice = dto.bookingMode === BOOKING_MODE.ONLINE
+          ? Number(matchingPurohitService.onlinePrice)
+          : Number(matchingPurohitService.offlinePrice);
+
+        if (!exactPrice || exactPrice <= 0) {
+          throw new BadRequestException('Exact price is not configured for this mode by the selected Purohit');
+        }
+
         const commissionPercentage = Number(service.commissionPercentage);
-        const agreedPrice = minPrice;
+        const purohitPayoutAmount = exactPrice;
         const platformCommission = Number(
-          (agreedPrice * (commissionPercentage / 100)).toFixed(2),
-        );
-        const purohitPayoutAmount = Number(
-          (agreedPrice - platformCommission).toFixed(2),
+          (exactPrice * (commissionPercentage / 100)).toFixed(2),
         );
         const donationAmount = Number(dto.donationAmount ?? 0);
 
@@ -3212,14 +3334,14 @@ export class BookingService {
             customer.id,
             service.id,
             dto.couponCode.trim().toUpperCase(),
-            agreedPrice,
+            exactPrice, // Or minPrice, but since exactPrice is known, we use it
           );
           appliedCoupon = couponResult.coupon;
           discountAmount = couponResult.discountAmount;
         }
 
         const finalAmount = Number(
-          (agreedPrice - discountAmount + donationAmount).toFixed(2),
+          (purohitPayoutAmount + platformCommission - discountAmount + donationAmount).toFixed(2),
         );
 
         const bookingNumber =
@@ -3236,7 +3358,6 @@ export class BookingService {
           scheduledAt,
           specialInstructions: dto.specialInstructions?.trim() || undefined,
           customFields: dto.customFields ?? undefined,
-          agreedPrice,
           commissionPercentage,
           platformCommission,
           purohitPayoutAmount,
@@ -3269,6 +3390,9 @@ export class BookingService {
           scheduledAtIst: this.toIstString(savedBooking.scheduledAt),
           createdAtIst: this.toIstString(savedBooking.createdAt),
           updatedAtIst: this.toIstString(savedBooking.updatedAt),
+          minPrice: Number(service.minPrice),
+          maxPrice: Number(service.maxPrice),
+          priceRange: `${Number(service.minPrice)} - ${Number(service.maxPrice)}`,
         };
 
         return {

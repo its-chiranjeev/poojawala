@@ -120,17 +120,14 @@ export class Booking {
   @Column({ type: 'jsonb', nullable: true })
   customFields?: Record<string, any>;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
-  agreedPrice!: number;
-
   @Column({ type: 'decimal', precision: 5, scale: 2 })
   commissionPercentage!: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
-  platformCommission!: number;
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  platformCommission?: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
-  purohitPayoutAmount!: number;
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  purohitPayoutAmount?: number;
 
   @Column({ type: 'varchar', length: 30, nullable: true })
   couponCode?: string;
@@ -141,8 +138,8 @@ export class Booking {
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0.0 })
   donationAmount!: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
-  finalAmount!: number;
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  finalAmount?: number;
 
   @Column({
     type: 'enum',

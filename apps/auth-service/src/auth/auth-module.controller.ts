@@ -272,6 +272,14 @@ export class AuthModuleController {
           profile.templeAffiliationProofDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.templeAffiliationProofUrl);
           profile.templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(profile.templeAffiliationProofUrl);
         }
+
+        // Attach serviceRadiusKm from the default service area (or first available)
+        const serviceAreas = (safeUser as any).serviceAreas;
+        if (serviceAreas && serviceAreas.length > 0) {
+          const defaultArea = serviceAreas.find((a: any) => a.isDefault) || serviceAreas[0];
+          profile.serviceRadiusKm = defaultArea.serviceRadiusKm;
+        }
+
         (safeUser as any).profile = profile;
       } catch (e) {
         console.error('Failed to generate pre-signed URL for profile documents:', e);

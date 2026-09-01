@@ -391,10 +391,25 @@ export class ServiceService {
       order: { createdAt: 'DESC' },
     });
 
+    const dataWithUrls = await Promise.all(
+      data.map(async (purohitService: any) => {
+        if (purohitService.service?.iconUrl) {
+          try {
+            purohitService.service.iconDownloadurl = await this.s3Service.getDownloadUrl(
+              purohitService.service.iconUrl,
+            );
+          } catch (e) {
+            console.error('Failed to generate pre-signed URL for icon:', e);
+          }
+        }
+        return purohitService;
+      }),
+    );
+
     return {
       success: true,
       message: 'Purohit services fetched successfully',
-      data,
+      data: dataWithUrls,
       pagination: {
         page,
         limit,

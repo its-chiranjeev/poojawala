@@ -10,9 +10,9 @@ interface FindBookingsByRoleOptions {
   purohitProfileId?: number;
   page?: number;
   limit?: number;
-  status?: BOOKING_STATUS;
-  bookingPaymentStatus?: BOOKING_PAYMENT_STATUS;
-  purohitPayoutStatus?: BOOKING_PAYMENT_STATUS;
+  status?: BOOKING_STATUS | BOOKING_STATUS[];
+  bookingPaymentStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
+  purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
   search?: string;
 }
 
@@ -65,6 +65,7 @@ export class BookingRepository extends BaseRepository<Booking> {
       .leftJoinAndSelect('booking.customerAddress', 'customerAddress')
       .leftJoinAndSelect('booking.payments', 'payments')
       .leftJoinAndSelect('booking.complaints', 'complaints')
+      .leftJoinAndSelect('purohit.bankAccounts', 'purohitBankAccounts')
       .where('booking.id = :bookingId', {
         bookingId,
       })
@@ -188,21 +189,45 @@ export class BookingRepository extends BaseRepository<Booking> {
     }
 
     if (status) {
-      query.andWhere('booking.status = :status', {
-        status,
-      });
+      if (Array.isArray(status)) {
+        query.andWhere('booking.status IN (:...status)', {
+          status,
+        });
+      } else {
+        query.andWhere('booking.status = :status', {
+          status,
+        });
+      }
     }
 
     if (bookingPaymentStatus) {
-      query.andWhere('booking.paymentStatus = :bookingPaymentStatus', {
-        bookingPaymentStatus,
-      });
+      if (Array.isArray(bookingPaymentStatus)) {
+        query.andWhere('booking.paymentStatus IN (:...bookingPaymentStatus)', {
+          bookingPaymentStatus,
+        });
+      } else {
+        query.andWhere('booking.paymentStatus = :bookingPaymentStatus', {
+          bookingPaymentStatus,
+        });
+      }
     }
 
     if (purohitPayoutStatus) {
-      query.andWhere('booking.purohitPayoutStatus = :purohitPayoutStatus', {
-        purohitPayoutStatus,
-      });
+      if (Array.isArray(purohitPayoutStatus)) {
+        query.andWhere(
+          'booking.purohitPayoutStatus IN (:...purohitPayoutStatus)',
+          {
+            purohitPayoutStatus,
+          },
+        );
+      } else {
+        query.andWhere(
+          'booking.purohitPayoutStatus = :purohitPayoutStatus',
+          {
+            purohitPayoutStatus,
+          },
+        );
+      }
     }
 
     if (search?.trim()) {
@@ -281,6 +306,9 @@ export class BookingRepository extends BaseRepository<Booking> {
       .leftJoinAndSelect('booking.customerAddress', 'customerAddress')
       .where('booking.status = :status', {
         status: BOOKING_STATUS.PENDING,
+      })
+      .andWhere('booking.assignmentType = :assignmentType', {
+        assignmentType: ASSIGNMENT_TYPE.AUTO,
       })
       .andWhere('booking."purohitId" IS NULL')
       .andWhere(
@@ -375,6 +403,7 @@ export class BookingRepository extends BaseRepository<Booking> {
     limit: number;
     search?: string;
     activeStatuses: BOOKING_STATUS[];
+    status?: BOOKING_STATUS | BOOKING_STATUS[];
   }): Promise<{
     bookings: Booking[];
     total: number;
@@ -410,7 +439,6 @@ export class BookingRepository extends BaseRepository<Booking> {
         'booking.scheduledAt',
         'booking.specialInstructions',
         'booking.customFields',
-        'booking.agreedPrice',
         'booking.discountAmount',
         'booking.donationAmount',
         'booking.finalAmount',
@@ -536,5 +564,135 @@ export class BookingRepository extends BaseRepository<Booking> {
       .execute();
 
     return result.affected ?? 0;
+  }
+
+  async getPurohitDashboardStats(purohitProfileId: number): Promise<{
+    totalEarnings: number;
+    thisMonthEarnings: number;
+    thisWeekEarnings: number;
+    totalActiveBookings: number;
+    totalCompletedBookings: number;
+  }> {
+    const now = new Date();
+
+    // Get start of month
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    // Get start of week (assuming Monday is start of week)
+    const day = now.getDay() || 7;
+    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 1);
+
+    const activeStatuses = [
+      BOOKING_STATUS.PENDING,
+      BOOKING_STATUS.ACCEPTED,
+      BOOKING_STATUS.ENROUTE,
+      BOOKING_STATUS.ARRIVED,
+      BOOKING_STATUS.ONGOING,
+    ];
+
+    const query = this.bookingRepo
+      .createQueryBuilder('booking')
+      .select('COALESCE(SUM(CASE WHEN booking.status = :completed AND booking."purohitPayoutStatus" = :payoutPaid THEN booking.purohitPayoutAmount ELSE 0 END), 0)', 'totalEarnings')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN booking.scheduledAt >= :startOfMonth AND booking.status = :completed AND booking."purohitPayoutStatus" = :payoutPaid THEN booking.purohitPayoutAmount ELSE 0 END), 0)`,
+        'thisMonthEarnings',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN booking.scheduledAt >= :startOfWeek AND booking.status = :completed AND booking."purohitPayoutStatus" = :payoutPaid THEN booking.purohitPayoutAmount ELSE 0 END), 0)`,
+        'thisWeekEarnings',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN booking.status IN (:...activeStatuses) THEN 1 ELSE 0 END), 0)`,
+        'totalActiveBookings',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN booking.status = :completed THEN 1 ELSE 0 END), 0)`,
+        'totalCompletedBookings',
+      )
+      .where('booking.purohitId = :purohitId', { purohitId: purohitProfileId });
+
+    const result = await query
+      .setParameters({
+        completed: BOOKING_STATUS.COMPLETED,
+        payoutPaid: BOOKING_PAYMENT_STATUS.PAID,
+        purohitId: purohitProfileId,
+        startOfMonth,
+        startOfWeek,
+        activeStatuses,
+      })
+      .getRawOne();
+
+    return {
+      totalEarnings: Number(result.totalEarnings) || 0,
+      thisMonthEarnings: Number(result.thisMonthEarnings) || 0,
+      thisWeekEarnings: Number(result.thisWeekEarnings) || 0,
+      totalActiveBookings: Number(result.totalActiveBookings) || 0,
+      totalCompletedBookings: Number(result.totalCompletedBookings) || 0,
+    };
+  }
+
+  async getCustomerDashboardStats(customerId: number): Promise<{
+    totalBookings: number;
+    pendingBookings: number;
+    completedBookings: number;
+  }> {
+    const activeStatuses = [
+      BOOKING_STATUS.PENDING,
+      BOOKING_STATUS.ACCEPTED,
+      BOOKING_STATUS.ENROUTE,
+      BOOKING_STATUS.ARRIVED,
+      BOOKING_STATUS.ONGOING,
+    ];
+
+    const query = this.bookingRepo
+      .createQueryBuilder('booking')
+      .select('COUNT(*)', 'totalBookings')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN booking.status IN (:...activeStatuses) THEN 1 ELSE 0 END), 0)`,
+        'pendingBookings',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN booking.status = :completed THEN 1 ELSE 0 END), 0)`,
+        'completedBookings',
+      )
+      .where('booking.customerId = :customerId', { customerId });
+
+    const result = await query
+      .setParameters({
+        completed: BOOKING_STATUS.COMPLETED,
+        customerId,
+        activeStatuses,
+      })
+      .getRawOne();
+
+    return {
+      totalBookings: Number(result.totalBookings) || 0,
+      pendingBookings: Number(result.pendingBookings) || 0,
+      completedBookings: Number(result.completedBookings) || 0,
+    };
+  }
+
+  async getAdminDashboardStats(): Promise<{
+    totalBookings: number;
+    totalRevenue: number;
+  }> {
+    const query = this.bookingRepo
+      .createQueryBuilder('booking')
+      .select('COUNT(*)', 'totalBookings')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN booking.status = :completed THEN booking."finalAmount" ELSE 0 END), 0)`,
+        'totalRevenue',
+      );
+
+    const result = await query
+      .setParameters({
+        completed: BOOKING_STATUS.COMPLETED,
+      })
+      .getRawOne();
+
+    return {
+      totalBookings: Number(result.totalBookings) || 0,
+      totalRevenue: Number(result.totalRevenue) || 0,
+    };
   }
 }

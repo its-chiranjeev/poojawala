@@ -20,6 +20,7 @@ import { Coupon } from './coupon.entity';
 import { CouponUsage } from './coupon-usage.entity';
 import { CmsContent } from './cms-content.entity';
 import { Notification } from './notification.entity';
+import { ContactUs } from './contact-us.entity';
 import { EntitiesService } from './entities.service';
 
 @Module({
@@ -44,6 +45,7 @@ import { EntitiesService } from './entities.service';
       CouponUsage,
       CmsContent,
       Notification,
+      ContactUs,
     ]),
   ],
   providers: [EntitiesService],

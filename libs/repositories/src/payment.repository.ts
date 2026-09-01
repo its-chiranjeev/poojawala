@@ -7,6 +7,7 @@ import {
   PAYMENT_TYPE,
   USER_ROLE,
   PAYMENT_METHOD,
+  BOOKING_PAYMENT_STATUS,
 } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
@@ -17,8 +18,10 @@ export interface FindMyPaymentsOptions {
   page?: number;
   limit?: number;
 
-  status?: PAYMENT_STATUS;
+  status?: PAYMENT_STATUS | PAYMENT_STATUS[];
   paymentType?: PAYMENT_TYPE;
+  purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
+  bookingPaymentStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
 
   search?: string;
 }
@@ -27,9 +30,11 @@ export interface FindAllPaymentsOptions {
   page?: number;
   limit?: number;
 
-  status?: PAYMENT_STATUS;
+  status?: PAYMENT_STATUS | PAYMENT_STATUS[];
   paymentType?: PAYMENT_TYPE;
   paymentMethod?: PAYMENT_METHOD;
+  purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
+  bookingPaymentStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
 
   bookingId?: number;
   customerId?: number;
@@ -228,6 +233,8 @@ export class PaymentRepository extends BaseRepository<Payment> {
       limit = 10,
       status,
       paymentType,
+      purohitPayoutStatus,
+      bookingPaymentStatus,
       search,
     } = options;
 
@@ -276,9 +283,9 @@ export class PaymentRepository extends BaseRepository<Payment> {
     } else if (userRole === USER_ROLE.PUROHIT) {
       query.andWhere(
         `(
-        payment."payeeId" = :userId
-        OR payment."createdById" = :userId
-        OR purohitUser.id = :userId
+        payment."createdById" = :userId
+        OR (payment."paymentType" = 'PUROHIT_PAYOUT' AND payment."payeeId" = :userId)
+        OR (payment."paymentType" = 'BOOKING_PAYMENT' AND purohitUser.id = :userId AND "booking"."paymentStatus" = 'PAID' AND "booking"."purohitPayoutStatus" = 'PENDING')
       )`,
         {
           userId,
@@ -289,15 +296,45 @@ export class PaymentRepository extends BaseRepository<Payment> {
     }
 
     if (status) {
-      query.andWhere('payment.status = :status', {
-        status,
-      });
+      if (Array.isArray(status)) {
+        query.andWhere('payment.status IN (:...status)', { status });
+      } else {
+        query.andWhere('payment.status = :status', { status });
+      }
     }
 
     if (paymentType) {
       query.andWhere('payment."paymentType" = :paymentType', {
         paymentType,
       });
+    }
+
+    if (purohitPayoutStatus) {
+      if (Array.isArray(purohitPayoutStatus)) {
+        query.andWhere(
+          '("booking"."purohitPayoutStatus" IN (:...purohitPayoutStatus1) OR "linkedBooking"."purohitPayoutStatus" IN (:...purohitPayoutStatus2))',
+          { purohitPayoutStatus1: purohitPayoutStatus, purohitPayoutStatus2: purohitPayoutStatus },
+        );
+      } else {
+        query.andWhere(
+          '("booking"."purohitPayoutStatus" = :purohitPayoutStatus1 OR "linkedBooking"."purohitPayoutStatus" = :purohitPayoutStatus2)',
+          { purohitPayoutStatus1: purohitPayoutStatus, purohitPayoutStatus2: purohitPayoutStatus },
+        );
+      }
+    }
+
+    if (bookingPaymentStatus) {
+      if (Array.isArray(bookingPaymentStatus)) {
+        query.andWhere(
+          '("booking"."paymentStatus" IN (:...bookingPaymentStatus1) OR "linkedBooking"."paymentStatus" IN (:...bookingPaymentStatus2))',
+          { bookingPaymentStatus1: bookingPaymentStatus, bookingPaymentStatus2: bookingPaymentStatus },
+        );
+      } else {
+        query.andWhere(
+          '("booking"."paymentStatus" = :bookingPaymentStatus1 OR "linkedBooking"."paymentStatus" = :bookingPaymentStatus2)',
+          { bookingPaymentStatus1: bookingPaymentStatus, bookingPaymentStatus2: bookingPaymentStatus },
+        );
+      }
     }
 
     const normalizedSearch = search?.trim();
@@ -386,6 +423,8 @@ export class PaymentRepository extends BaseRepository<Payment> {
       status,
       paymentType,
       paymentMethod,
+      purohitPayoutStatus,
+      bookingPaymentStatus,
 
       bookingId,
       customerId,
@@ -429,9 +468,11 @@ export class PaymentRepository extends BaseRepository<Payment> {
       .leftJoinAndSelect('linkedBooking.service', 'linkedService');
 
     if (status) {
-      query.andWhere('payment.status = :status', {
-        status,
-      });
+      if (Array.isArray(status)) {
+        query.andWhere('payment.status IN (:...status)', { status });
+      } else {
+        query.andWhere('payment.status = :status', { status });
+      }
     }
 
     if (paymentType) {
@@ -444,6 +485,34 @@ export class PaymentRepository extends BaseRepository<Payment> {
       query.andWhere('payment."paymentMethod" = :paymentMethod', {
         paymentMethod,
       });
+    }
+
+    if (purohitPayoutStatus) {
+      if (Array.isArray(purohitPayoutStatus)) {
+        query.andWhere(
+          '(booking.purohitPayoutStatus IN (:...purohitPayoutStatus) OR linkedBooking.purohitPayoutStatus IN (:...purohitPayoutStatus))',
+          { purohitPayoutStatus },
+        );
+      } else {
+        query.andWhere(
+          '(booking.purohitPayoutStatus = :purohitPayoutStatus OR linkedBooking.purohitPayoutStatus = :purohitPayoutStatus)',
+          { purohitPayoutStatus },
+        );
+      }
+    }
+
+    if (bookingPaymentStatus) {
+      if (Array.isArray(bookingPaymentStatus)) {
+        query.andWhere(
+          '(booking.paymentStatus IN (:...bookingPaymentStatus) OR linkedBooking.paymentStatus IN (:...bookingPaymentStatus))',
+          { bookingPaymentStatus },
+        );
+      } else {
+        query.andWhere(
+          '(booking.paymentStatus = :bookingPaymentStatus OR linkedBooking.paymentStatus = :bookingPaymentStatus)',
+          { bookingPaymentStatus },
+        );
+      }
     }
 
     if (bookingId) {

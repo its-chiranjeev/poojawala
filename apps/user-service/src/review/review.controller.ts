@@ -77,4 +77,11 @@ export class ReviewController {
   ) {
     return await this.reviewService.getPurohitOverallRating(purohitId);
   }
+
+  @Get('customers/given')
+  async getAllCustomerReviews(
+    @Query() query: ReviewQueryDto,
+  ) {
+    return this.reviewService.getAllCustomerReviews(query);
+  }
 }

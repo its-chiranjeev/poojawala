@@ -41,20 +41,41 @@ export class BookingQueryDto {
   search?: string;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.split(',').map(v => v.trim());
+    }
+    return value;
+  })
   @IsEnum(BOOKING_STATUS, {
+    each: true,
     message: 'Status must be a valid booking status',
   })
-  status?: BOOKING_STATUS;
+  status?: BOOKING_STATUS | BOOKING_STATUS[];
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.split(',').map(v => v.trim());
+    }
+    return value;
+  })
   @IsEnum(BOOKING_PAYMENT_STATUS, {
+    each: true,
     message: 'Payment status must be a valid booking payment status',
   })
-  bookingPaymentStatus?: BOOKING_PAYMENT_STATUS;
+  bookingPaymentStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.split(',').map(v => v.trim());
+    }
+    return value;
+  })
   @IsEnum(BOOKING_PAYMENT_STATUS, {
+    each: true,
     message: 'Purohit payout status must be a valid booking payment status',
   })
-  purohitPayoutStatus?: BOOKING_PAYMENT_STATUS;
+  purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
 }

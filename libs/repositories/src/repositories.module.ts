@@ -19,6 +19,7 @@ import { CouponRepository } from './coupon.repository';
 import { CouponUsageRepository } from './coupon-usage.repository';
 import { CmsContentRepository } from './cms-content.repository';
 import { NotificationRepository } from './notification.repository';
+import { ContactUsRepository } from './contact-us.repository';
 
 @Module({
   imports: [EntitiesModule],
@@ -42,6 +43,7 @@ import { NotificationRepository } from './notification.repository';
     CouponUsageRepository,
     CmsContentRepository,
     NotificationRepository,
+    ContactUsRepository,
   ],
   exports: [
     RepositoriesService,
@@ -63,6 +65,7 @@ import { NotificationRepository } from './notification.repository';
     CouponUsageRepository,
     CmsContentRepository,
     NotificationRepository,
+    ContactUsRepository,
   ],
 })
 export class RepositoriesModule { }

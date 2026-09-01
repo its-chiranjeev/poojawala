@@ -18,12 +18,12 @@ export class ServiceRepository extends BaseRepository<Service> {
     const { page = 1, limit = 10, search, isActive } = query;
     console.log("=== API REQUEST RECEIVED ===");
     console.log("Original query object:", query);
-    
+
     let parsedIsActive: boolean | undefined = undefined;
     if (isActive !== undefined) {
       parsedIsActive = String(isActive) === 'true';
     }
-    
+
     console.log("Parsed isActive:", parsedIsActive);
 
     const where: any = {

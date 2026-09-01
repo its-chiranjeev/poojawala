@@ -40,7 +40,7 @@ interface AuthenticatedRequest extends Request {
 @Controller('bookings')
 @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
 export class BookingController {
-  constructor(private readonly bookingService: BookingService) {}
+  constructor(private readonly bookingService: BookingService) { }
 
   @Post('admin/add')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
@@ -138,15 +138,15 @@ export class BookingController {
     return this.bookingService.repeatBooking(req.user, bookingId, dto);
   }
 
-  @Get('active')
-  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
-  async getActiveBookings(
-    @Req() req: AuthenticatedRequest,
-    @Query() query: BookingQueryDto,
-  ) {
-    return this.bookingService.getActiveBookings(req.user, query);
-  }
+  // @Get('active')
+  // @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  // @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
+  // async getActiveBookings(
+  //   @Req() req: AuthenticatedRequest,
+  //   @Query() query: BookingQueryDto,
+  // ) {
+  //   return this.bookingService.getActiveBookings(req.user, query);
+  // }
 
   @Patch(':id/respond')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
@@ -199,6 +199,16 @@ export class BookingController {
     bookingId: number,
   ) {
     return this.bookingService.generateStartOtp(req.user, bookingId);
+  }
+
+  @Post(':id/resend-start-otp')
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
+  resendStartOtp(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseIntPipe)
+    bookingId: number,
+  ) {
+    return this.bookingService.resendStartOtp(req.user, bookingId);
   }
 
   @Post(':id/verify-start-otp')
