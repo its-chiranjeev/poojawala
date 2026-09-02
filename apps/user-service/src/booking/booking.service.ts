@@ -3252,7 +3252,7 @@ export class BookingService {
         const bookingRepository = manager.getRepository(Booking);
         const purohitProfileRepository = manager.getRepository(PurohitProfile);
 
-        const [customer, purohitProfile, service, customerAddress] = await Promise.all([
+        const [customer, purohitProfile, service, customerAddress, purohitUser] = await Promise.all([
           userRepository.findOne({
             where: { id: dto.customerId, role: USER_ROLE.CUSTOMER },
           }),
@@ -3264,6 +3264,9 @@ export class BookingService {
           }),
           addressRepository.findOne({
             where: { id: dto.customerAddressId, customerId: dto.customerId },
+          }),
+          userRepository.findOne({
+            where: { id: dto.purohitId, role: USER_ROLE.PUROHIT },
           }),
         ]);
 
@@ -3399,6 +3402,10 @@ export class BookingService {
           formattedSavedBooking,
           notifyPurohitId: dto.purohitId,
           notifyCustomerId: customer.id,
+          customer,
+          purohitUser,
+          service,
+          customerAddress,
         };
       });
 
@@ -3415,6 +3422,73 @@ export class BookingService {
         'create_booking_by_admin',
         transactionResult.formattedSavedBooking,
       );
+
+      // Email notifications
+      const {
+        formattedSavedBooking: b,
+        customer,
+        purohitUser,
+        service,
+        customerAddress,
+      } = transactionResult;
+
+      const customerName = customer.firstName || 'Customer';
+      const purohitName = purohitUser?.firstName || 'Purohit';
+      const addressString = `${customerAddress.fullAddress}, ${customerAddress.city} - ${customerAddress.pincode}`;
+      
+      const splitDateIst = b.scheduledAtIst ? b.scheduledAtIst.split(', ') : [];
+      const bookingDate = splitDateIst.length > 0 ? splitDateIst[0] : b.scheduledAt.toLocaleDateString();
+      const bookingTime = splitDateIst.length > 1 ? splitDateIst[1] : b.scheduledAt.toLocaleTimeString();
+
+      if (customer.email) {
+        try {
+          this.logger.log(`[BookingEmail] Sending booking confirmation email to customer for booking #${b.bookingNumber}...`);
+          await this.emailService.sendCustomerBookingConfirmationEmail({
+            email: customer.email,
+            customerName,
+            bookingId: b.bookingNumber,
+            serviceName: service.name,
+            bookingDate,
+            bookingTime,
+            bookingAddress: addressString,
+            purohitName,
+            totalAmount: Number(b.finalAmount) || 0,
+            amountPaid: 0,
+            pendingAmount: Number(b.finalAmount) || 0,
+            paymentStatus: b.paymentStatus,
+            bookingStatus: b.status,
+            specialInstructions: b.specialInstructions,
+          });
+          this.logger.log(`[BookingEmail] Customer booking email sent successfully for booking #${b.bookingNumber}.`);
+        } catch (error) {
+          this.logger.error(`[BookingEmail] Failed to send customer booking email for booking #${b.bookingNumber}`, error instanceof Error ? error.stack : String(error));
+        }
+      }
+
+      if (purohitUser && purohitUser.email) {
+        try {
+          this.logger.log(`[BookingEmail] Sending booking assignment email to Purohit for booking #${b.bookingNumber}...`);
+          await this.emailService.sendPurohitBookingAssignmentEmail({
+            email: purohitUser.email,
+            purohitName,
+            bookingId: b.bookingNumber,
+            customerName,
+            customerPhone: customer.phone || 'N/A',
+            serviceName: service.name,
+            bookingDate,
+            bookingTime,
+            bookingAddress: addressString,
+            totalAmount: Number(b.finalAmount) || 0,
+            purohitPayoutAmount: Number(b.purohitPayoutAmount) || 0,
+            paymentStatus: b.paymentStatus,
+            bookingStatus: b.status,
+            specialInstructions: b.specialInstructions,
+          });
+          this.logger.log(`[BookingEmail] Purohit booking email sent successfully for booking #${b.bookingNumber}.`);
+        } catch (error) {
+          this.logger.error(`[BookingEmail] Failed to send Purohit booking email for booking #${b.bookingNumber}`, error instanceof Error ? error.stack : String(error));
+        }
+      }
 
       return transactionResult.formattedSavedBooking as any;
     } catch (error) {
