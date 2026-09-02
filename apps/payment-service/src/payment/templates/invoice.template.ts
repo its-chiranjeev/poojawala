@@ -220,6 +220,7 @@ export const paymentInvoiceTemplate = (
     body {
       margin: 0;
       padding: 0;
+      zoom: 0.92;
       background: #ffffff;
       color: var(--text);
       font-family:
@@ -237,6 +238,8 @@ export const paymentInvoiceTemplate = (
       width: 100%;
       min-height: 100%;
       overflow: hidden;
+      page-break-after: avoid;
+      page-break-inside: avoid;
       background:
         radial-gradient(
           circle at top right,
