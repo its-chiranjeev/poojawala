@@ -10,6 +10,7 @@ import { CommonAuthModule } from '@poojawala/common';
 import { AuthModuleModule } from 'apps/auth-service/src/auth/auth-module.module';
 import { S3Module } from '@poojawala/s3';
 import { NotificationModule } from '@poojawala/notification';
+import { CommonModule } from '@poojawala/common';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { NotificationModule } from '@poojawala/notification';
     EmailServicesModule,
     SmsServicesModule,
     NotificationModule,
+    CommonModule,
   ],
   controllers: [UserController],
   providers: [UserService],

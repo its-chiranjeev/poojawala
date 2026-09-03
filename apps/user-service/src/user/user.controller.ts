@@ -101,11 +101,12 @@ export class UserController {
   @UseInterceptors(FileInterceptor('profileImage'))
   @HttpCode(HttpStatus.OK)
   async updateProfileByAdmin(
+    @Req() req: any,
     @Param('id') id: string,
     @Body(new ValidationPipe({ whitelist: true })) dto: UpdateUserDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.userService.updateProfileByAdmin(id, dto, file);
+    return this.userService.updateProfileByAdmin(req.user.id, id, dto, file);
   }
 
   @UseGuards(JwtAuthGuard, CsrfGuard)
@@ -140,11 +141,12 @@ export class UserController {
   @Patch('admin/status/:id')
   @HttpCode(HttpStatus.OK)
   async updateUserStatus(
+    @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
     @Body(new ValidationPipe({ whitelist: true }))
     dto: UpdateUserStatusDto,
   ) {
-    return this.userService.updateUserStatus(id, dto.status);
+    return this.userService.updateUserStatus(id, dto.status, req.user.id);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)

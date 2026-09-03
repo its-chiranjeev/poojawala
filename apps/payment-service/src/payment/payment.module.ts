@@ -6,6 +6,7 @@ import { PaymentController } from './payment.controller';
 import { PaymentService } from './payment.service';
 import { NotificationModule } from '@poojawala/notification';
 import { GatewayModule } from '@poojawala/gateway';
+import { CommonModule } from '@poojawala/common';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { GatewayModule } from '@poojawala/gateway';
     ]),
     NotificationModule,
     GatewayModule,
+    CommonModule,
   ],
   controllers: [PaymentController],
   providers: [

@@ -54,19 +54,21 @@ export class ReviewController {
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   updateStatus(
+    @Req() req: any,
     @Param('bookingId', ParseIntPipe) bookingId: number,
     @Body() dto: UpdateReviewStatusDto,
   ) {
-    return this.reviewService.updateStatus(bookingId, dto);
+    return this.reviewService.updateStatus(bookingId, dto, req.user.id);
   }
 
   @Delete(':bookingId')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   remove(
+    @Req() req: any,
     @Param('bookingId', ParseIntPipe) bookingId: number,
   ) {
-    return this.reviewService.remove(bookingId);
+    return this.reviewService.remove(bookingId, req.user.id);
   }
 
   @Get('purohit/:purohitId/rating')

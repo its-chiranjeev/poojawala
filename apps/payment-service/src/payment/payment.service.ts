@@ -45,6 +45,8 @@ import { paymentInvoiceTemplate } from './templates/invoice.template';
 import { NotificationService } from '@poojawala/notification';
 import { NOTIFICATION_TYPE, PurohitProfile, PurohitBankAccount } from '@poojawala/entities';
 import { BookingGateway } from '@poojawala/gateway';
+import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 
 interface RazorpayError {
   error?: {
@@ -339,6 +341,7 @@ export class PaymentService {
     private readonly dataSource: DataSource,
     private readonly notificationService: NotificationService,
     private readonly bookingGateway: BookingGateway,
+    private readonly auditLogService: AuditLogService,
   ) {
     const keyId = process.env['RAZORPAY_KEY_ID'];
     const keySecret = process.env['RAZORPAY_KEY_SECRET'];
@@ -513,6 +516,22 @@ export class PaymentService {
       booking.purohitPayoutStatus = BOOKING_PAYMENT_STATUS.PAID;
       booking.purohitPaymentId = payoutRecord.id;
       await bkRepo.save(booking);
+
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: adminId,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: USER_ROLE.ADMIN,
+          module: AUDIT_MODULE.PAYMENT,
+          entity: 'Payment',
+          entityId: String(payoutRecord.id),
+          action: 'PAYOUT_PROCESSED',
+          message: `Admin manually processed a payout of ₹${payoutAmount} for Purohit #${purohitProfile.userId} (Booking #${booking.bookingNumber}).`,
+          oldValue: { purohitPayoutStatus: BOOKING_PAYMENT_STATUS.PENDING },
+          newValue: { purohitPayoutStatus: booking.purohitPayoutStatus, paymentId: payoutRecord.id },
+        },
+        manager,
+      );
 
       return payoutRecord;
     });
@@ -997,6 +1016,19 @@ export class PaymentService {
 
     await this.finalizeSuccessfulPayment(payment);
 
+    await this.auditLogService.createAuditLog({
+      actorId: null,
+      actorType: ACTOR_TYPE.WEBHOOK,
+      actorRole: undefined,
+      module: AUDIT_MODULE.PAYMENT,
+      entity: 'Payment',
+      entityId: String(payment.id),
+      action: 'PAYMENT_SUCCESS',
+      message: `Payment #${payment.id} completed successfully via Razorpay Webhook.`,
+      oldValue: { status: PAYMENT_STATUS.PENDING },
+      newValue: { status: PAYMENT_STATUS.SUCCESS, razorpayPaymentId: payment.razorpayPaymentId },
+    });
+
     this.logger.log(
       `Payment ${payment.id} completed through Razorpay Payment Link`,
     );
@@ -1040,6 +1072,19 @@ export class PaymentService {
         : 'Payment link cancelled';
 
     await this.paymentRepository.savePayment(payment);
+
+    await this.auditLogService.createAuditLog({
+      actorId: null,
+      actorType: ACTOR_TYPE.SYSTEM,
+      actorRole: undefined,
+      module: AUDIT_MODULE.PAYMENT,
+      entity: 'Payment',
+      entityId: String(payment.id),
+      action: 'PAYMENT_FAILED',
+      message: `Payment #${payment.id} failed: ${payment.failureReason}.`,
+      oldValue: { status: PAYMENT_STATUS.PENDING },
+      newValue: { status: payment.status, failureReason: payment.failureReason },
+    });
   }
 
   /**
@@ -1107,6 +1152,19 @@ export class PaymentService {
       : new Date();
 
     await this.finalizeSuccessfulPayment(payment);
+
+    await this.auditLogService.createAuditLog({
+      actorId: null,
+      actorType: ACTOR_TYPE.WEBHOOK,
+      actorRole: undefined,
+      module: AUDIT_MODULE.PAYMENT,
+      entity: 'Payment',
+      entityId: String(payment.id),
+      action: 'PAYMENT_SUCCESS',
+      message: `Payment #${payment.id} completed successfully via Razorpay Webhook (captured).`,
+      oldValue: { status: PAYMENT_STATUS.PENDING },
+      newValue: { status: PAYMENT_STATUS.SUCCESS, razorpayPaymentId: payment.razorpayPaymentId },
+    });
   }
 
   private async handlePaymentFailed(
@@ -1158,6 +1216,19 @@ export class PaymentService {
       razorpayPayment.error_description ?? 'Payment failed';
 
     await this.paymentRepository.savePayment(payment);
+
+    await this.auditLogService.createAuditLog({
+      actorId: null,
+      actorType: ACTOR_TYPE.SYSTEM,
+      actorRole: undefined,
+      module: AUDIT_MODULE.PAYMENT,
+      entity: 'Payment',
+      entityId: String(payment.id),
+      action: 'PAYMENT_FAILED',
+      message: `Payment #${payment.id} failed: ${payment.failureReason}.`,
+      oldValue: { status: PAYMENT_STATUS.PENDING },
+      newValue: { status: payment.status, failureReason: payment.failureReason },
+    });
   }
 
   private resolveDatabasePaymentId(
@@ -2464,6 +2535,19 @@ export class PaymentService {
         : new Date();
 
       await paymentRepository.save(lockedRefundPayment);
+
+      await this.auditLogService.createAuditLog({
+        actorId: null,
+        actorType: ACTOR_TYPE.WEBHOOK,
+        actorRole: undefined,
+        module: AUDIT_MODULE.PAYMENT,
+        entity: 'Payment',
+        entityId: String(lockedRefundPayment.id),
+        action: 'REFUND_SUCCESS',
+        message: `Refund #${lockedRefundPayment.id} processed successfully via Razorpay Webhook.`,
+        oldValue: { status: PAYMENT_STATUS.PENDING },
+        newValue: { status: PAYMENT_STATUS.SUCCESS, razorpayRefundId: lockedRefundPayment.razorpayRefundId },
+      }, manager);
     });
 
     const originalRazorpayPaymentId =
@@ -2556,6 +2640,19 @@ export class PaymentService {
       refund.error_description ?? refund.error_reason ?? 'Refund failed';
 
     await this.paymentRepository.savePayment(refundPayment);
+
+    await this.auditLogService.createAuditLog({
+      actorId: null,
+      actorType: ACTOR_TYPE.SYSTEM,
+      actorRole: undefined,
+      module: AUDIT_MODULE.PAYMENT,
+      entity: 'Payment',
+      entityId: String(refundPayment.id),
+      action: 'REFUND_FAILED',
+      message: `Refund #${refundPayment.id} failed: ${refundPayment.failureReason}.`,
+      oldValue: { status: PAYMENT_STATUS.PENDING },
+      newValue: { status: refundPayment.status, failureReason: refundPayment.failureReason },
+    });
 
     /*
      * A failed refund does not make the original

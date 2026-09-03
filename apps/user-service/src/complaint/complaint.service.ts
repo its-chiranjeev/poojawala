@@ -6,6 +6,8 @@ import { Booking, COMPLAINT_STATUS, Payment, PurohitProfile, User, USER_ROLE, CO
 import { ComplaintRepository } from '@poojawala/repositories';
 import { CreateComplaintDto, ComplaintQueryDto, UpdateComplaintStatusDto, } from '@poojawala/dtos';
 import { S3Service } from '@poojawala/s3';
+import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 
 @Injectable()
 export class ComplaintService {
@@ -16,6 +18,7 @@ export class ComplaintService {
     private readonly purohitProfileRepository: Repository<PurohitProfile>,
     private readonly complaintRepository: ComplaintRepository,
     private readonly s3Service: S3Service,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async createComplaint(
@@ -82,6 +85,19 @@ export class ComplaintService {
       });
 
       const savedComplaint = await this.complaintRepository.save(complaint);
+
+      await this.auditLogService.createAuditLog({
+        actorId: user.id,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: user.role,
+        module: AUDIT_MODULE.COMPLAINT,
+        entity: 'Complaint',
+        entityId: String(savedComplaint.id),
+        action: 'COMPLAINT_CREATED',
+        message: `User #${user.id} created complaint #${savedComplaint.id}.`,
+        oldValue: undefined,
+        newValue: { category: dto.category, bookingId: booking?.id },
+      });
 
       if (savedComplaint.evidenceUrls?.length) {
         const downloadUrls = await Promise.all(
@@ -315,6 +331,19 @@ export class ComplaintService {
     }
 
     const updatedComplaint = await this.complaintRepository.save(complaint);
+
+    await this.auditLogService.createAuditLog({
+      actorId: admin.id,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.COMPLAINT,
+      entity: 'Complaint',
+      entityId: String(updatedComplaint.id),
+      action: dto.status === COMPLAINT_STATUS.RESOLVED ? 'COMPLAINT_RESOLVED' : 'COMPLAINT_UPDATED',
+      message: `Admin #${admin.id} updated complaint #${updatedComplaint.id} status to ${dto.status}.`,
+      oldValue: undefined,
+      newValue: { status: dto.status, resolutionNotes: dto.resolutionNotes },
+    });
 
     return {
       message: 'Complaint status updated successfully',

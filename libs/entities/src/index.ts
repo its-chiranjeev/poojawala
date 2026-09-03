@@ -20,3 +20,4 @@ export * from './coupon-usage.entity';
 export * from './cms-content.entity';
 export * from './notification.entity';
 export * from './contact-us.entity';
+export * from './audit-log.entity';

@@ -106,10 +106,12 @@ export class ServiceController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @HttpCode(HttpStatus.OK)
   async updateServiceStatus(
+    @Req() req: Request,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateServiceStatusDto,
   ) {
-    return this.serviceService.updateServiceStatus(id, dto.isActive);
+    const user = (req as any).user;
+    return this.serviceService.updateServiceStatus(id, dto.isActive, user.id);
   }
 
   @Post()
@@ -125,13 +127,15 @@ export class ServiceController {
   )
   @HttpCode(HttpStatus.CREATED)
   async createService(
+    @Req() req: Request,
     @Body() dto: CreateServiceDto,
     @UploadedFiles()
     files: {
       icon?: Express.Multer.File[];
     },
   ) {
-    return this.serviceService.createService(dto, files);
+    const user = (req as any).user;
+    return this.serviceService.createService(dto, files, user.id);
   }
 
   @Patch(':id')
@@ -147,6 +151,7 @@ export class ServiceController {
   )
   @HttpCode(HttpStatus.OK)
   async updateService(
+    @Req() req: Request,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateServiceDto,
     @UploadedFiles()
@@ -154,7 +159,8 @@ export class ServiceController {
       icon?: Express.Multer.File[];
     },
   ) {
-    return this.serviceService.updateService(id, dto, files);
+    const user = (req as any).user;
+    return this.serviceService.updateService(id, dto, files, user.id);
   }
 
   @Get(':id')
@@ -167,8 +173,9 @@ export class ServiceController {
   @Roles(USER_ROLE.ADMIN)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @HttpCode(HttpStatus.OK)
-  async deleteService(@Param('id', ParseIntPipe) id: number) {
-    return this.serviceService.deleteService(id);
+  async deleteService(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    const user = (req as any).user;
+    return this.serviceService.deleteService(id, user.id);
   }
 
   @Get('purohit-service/:id')

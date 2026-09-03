@@ -9,9 +9,10 @@ import { PurohitServiceRepository } from '@poojawala/repositories';
 import { PurohitService } from '@poojawala/entities';
 import { PurohitProfileRepository } from '@poojawala/repositories';
 import { PurohitProfile } from '@poojawala/entities';
+import { CommonModule } from '@poojawala/common';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Service, PurohitService, PurohitProfile]), S3Module],
+  imports: [TypeOrmModule.forFeature([Service, PurohitService, PurohitProfile]), S3Module, CommonModule],
   controllers: [ServiceController],
   providers: [ServiceService, ServiceRepository, PurohitServiceRepository, PurohitProfileRepository],
 })

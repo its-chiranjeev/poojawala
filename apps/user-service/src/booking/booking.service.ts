@@ -60,6 +60,8 @@ import { EmailService } from '@poojawala/email-services';
 import { AssignmentService } from '../assignment/assignment.service';
 import { BookingGateway } from '@poojawala/gateway';
 import { NotificationService } from '@poojawala/notification';
+import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 
 interface CouponCalculationResult {
   coupon: Coupon;
@@ -78,6 +80,7 @@ export class BookingService {
     private readonly assignmentService: AssignmentService,
     private readonly bookingGateway: BookingGateway,
     private readonly notificationService: NotificationService,
+    private readonly auditLogService: AuditLogService,
   ) { }
 
   private getIstDateParts(date: Date) {
@@ -122,12 +125,27 @@ export class BookingService {
     this.logger.log('Checking expired bookings for manual assignment...');
 
     try {
-      const updatedCount = await this.bookingRepository.markExpiredAsManual();
+      const updatedBookings = await this.bookingRepository.markExpiredAsManual();
 
-      if (updatedCount > 0) {
+      if (updatedBookings.length > 0) {
         this.logger.log(
-          `${updatedCount} booking(s) marked for manual assignment`,
+          `${updatedBookings.length} booking(s) marked for manual assignment`,
         );
+
+        for (const booking of updatedBookings) {
+          await this.auditLogService.createAuditLog({
+            actorId: null,
+            actorType: ACTOR_TYPE.SYSTEM,
+            actorRole: undefined,
+            module: AUDIT_MODULE.BOOKING,
+            entity: 'Booking',
+            entityId: String(booking.id),
+            action: 'BOOKING_EXPIRED_MANUAL_ASSIGNMENT',
+            message: `Booking #${booking.id} auto-assignment time expired and was marked for manual assignment by SYSTEM.`,
+            oldValue: { assignmentType: 'AUTO' },
+            newValue: { assignmentType: 'MANUAL' },
+          });
+        }
       }
     } catch (error) {
       this.logger.error(
@@ -448,6 +466,27 @@ export class BookingService {
 
           await couponUsageRepository.save(couponUsage);
         }
+
+        await this.auditLogService.createAuditLog(
+          {
+            actorId: user.id,
+            actorType: ACTOR_TYPE.USER,
+            actorRole: user.role,
+            module: AUDIT_MODULE.BOOKING,
+            entity: 'Booking',
+            entityId: String(savedBooking.id),
+            action: 'BOOKING_CREATED',
+            message: `Customer created Booking #${savedBooking.bookingNumber}.`,
+            oldValue: undefined,
+            newValue: {
+              status: savedBooking.status,
+              paymentStatus: savedBooking.paymentStatus,
+              serviceId: savedBooking.serviceId,
+              scheduledAt: savedBooking.scheduledAt,
+            },
+          },
+          manager, // Pass transaction manager
+        );
 
         return { savedBooking, eligiblePurohitUserIds, service };
       });
@@ -873,6 +912,26 @@ export class BookingService {
         savedBooking = await bookingRepository.save(savedBooking);
       }
 
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: user.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: user.role,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(savedBooking.id),
+          action: 'BOOKING_UPDATED',
+          message: `Booking #${savedBooking.bookingNumber} details were updated.`,
+          oldValue: undefined,
+          newValue: {
+            scheduledAt: savedBooking.scheduledAt,
+            customerAddressId: savedBooking.customerAddressId,
+            specialInstructions: savedBooking.specialInstructions,
+          },
+        },
+        manager,
+      );
+
       return savedBooking;
     });
   }
@@ -1225,6 +1284,22 @@ export class BookingService {
           purohit: { user: true },
         },
       });
+
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: user.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: user.role,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(savedBooking.id),
+          action: 'BOOKING_CANCELLED',
+          message: `Booking #${savedBooking.bookingNumber} was cancelled.`,
+          oldValue: { status: booking.status },
+          newValue: { status: savedBooking.status, cancellationReason },
+        },
+        manager,
+      );
 
       return {
         message,
@@ -1670,6 +1745,22 @@ export class BookingService {
             'BOOKING',
           );
 
+          await this.auditLogService.createAuditLog(
+            {
+              actorId: user.id,
+              actorType: ACTOR_TYPE.USER,
+              actorRole: user.role,
+              module: AUDIT_MODULE.BOOKING,
+              entity: 'Booking',
+              entityId: String(savedBooking.id),
+              action: 'BOOKING_RESPONDED',
+              message: `Purohit #${purohitProfile.id} accepted Booking #${savedBooking.bookingNumber}.`,
+              oldValue: { status: BOOKING_STATUS.PENDING },
+              newValue: { status: savedBooking.status, purohitId: savedBooking.purohitId },
+            },
+            manager,
+          );
+
           return {
             message: 'Booking accepted successfully',
             booking: acceptedBooking ?? savedBooking,
@@ -1682,6 +1773,22 @@ export class BookingService {
           );
 
           await bookingRepository.save(booking);
+
+          await this.auditLogService.createAuditLog(
+            {
+              actorId: user.id,
+              actorType: ACTOR_TYPE.USER,
+              actorRole: user.role,
+              module: AUDIT_MODULE.BOOKING,
+              entity: 'Booking',
+              entityId: String(booking.id),
+              action: 'BOOKING_RESPONDED',
+              message: `Purohit #${purohitProfile.id} rejected Booking #${booking.bookingNumber}.`,
+              oldValue: { filteredPurohitIds },
+              newValue: { filteredPurohitIds: booking.filteredPurohitIds },
+            },
+            manager,
+          );
 
           return {
             message: 'Booking dismissed successfully',
@@ -1904,6 +2011,22 @@ export class BookingService {
         booking: assignedBooking ?? savedBooking,
       });
 
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: admin.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: admin.role,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(savedBooking.id),
+          action: 'PUROHIT_ASSIGNED',
+          message: `Admin manually assigned Purohit #${dto.purohitId} to Booking #${savedBooking.bookingNumber}.`,
+          oldValue: { status: BOOKING_STATUS.PENDING },
+          newValue: { status: savedBooking.status, purohitId: savedBooking.purohitId },
+        },
+        manager,
+      );
+
       return {
         message: 'Booking assigned to Purohit successfully',
         booking: assignedBooking ?? savedBooking,
@@ -2045,6 +2168,22 @@ export class BookingService {
           );
         }
       }
+
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: user.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: user.role,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(updatedBooking.id),
+          action: 'BOOKING_STATUS_CHANGED',
+          message: `Booking #${updatedBooking.bookingNumber} status changed from ${booking.status} to ${updatedBooking.status}.`,
+          oldValue: { status: booking.status },
+          newValue: { status: updatedBooking.status },
+        },
+        manager,
+      );
 
       return {
         message: 'Booking status updated successfully',
@@ -2231,6 +2370,19 @@ export class BookingService {
       ];
 
       const savedBooking = await this.bookingRepository.save(booking);
+
+      await this.auditLogService.createAuditLog({
+        actorId: user.id,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: user.role,
+        module: AUDIT_MODULE.BOOKING,
+        entity: 'Booking',
+        entityId: String(savedBooking.id),
+        action: 'COMPLETION_PROOF_UPLOADED',
+        message: `Purohit uploaded completion proof for Booking #${savedBooking.bookingNumber}.`,
+        oldValue: undefined,
+        newValue: { completionPhotoUrls: savedBooking.completionPhotoUrls },
+      });
 
       return {
         message: 'Completion proof uploaded successfully',
@@ -2495,6 +2647,22 @@ export class BookingService {
       booking.completionOtp = undefined;
 
       const updatedBooking = await bookingRepository.save(booking);
+
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: user.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: user.role,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(updatedBooking.id),
+          action: 'BOOKING_STARTED',
+          message: `Booking #${updatedBooking.bookingNumber} was started after OTP verification.`,
+          oldValue: { status: BOOKING_STATUS.ARRIVED },
+          newValue: { status: updatedBooking.status },
+        },
+        manager,
+      );
 
       return {
         message: 'Start OTP verified and booking started successfully',
@@ -2945,6 +3113,22 @@ export class BookingService {
 
       const finalBooking = rescheduledBooking ?? savedBooking;
 
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: user.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: user.role,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(finalBooking.id),
+          action: 'BOOKING_RESCHEDULED',
+          message: `Booking #${finalBooking.bookingNumber} was rescheduled to ${this.toIstString(newScheduledAt)}.`,
+          oldValue: { scheduledAt: previousScheduledAt },
+          newValue: { scheduledAt: newScheduledAt },
+        },
+        manager,
+      );
+
       return {
         message,
         assignmentChanged,
@@ -3204,6 +3388,19 @@ export class BookingService {
 
     const repeatedBooking = await this.createBooking(user, createBookingDto);
 
+    await this.auditLogService.createAuditLog({
+      actorId: user.id,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: user.role,
+      module: AUDIT_MODULE.BOOKING,
+      entity: 'Booking',
+      entityId: String(repeatedBooking.id),
+      action: 'BOOKING_REPEATED',
+      message: `A new repeated booking #${repeatedBooking.bookingNumber} was created from Booking #${originalBooking.bookingNumber}.`,
+      oldValue: undefined,
+      newValue: { originalBookingId: originalBooking.id, newBookingId: repeatedBooking.id },
+    });
+
     return {
       message: 'Booking repeated successfully',
       originalBooking: {
@@ -3388,6 +3585,27 @@ export class BookingService {
             }),
           );
         }
+
+        await this.auditLogService.createAuditLog(
+          {
+            actorId: adminUser.id,
+            actorType: ACTOR_TYPE.USER,
+            actorRole: adminUser.role,
+            module: AUDIT_MODULE.BOOKING,
+            entity: 'Booking',
+            entityId: String(savedBooking.id),
+            action: 'BOOKING_CREATED_ADMIN',
+            message: `Admin created Booking #${savedBooking.bookingNumber} for Customer #${customer.id}.`,
+            oldValue: undefined,
+            newValue: {
+              status: savedBooking.status,
+              purohitId: savedBooking.purohitId,
+              customerId: savedBooking.customerId,
+            },
+          },
+          manager,
+        );
+
         const formattedSavedBooking = {
           ...savedBooking,
           scheduledAtIst: this.toIstString(savedBooking.scheduledAt),

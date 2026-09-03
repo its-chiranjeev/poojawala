@@ -24,6 +24,8 @@ import {
   ResendOtpDto,
 } from '@poojawala/dtos';
 import { DataSource } from 'typeorm';
+import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 import { EmailService } from '@poojawala/email-services';
 import { SmsService } from '@poojawala/sms-services';
 import { MoreThan } from 'typeorm';
@@ -38,6 +40,7 @@ export class AuthModuleService {
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
     private readonly smsService: SmsService,
+    private readonly auditLogService: AuditLogService,
   ) { }
 
   async issueAuthTokens(user: User) {
@@ -196,9 +199,26 @@ export class AuthModuleService {
   // }
 
   async logoutService(userId: string | number) {
+    const numericUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    const user = await this.userRepository.findById(numericUserId);
+
     await this.userRepository.update(userId, {
       hashedRefreshToken: undefined,
     });
+
+    if (user) {
+      await this.auditLogService.createAuditLog({
+        actorId: numericUserId,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: user.role,
+        module: AUDIT_MODULE.AUTH,
+        entity: 'Auth',
+        entityId: String(numericUserId),
+        action: 'USER_LOGOUT',
+        message: `User #${numericUserId} logged out.`,
+      });
+    }
+
     return {
       message: 'Logout successful',
     };
@@ -229,6 +249,18 @@ export class AuthModuleService {
       throw new ForbiddenException('Your Profile Is Blocked');
     }
     const data = await this.issueAuthTokens(user);
+
+    await this.auditLogService.createAuditLog({
+      actorId: user.id,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: user.role,
+      module: AUDIT_MODULE.AUTH,
+      entity: 'Auth',
+      entityId: String(user.id),
+      action: 'USER_LOGIN',
+      message: `User #${user.id} logged in.`,
+    });
+
     return {
       message: 'Login successful',
       ...data,

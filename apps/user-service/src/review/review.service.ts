@@ -7,6 +7,8 @@ import {
   PurohitProfileRepository,
   UserRepository,
 } from '@poojawala/repositories';
+import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 import {
   BadRequestException,
   ForbiddenException,
@@ -20,6 +22,7 @@ export class ReviewService {
     private readonly bookingRepository: BookingRepository,
     private readonly userRepository: UserRepository,
     private readonly purohitProfileRepository: PurohitProfileRepository,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async create(user: User, bookingId: number, dto: CreateReviewDto) {
@@ -78,6 +81,19 @@ export class ReviewService {
     booking.reviewStatus = REVIEW_STATUS.DRAFT;
 
     await this.bookingRepository.save(booking);
+
+    await this.auditLogService.createAuditLog({
+      actorId: user.id,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: user.role,
+      module: AUDIT_MODULE.REVIEW,
+      entity: 'Review',
+      entityId: String(bookingId),
+      action: 'REVIEW_CREATED',
+      message: `User #${user.id} submitted a review for booking #${bookingId}.`,
+      oldValue: undefined,
+      newValue: { rating: dto.rating },
+    });
 
     return {
       message: 'Review submitted successfully',
@@ -193,7 +209,11 @@ export class ReviewService {
     return this.mapReviewResponse(booking);
   }
 
-  async updateStatus(bookingId: number, dto: UpdateReviewStatusDto) {
+  async updateStatus(
+    bookingId: number,
+    dto: UpdateReviewStatusDto,
+    adminId: number,
+  ) {
     const booking = await this.bookingRepository.findOne({
       where: { id: bookingId },
     });
@@ -216,10 +236,23 @@ export class ReviewService {
       await this.recalculateCustomerRating(booking.customerId);
     }
 
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.REVIEW,
+      entity: 'Review',
+      entityId: String(bookingId),
+      action: 'REVIEW_UPDATED',
+      message: `Admin updated review status for booking #${bookingId} to ${dto.status}.`,
+      oldValue: undefined,
+      newValue: { status: dto.status },
+    });
+
     return { message: 'Review status updated successfully' };
   }
 
-  async remove(bookingId: number) {
+  async remove(bookingId: number, adminId: number) {
     const booking = await this.bookingRepository.findOne({
       where: { id: bookingId },
     });
@@ -243,6 +276,19 @@ export class ReviewService {
     if (booking.customerId) {
       await this.recalculateCustomerRating(booking.customerId);
     }
+
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.REVIEW,
+      entity: 'Review',
+      entityId: String(bookingId),
+      action: 'REVIEW_DELETED',
+      message: `Admin deleted review for booking #${bookingId}.`,
+      oldValue: undefined,
+      newValue: { deleted: true },
+    });
 
     return { message: 'Review deleted successfully.' };
   }

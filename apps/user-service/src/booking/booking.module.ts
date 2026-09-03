@@ -10,6 +10,7 @@ import { EmailServicesModule } from '@poojawala/email-services';
 import { AssignmentModule } from '../assignment/assignment.module';
 import { GatewayModule } from '@poojawala/gateway';
 import { NotificationModule } from '@poojawala/notification';
+import { CommonModule } from '@poojawala/common';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { NotificationModule } from '@poojawala/notification';
     GatewayModule,
     EmailServicesModule,
     NotificationModule,
+    CommonModule,
   ],
   controllers: [BookingController],
   providers: [BookingService, BookingRepository],

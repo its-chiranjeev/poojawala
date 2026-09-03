@@ -73,9 +73,10 @@ export class CouponController {
   @Roles(USER_ROLE.ADMIN)
   @HttpCode(HttpStatus.OK)
   deleteCoupon(
+    @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
   ) {
-    return this.couponService.deleteCoupon(id);
+    return this.couponService.deleteCoupon(id, req.user.id);
   }
 
 
@@ -84,9 +85,10 @@ export class CouponController {
   @Roles(USER_ROLE.ADMIN)
   @HttpCode(HttpStatus.OK)
   restoreCoupon(
+    @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
   ) {
-    return this.couponService.restoreCoupon(id);
+    return this.couponService.restoreCoupon(id, req.user.id);
   }
 
 }

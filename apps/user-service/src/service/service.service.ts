@@ -25,6 +25,8 @@ import {
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { QueryFailedError, ILike } from 'typeorm';
+import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 
 // 177 87
 
@@ -35,6 +37,7 @@ export class ServiceService {
     private readonly s3Service: S3Service,
     private readonly PurohitServiceRepository: PurohitServiceRepository,
     private readonly PurohitProfileRepository: PurohitProfileRepository,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async findAllServices(query: GetServicesQueryDto) {
@@ -76,6 +79,7 @@ export class ServiceService {
     files: {
       icon?: Express.Multer.File[];
     },
+    adminId: number,
   ) {
     try {
       const existing = await this.serviceRepository.findOne({
@@ -122,6 +126,19 @@ export class ServiceService {
         }
       }
 
+      await this.auditLogService.createAuditLog({
+        actorId: adminId,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: USER_ROLE.ADMIN,
+        module: AUDIT_MODULE.SERVICE,
+        entity: 'Service',
+        entityId: String(savedService.id),
+        action: 'SERVICE_CREATED',
+        message: `Admin created new service ${savedService.name}.`,
+        oldValue: undefined,
+        newValue: { name: savedService.name, slug: savedService.slug },
+      });
+
       return {
         success: true,
         message: 'Service created successfully',
@@ -143,6 +160,7 @@ export class ServiceService {
     files: {
       icon?: Express.Multer.File[];
     },
+    adminId: number,
   ) {
     const service = await this.serviceRepository.findOne({
       where: { id },
@@ -196,6 +214,19 @@ export class ServiceService {
 
     const updated = await this.serviceRepository.save(service);
 
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.SERVICE,
+      entity: 'Service',
+      entityId: String(updated.id),
+      action: 'SERVICE_UPDATED',
+      message: `Admin updated service ${updated.name}.`,
+      oldValue: undefined,
+      newValue: { name: updated.name },
+    });
+
     return {
       success: true,
       message: 'Service updated successfully',
@@ -227,7 +258,7 @@ export class ServiceService {
     };
   }
 
-  async deleteService(id: number) {
+  async deleteService(id: number, adminId: number) {
     const service = await this.serviceRepository.findOne({
       where: { id },
     });
@@ -238,6 +269,19 @@ export class ServiceService {
 
     try {
       await this.serviceRepository.remove(service);
+
+      await this.auditLogService.createAuditLog({
+        actorId: adminId,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: USER_ROLE.ADMIN,
+        module: AUDIT_MODULE.SERVICE,
+        entity: 'Service',
+        entityId: String(id),
+        action: 'SERVICE_DELETED',
+        message: `Admin deleted service ${service.name}.`,
+        oldValue: undefined,
+        newValue: { deleted: true },
+      });
 
       return {
         success: true,
@@ -259,7 +303,7 @@ export class ServiceService {
     }
   }
 
-  async updateServiceStatus(id: number, isActive: boolean) {
+  async updateServiceStatus(id: number, isActive: boolean, adminId: number) {
     const service = await this.serviceRepository.findOne({ where: { id } });
     if (!service) {
       throw new NotFoundException('Service not found');

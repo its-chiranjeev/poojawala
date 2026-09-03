@@ -544,7 +544,7 @@ export class BookingRepository extends BaseRepository<Booking> {
     };
   }
 
-  async markExpiredAsManual(): Promise<number> {
+  async markExpiredAsManual(): Promise<Booking[]> {
     const result = await this.bookingRepo
       .createQueryBuilder()
       .update(Booking)
@@ -561,9 +561,10 @@ export class BookingRepository extends BaseRepository<Booking> {
       .andWhere(
         `"createdAt" <= CURRENT_TIMESTAMP - INTERVAL '5 minutes'`,
       )
+      .returning('*')
       .execute();
 
-    return result.affected ?? 0;
+    return result.raw as Booking[];
   }
 
   async getPurohitDashboardStats(purohitProfileId: number): Promise<{

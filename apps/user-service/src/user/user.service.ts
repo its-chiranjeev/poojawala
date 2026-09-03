@@ -15,6 +15,8 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { createHmac } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
+import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 
 @Injectable()
 export class UserService {
@@ -37,6 +39,7 @@ export class UserService {
     private readonly purohitBankAccountRepository: PurohitBankAccountRepository,
     private readonly bookingRepository: BookingRepository,
     private readonly purohitServiceRepository: PurohitServiceRepository,
+    private readonly auditLogService: AuditLogService,
   ) { }
 
   async deleteExpiredOtps(): Promise<number> {
@@ -48,10 +51,24 @@ export class UserService {
       .where('"expiresAt" <= NOW()')
       .execute();
 
-    return result.affected ?? 0;
+    const affected = result.affected ?? 0;
+
+    if (affected > 0) {
+      await this.auditLogService.createAuditLog({
+        actorType: ACTOR_TYPE.SYSTEM,
+        module: AUDIT_MODULE.AUTH,
+        entity: 'Otp',
+        action: 'DELETE_EXPIRED_OTPS',
+        message: `Deleted ${affected} expired OTP(s) via cron job`,
+        metadata: { deletedCount: affected },
+      });
+    }
+
+    return affected;
   }
 
   async updateProfileByAdmin(
+    adminId: number,
     id: string,
     dto: UpdateUserDto,
     file?: Express.Multer.File,
@@ -132,6 +149,20 @@ export class UserService {
         console.error('Failed to generate pre-signed URL for profileImage:', e);
       }
     }
+
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: id,
+      action: 'USER_PROFILE_UPDATED',
+      message: `Admin updated profile for User #${id}.`,
+      oldValue: undefined,
+      newValue: undefined,
+    });
+
     return {
       success: true,
       message: 'User profile updated successfully by admin',
@@ -295,6 +326,19 @@ export class UserService {
       }
     }
 
+    await this.auditLogService.createAuditLog({
+      actorId: Number(id),
+      actorType: ACTOR_TYPE.USER,
+      actorRole: user.role,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: id,
+      action: 'USER_PROFILE_UPDATED',
+      message: `User #${id} updated their own profile.`,
+      oldValue: undefined,
+      newValue: undefined,
+    });
+
     return {
       success: true,
       message: 'Profile updated successfully',
@@ -302,7 +346,7 @@ export class UserService {
     };
   }
 
-  async updateUserStatus(id: number, status: USER_STATUS) {
+  async updateUserStatus(id: number, status: USER_STATUS, adminId: number) {
     const user = await this.userRepository.findById(id);
 
     if (!user) {
@@ -330,6 +374,19 @@ export class UserService {
     }
 
     await this.userRepository.save(user);
+
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(id),
+      action: 'USER_STATUS_CHANGED',
+      message: `User #${id} status changed to ${status}.`,
+      oldValue: undefined,
+      newValue: { status },
+    });
 
     return {
       success: true,
@@ -947,6 +1004,19 @@ export class UserService {
         isDefault,
       });
 
+      await this.auditLogService.createAuditLog({
+        actorId: userId,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: user.role,
+        module: AUDIT_MODULE.USER,
+        entity: 'User',
+        entityId: String(userId),
+        action: 'CUSTOMER_ADDRESS_UPDATED',
+        message: `Customer #${userId} added a new address #${address.id}.`,
+        oldValue: undefined,
+        newValue: { addressId: address.id },
+      });
+
       return {
         success: true,
         message: 'Address added successfully',
@@ -1024,6 +1094,19 @@ export class UserService {
 
     const updated = await this.customerAddressRepository.update(id, dto);
 
+    await this.auditLogService.createAuditLog({
+      actorId: userId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.CUSTOMER,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(userId),
+      action: 'CUSTOMER_ADDRESS_UPDATED',
+      message: `Customer #${userId} updated address #${id}.`,
+      oldValue: undefined,
+      newValue: { addressId: id },
+    });
+
     return {
       success: true,
       message: 'Address updated successfully',
@@ -1043,6 +1126,19 @@ export class UserService {
     }
 
     await this.customerAddressRepository.softDelete(id);
+
+    await this.auditLogService.createAuditLog({
+      actorId: userId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.CUSTOMER,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(userId),
+      action: 'CUSTOMER_ADDRESS_UPDATED',
+      message: `Customer #${userId} deleted address #${id}.`,
+      oldValue: undefined,
+      newValue: { addressId: id, deleted: true },
+    });
 
     return {
       success: true,
@@ -1261,6 +1357,19 @@ export class UserService {
       verificationStatus: initialVerificationStatus,
     });
 
+    await this.auditLogService.createAuditLog({
+      actorId: userId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.PUROHIT,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(userId),
+      action: 'PUROHIT_BANK_UPDATED',
+      message: `Purohit #${userId} added a new bank account #${account.id}.`,
+      oldValue: undefined,
+      newValue: { bankAccountId: account.id },
+    });
+
     return {
       success: true,
       message: 'Bank account added successfully',
@@ -1401,6 +1510,19 @@ export class UserService {
 
     const freshUpdatedAccount = await this.purohitBankAccountRepository.findById(id);
 
+    await this.auditLogService.createAuditLog({
+      actorId: userId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.PUROHIT,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(userId),
+      action: 'PUROHIT_BANK_UPDATED',
+      message: `Purohit #${userId} updated bank account #${id}.`,
+      oldValue: undefined,
+      newValue: { bankAccountId: id },
+    });
+
     return {
       success: true,
       message: 'Bank account updated successfully',
@@ -1443,6 +1565,19 @@ export class UserService {
         );
       }
     }
+
+    await this.auditLogService.createAuditLog({
+      actorId: userId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.PUROHIT,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(userId),
+      action: 'PUROHIT_BANK_UPDATED',
+      message: `Purohit #${userId} deleted bank account #${id}.`,
+      oldValue: undefined,
+      newValue: { bankAccountId: id, deleted: true },
+    });
 
     return {
       success: true,
@@ -1860,6 +1995,19 @@ export class UserService {
             ? rejectionReason!
             : null,
       };
+    });
+
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(purohitUserId),
+      action: 'USER_STATUS_CHANGED',
+      message: `Admin verified Purohit #${purohitUserId}. Status changed to ${dto.status}.`,
+      oldValue: undefined,
+      newValue: { status: dto.status, rejectionReason: dto.status === PUROHIT_VERIFICATION_STATUS.REJECTED ? rejectionReason : null },
     });
 
     const emailSent = await this.sendPurohitVerificationEmail(result);
@@ -2492,6 +2640,19 @@ export class UserService {
       if (otpRecord.id) {
         await manager.delete(Otp, { id: otpRecord.id });
       }
+
+      await this.auditLogService.createAuditLog({
+        actorId: saved.id,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: saved.role,
+        module: AUDIT_MODULE.USER,
+        entity: 'User',
+        entityId: String(saved.id),
+        action: 'USER_REGISTERED',
+        message: `User ${saved.username || saved.email || saved.phone} registered as ${saved.role}.`,
+        oldValue: undefined,
+        newValue: { role: saved.role, email: saved.email, phone: saved.phone },
+      }, manager);
 
       return saved;
     });
