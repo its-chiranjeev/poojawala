@@ -114,86 +114,86 @@ export class AuthModuleService {
     return Buffer.from(value).toString('base64url');
   }
 
-  async generateOtpService(dto: RegisterUserDto) {
-    if (!dto.phone) {
-      throw new BadRequestException('Phone number is required');
-    }
+  // async generateOtpService(dto: RegisterUserDto) {
+  //   if (!dto.phone) {
+  //     throw new BadRequestException('Phone number is required');
+  //   }
 
-    if (
-      ![USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN].includes(
-        dto.role,
-      )
-    ) {
-      throw new BadRequestException('Invalid role');
-    }
+  //   if (
+  //     ![USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN].includes(
+  //       dto.role,
+  //     )
+  //   ) {
+  //     throw new BadRequestException('Invalid role');
+  //   }
 
-    // 2. Verify if user already exists by phone
-    if (dto.phone) {
-      const existingUserByPhone = await this.userRepository.findOne({
-        where: { phone: dto.phone },
-      });
-      if (existingUserByPhone) {
-        throw new ConflictException('Phone number already in use');
-      }
-      const verifyAccount = await this.otpRepository.findOne({
-        where: { phone: dto.phone },
-      });
-      if (verifyAccount) {
-        await this.otpRepository.delete(verifyAccount.id);
-      }
-    }
+  //   // 2. Verify if user already exists by phone
+  //   if (dto.phone) {
+  //     const existingUserByPhone = await this.userRepository.findOne({
+  //       where: { phone: dto.phone },
+  //     });
+  //     if (existingUserByPhone) {
+  //       throw new ConflictException('Phone number already in use');
+  //     }
+  //     const verifyAccount = await this.otpRepository.findOne({
+  //       where: { phone: dto.phone },
+  //     });
+  //     if (verifyAccount) {
+  //       await this.otpRepository.delete(verifyAccount.id);
+  //     }
+  //   }
 
-    // 5. Generate a 6-digit numeric OTP
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+  //   // 5. Generate a 6-digit numeric OTP
+  //   const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    if (dto.phone) {
-      await this.smsService.sendOtpSms(dto.phone, otpCode);
-    }
+  //   if (dto.phone) {
+  //     await this.smsService.sendOtpSms(dto.phone, otpCode);
+  //   }
 
-    // 6. Save OTP to database
-    const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + 10); // OTP expires in 10 minutes
+  //   // 6. Save OTP to database
+  //   const expiresAt = new Date();
+  //   expiresAt.setMinutes(expiresAt.getMinutes() + 10); // OTP expires in 10 minutes
 
-    const newOtp = this.otpRepository.create({
-      ...(dto.email && { email: dto.email }),
-      ...(dto.phone && { phone: dto.phone }),
-      otp: otpCode,
-      expiresAt,
-      role: dto.role,
-      isVerified: false,
-    });
+  //   const newOtp = this.otpRepository.create({
+  //     ...(dto.email && { email: dto.email }),
+  //     ...(dto.phone && { phone: dto.phone }),
+  //     otp: otpCode,
+  //     expiresAt,
+  //     role: dto.role,
+  //     isVerified: false,
+  //   });
 
-    await this.otpRepository.save(newOtp);
+  //   await this.otpRepository.save(newOtp);
 
-    return {
-      message: 'OTP has been sent.',
-      email: dto.email,
-      phone: dto.phone,
-    };
-  }
+  //   return {
+  //     message: 'OTP has been sent.',
+  //     email: dto.email,
+  //     phone: dto.phone,
+  //   };
+  // }
 
-  async verifyOtpService(dto: VerifyOtpDto) {
-    const otpRecord = await this.otpRepository.findOne({
-      where: {
-        phone: dto.phone,
-        otp: dto.otp,
-        isVerified: false,
-      },
-    });
+  // async verifyOtpService(dto: VerifyOtpDto) {
+  //   const otpRecord = await this.otpRepository.findOne({
+  //     where: {
+  //       phone: dto.phone,
+  //       otp: dto.otp,
+  //       isVerified: false,
+  //     },
+  //   });
 
-    if (!otpRecord) {
-      throw new BadRequestException('Invalid OTP code or phone');
-    }
+  //   if (!otpRecord) {
+  //     throw new BadRequestException('Invalid OTP code or phone');
+  //   }
 
-    if (otpRecord.expiresAt < new Date()) {
-      throw new BadRequestException('OTP has expired');
-    }
+  //   if (otpRecord.expiresAt < new Date()) {
+  //     throw new BadRequestException('OTP has expired');
+  //   }
 
-    await this.otpRepository.update(otpRecord.id, { isVerified: true });
-    return {
-      message: 'OTP verified successfully',
-    };
-  }
+  //   await this.otpRepository.update(otpRecord.id, { isVerified: true });
+  //   return {
+  //     message: 'OTP verified successfully',
+  //   };
+  // }
 
   async logoutService(userId: string | number) {
     await this.userRepository.update(userId, {

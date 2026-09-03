@@ -82,7 +82,7 @@ export class UserService {
       username: dto.username,
       firstName: dto.firstName,
       lastName: dto.lastName,
-      phone: dto.phone,
+      // phone: dto.phone,
       profileImage: dto.profileImage,
       birthPlace: dto.birthPlace,
     };
@@ -153,6 +153,10 @@ export class UserService {
       throw new NotFoundException('User not found');
     }
 
+    if (dto.phone) {
+      throw new BadRequestException('Phone number cannot be updated');
+    }
+
     // Normal users cannot change their role or status
     if (user.role !== USER_ROLE.ADMIN) {
       delete dto.role;
@@ -166,11 +170,27 @@ export class UserService {
       delete dto.confirmPassword;
     }
 
-    if (files.profileImage?.length) {
+    if (files?.profileImage?.length) {
       dto.profileImage = await this.s3Service.uploadFileHelper(
         id,
         'profileImage',
         files.profileImage,
+      );
+    }
+
+    if (files?.certificate?.length) {
+      dto.certificate = await this.s3Service.uploadFileHelper(
+        id,
+        'certificate',
+        files.certificate,
+      );
+    }
+
+    if (files?.templeAffiliationProof?.length) {
+      dto.templeAffiliationProof = await this.s3Service.uploadFileHelper(
+        id,
+        'templeAffiliationProof',
+        files.templeAffiliationProof,
       );
     }
 
@@ -179,7 +199,6 @@ export class UserService {
       username: dto.username,
       firstName: dto.firstName,
       lastName: dto.lastName,
-      phone: dto.phone,
       profileImage: dto.profileImage,
       birthPlace: dto.birthPlace,
     };
@@ -210,6 +229,41 @@ export class UserService {
     }
 
     const updatedUser = await this.userRepository.getFullProfile(Number(id), user.role);
+
+    if (user.role === USER_ROLE.PUROHIT) {
+      const profile = await this.purohitProfileRepository.findByUserId(
+        Number(id),
+      );
+
+      if (profile) {
+        await this.purohitProfileRepository.update(profile.id, {
+          bio: dto.bio,
+          qualification: dto.qualification,
+          experienceYears: dto.experienceYears,
+          aadhaarNumber: dto.aadhaarNumber,
+          city: dto.city,
+          languages: dto.languages,
+          specializations: dto.specializations,
+          ...(dto.certificate && { certificateUrl: dto.certificate }),
+          ...(dto.templeAffiliationProof && {
+            templeAffiliationProofUrl: dto.templeAffiliationProof,
+          }),
+          isOnlineAvailable:
+            dto.isOnlineAvailable === undefined
+              ? profile.isOnlineAvailable
+              : String(dto.isOnlineAvailable) === 'true',
+          isOfflineAvailable:
+            dto.isOfflineAvailable === undefined
+              ? profile.isOfflineAvailable
+              : String(dto.isOfflineAvailable) === 'true',
+        });
+      }
+    }
+
+    const fullUser = await this.userRepository.getFullProfile(
+      Number(id),
+      user.role,
+    );
 
     const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } =
       updatedUser as any;
@@ -2326,7 +2380,7 @@ export class UserService {
         const isOnlineAvailable = dto.isOnlineAvailable === 'true';
 
         const isOfflineAvailable = dto.isOfflineAvailable === 'true';
-        
+
         let profile = await manager.findOne(PurohitProfile, { where: { userId: saved.id } });
 
         if (profile) {

@@ -27,23 +27,23 @@ export class AuthModuleController {
     private readonly s3Service: S3Service,
   ) { }
 
-  @Post('generate-otp')
-  @HttpCode(HttpStatus.OK)
-  async generateOtp(
-    @Body(new ValidationPipe({ whitelist: true, transform: true }))
-    dto: RegisterUserDto,
-  ) {
-    return this.authModuleService.generateOtpService(dto);
-  }
+  // @Post('generate-otp')
+  // @HttpCode(HttpStatus.OK)
+  // async generateOtp(
+  //   @Body(new ValidationPipe({ whitelist: true, transform: true }))
+  //   dto: RegisterUserDto,
+  // ) {
+  //   return this.authModuleService.generateOtpService(dto);
+  // }
 
-  @Post('verify-otp')
-  @HttpCode(HttpStatus.OK)
-  async verifyOtp(
-    @Body(new ValidationPipe({ whitelist: true, transform: true }))
-    dto: VerifyOtpDto,
-  ) {
-    return this.authModuleService.verifyOtpService(dto);
-  }
+  // @Post('verify-otp')
+  // @HttpCode(HttpStatus.OK)
+  // async verifyOtp(
+  //   @Body(new ValidationPipe({ whitelist: true, transform: true }))
+  //   dto: VerifyOtpDto,
+  // ) {
+  //   return this.authModuleService.verifyOtpService(dto);
+  // }
 
   private setAuthCookies(res: Response, accessToken: string, refreshToken: string, csrfToken: string) {
     const isProd = process.env.NODE_ENV === 'production';
