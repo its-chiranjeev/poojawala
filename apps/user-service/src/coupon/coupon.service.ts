@@ -2,12 +2,14 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { CouponRepository } from '@poojawala/repositories';
 import { CreateCouponDto, } from '@poojawala/dtos';
 
-import { DISCOUNT_TYPE,} from '@poojawala/entities';
+import { DISCOUNT_TYPE, USER_ROLE, AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 
 @Injectable()
 export class CouponService {
   constructor(
     private readonly couponRepository: CouponRepository,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async createCoupon(
@@ -85,6 +87,19 @@ export class CouponService {
     });
 
     await this.couponRepository.save(coupon);
+
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.COUPON,
+      entity: 'Coupon',
+      entityId: String(coupon.id),
+      action: 'COUPON_CREATED',
+      message: `Admin #${adminId} created coupon ${coupon.code}.`,
+      oldValue: undefined,
+      newValue: { code: coupon.code, discountType: coupon.discountType, discountValue: coupon.discountValue },
+    });
 
     return {
       success: true,
@@ -232,6 +247,19 @@ export class CouponService {
       createdById: adminId,
     });
 
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.COUPON,
+      entity: 'Coupon',
+      entityId: String(id),
+      action: 'COUPON_UPDATED',
+      message: `Admin #${adminId} updated coupon ${dto.code.toUpperCase()}.`,
+      oldValue: undefined,
+      newValue: { code: dto.code.toUpperCase(), isActive: dto.isActive },
+    });
+
     return {
       success: true,
       message: 'Coupon updated successfully',
@@ -239,7 +267,7 @@ export class CouponService {
   }
 
 
-  async deleteCoupon(id: number) {
+  async deleteCoupon(id: number, adminId: number) {
     const coupon = await this.couponRepository.getCouponByIdWithDeleted(id);
 
     if (!coupon) {
@@ -254,6 +282,19 @@ export class CouponService {
 
     await this.couponRepository.save(coupon);
 
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.COUPON,
+      entity: 'Coupon',
+      entityId: String(id),
+      action: 'COUPON_DELETED',
+      message: `Coupon ${coupon.code} was deleted.`,
+      oldValue: undefined,
+      newValue: { deleted: true, isActive: false },
+    });
+
     return {
       success: true,
       message: 'Coupon deleted successfully',
@@ -261,7 +302,7 @@ export class CouponService {
   }
 
 
-  async restoreCoupon(id: number) {
+  async restoreCoupon(id: number, adminId: number) {
     const coupon = await this.couponRepository.getCouponByIdWithDeleted(id);
 
     if (!coupon) {

@@ -7,6 +7,8 @@ import {
   PurohitProfileRepository,
   UserRepository,
 } from '@poojawala/repositories';
+import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 import {
   BadRequestException,
   ForbiddenException,
@@ -20,6 +22,7 @@ export class ReviewService {
     private readonly bookingRepository: BookingRepository,
     private readonly userRepository: UserRepository,
     private readonly purohitProfileRepository: PurohitProfileRepository,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async create(user: User, bookingId: number, dto: CreateReviewDto) {
@@ -52,7 +55,10 @@ export class ReviewService {
       booking.customerRating = dto.rating;
       booking.customerReview = dto.review;
     } else if (user.role === USER_ROLE.PUROHIT) {
-      if (booking.purohitId !== user.id) {
+      const purohitProfile = await this.purohitProfileRepository.findOne({
+        where: { userId: user.id },
+      });
+      if (booking.purohitId !== purohitProfile?.id) {
         throw new ForbiddenException('You cannot review this booking.');
       }
       if (
@@ -76,6 +82,19 @@ export class ReviewService {
 
     await this.bookingRepository.save(booking);
 
+    await this.auditLogService.createAuditLog({
+      actorId: user.id,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: user.role,
+      module: AUDIT_MODULE.REVIEW,
+      entity: 'Review',
+      entityId: String(bookingId),
+      action: 'REVIEW_CREATED',
+      message: `User #${user.id} submitted a review for booking #${bookingId}.`,
+      oldValue: undefined,
+      newValue: { rating: dto.rating },
+    });
+
     return {
       message: 'Review submitted successfully',
     };
@@ -86,6 +105,8 @@ export class ReviewService {
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.customer', 'customer')
       .leftJoinAndSelect('booking.purohit', 'purohit')
+      .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('booking.service', 'service')
       .where(
         '(booking.customerRating IS NOT NULL OR booking.purohitRating IS NOT NULL)',
       );
@@ -95,7 +116,7 @@ export class ReviewService {
         userId: user.id,
       });
     } else if (user.role === USER_ROLE.PUROHIT) {
-      queryBuilder.andWhere('booking.purohitId = :userId', { userId: user.id });
+      queryBuilder.andWhere('purohit.userId = :userId', { userId: user.id });
     }
 
     if (query.status) {
@@ -118,11 +139,43 @@ export class ReviewService {
     const bookings = await queryBuilder.getMany();
 
     return {
-      data: bookings,
+      data: bookings.map((b) => this.mapReviewResponse(b)),
       meta: {
         total,
         page: query.page,
         limit: query.limit,
+      },
+    };
+  }
+
+  async getAllCustomerReviews(query: ReviewQueryDto) {
+    const queryBuilder = this.bookingRepository
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.customer', 'customer')
+      .leftJoinAndSelect('booking.purohit', 'purohit')
+      .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('booking.service', 'service')
+      .where('booking.customerRating IS NOT NULL')
+      .andWhere('booking.reviewStatus = :status', {
+        status: REVIEW_STATUS.PUBLISHED,
+      });
+
+    const total = await queryBuilder.getCount();
+
+    queryBuilder
+      .orderBy('booking.updatedAt', 'DESC')
+      .skip((query.page - 1) * query.limit)
+      .take(query.limit);
+
+    const bookings = await queryBuilder.getMany();
+
+    return {
+      data: bookings.map((b) => this.mapReviewResponse(b)),
+      meta: {
+        total,
+        page: query.page,
+        limit: query.limit,
+        totalPages: Math.ceil(total / query.limit),
       },
     };
   }
@@ -132,6 +185,8 @@ export class ReviewService {
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.customer', 'customer')
       .leftJoinAndSelect('booking.purohit', 'purohit')
+      .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('booking.service', 'service')
       .where('booking.id = :bookingId', { bookingId })
       .andWhere(
         '(booking.customerRating IS NOT NULL OR booking.purohitRating IS NOT NULL)',
@@ -142,7 +197,7 @@ export class ReviewService {
         userId: user.id,
       });
     } else if (user.role === USER_ROLE.PUROHIT) {
-      queryBuilder.andWhere('booking.purohitId = :userId', { userId: user.id });
+      queryBuilder.andWhere('purohit.userId = :userId', { userId: user.id });
     }
 
     const booking = await queryBuilder.getOne();
@@ -151,10 +206,14 @@ export class ReviewService {
       throw new NotFoundException('Review not found for this booking.');
     }
 
-    return booking;
+    return this.mapReviewResponse(booking);
   }
 
-  async updateStatus(bookingId: number, dto: UpdateReviewStatusDto) {
+  async updateStatus(
+    bookingId: number,
+    dto: UpdateReviewStatusDto,
+    adminId: number,
+  ) {
     const booking = await this.bookingRepository.findOne({
       where: { id: bookingId },
     });
@@ -177,10 +236,23 @@ export class ReviewService {
       await this.recalculateCustomerRating(booking.customerId);
     }
 
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.REVIEW,
+      entity: 'Review',
+      entityId: String(bookingId),
+      action: 'REVIEW_UPDATED',
+      message: `Admin updated review status for booking #${bookingId} to ${dto.status}.`,
+      oldValue: undefined,
+      newValue: { status: dto.status },
+    });
+
     return { message: 'Review status updated successfully' };
   }
 
-  async remove(bookingId: number) {
+  async remove(bookingId: number, adminId: number) {
     const booking = await this.bookingRepository.findOne({
       where: { id: bookingId },
     });
@@ -204,6 +276,19 @@ export class ReviewService {
     if (booking.customerId) {
       await this.recalculateCustomerRating(booking.customerId);
     }
+
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.REVIEW,
+      entity: 'Review',
+      entityId: String(bookingId),
+      action: 'REVIEW_DELETED',
+      message: `Admin deleted review for booking #${bookingId}.`,
+      oldValue: undefined,
+      newValue: { deleted: true },
+    });
 
     return { message: 'Review deleted successfully.' };
   }
@@ -261,5 +346,59 @@ export class ReviewService {
     await this.userRepository.update(customerId, {
       avgRating: finalRating,
     });
+  }
+
+  private mapReviewResponse(booking: any) {
+    return {
+      id: booking.id,
+      bookingId: booking.id,
+      bookingNumber: booking.bookingNumber,
+
+      customerId: booking.customerId,
+      customer: booking.customer
+        ? {
+            id: booking.customer.id,
+            firstName: booking.customer.firstName,
+            lastName: booking.customer.lastName,
+            profileImage: booking.customer.profileImage,
+          }
+        : null,
+
+      purohitId: booking.purohitId,
+      purohit: booking.purohit
+        ? {
+            id: booking.purohit.id,
+            userId: booking.purohit.userId,
+            firstName: booking.purohit.user?.firstName,
+            lastName: booking.purohit.user?.lastName,
+            profileImage: booking.purohit.user?.profileImage,
+            bio: booking.purohit.bio,
+            qualification: booking.purohit.qualification,
+            experienceYears: booking.purohit.experienceYears,
+            languages: booking.purohit.languages,
+            specializations: booking.purohit.specializations,
+            city: booking.purohit.city,
+            avgRating: booking.purohit.avgRating,
+          }
+        : null,
+
+      serviceId: booking.serviceId,
+      service: booking.service
+        ? {
+            id: booking.service.id,
+            name: booking.service.name,
+            iconUrl: booking.service.iconUrl,
+          }
+        : null,
+
+      customerReview: booking.customerReview,
+      customerRating: booking.customerRating,
+      purohitReview: booking.purohitReview,
+      purohitRating: booking.purohitRating,
+      reviewStatus: booking.reviewStatus,
+
+      createdAt: booking.createdAt,
+      updatedAt: booking.updatedAt,
+    };
   }
 }

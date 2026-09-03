@@ -12,12 +12,18 @@ import {
 import { Booking } from './booking.entity';
 import { User } from './user.entity';
 import { PaymentBooking } from './payment-booking.entity';
+import { PurohitBankAccount } from './purohit-bank-account.entity';
 
 export enum PAYMENT_TYPE {
   BOOKING_PAYMENT = 'BOOKING_PAYMENT',
   PUROHIT_PAYOUT = 'PUROHIT_PAYOUT',
   CUSTOMER_REFUND = 'CUSTOMER_REFUND',
   DONATION = 'DONATION',
+}
+
+export enum CUSTOMER_PAYMENT_METHOD {
+  CASH = 'CASH',
+  ONLINE = 'ONLINE',
 }
 
 export enum PAYMENT_METHOD {
@@ -86,6 +92,13 @@ export class Payment {
 
   @Column({
     type: 'enum',
+    enum: CUSTOMER_PAYMENT_METHOD,
+    nullable: true,
+  })
+  customerPaymentMethod?: CUSTOMER_PAYMENT_METHOD;
+
+  @Column({
+    type: 'enum',
     enum: PAYMENT_METHOD,
     nullable: true,
   })
@@ -118,6 +131,19 @@ export class Payment {
 
   @Column({ type: 'timestamp', nullable: true })
   paidAt?: Date;
+
+  @Column({ type: 'varchar', length: 100, nullable: true, unique: true })
+  idempotencyKey?: string;
+
+  @Column({ type: 'int', nullable: true })
+  purohitBankAccountId?: number;
+
+  @ManyToOne(() => PurohitBankAccount, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'purohitBankAccountId' })
+  purohitBankAccount?: PurohitBankAccount;
+
+  @Column({ type: 'text', nullable: true })
+  remark?: string;
 
   @OneToMany(() => PaymentBooking, (paymentBooking) => paymentBooking.payment)
   paymentBookings!: PaymentBooking[];

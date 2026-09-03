@@ -61,6 +61,12 @@
       "@poojawala/payment/*": [
         "libs/payment/src/*"
       ],
+      "@poojawala/notification": [
+        "libs/notification/src"
+      ],
+      "@poojawala/notification/*": [
+        "libs/notification/src/*"
+      ],
       "@poojawala/repositories": [
         "libs/repositories/src"
       ],

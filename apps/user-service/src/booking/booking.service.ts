@@ -31,10 +31,13 @@ import {
   PUROHIT_VERIFICATION_STATUS,
   PurohitProfile,
   PurohitService,
+  PurohitServiceArea,
   Service,
   User,
   USER_ROLE,
   USER_STATUS,
+  NOTIFICATION_TYPE,
+  PAYMENT_TYPE,
 } from '@poojawala/entities';
 import { BookingRepository } from '@poojawala/repositories';
 import {
@@ -56,7 +59,9 @@ import { SmsService } from '@poojawala/sms-services';
 import { EmailService } from '@poojawala/email-services';
 import { AssignmentService } from '../assignment/assignment.service';
 import { BookingGateway } from '@poojawala/gateway';
-import { console } from 'inspector';
+import { NotificationService } from '@poojawala/notification';
+import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 
 interface CouponCalculationResult {
   coupon: Coupon;
@@ -74,6 +79,8 @@ export class BookingService {
     private readonly emailService: EmailService,
     private readonly assignmentService: AssignmentService,
     private readonly bookingGateway: BookingGateway,
+    private readonly notificationService: NotificationService,
+    private readonly auditLogService: AuditLogService,
   ) { }
 
   private getIstDateParts(date: Date) {
@@ -118,12 +125,27 @@ export class BookingService {
     this.logger.log('Checking expired bookings for manual assignment...');
 
     try {
-      const updatedCount = await this.bookingRepository.markExpiredAsManual();
+      const updatedBookings = await this.bookingRepository.markExpiredAsManual();
 
-      if (updatedCount > 0) {
+      if (updatedBookings.length > 0) {
         this.logger.log(
-          `${updatedCount} booking(s) marked for manual assignment`,
+          `${updatedBookings.length} booking(s) marked for manual assignment`,
         );
+
+        for (const booking of updatedBookings) {
+          await this.auditLogService.createAuditLog({
+            actorId: null,
+            actorType: ACTOR_TYPE.SYSTEM,
+            actorRole: undefined,
+            module: AUDIT_MODULE.BOOKING,
+            entity: 'Booking',
+            entityId: String(booking.id),
+            action: 'BOOKING_EXPIRED_MANUAL_ASSIGNMENT',
+            message: `Booking #${booking.id} auto-assignment time expired and was marked for manual assignment by SYSTEM.`,
+            oldValue: { assignmentType: 'AUTO' },
+            newValue: { assignmentType: 'MANUAL' },
+          });
+        }
       }
     } catch (error) {
       this.logger.error(
@@ -168,36 +190,43 @@ export class BookingService {
     }
 
     try {
-      return await this.dataSource.transaction(async (manager) => {
+      const transactionResult = await this.dataSource.transaction(async (manager) => {
         const userRepository = manager.getRepository(User);
         const serviceRepository = manager.getRepository(Service);
         const addressRepository = manager.getRepository(CustomerAddress);
         const bookingRepository = manager.getRepository(Booking);
-        /*
-         * Reload customer from database.
-         */
-        const customer = await userRepository.findOne({
-          where: {
-            id: user.id,
-            role: USER_ROLE.CUSTOMER,
-            status: USER_STATUS.ACTIVE,
-          },
-        });
+        if (!dto.customerAddressId) {
+          throw new BadRequestException(
+            'Customer address is required for booking',
+          );
+        }
+
+        const [customer, service, customerAddress] = await Promise.all([
+          userRepository.findOne({
+            where: {
+              id: user.id,
+              role: USER_ROLE.CUSTOMER,
+              status: USER_STATUS.ACTIVE,
+            },
+          }),
+          serviceRepository.findOne({
+            where: {
+              id: dto.serviceId,
+            },
+          }),
+          addressRepository.findOne({
+            where: {
+              id: dto.customerAddressId,
+              customerId: user.id,
+            },
+          }),
+        ]);
 
         if (!customer) {
           throw new ForbiddenException(
             'Only active customers can create bookings',
           );
         }
-
-        /*
-         * Validate service.
-         */
-        const service = await serviceRepository.findOne({
-          where: {
-            id: dto.serviceId,
-          },
-        });
 
         if (!service) {
           throw new NotFoundException('Service not found');
@@ -206,22 +235,6 @@ export class BookingService {
         if (!service.isActive) {
           throw new BadRequestException('Service is currently inactive');
         }
-
-        /*
-         * Address is required.
-         */
-        if (!dto.customerAddressId) {
-          throw new BadRequestException(
-            'Customer address is required for booking',
-          );
-        }
-
-        const customerAddress = await addressRepository.findOne({
-          where: {
-            id: dto.customerAddressId,
-            customerId: customer.id,
-          },
-        });
 
         if (!customerAddress) {
           throw new NotFoundException(
@@ -354,17 +367,9 @@ export class BookingService {
         }
 
         /*
-         * Pricing.
+         * Pricing logic (platformCommission, purohitPayoutAmount, finalAmount)
+         * has been deferred to when a Purohit accepts the booking or is assigned by an admin.
          */
-        const agreedPrice = minPrice;
-
-        const platformCommission = Number(
-          (agreedPrice * (commissionPercentage / 100)).toFixed(2),
-        );
-
-        const purohitPayoutAmount = Number(
-          (agreedPrice - platformCommission).toFixed(2),
-        );
 
         let appliedCoupon: Coupon | null = null;
         let discountAmount = 0;
@@ -375,36 +380,16 @@ export class BookingService {
             customer.id,
             service.id,
             couponCode,
-            agreedPrice,
+            minPrice, // Use minPrice for initial validation
           );
 
           appliedCoupon = couponResult.coupon;
           discountAmount = couponResult.discountAmount;
         }
 
-        const finalAmount = Number(
-          (agreedPrice - discountAmount + donationAmount).toFixed(2),
-        );
-
-        if (
-          platformCommission < 0 ||
-          purohitPayoutAmount < 0 ||
-          discountAmount < 0 ||
-          finalAmount < 0
-        ) {
-          throw new BadRequestException('Calculated booking amount is invalid');
-        }
-
         const bookingNumber =
           await this.generateUniqueBookingNumber(bookingRepository);
 
-        /*
-         * Initially create booking with
-         * empty filteredPurohitIds.
-         *
-         * AssignmentService will calculate
-         * them after booking is persisted.
-         */
         const booking = bookingRepository.create({
           bookingNumber,
           customerId: customer.id,
@@ -416,34 +401,20 @@ export class BookingService {
           scheduledAt,
           specialInstructions: dto.specialInstructions?.trim() || undefined,
           customFields: dto.customFields ?? undefined,
-          agreedPrice,
           commissionPercentage,
-          platformCommission,
-          purohitPayoutAmount,
+          platformCommission: null as any,
+          purohitPayoutAmount: null as any,
           couponCode: appliedCoupon?.code ?? undefined,
           discountAmount,
           donationAmount,
-          finalAmount,
+          finalAmount: null as any,
           status: BOOKING_STATUS.PENDING,
           paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
           assignmentType: ASSIGNMENT_TYPE.AUTO,
-          /*
-           * AssignmentService fills
-           * this after first save.
-           */
-          filteredPurohitIds: [],
         });
 
         /*
-         * First save generates booking.id.
-         */
-        let savedBooking = await bookingRepository.save(booking);
-
-        /*
-         * NEW ASSIGNMENT FLOW
-         *
          * AssignmentService handles:
-         *
          * - approved Purohits
          * - active Purohit users
          * - service matching
@@ -451,48 +422,29 @@ export class BookingService {
          * - Haversine radius
          * - busy booking filtering
          */
-        const eligiblePurohitIds =
-          await this.assignmentService.findEligiblePurohitIds(
-            manager,
-            savedBooking,
-          );
+        const eligiblePurohitIds = await this.assignmentService.findEligiblePurohitIds(
+          manager,
+          booking,
+        );
 
-        savedBooking.filteredPurohitIds = eligiblePurohitIds;
-        savedBooking = await bookingRepository.save(savedBooking);
+        booking.filteredPurohitIds = eligiblePurohitIds;
 
+        const savedBooking = await bookingRepository.save(booking);
 
+        let eligiblePurohitUserIds: number[] = [];
         if (eligiblePurohitIds.length > 0) {
-          const purohitProfiles =
-            await manager
-              .getRepository(PurohitProfile)
-              .createQueryBuilder('profile')
-              .select([
-                'profile.id',
-                'profile.userId',
-              ])
-              .where(
-                'profile.id IN (:...purohitProfileIds)',
-                {
-                  purohitProfileIds:
-                    eligiblePurohitIds,
-                },
-              )
-              .getMany();
+          const purohitProfiles = await manager
+            .getRepository(PurohitProfile)
+            .createQueryBuilder('profile')
+            .select(['profile.id', 'profile.userId'])
+            .where('profile.id IN (:...purohitProfileIds)', {
+              purohitProfileIds: eligiblePurohitIds,
+            })
+            .getMany();
 
-          const eligiblePurohitUserIds =
-            purohitProfiles.map(
-              (profile) => profile.userId,
-            );
-
-
-          for (const purohitUserId of eligiblePurohitUserIds) {
-
-            this.bookingGateway.notifyUser(
-              purohitUserId,
-              'create_booking',
-              savedBooking,
-            );
-          }
+          eligiblePurohitUserIds = purohitProfiles.map(
+            (profile) => profile.userId,
+          );
         }
 
         this.logger.log(
@@ -509,13 +461,61 @@ export class BookingService {
             coupon: appliedCoupon,
             customer,
             booking: savedBooking,
+            discountApplied: discountAmount,
           });
 
           await couponUsageRepository.save(couponUsage);
         }
 
-        return savedBooking;
+        await this.auditLogService.createAuditLog(
+          {
+            actorId: user.id,
+            actorType: ACTOR_TYPE.USER,
+            actorRole: user.role,
+            module: AUDIT_MODULE.BOOKING,
+            entity: 'Booking',
+            entityId: String(savedBooking.id),
+            action: 'BOOKING_CREATED',
+            message: `Customer created Booking #${savedBooking.bookingNumber}.`,
+            oldValue: undefined,
+            newValue: {
+              status: savedBooking.status,
+              paymentStatus: savedBooking.paymentStatus,
+              serviceId: savedBooking.serviceId,
+              scheduledAt: savedBooking.scheduledAt,
+            },
+          },
+          manager, // Pass transaction manager
+        );
+
+        return { savedBooking, eligiblePurohitUserIds, service };
       });
+
+      for (const purohitUserId of transactionResult.eligiblePurohitUserIds) {
+        // Emit legacy event
+        this.bookingGateway.notifyUser(
+          purohitUserId,
+          'create_booking',
+          transactionResult.savedBooking,
+        );
+
+        // Save persistent notification
+        await this.notificationService.createNotification(
+          purohitUserId,
+          'New Booking',
+          `You have received a new booking request (Booking #${transactionResult.savedBooking.bookingNumber}).`,
+          NOTIFICATION_TYPE.BOOKING,
+          transactionResult.savedBooking.id,
+          'BOOKING',
+        );
+      }
+
+      return {
+        ...transactionResult.savedBooking,
+        minPrice: Number(transactionResult.service.minPrice),
+        maxPrice: Number(transactionResult.service.maxPrice),
+        priceRange: `${Number(transactionResult.service.minPrice)} - ${Number(transactionResult.service.maxPrice)}`,
+      } as any;
     } catch (error) {
       if (
         error instanceof QueryFailedError &&
@@ -579,16 +579,30 @@ export class BookingService {
         page,
         limit,
         status,
+        bookingPaymentStatus: query.bookingPaymentStatus,
+        purohitPayoutStatus: query.purohitPayoutStatus,
         search,
       },
     );
 
-    const formattedBookings = bookings.map((booking) => ({
-      ...booking,
-      scheduledAtIst: this.toIstString(booking.scheduledAt),
-      createdAtIst: this.toIstString(booking.createdAt),
-      updatedAtIst: this.toIstString(booking.updatedAt),
-    }));
+    const formattedBookings = bookings.map((booking) => {
+      const payments = booking.payments || [];
+      const bookingPayment = payments.find(
+        (p) => p.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
+      ) || null;
+      const purohitPayout = payments.find(
+        (p) => p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT
+      ) || null;
+
+      return {
+        ...booking,
+        bookingPayment,
+        purohitPayout,
+        scheduledAtIst: this.toIstString(booking.scheduledAt),
+        createdAtIst: this.toIstString(booking.createdAt),
+        updatedAtIst: this.toIstString(booking.updatedAt),
+      };
+    });
 
     return {
       bookings: formattedBookings,
@@ -625,11 +639,21 @@ export class BookingService {
       throw new NotFoundException('Booking not found');
     }
 
+    const payments = booking.payments || [];
+    const bookingPayment = payments.find(
+      (p) => p.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
+    ) || null;
+    const purohitPayout = payments.find(
+      (p) => p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT
+    ) || null;
+
     switch (user.role) {
       case USER_ROLE.ADMIN:
         // Admin can access any booking.
         return {
           ...booking,
+          bookingPayment,
+          purohitPayout,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),
@@ -645,6 +669,8 @@ export class BookingService {
 
         return {
           ...booking,
+          bookingPayment,
+          purohitPayout,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),
@@ -676,6 +702,8 @@ export class BookingService {
 
         return {
           ...booking,
+          bookingPayment,
+          purohitPayout,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),
@@ -822,13 +850,16 @@ export class BookingService {
 
         booking.donationAmount = donationAmount;
 
-        booking.finalAmount = Number(
-          (
-            Number(booking.agreedPrice) -
-            Number(booking.discountAmount ?? 0) +
-            donationAmount
-          ).toFixed(2),
-        );
+        if (booking.purohitPayoutAmount != null && booking.platformCommission != null) {
+          booking.finalAmount = Number(
+            (
+              Number(booking.purohitPayoutAmount) +
+              Number(booking.platformCommission) -
+              Number(booking.discountAmount ?? 0) +
+              donationAmount
+            ).toFixed(2),
+          );
+        }
       }
 
       /*
@@ -864,7 +895,7 @@ export class BookingService {
              * Existing Purohit no longer
              * qualifies for new time/location.
              */
-            savedBooking.purohitId = undefined;
+            savedBooking.purohitId = null as unknown as undefined;
 
             savedBooking.status = BOOKING_STATUS.PENDING;
 
@@ -880,6 +911,26 @@ export class BookingService {
 
         savedBooking = await bookingRepository.save(savedBooking);
       }
+
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: user.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: user.role,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(savedBooking.id),
+          action: 'BOOKING_UPDATED',
+          message: `Booking #${savedBooking.bookingNumber} details were updated.`,
+          oldValue: undefined,
+          newValue: {
+            scheduledAt: savedBooking.scheduledAt,
+            customerAddressId: savedBooking.customerAddressId,
+            specialInstructions: savedBooking.specialInstructions,
+          },
+        },
+        manager,
+      );
 
       return savedBooking;
     });
@@ -1035,7 +1086,7 @@ export class BookingService {
     dto: CancelBookingDto,
   ): Promise<{
     message: string;
-    booking: Booking;
+    booking: Awaited<ReturnType<BookingService['formatBookingResponse']>>;
   }> {
     const allowedRoles: USER_ROLE[] = [
       USER_ROLE.CUSTOMER,
@@ -1122,7 +1173,7 @@ export class BookingService {
 
           booking.status = BOOKING_STATUS.PENDING;
 
-          booking.purohitId = undefined;
+          booking.purohitId = null as unknown as undefined;
 
           booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
 
@@ -1224,9 +1275,35 @@ export class BookingService {
         }
       }
 
+      const populatedBooking = await bookingRepository.findOne({
+        where: { id: savedBooking.id },
+        relations: {
+          customer: true,
+          service: true,
+          customerAddress: true,
+          purohit: { user: true },
+        },
+      });
+
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: user.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: user.role,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(savedBooking.id),
+          action: 'BOOKING_CANCELLED',
+          message: `Booking #${savedBooking.bookingNumber} was cancelled.`,
+          oldValue: { status: booking.status },
+          newValue: { status: savedBooking.status, cancellationReason },
+        },
+        manager,
+      );
+
       return {
         message,
-        booking: savedBooking,
+        booking: await this.formatBookingResponse(populatedBooking as Booking),
       };
     });
   }
@@ -1299,34 +1376,40 @@ export class BookingService {
       );
     }
 
+    let totalUsagePromise: Promise<number> | undefined;
+
     if (
       coupon.usageLimitTotal !== null &&
       coupon.usageLimitTotal !== undefined
     ) {
-      const totalUsage = await couponUsageRepository.count({
+      totalUsagePromise = couponUsageRepository.count({
         where: {
           coupon: {
             id: coupon.id,
           },
         },
       });
-
-      if (totalUsage >= coupon.usageLimitTotal) {
-        throw new BadRequestException('Coupon usage limit has been reached');
-      }
     }
 
-    const customerUsage = await couponUsageRepository.count({
+    const customerUsagePromise = couponUsageRepository.count({
       where: {
         coupon: {
           id: coupon.id,
         },
-
         customer: {
           id: customerId,
         },
       },
     });
+
+    const [totalUsage, customerUsage] = await Promise.all([
+      totalUsagePromise ?? Promise.resolve(0),
+      customerUsagePromise,
+    ]);
+
+    if (totalUsagePromise && totalUsage >= coupon.usageLimitTotal!) {
+      throw new BadRequestException('Coupon usage limit has been reached');
+    }
 
     if (customerUsage >= coupon.usageLimitPerCustomer) {
       throw new BadRequestException(
@@ -1585,18 +1668,30 @@ export class BookingService {
             );
           }
 
-          booking.agreedPrice = exactPrice;
+          const isOverlapping = await this.assignmentService.hasOverlappingBooking(
+            manager,
+            purohitProfile.id,
+            booking.scheduledAt,
+            booking.id
+          );
+
+          if (isOverlapping) {
+            throw new BadRequestException(
+              'You are not available for the provided date or time due to overlapping bookings',
+            );
+          }
+
+
+          booking.purohitPayoutAmount = exactPrice;
           booking.platformCommission = Number(
             (exactPrice * (Number(booking.commissionPercentage) / 100)).toFixed(
               2,
             ),
           );
-          booking.purohitPayoutAmount = Number(
-            (exactPrice - booking.platformCommission).toFixed(2),
-          );
           booking.finalAmount = Number(
             (
-              exactPrice -
+              exactPrice +
+              booking.platformCommission -
               Number(booking.discountAmount ?? 0) +
               Number(booking.donationAmount ?? 0)
             ).toFixed(2),
@@ -1641,6 +1736,31 @@ export class BookingService {
             },
           );
 
+          await this.notificationService.createNotification(
+            booking.customerId,
+            'Booking Accepted',
+            `Your booking #${savedBooking.bookingNumber} has been accepted by the Purohit.`,
+            NOTIFICATION_TYPE.BOOKING_STATUS,
+            savedBooking.id,
+            'BOOKING',
+          );
+
+          await this.auditLogService.createAuditLog(
+            {
+              actorId: user.id,
+              actorType: ACTOR_TYPE.USER,
+              actorRole: user.role,
+              module: AUDIT_MODULE.BOOKING,
+              entity: 'Booking',
+              entityId: String(savedBooking.id),
+              action: 'BOOKING_RESPONDED',
+              message: `Purohit #${purohitProfile.id} accepted Booking #${savedBooking.bookingNumber}.`,
+              oldValue: { status: BOOKING_STATUS.PENDING },
+              newValue: { status: savedBooking.status, purohitId: savedBooking.purohitId },
+            },
+            manager,
+          );
+
           return {
             message: 'Booking accepted successfully',
             booking: acceptedBooking ?? savedBooking,
@@ -1653,6 +1773,22 @@ export class BookingService {
           );
 
           await bookingRepository.save(booking);
+
+          await this.auditLogService.createAuditLog(
+            {
+              actorId: user.id,
+              actorType: ACTOR_TYPE.USER,
+              actorRole: user.role,
+              module: AUDIT_MODULE.BOOKING,
+              entity: 'Booking',
+              entityId: String(booking.id),
+              action: 'BOOKING_RESPONDED',
+              message: `Purohit #${purohitProfile.id} rejected Booking #${booking.bookingNumber}.`,
+              oldValue: { filteredPurohitIds },
+              newValue: { filteredPurohitIds: booking.filteredPurohitIds },
+            },
+            manager,
+          );
 
           return {
             message: 'Booking dismissed successfully',
@@ -1786,20 +1922,51 @@ export class BookingService {
         await this.assignmentService.findEligiblePurohitIds(manager, booking);
 
       if (!eligiblePurohitIds.includes(purohit.id)) {
+        const isOverlapping = await this.assignmentService.hasOverlappingBooking(
+          manager,
+          purohit.id,
+          booking.scheduledAt,
+          booking.id
+        );
+
+        if (isOverlapping) {
+          throw new BadRequestException(
+            "Selected Purohit isn't available for provided date or time",
+          );
+        }
+
+        if (
+          booking.bookingMode === BOOKING_MODE.OFFLINE &&
+          !purohit.isOfflineAvailable
+        ) {
+          throw new BadRequestException(
+            'Selected Purohit is not available for offline bookings',
+          );
+        }
+
+        const purohitServiceAreaRepository = manager.getRepository(PurohitServiceArea);
+        const serviceArea = await purohitServiceAreaRepository.findOne({
+          where: { purohitId: purohit.userId },
+        });
+
+        if (!serviceArea || serviceArea.latitude === null || serviceArea.longitude === null) {
+          throw new BadRequestException(
+            'Selected Purohit does not have a valid service area configured',
+          );
+        }
+
         throw new BadRequestException(
-          'Selected Purohit is not currently eligible or available for this booking',
+          "Customer location is outside the selected Purohit's service area radius",
         );
       }
-      booking.agreedPrice = exactPrice;
+      booking.purohitPayoutAmount = exactPrice;
       booking.platformCommission = Number(
         (exactPrice * (Number(booking.commissionPercentage) / 100)).toFixed(2),
       );
-      booking.purohitPayoutAmount = Number(
-        (exactPrice - booking.platformCommission).toFixed(2),
-      );
       booking.finalAmount = Number(
         (
-          exactPrice -
+          exactPrice +
+          booking.platformCommission -
           Number(booking.discountAmount ?? 0) +
           Number(booking.donationAmount ?? 0)
         ).toFixed(2),
@@ -1843,6 +2010,22 @@ export class BookingService {
         message: 'Booking assigned to you by admin',
         booking: assignedBooking ?? savedBooking,
       });
+
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: admin.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: admin.role,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(savedBooking.id),
+          action: 'PUROHIT_ASSIGNED',
+          message: `Admin manually assigned Purohit #${dto.purohitId} to Booking #${savedBooking.bookingNumber}.`,
+          oldValue: { status: BOOKING_STATUS.PENDING },
+          newValue: { status: savedBooking.status, purohitId: savedBooking.purohitId },
+        },
+        manager,
+      );
 
       return {
         message: 'Booking assigned to Purohit successfully',
@@ -1962,11 +2145,59 @@ export class BookingService {
         },
       );
 
+      await this.notificationService.createNotification(
+        updatedBooking.customerId,
+        'Booking Status Updated',
+        `Your booking #${updatedBooking.bookingNumber} status has been updated to ${updatedBooking.status}.`,
+        NOTIFICATION_TYPE.BOOKING_STATUS,
+        updatedBooking.id,
+        'BOOKING',
+      );
+
+      // Also notify purohit if assigned
+      if (updatedBooking.purohitId) {
+        const purohitUserId = await this.getPurohitUserIdFromProfileId(manager, updatedBooking.purohitId);
+        if (purohitUserId) {
+          await this.notificationService.createNotification(
+            purohitUserId,
+            'Booking Status Updated',
+            `Booking #${updatedBooking.bookingNumber} status has been updated to ${updatedBooking.status}.`,
+            NOTIFICATION_TYPE.BOOKING_STATUS,
+            updatedBooking.id,
+            'BOOKING',
+          );
+        }
+      }
+
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: user.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: user.role,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(updatedBooking.id),
+          action: 'BOOKING_STATUS_CHANGED',
+          message: `Booking #${updatedBooking.bookingNumber} status changed from ${booking.status} to ${updatedBooking.status}.`,
+          oldValue: { status: booking.status },
+          newValue: { status: updatedBooking.status },
+        },
+        manager,
+      );
+
       return {
         message: 'Booking status updated successfully',
         booking: updatedBooking,
       };
     });
+  }
+
+  private async getPurohitUserIdFromProfileId(manager: EntityManager, profileId: number): Promise<number | undefined> {
+    const profile = await manager.getRepository(PurohitProfile).findOne({
+      where: { id: profileId },
+      select: ['userId'],
+    });
+    return profile?.userId;
   }
 
   private validatePaymentForStatusChange(
@@ -1998,6 +2229,12 @@ export class BookingService {
     if (currentStatus === BOOKING_STATUS.ARRIVED && nextStatus === BOOKING_STATUS.ONGOING) {
       throw new BadRequestException(
         'Start OTP verification is required to change status to ONGOING',
+      );
+    }
+
+    if (role === USER_ROLE.PUROHIT && nextStatus === BOOKING_STATUS.COMPLETED) {
+      throw new BadRequestException(
+        'Booking completion is handled automatically after successful customer payment.',
       );
     }
 
@@ -2086,9 +2323,9 @@ export class BookingService {
       throw new NotFoundException('Booking not found');
     }
 
-    if (booking.status !== BOOKING_STATUS.ONGOING) {
+    if (booking.status !== BOOKING_STATUS.COMPLETED) {
       throw new BadRequestException(
-        'Completion proof can only be uploaded for an ongoing booking',
+        'Completion proof can only be uploaded for completed booking',
       );
     }
 
@@ -2133,6 +2370,19 @@ export class BookingService {
       ];
 
       const savedBooking = await this.bookingRepository.save(booking);
+
+      await this.auditLogService.createAuditLog({
+        actorId: user.id,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: user.role,
+        module: AUDIT_MODULE.BOOKING,
+        entity: 'Booking',
+        entityId: String(savedBooking.id),
+        action: 'COMPLETION_PROOF_UPLOADED',
+        message: `Purohit uploaded completion proof for Booking #${savedBooking.bookingNumber}.`,
+        oldValue: undefined,
+        newValue: { completionPhotoUrls: savedBooking.completionPhotoUrls },
+      });
 
       return {
         message: 'Completion proof uploaded successfully',
@@ -2249,9 +2499,9 @@ export class BookingService {
     const deliveryResults = await Promise.allSettled([
       customerPhone
         ? this.smsService.sendSms(
-            customerPhone,
-            `Your Poojawala booking start OTP is ${otp}. Share this OTP with the Purohit to start the Puja.`,
-          )
+          customerPhone,
+          `Your Poojawala booking start OTP is ${otp}. Share this OTP with the Purohit to start the Puja.`,
+        )
         : Promise.resolve(null),
 
       customerEmail
@@ -2293,6 +2543,14 @@ export class BookingService {
 
       // Use only during development/Postman testing.
       ...(process.env['NODE_ENV'] !== 'production' ? { otp } : {}),
+    };
+  }
+
+  async resendStartOtp(user: User, bookingId: number) {
+    const result = await this.generateStartOtp(user, bookingId);
+    return {
+      ...result,
+      message: 'Booking start OTP resent successfully',
     };
   }
 
@@ -2390,6 +2648,22 @@ export class BookingService {
 
       const updatedBooking = await bookingRepository.save(booking);
 
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: user.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: user.role,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(updatedBooking.id),
+          action: 'BOOKING_STARTED',
+          message: `Booking #${updatedBooking.bookingNumber} was started after OTP verification.`,
+          oldValue: { status: BOOKING_STATUS.ARRIVED },
+          newValue: { status: updatedBooking.status },
+        },
+        manager,
+      );
+
       return {
         message: 'Start OTP verified and booking started successfully',
         booking: {
@@ -2427,12 +2701,18 @@ export class BookingService {
       purohitProfileId = purohitProfile.id;
     }
 
-    const activeStatuses: BOOKING_STATUS[] = [
+    let activeStatuses: BOOKING_STATUS[] = [
       BOOKING_STATUS.ACCEPTED,
       BOOKING_STATUS.ENROUTE,
       BOOKING_STATUS.ARRIVED,
       BOOKING_STATUS.ONGOING,
     ];
+
+    if (query.status) {
+      const queryStatuses = Array.isArray(query.status) ? query.status : [query.status];
+      // Allow querying any valid status if explicitly requested
+      activeStatuses = queryStatuses as BOOKING_STATUS[];
+    }
 
     const { bookings, total } =
       await this.bookingRepository.findActiveBookingsByRole({
@@ -2445,7 +2725,7 @@ export class BookingService {
         activeStatuses,
       });
 
-    const formattedBookings = bookings.map((booking) => {
+    const formattedBookings = await Promise.all(bookings.map(async (booking) => {
       const customerName = [
         booking.customer?.firstName,
         booking.customer?.lastName,
@@ -2465,6 +2745,15 @@ export class BookingService {
 
       const snapshot = booking.addressSnapshot ?? {};
 
+      const serviceIconUrl = booking.service?.iconUrl ?? null;
+      const serviceIconDownloadUrl = serviceIconUrl ? await this.s3Service.getDownloadUrl(serviceIconUrl) : null;
+
+      const customerProfileImage = booking.customer?.profileImage ?? null;
+      const customerProfileImageDownloadUrl = customerProfileImage ? await this.s3Service.getDownloadUrl(customerProfileImage) : null;
+
+      const purohitProfileImage = purohitUser?.profileImage ?? null;
+      const purohitProfileImageDownloadUrl = purohitProfileImage ? await this.s3Service.getDownloadUrl(purohitProfileImage) : null;
+
       return {
         id: booking.id,
         bookingNumber: booking.bookingNumber,
@@ -2481,7 +2770,8 @@ export class BookingService {
         service: {
           id: booking.service?.id ?? booking.serviceId,
           name: booking.service?.name ?? '-',
-          iconUrl: booking.service?.iconUrl ?? null,
+          iconUrl: serviceIconUrl,
+          iconDownloadUrl: serviceIconDownloadUrl,
           durationMinutes: booking.service?.durationMinutes ?? null,
         },
 
@@ -2490,7 +2780,8 @@ export class BookingService {
           name: customerName || '-',
           email: booking.customer?.email ?? null,
           phone: booking.customer?.phone ?? null,
-          profileImage: booking.customer?.profileImage ?? null,
+          profileImage: customerProfileImage,
+          profileImageDownloadUrl: customerProfileImageDownloadUrl,
         },
 
         purohit: booking.purohit
@@ -2500,7 +2791,8 @@ export class BookingService {
             name: purohitName || '-',
             email: purohitUser?.email ?? null,
             phone: purohitUser?.phone ?? null,
-            profileImage: purohitUser?.profileImage ?? null,
+            profileImage: purohitProfileImage,
+            profileImageDownloadUrl: purohitProfileImageDownloadUrl,
             avgRating: Number(booking.purohit.avgRating ?? 0),
           }
           : null,
@@ -2537,7 +2829,13 @@ export class BookingService {
         },
 
         pricing: {
-          agreedPrice: Number(booking.agreedPrice),
+          minPrice: booking.service?.minPrice ? Number(booking.service.minPrice) : null,
+          maxPrice: booking.service?.maxPrice ? Number(booking.service.maxPrice) : null,
+          priceRange: booking.service?.minPrice && booking.service?.maxPrice
+            ? `${Number(booking.service.minPrice)} - ${Number(booking.service.maxPrice)}`
+            : null,
+          purohitPayoutAmount: booking.purohitPayoutAmount ? Number(booking.purohitPayoutAmount) : null,
+          platformCommission: booking.platformCommission ? Number(booking.platformCommission) : null,
           discountAmount: Number(booking.discountAmount ?? 0),
           donationAmount: Number(booking.donationAmount ?? 0),
           finalAmount: Number(booking.finalAmount),
@@ -2547,7 +2845,7 @@ export class BookingService {
         specialInstructions: booking.specialInstructions ?? null,
         customFields: booking.customFields ?? null,
       };
-    });
+    }));
 
     return {
       bookings: formattedBookings,
@@ -2570,7 +2868,7 @@ export class BookingService {
   ): Promise<{
     message: string;
     assignmentChanged: boolean;
-    booking: ReturnType<BookingService['formatBookingResponse']>;
+    booking: Awaited<ReturnType<BookingService['formatBookingResponse']>>;
     reschedule: {
       previousScheduledAt: Date;
       newScheduledAt: Date;
@@ -2773,7 +3071,7 @@ export class BookingService {
             'Booking rescheduled successfully. The assigned Purohit remains available';
         } else {
           assignmentChanged = true;
-          booking.purohitId = undefined;
+          booking.purohitId = null as unknown as undefined;
           booking.status = BOOKING_STATUS.PENDING;
           booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
           booking.filteredPurohitIds = eligiblePurohitIds.filter(
@@ -2786,7 +3084,7 @@ export class BookingService {
               : 'Booking rescheduled successfully, but no eligible Purohit is currently available for the new schedule';
         }
       } else {
-        booking.purohitId = undefined;
+        booking.purohitId = null as unknown as undefined;
         booking.status = BOOKING_STATUS.PENDING;
         booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
         booking.filteredPurohitIds = eligiblePurohitIds;
@@ -2815,10 +3113,26 @@ export class BookingService {
 
       const finalBooking = rescheduledBooking ?? savedBooking;
 
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: user.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: user.role,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(finalBooking.id),
+          action: 'BOOKING_RESCHEDULED',
+          message: `Booking #${finalBooking.bookingNumber} was rescheduled to ${this.toIstString(newScheduledAt)}.`,
+          oldValue: { scheduledAt: previousScheduledAt },
+          newValue: { scheduledAt: newScheduledAt },
+        },
+        manager,
+      );
+
       return {
         message,
         assignmentChanged,
-        booking: this.formatBookingResponse(finalBooking),
+        booking: await this.formatBookingResponse(finalBooking),
         reschedule: {
           previousScheduledAt,
           newScheduledAt,
@@ -2828,7 +3142,7 @@ export class BookingService {
     });
   }
 
-  private formatBookingResponse(booking: Booking) {
+  private async formatBookingResponse(booking: Booking) {
     const customerName = [
       booking.customer?.firstName,
       booking.customer?.lastName,
@@ -2856,6 +3170,23 @@ export class BookingService {
     const longitude =
       customerAddress?.longitude ?? addressSnapshot['longitude'];
 
+    const serviceIconUrl = booking.service?.iconUrl ?? null;
+    const serviceIconDownloadUrl = serviceIconUrl ? await this.s3Service.getDownloadUrl(serviceIconUrl) : null;
+
+    const customerProfileImage = booking.customer?.profileImage ?? null;
+    const customerProfileImageDownloadUrl = customerProfileImage ? await this.s3Service.getDownloadUrl(customerProfileImage) : null;
+
+    const purohitProfileImage = purohitUser?.profileImage ?? null;
+    const purohitProfileImageDownloadUrl = purohitProfileImage ? await this.s3Service.getDownloadUrl(purohitProfileImage) : null;
+
+    const completionPhotoUrls = booking.completionPhotoUrls ?? [];
+    let completionPhotoDownloadUrls: string[] = [];
+    if (completionPhotoUrls.length > 0) {
+      completionPhotoDownloadUrls = await Promise.all(
+        completionPhotoUrls.map((url) => this.s3Service.getDownloadUrl(url))
+      );
+    }
+
     return {
       id: booking.id,
       bookingNumber: booking.bookingNumber,
@@ -2872,7 +3203,8 @@ export class BookingService {
       service: {
         id: booking.service?.id ?? booking.serviceId,
         name: booking.service?.name ?? null,
-        iconUrl: booking.service?.iconUrl ?? null,
+        iconUrl: serviceIconUrl,
+        iconDownloadUrl: serviceIconDownloadUrl,
         durationMinutes: booking.service?.durationMinutes ?? null,
       },
 
@@ -2881,7 +3213,8 @@ export class BookingService {
         name: customerName || null,
         email: booking.customer?.email ?? null,
         phone: booking.customer?.phone ?? null,
-        profileImage: booking.customer?.profileImage ?? null,
+        profileImage: customerProfileImage,
+        profileImageDownloadUrl: customerProfileImageDownloadUrl,
       },
 
       purohit: booking.purohit
@@ -2891,7 +3224,8 @@ export class BookingService {
           name: purohitName || null,
           email: purohitUser?.email ?? null,
           phone: purohitUser?.phone ?? null,
-          profileImage: purohitUser?.profileImage ?? null,
+          profileImage: purohitProfileImage,
+          profileImageDownloadUrl: purohitProfileImageDownloadUrl,
           avgRating: Number(booking.purohit.avgRating ?? 0),
         }
         : null,
@@ -2926,7 +3260,11 @@ export class BookingService {
       },
 
       pricing: {
-        agreedPrice: Number(booking.agreedPrice),
+        minPrice: booking.service?.minPrice ? Number(booking.service.minPrice) : null,
+        maxPrice: booking.service?.maxPrice ? Number(booking.service.maxPrice) : null,
+        priceRange: booking.service?.minPrice && booking.service?.maxPrice
+          ? `${Number(booking.service.minPrice)} - ${Number(booking.service.maxPrice)}`
+          : null,
         platformCommission: Number(booking.platformCommission),
         purohitPayoutAmount: Number(booking.purohitPayoutAmount),
         discountAmount: Number(booking.discountAmount ?? 0),
@@ -2938,6 +3276,8 @@ export class BookingService {
       specialInstructions: booking.specialInstructions ?? null,
       customFields: booking.customFields ?? null,
       eligiblePurohitCount: booking.filteredPurohitIds?.length ?? 0,
+      completionPhotoUrls,
+      completionPhotoDownloadUrls,
     };
   }
 
@@ -3048,6 +3388,19 @@ export class BookingService {
 
     const repeatedBooking = await this.createBooking(user, createBookingDto);
 
+    await this.auditLogService.createAuditLog({
+      actorId: user.id,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: user.role,
+      module: AUDIT_MODULE.BOOKING,
+      entity: 'Booking',
+      entityId: String(repeatedBooking.id),
+      action: 'BOOKING_REPEATED',
+      message: `A new repeated booking #${repeatedBooking.bookingNumber} was created from Booking #${originalBooking.bookingNumber}.`,
+      oldValue: undefined,
+      newValue: { originalBookingId: originalBooking.id, newBookingId: repeatedBooking.id },
+    });
+
     return {
       message: 'Booking repeated successfully',
       originalBooking: {
@@ -3089,32 +3442,38 @@ export class BookingService {
     }
 
     try {
-      return await this.dataSource.transaction(async (manager) => {
+      const transactionResult = await this.dataSource.transaction(async (manager) => {
         const userRepository = manager.getRepository(User);
         const serviceRepository = manager.getRepository(Service);
         const addressRepository = manager.getRepository(CustomerAddress);
         const bookingRepository = manager.getRepository(Booking);
         const purohitProfileRepository = manager.getRepository(PurohitProfile);
 
-        const customer = await userRepository.findOne({
-          where: { id: dto.customerId, role: USER_ROLE.CUSTOMER },
-        });
+        const [customer, purohitProfile, service, customerAddress, purohitUser] = await Promise.all([
+          userRepository.findOne({
+            where: { id: dto.customerId, role: USER_ROLE.CUSTOMER },
+          }),
+          purohitProfileRepository.findOne({
+            where: { userId: dto.purohitId },
+          }),
+          serviceRepository.findOne({
+            where: { id: dto.serviceId },
+          }),
+          addressRepository.findOne({
+            where: { id: dto.customerAddressId, customerId: dto.customerId },
+          }),
+          userRepository.findOne({
+            where: { id: dto.purohitId, role: USER_ROLE.PUROHIT },
+          }),
+        ]);
 
         if (!customer) {
           throw new NotFoundException('Customer not found');
         }
 
-        const purohitProfile = await purohitProfileRepository.findOne({
-          where: { userId: dto.purohitId },
-        });
-
         if (!purohitProfile) {
           throw new NotFoundException('Purohit profile not found');
         }
-
-        const service = await serviceRepository.findOne({
-          where: { id: dto.serviceId },
-        });
 
         if (!service) {
           throw new NotFoundException('Service not found');
@@ -3123,10 +3482,6 @@ export class BookingService {
         if (!service.isActive) {
           throw new BadRequestException('Service is currently inactive');
         }
-
-        const customerAddress = await addressRepository.findOne({
-          where: { id: dto.customerAddressId, customerId: customer.id },
-        });
 
         if (!customerAddress) {
           throw new NotFoundException('Customer address not found');
@@ -3142,14 +3497,31 @@ export class BookingService {
           duplicateLockKey,
         ]);
 
-        const minPrice = Number(service.minPrice);
+        const purohitServiceRepository = manager.getRepository(PurohitService);
+        const matchingPurohitService = await purohitServiceRepository.findOne({
+          where: {
+            purohitId: purohitProfile.id,
+            serviceId: service.id,
+            isActive: true,
+          },
+        });
+
+        if (!matchingPurohitService) {
+          throw new BadRequestException('Selected Purohit does not provide the service required for this booking');
+        }
+
+        const exactPrice = dto.bookingMode === BOOKING_MODE.ONLINE
+          ? Number(matchingPurohitService.onlinePrice)
+          : Number(matchingPurohitService.offlinePrice);
+
+        if (!exactPrice || exactPrice <= 0) {
+          throw new BadRequestException('Exact price is not configured for this mode by the selected Purohit');
+        }
+
         const commissionPercentage = Number(service.commissionPercentage);
-        const agreedPrice = minPrice;
+        const purohitPayoutAmount = exactPrice;
         const platformCommission = Number(
-          (agreedPrice * (commissionPercentage / 100)).toFixed(2),
-        );
-        const purohitPayoutAmount = Number(
-          (agreedPrice - platformCommission).toFixed(2),
+          (exactPrice * (commissionPercentage / 100)).toFixed(2),
         );
         const donationAmount = Number(dto.donationAmount ?? 0);
 
@@ -3162,14 +3534,14 @@ export class BookingService {
             customer.id,
             service.id,
             dto.couponCode.trim().toUpperCase(),
-            agreedPrice,
+            exactPrice, // Or minPrice, but since exactPrice is known, we use it
           );
           appliedCoupon = couponResult.coupon;
           discountAmount = couponResult.discountAmount;
         }
 
         const finalAmount = Number(
-          (agreedPrice - discountAmount + donationAmount).toFixed(2),
+          (purohitPayoutAmount + platformCommission - discountAmount + donationAmount).toFixed(2),
         );
 
         const bookingNumber =
@@ -3186,7 +3558,6 @@ export class BookingService {
           scheduledAt,
           specialInstructions: dto.specialInstructions?.trim() || undefined,
           customFields: dto.customFields ?? undefined,
-          agreedPrice,
           commissionPercentage,
           platformCommission,
           purohitPayoutAmount,
@@ -3210,42 +3581,134 @@ export class BookingService {
               coupon: appliedCoupon,
               customer,
               booking: savedBooking,
+              discountApplied: discountAmount,
             }),
           );
         }
-        // send notification to the assigned Purohit
-        if (dto.purohitId) {
-          this.bookingGateway.notifyUser(
-            dto.purohitId,
-            "create_booking_by_admin",
-            {
-              ...savedBooking,
-              scheduledAtIst: this.toIstString(savedBooking.scheduledAt),
-              createdAtIst: this.toIstString(savedBooking.createdAt),
-              updatedAtIst: this.toIstString(savedBooking.updatedAt),
-            }
-          );
-        }
 
-        // send notification to the customer
-        this.bookingGateway.notifyUser(
-          customer.id,
-          "create_booking_by_admin",
+        await this.auditLogService.createAuditLog(
           {
-            ...savedBooking,
-            scheduledAtIst: this.toIstString(savedBooking.scheduledAt),
-            createdAtIst: this.toIstString(savedBooking.createdAt),
-            updatedAtIst: this.toIstString(savedBooking.updatedAt),
-          }
+            actorId: adminUser.id,
+            actorType: ACTOR_TYPE.USER,
+            actorRole: adminUser.role,
+            module: AUDIT_MODULE.BOOKING,
+            entity: 'Booking',
+            entityId: String(savedBooking.id),
+            action: 'BOOKING_CREATED_ADMIN',
+            message: `Admin created Booking #${savedBooking.bookingNumber} for Customer #${customer.id}.`,
+            oldValue: undefined,
+            newValue: {
+              status: savedBooking.status,
+              purohitId: savedBooking.purohitId,
+              customerId: savedBooking.customerId,
+            },
+          },
+          manager,
         );
 
-        return {
+        const formattedSavedBooking = {
           ...savedBooking,
           scheduledAtIst: this.toIstString(savedBooking.scheduledAt),
           createdAtIst: this.toIstString(savedBooking.createdAt),
           updatedAtIst: this.toIstString(savedBooking.updatedAt),
+          minPrice: Number(service.minPrice),
+          maxPrice: Number(service.maxPrice),
+          priceRange: `${Number(service.minPrice)} - ${Number(service.maxPrice)}`,
+        };
+
+        return {
+          formattedSavedBooking,
+          notifyPurohitId: dto.purohitId,
+          notifyCustomerId: customer.id,
+          customer,
+          purohitUser,
+          service,
+          customerAddress,
         };
       });
+
+      if (transactionResult.notifyPurohitId) {
+        this.bookingGateway.notifyUser(
+          transactionResult.notifyPurohitId,
+          'create_booking_by_admin',
+          transactionResult.formattedSavedBooking,
+        );
+      }
+
+      this.bookingGateway.notifyUser(
+        transactionResult.notifyCustomerId,
+        'create_booking_by_admin',
+        transactionResult.formattedSavedBooking,
+      );
+
+      // Email notifications
+      const {
+        formattedSavedBooking: b,
+        customer,
+        purohitUser,
+        service,
+        customerAddress,
+      } = transactionResult;
+
+      const customerName = customer.firstName || 'Customer';
+      const purohitName = purohitUser?.firstName || 'Purohit';
+      const addressString = `${customerAddress.fullAddress}, ${customerAddress.city} - ${customerAddress.pincode}`;
+      
+      const splitDateIst = b.scheduledAtIst ? b.scheduledAtIst.split(', ') : [];
+      const bookingDate = splitDateIst.length > 0 ? splitDateIst[0] : b.scheduledAt.toLocaleDateString();
+      const bookingTime = splitDateIst.length > 1 ? splitDateIst[1] : b.scheduledAt.toLocaleTimeString();
+
+      if (customer.email) {
+        try {
+          this.logger.log(`[BookingEmail] Sending booking confirmation email to customer for booking #${b.bookingNumber}...`);
+          await this.emailService.sendCustomerBookingConfirmationEmail({
+            email: customer.email,
+            customerName,
+            bookingId: b.bookingNumber,
+            serviceName: service.name,
+            bookingDate,
+            bookingTime,
+            bookingAddress: addressString,
+            purohitName,
+            totalAmount: Number(b.finalAmount) || 0,
+            amountPaid: 0,
+            pendingAmount: Number(b.finalAmount) || 0,
+            paymentStatus: b.paymentStatus,
+            bookingStatus: b.status,
+            specialInstructions: b.specialInstructions,
+          });
+          this.logger.log(`[BookingEmail] Customer booking email sent successfully for booking #${b.bookingNumber}.`);
+        } catch (error) {
+          this.logger.error(`[BookingEmail] Failed to send customer booking email for booking #${b.bookingNumber}`, error instanceof Error ? error.stack : String(error));
+        }
+      }
+
+      if (purohitUser && purohitUser.email) {
+        try {
+          this.logger.log(`[BookingEmail] Sending booking assignment email to Purohit for booking #${b.bookingNumber}...`);
+          await this.emailService.sendPurohitBookingAssignmentEmail({
+            email: purohitUser.email,
+            purohitName,
+            bookingId: b.bookingNumber,
+            customerName,
+            customerPhone: customer.phone || 'N/A',
+            serviceName: service.name,
+            bookingDate,
+            bookingTime,
+            bookingAddress: addressString,
+            totalAmount: Number(b.finalAmount) || 0,
+            purohitPayoutAmount: Number(b.purohitPayoutAmount) || 0,
+            paymentStatus: b.paymentStatus,
+            bookingStatus: b.status,
+            specialInstructions: b.specialInstructions,
+          });
+          this.logger.log(`[BookingEmail] Purohit booking email sent successfully for booking #${b.bookingNumber}.`);
+        } catch (error) {
+          this.logger.error(`[BookingEmail] Failed to send Purohit booking email for booking #${b.bookingNumber}`, error instanceof Error ? error.stack : String(error));
+        }
+      }
+
+      return transactionResult.formattedSavedBooking as any;
     } catch (error) {
       if (
         error instanceof QueryFailedError &&

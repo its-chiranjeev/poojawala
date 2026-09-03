@@ -61,6 +61,15 @@
         "tsConfigPath": "libs/gateway/tsconfig.lib.json"
       }
     },
+    "notification": {
+      "type": "library",
+      "root": "libs/notification",
+      "entryFile": "index",
+      "sourceRoot": "libs/notification/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/notification/tsconfig.lib.json"
+      }
+    },
     "payment": {
       "type": "library",
       "root": "libs/payment",

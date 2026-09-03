@@ -27,23 +27,23 @@ export class AuthModuleController {
     private readonly s3Service: S3Service,
   ) { }
 
-  @Post('generate-otp')
-  @HttpCode(HttpStatus.OK)
-  async generateOtp(
-    @Body(new ValidationPipe({ whitelist: true, transform: true }))
-    dto: RegisterUserDto,
-  ) {
-    return this.authModuleService.generateOtpService(dto);
-  }
+  // @Post('generate-otp')
+  // @HttpCode(HttpStatus.OK)
+  // async generateOtp(
+  //   @Body(new ValidationPipe({ whitelist: true, transform: true }))
+  //   dto: RegisterUserDto,
+  // ) {
+  //   return this.authModuleService.generateOtpService(dto);
+  // }
 
-  @Post('verify-otp')
-  @HttpCode(HttpStatus.OK)
-  async verifyOtp(
-    @Body(new ValidationPipe({ whitelist: true, transform: true }))
-    dto: VerifyOtpDto,
-  ) {
-    return this.authModuleService.verifyOtpService(dto);
-  }
+  // @Post('verify-otp')
+  // @HttpCode(HttpStatus.OK)
+  // async verifyOtp(
+  //   @Body(new ValidationPipe({ whitelist: true, transform: true }))
+  //   dto: VerifyOtpDto,
+  // ) {
+  //   return this.authModuleService.verifyOtpService(dto);
+  // }
 
   private setAuthCookies(res: Response, accessToken: string, refreshToken: string, csrfToken: string) {
     const isProd = process.env.NODE_ENV === 'production';
@@ -272,6 +272,14 @@ export class AuthModuleController {
           profile.templeAffiliationProofDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.templeAffiliationProofUrl);
           profile.templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(profile.templeAffiliationProofUrl);
         }
+
+        // Attach serviceRadiusKm from the default service area (or first available)
+        const serviceAreas = (safeUser as any).serviceAreas;
+        if (serviceAreas && serviceAreas.length > 0) {
+          const defaultArea = serviceAreas.find((a: any) => a.isDefault) || serviceAreas[0];
+          profile.serviceRadiusKm = defaultArea.serviceRadiusKm;
+        }
+
         (safeUser as any).profile = profile;
       } catch (e) {
         console.error('Failed to generate pre-signed URL for profile documents:', e);

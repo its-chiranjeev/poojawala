@@ -7,7 +7,9 @@ import { AssignmentModule } from './assignment/assignment.module';
 import { CouponModule } from './coupon/coupon.module';
 import { ReviewModule } from './review/review.module';
 import { ServiceModule } from './service/service.module';
+import { ContactUsModule } from './contact-us/contact-us.module';
 import { UserManagementService } from './user-management.service';
+import { AuditLogModule } from './audit-log/audit-log.module';
 
 import { DatabaseModule } from '@poojawala/database';
 import { EntitiesModule } from '@poojawala/entities';
@@ -30,6 +32,8 @@ import { ScheduleModule } from '@nestjs/schedule';
     ComplaintModule,
     CouponModule,
     AssignmentModule,
+    ContactUsModule,
+    AuditLogModule,
   ],
   controllers: [UserManagementController],
   providers: [UserManagementService],

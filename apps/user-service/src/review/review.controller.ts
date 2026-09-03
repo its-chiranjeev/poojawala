@@ -20,13 +20,13 @@ import { USER_ROLE } from '@poojawala/entities';
 
 @Controller('review')
 export class ReviewController {
-  constructor(private readonly reviewService: ReviewService) {}
+  constructor(private readonly reviewService: ReviewService) { }
 
   @Post(':bookingId')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
   create(
-    @Req() req: any, 
+    @Req() req: any,
     @Param('bookingId', ParseIntPipe) bookingId: number,
     @Body() dto: CreateReviewDto
   ) {
@@ -44,7 +44,7 @@ export class ReviewController {
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   findOne(
-    @Req() req: any, 
+    @Req() req: any,
     @Param('bookingId', ParseIntPipe) bookingId: number
   ) {
     return this.reviewService.findOne(req.user, bookingId);
@@ -54,25 +54,36 @@ export class ReviewController {
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   updateStatus(
+    @Req() req: any,
     @Param('bookingId', ParseIntPipe) bookingId: number,
     @Body() dto: UpdateReviewStatusDto,
   ) {
-    return this.reviewService.updateStatus(bookingId, dto);
+    return this.reviewService.updateStatus(bookingId, dto, req.user.id);
   }
 
   @Delete(':bookingId')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   remove(
+    @Req() req: any,
     @Param('bookingId', ParseIntPipe) bookingId: number,
   ) {
-    return this.reviewService.remove(bookingId);
+    return this.reviewService.remove(bookingId, req.user.id);
   }
 
   @Get('purohit/:purohitId/rating')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
   async getPurohitOverallRating(
     @Param('purohitId', ParseIntPipe) purohitId: number,
   ) {
     return await this.reviewService.getPurohitOverallRating(purohitId);
+  }
+
+  @Get('customers/given')
+  async getAllCustomerReviews(
+    @Query() query: ReviewQueryDto,
+  ) {
+    return this.reviewService.getAllCustomerReviews(query);
   }
 }

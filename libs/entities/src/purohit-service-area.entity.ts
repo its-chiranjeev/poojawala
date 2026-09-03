@@ -13,7 +13,6 @@ import { PurohitProfile } from './purohit-profile.entity';
 import { User } from './user.entity';
 
 @Entity('purohit_service_areas')
-@Unique(['purohitId', 'pincode'])
 export class PurohitServiceArea {
   @PrimaryGeneratedColumn()
   id!: number;
@@ -53,13 +52,21 @@ export class PurohitServiceArea {
 })
 latitude?: number;
 
-@Column({
-  type: 'decimal',
-  precision: 10,
-  scale: 7,
-  nullable: true,
-})
-longitude?: number;
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
+  longitude?: number;
+
+  @Column({
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    default: 10,
+  })
+  serviceRadiusKm!: number;
 
   @CreateDateColumn()
   createdAt!: Date;

@@ -15,6 +15,8 @@ export * from './payment.repository';
 export * from './payment-booking.repository';
 export * from './complaint.repository';
 export * from './platform-setting.repository';
+export * from './notification.repository';
+export * from './contact-us.repository';
 export * from './coupon.repository';
 export * from './coupon-usage.repository';
 export * from './cms-content.repository';

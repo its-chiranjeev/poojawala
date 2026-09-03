@@ -12,3 +12,4 @@ export * from './strategies/jwt.strategy';
 export * from './strategies/local.strategy';
 export * from './decorators/parse-int-array.decorator';
 export * from './types/jwt-payload.type';
+export * from './audit/audit-log.service';

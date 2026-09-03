@@ -12,42 +12,35 @@ export class BookingGateway
   @WebSocketServer()
   server: Server;
 
-  private userSockets = new Map<string | number, string>();
-
   handleConnection(client: Socket) {
     const userId = client.handshake.auth.userId;
     if (userId) {
-      this.userSockets.set(userId, client.id);
-      console.log(`User ${userId} connected`);
+      client.join(`user:${userId}`);
+      console.log(`User ${userId} connected and joined room user:${userId}`);
     }
   }
 
   handleDisconnect(client: Socket) {
-    this.userSockets.forEach((socketId, uId) => {
-      if (socketId === client.id) {
-        this.userSockets.delete(uId);
-        console.log(`User ${uId} disconnected`);
-      }
-    });
+    // Socket.IO automatically leaves rooms on disconnect, so we don't strictly need to do anything here
+    const userId = client.handshake.auth.userId;
+    if (userId) {
+      console.log(`User ${userId} disconnected`);
+    }
   }
 
   notifyUser(
     userId: string | number,
     eventName: string,
     data: any,
-  ): boolean {
-    const socketId = this.userSockets.get(userId);
-    if (socketId) {
-      this.server.to(socketId).emit(eventName, data);
-      return true; // user is online
-    }
-    return false; // user is offline
+  ): void {
+    this.server.to(`user:${userId}`).emit(eventName, data);
+  }
+
+  emitNotification(userId: string | number, data: any): void {
+    this.server.to(`user:${userId}`).emit('notification:new', data);
   }
 
   dismissNotification(userId: string | number) {
-    const socketId = this.userSockets.get(userId);
-    if (socketId) {
-      this.server.to(socketId).emit('booking_taken');
-    }
+    this.server.to(`user:${userId}`).emit('booking_taken');
   }
 }

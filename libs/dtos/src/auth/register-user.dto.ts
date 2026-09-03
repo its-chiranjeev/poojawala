@@ -1,6 +1,6 @@
 import { USER_ROLE, QUALIFICATION, PUROHIT_PAYMENT_METHOD } from '@poojawala/entities';
 import { Transform } from 'class-transformer';
-import { IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, } from 'class-validator';
+import { IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, ValidateIf, IsNumber } from 'class-validator';
 
 export class OtpDto {
   @IsOptional()
@@ -25,10 +25,15 @@ export class OtpDto {
   role!: USER_ROLE;
 }
 
-export class RegisterUserDto extends OtpDto {}
+export class RegisterUserDto extends OtpDto { }
 
 export class RegisterNormalUserDto {
   @IsOptional()
+  @IsNumber()
+  @Transform(({ value }) => value ? Number(value) : undefined)
+  id?: number;
+
+  @ValidateIf(o => !o.id)
   @IsEmail()
   @Transform(({ value }) => value?.trim().toLowerCase())
   email?: string;
@@ -38,7 +43,7 @@ export class RegisterNormalUserDto {
   @Transform(({ value }) => value?.trim())
   @MaxLength(15)
   phone?: string;
-  
+
   @IsOptional()
   @IsString()
   @Transform(({ value }) => value?.trim())
@@ -52,26 +57,28 @@ export class RegisterNormalUserDto {
 
   @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
-  username!: string;
+  username?: string;
 
+  @ValidateIf(o => !o.id)
   @IsString()
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
   firstName!: string;
 
+  @ValidateIf(o => !o.id)
   @IsString()
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
   lastName!: string;
 
+  @ValidateIf(o => !o.id)
   @IsString()
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
   password!: string;
-  
-  @IsOptional()
+
+  @ValidateIf(o => !o.id)
   @IsString()
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
@@ -128,7 +135,7 @@ export class RegisterNormalUserDto {
   @IsOptional()
   specializations?: string[];
 
-  @IsOptional()
+  @ValidateIf(o => !o.id)
   @IsDateString()
   dob?: string;
 
@@ -215,7 +222,7 @@ export class resetPasswordDto {
   @Transform(({ value }) => value?.trim())
   password!: string;
 
-  
+
 }
 
 export class forgotPasswordDto {

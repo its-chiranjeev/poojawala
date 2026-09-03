@@ -24,6 +24,8 @@ import {
   ResendOtpDto,
 } from '@poojawala/dtos';
 import { DataSource } from 'typeorm';
+import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 import { EmailService } from '@poojawala/email-services';
 import { SmsService } from '@poojawala/sms-services';
 import { MoreThan } from 'typeorm';
@@ -38,7 +40,8 @@ export class AuthModuleService {
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
     private readonly smsService: SmsService,
-  ) {}
+    private readonly auditLogService: AuditLogService,
+  ) { }
 
   async issueAuthTokens(user: User) {
     const accessSecret =
@@ -81,6 +84,7 @@ export class AuthModuleService {
         lastName: user.lastName,
         role: user.role,
         profileImage: user.profileImage,
+        isAdminCreated: user.isAdminCreated,
       },
     };
   }
@@ -113,91 +117,108 @@ export class AuthModuleService {
     return Buffer.from(value).toString('base64url');
   }
 
-  async generateOtpService(dto: RegisterUserDto) {
-    if (!dto.phone) {
-      throw new BadRequestException('Phone number is required');
-    }
+  // async generateOtpService(dto: RegisterUserDto) {
+  //   if (!dto.phone) {
+  //     throw new BadRequestException('Phone number is required');
+  //   }
 
-    if (
-      ![USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN].includes(
-        dto.role,
-      )
-    ) {
-      throw new BadRequestException('Invalid role');
-    }
+  //   if (
+  //     ![USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN].includes(
+  //       dto.role,
+  //     )
+  //   ) {
+  //     throw new BadRequestException('Invalid role');
+  //   }
 
-    // 2. Verify if user already exists by phone
-    if (dto.phone) {
-      const existingUserByPhone = await this.userRepository.findOne({
-        where: { phone: dto.phone },
-      });
-      if (existingUserByPhone) {
-        throw new ConflictException('Phone number already in use');
-      }
-      const verifyAccount = await this.otpRepository.findOne({
-        where: { phone: dto.phone },
-      });
-      if (verifyAccount) {
-        await this.otpRepository.delete(verifyAccount.id);
-      }
-    }
+  //   // 2. Verify if user already exists by phone
+  //   if (dto.phone) {
+  //     const existingUserByPhone = await this.userRepository.findOne({
+  //       where: { phone: dto.phone },
+  //     });
+  //     if (existingUserByPhone) {
+  //       throw new ConflictException('Phone number already in use');
+  //     }
+  //     const verifyAccount = await this.otpRepository.findOne({
+  //       where: { phone: dto.phone },
+  //     });
+  //     if (verifyAccount) {
+  //       await this.otpRepository.delete(verifyAccount.id);
+  //     }
+  //   }
 
-    // 5. Generate a 6-digit numeric OTP
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+  //   // 5. Generate a 6-digit numeric OTP
+  //   const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    if (dto.phone) {
-      await this.smsService.sendOtpSms(dto.phone, otpCode);
-    }
+  //   if (dto.phone) {
+  //     await this.smsService.sendOtpSms(dto.phone, otpCode);
+  //   }
 
-    // 6. Save OTP to database
-    const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + 10); // OTP expires in 10 minutes
+  //   // 6. Save OTP to database
+  //   const expiresAt = new Date();
+  //   expiresAt.setMinutes(expiresAt.getMinutes() + 10); // OTP expires in 10 minutes
 
-    const newOtp = this.otpRepository.create({
-      ...(dto.email && { email: dto.email }),
-      ...(dto.phone && { phone: dto.phone }),
-      otp: otpCode,
-      expiresAt,
-      role: dto.role,
-      isVerified: false,
-    });
+  //   const newOtp = this.otpRepository.create({
+  //     ...(dto.email && { email: dto.email }),
+  //     ...(dto.phone && { phone: dto.phone }),
+  //     otp: otpCode,
+  //     expiresAt,
+  //     role: dto.role,
+  //     isVerified: false,
+  //   });
 
-    await this.otpRepository.save(newOtp);
+  //   await this.otpRepository.save(newOtp);
 
-    return {
-      message: 'OTP has been sent.',
-      email: dto.email,
-      phone: dto.phone,
-    };
-  }
+  //   return {
+  //     message: 'OTP has been sent.',
+  //     email: dto.email,
+  //     phone: dto.phone,
+  //   };
+  // }
 
-  async verifyOtpService(dto: VerifyOtpDto) {
-    const otpRecord = await this.otpRepository.findOne({
-      where: {
-        phone: dto.phone,
-        otp: dto.otp,
-        isVerified: false,
-      },
-    });
+  // async verifyOtpService(dto: VerifyOtpDto) {
+  //   const otpRecord = await this.otpRepository.findOne({
+  //     where: {
+  //       phone: dto.phone,
+  //       otp: dto.otp,
+  //       isVerified: false,
+  //     },
+  //   });
 
-    if (!otpRecord) {
-      throw new BadRequestException('Invalid OTP code or phone');
-    }
+  //   if (!otpRecord) {
+  //     throw new BadRequestException('Invalid OTP code or phone');
+  //   }
 
-    if (otpRecord.expiresAt < new Date()) {
-      throw new BadRequestException('OTP has expired');
-    }
+  //   if (otpRecord.expiresAt < new Date()) {
+  //     throw new BadRequestException('OTP has expired');
+  //   }
 
-    await this.otpRepository.update(otpRecord.id, { isVerified: true });
-    return {
-      message: 'OTP verified successfully',
-    };
-  }
+  //   await this.otpRepository.update(otpRecord.id, { isVerified: true });
+  //   return {
+  //     message: 'OTP verified successfully',
+  //   };
+  // }
 
   async logoutService(userId: string | number) {
+    const numericUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    const user = await this.userRepository.findById(numericUserId);
+
     await this.userRepository.update(userId, {
       hashedRefreshToken: undefined,
     });
+
+    if (user) {
+      await this.auditLogService.createAuditLog({
+        actorId: numericUserId,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: user.role,
+        module: AUDIT_MODULE.AUTH,
+        entity: 'Auth',
+        entityId: String(numericUserId),
+        action: 'USER_LOGOUT',
+        message: `User #${numericUserId} logged out.`,
+      });
+    }
+
     return {
       message: 'Logout successful',
     };
@@ -217,13 +238,29 @@ export class AuthModuleService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (user.status === USER_STATUS.REJECTED) {
+      throw new ForbiddenException('Your profile is Rejected By Admin');
+    }
+
     if (user.status === USER_STATUS.BLOCKED) {
       user.hashedRefreshToken = null; // Invalidate existing refresh tokens
 
       await this.userRepository.save(user);
-      throw new ForbiddenException('User is blocked');
+      throw new ForbiddenException('Your Profile Is Blocked');
     }
     const data = await this.issueAuthTokens(user);
+
+    await this.auditLogService.createAuditLog({
+      actorId: user.id,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: user.role,
+      module: AUDIT_MODULE.AUTH,
+      entity: 'Auth',
+      entityId: String(user.id),
+      action: 'USER_LOGIN',
+      message: `User #${user.id} logged in.`,
+    });
+
     return {
       message: 'Login successful',
       ...data,
@@ -527,15 +564,15 @@ export class AuthModuleService {
     const otp = await this.otpRepository.findOne({
       where: dto.email
         ? {
-            email: dto.email,
-            expiresAt: MoreThan(new Date()),
-            otpType: OTP_TYPE.RESET_PASSWORD,
-          }
+          email: dto.email,
+          expiresAt: MoreThan(new Date()),
+          otpType: OTP_TYPE.RESET_PASSWORD,
+        }
         : {
-            phone: dto.phone,
-            expiresAt: MoreThan(new Date()),
-            otpType: OTP_TYPE.RESET_PASSWORD,
-          },
+          phone: dto.phone,
+          expiresAt: MoreThan(new Date()),
+          otpType: OTP_TYPE.RESET_PASSWORD,
+        },
     });
 
     if (!otp) {
@@ -602,25 +639,36 @@ export class AuthModuleService {
       }
     }
 
-    // 3. Generate OTP
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-    // 4. Expiry
+    // 3. Find existing OTP or generate new one
+    let otpCode;
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + 2);
 
-    // 5. Save OTP
-    const newOtp = this.otpRepository.create({
-      email: dto.email,
-      phone: dto.phone,
-      otp: otpCode,
-      expiresAt,
-      role: user.role,
-      isVerified: false,
-      otpType: dto.otpType,
+    const existingOtp = await this.otpRepository.findOne({
+      where: dto.phone
+        ? { phone: dto.phone, isVerified: false, otpType: dto.otpType }
+        : { email: dto.email, isVerified: false, otpType: dto.otpType },
+      order: { createdAt: 'DESC' },
     });
 
-    await this.otpRepository.save(newOtp);
+    if (existingOtp) {
+      otpCode = existingOtp.otp;
+      existingOtp.expiresAt = expiresAt;
+      await this.otpRepository.save(existingOtp);
+    } else {
+      otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const newOtp = this.otpRepository.create({
+        email: dto.email,
+        phone: dto.phone,
+        otp: otpCode,
+        expiresAt,
+        role: user.role,
+        isVerified: false,
+        otpType: dto.otpType,
+      });
+
+      await this.otpRepository.save(newOtp);
+    }
 
     // 6. Send OTP
     if (dto.phone) {

@@ -1,4 +1,4 @@
-import { CreatePurohitBankAccountDto, CreatePurohitByAdminDto, CustomerFavoriteDto, GenerateOtpDto, RegisterNormalUserDto, UpdatePurohitBankAccountDto, UpdateUserDto, VerifyPurohitDto } from '@poojawala/dtos';
+import { CreatePurohitBankAccountDto, CreatePurohitByAdminDto, CreateCustomerByAdminDto, CustomerFavoriteDto, GenerateOtpDto, RegisterNormalUserDto, UpdatePurohitBankAccountDto, UpdateUserDto, VerifyPurohitDto } from '@poojawala/dtos';
 import { UpsertPlatformSettingDto } from '@poojawala/dtos/Platform setting/Platform.dto';
 import { CreateCustomerAddressDto } from '@poojawala/dtos/user/add-customer-address.dto';
 import { UpdateCustomerAddressDto } from '@poojawala/dtos/user/update-customer-address.dto';
@@ -6,8 +6,8 @@ import { CreatePurohitServiceAreaDto } from '@poojawala/dtos/user/add-purohit-ad
 import { GetAllUsersDto } from '@poojawala/dtos/user/get-all-users.dto';
 import { UpdatePurohitServiceAreaDto } from '@poojawala/dtos/user/update-purohit-address.dto';
 import { EmailService } from '@poojawala/email-services';
-import { BANK_VERIFICATION_STATUS, Otp, OTP_TYPE, PUROHIT_MEDIA_TYPE, PUROHIT_MEDIA_VERIFICATION_STATUS, PUROHIT_PAYMENT_METHOD, PUROHIT_VERIFICATION_STATUS, PurohitBankAccount, PurohitMedia, PurohitProfile, User, USER_ROLE, USER_STATUS, } from '@poojawala/entities';
-import { CustomerAddressRepository, CustomerFavoriteRepository, OtpRepository, PlatformSettingRepository, PurohitBankAccountRepository, PurohitMediaRepository, PurohitProfileRepository, PurohitServiceAreaRepository, UserRepository, } from '@poojawala/repositories';
+import { BANK_VERIFICATION_STATUS, Otp, OTP_TYPE, PUROHIT_MEDIA_TYPE, PUROHIT_MEDIA_VERIFICATION_STATUS, PUROHIT_PAYMENT_METHOD, PUROHIT_VERIFICATION_STATUS, PurohitBankAccount, PurohitMedia, PurohitProfile, User, USER_ROLE, USER_STATUS, CustomerAddress } from '@poojawala/entities';
+import { BookingRepository, CustomerAddressRepository, CustomerFavoriteRepository, OtpRepository, PlatformSettingRepository, PurohitBankAccountRepository, PurohitMediaRepository, PurohitProfileRepository, PurohitServiceAreaRepository, PurohitServiceRepository, UserRepository, } from '@poojawala/repositories';
 import { S3Service } from '@poojawala/s3';
 import { SmsService } from '@poojawala/sms-services';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, InternalServerErrorException, Logger, NotFoundException, } from '@nestjs/common';
@@ -15,6 +15,8 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { createHmac } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
+import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 
 @Injectable()
 export class UserService {
@@ -35,6 +37,9 @@ export class UserService {
     private readonly configService: ConfigService,
     private readonly purohitMediaRepository: PurohitMediaRepository,
     private readonly purohitBankAccountRepository: PurohitBankAccountRepository,
+    private readonly bookingRepository: BookingRepository,
+    private readonly purohitServiceRepository: PurohitServiceRepository,
+    private readonly auditLogService: AuditLogService,
   ) { }
 
   async deleteExpiredOtps(): Promise<number> {
@@ -46,10 +51,24 @@ export class UserService {
       .where('"expiresAt" <= NOW()')
       .execute();
 
-    return result.affected ?? 0;
+    const affected = result.affected ?? 0;
+
+    if (affected > 0) {
+      await this.auditLogService.createAuditLog({
+        actorType: ACTOR_TYPE.SYSTEM,
+        module: AUDIT_MODULE.AUTH,
+        entity: 'Otp',
+        action: 'DELETE_EXPIRED_OTPS',
+        message: `Deleted ${affected} expired OTP(s) via cron job`,
+        metadata: { deletedCount: affected },
+      });
+    }
+
+    return affected;
   }
 
   async updateProfileByAdmin(
+    adminId: number,
     id: string,
     dto: UpdateUserDto,
     file?: Express.Multer.File,
@@ -80,7 +99,7 @@ export class UserService {
       username: dto.username,
       firstName: dto.firstName,
       lastName: dto.lastName,
-      phone: dto.phone,
+      // phone: dto.phone,
       profileImage: dto.profileImage,
       birthPlace: dto.birthPlace,
     };
@@ -130,6 +149,20 @@ export class UserService {
         console.error('Failed to generate pre-signed URL for profileImage:', e);
       }
     }
+
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: id,
+      action: 'USER_PROFILE_UPDATED',
+      message: `Admin updated profile for User #${id}.`,
+      oldValue: undefined,
+      newValue: undefined,
+    });
+
     return {
       success: true,
       message: 'User profile updated successfully by admin',
@@ -151,6 +184,10 @@ export class UserService {
       throw new NotFoundException('User not found');
     }
 
+    if (dto.phone) {
+      throw new BadRequestException('Phone number cannot be updated');
+    }
+
     // Normal users cannot change their role or status
     if (user.role !== USER_ROLE.ADMIN) {
       delete dto.role;
@@ -164,11 +201,27 @@ export class UserService {
       delete dto.confirmPassword;
     }
 
-    if (files.profileImage?.length) {
+    if (files?.profileImage?.length) {
       dto.profileImage = await this.s3Service.uploadFileHelper(
         id,
         'profileImage',
         files.profileImage,
+      );
+    }
+
+    if (files?.certificate?.length) {
+      dto.certificate = await this.s3Service.uploadFileHelper(
+        id,
+        'certificate',
+        files.certificate,
+      );
+    }
+
+    if (files?.templeAffiliationProof?.length) {
+      dto.templeAffiliationProof = await this.s3Service.uploadFileHelper(
+        id,
+        'templeAffiliationProof',
+        files.templeAffiliationProof,
       );
     }
 
@@ -177,7 +230,6 @@ export class UserService {
       username: dto.username,
       firstName: dto.firstName,
       lastName: dto.lastName,
-      phone: dto.phone,
       profileImage: dto.profileImage,
       birthPlace: dto.birthPlace,
     };
@@ -186,10 +238,66 @@ export class UserService {
       userPayload.dob = new Date(dto.dob);
     }
 
-    const updatedUser = await this.userRepository.updateUser(id, userPayload);
+    await this.userRepository.updateUser(id, userPayload);
+
+    if (user.role === USER_ROLE.PUROHIT) {
+      const profilePayload: any = {};
+      if (dto.languages !== undefined) profilePayload.languages = dto.languages;
+      if (dto.city !== undefined) profilePayload.city = dto.city;
+      if (dto.specializations !== undefined) profilePayload.specializations = dto.specializations;
+      if (dto.bio !== undefined) profilePayload.bio = dto.bio;
+      if (dto.experienceYears !== undefined) profilePayload.experienceYears = dto.experienceYears;
+      if (dto.qualification !== undefined) profilePayload.qualification = dto.qualification;
+      if (dto.isOnlineAvailable !== undefined) profilePayload.isOnlineAvailable = dto.isOnlineAvailable === 'true' || dto.isOnlineAvailable === true as any;
+      if (dto.isOfflineAvailable !== undefined) profilePayload.isOfflineAvailable = dto.isOfflineAvailable === 'true' || dto.isOfflineAvailable === true as any;
+
+      if (Object.keys(profilePayload).length > 0) {
+        const profile = await this.purohitProfileRepository.findOne({ where: { userId: Number(id) } });
+        if (profile) {
+          await this.purohitProfileRepository.update(profile.id, profilePayload);
+        }
+      }
+    }
+
+    const updatedUser = await this.userRepository.getFullProfile(Number(id), user.role);
+
+    if (user.role === USER_ROLE.PUROHIT) {
+      const profile = await this.purohitProfileRepository.findByUserId(
+        Number(id),
+      );
+
+      if (profile) {
+        await this.purohitProfileRepository.update(profile.id, {
+          bio: dto.bio,
+          qualification: dto.qualification,
+          experienceYears: dto.experienceYears,
+          aadhaarNumber: dto.aadhaarNumber,
+          city: dto.city,
+          languages: dto.languages,
+          specializations: dto.specializations,
+          ...(dto.certificate && { certificateUrl: dto.certificate }),
+          ...(dto.templeAffiliationProof && {
+            templeAffiliationProofUrl: dto.templeAffiliationProof,
+          }),
+          isOnlineAvailable:
+            dto.isOnlineAvailable === undefined
+              ? profile.isOnlineAvailable
+              : String(dto.isOnlineAvailable) === 'true',
+          isOfflineAvailable:
+            dto.isOfflineAvailable === undefined
+              ? profile.isOfflineAvailable
+              : String(dto.isOfflineAvailable) === 'true',
+        });
+      }
+    }
+
+    const fullUser = await this.userRepository.getFullProfile(
+      Number(id),
+      user.role,
+    );
 
     const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } =
-      updatedUser!;
+      updatedUser as any;
     if (safeUser.profileImage) {
       try {
         safeUser.profileImage = await this.s3Service.getDownloadUrl(
@@ -199,6 +307,38 @@ export class UserService {
         console.error('Failed to generate pre-signed URL for profileImage:', e);
       }
     }
+
+    // Also generate pre-signed URLs for documents if present in the profile
+    if (safeUser.profile) {
+      try {
+        if (safeUser.profile.aadhaarDocUrl) safeUser.profile.aadhaarDocUrl = await this.s3Service.getDownloadUrl(safeUser.profile.aadhaarDocUrl);
+        if (safeUser.profile.panDocUrl) safeUser.profile.panDocUrl = await this.s3Service.getDownloadUrl(safeUser.profile.panDocUrl);
+        if (safeUser.profile.certificateUrl) safeUser.profile.certificateUrl = await this.s3Service.getDownloadUrl(safeUser.profile.certificateUrl);
+        if (safeUser.profile.templeAffiliationProofUrl) safeUser.profile.templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(safeUser.profile.templeAffiliationProofUrl);
+
+        // Attach serviceRadiusKm from the default service area
+        if (safeUser.serviceAreas && safeUser.serviceAreas.length > 0) {
+          const defaultArea = safeUser.serviceAreas.find((a: any) => a.isDefault) || safeUser.serviceAreas[0];
+          safeUser.profile.serviceRadiusKm = defaultArea.serviceRadiusKm;
+        }
+      } catch (e) {
+        console.error('Failed to generate pre-signed URL for profile documents:', e);
+      }
+    }
+
+    await this.auditLogService.createAuditLog({
+      actorId: Number(id),
+      actorType: ACTOR_TYPE.USER,
+      actorRole: user.role,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: id,
+      action: 'USER_PROFILE_UPDATED',
+      message: `User #${id} updated their own profile.`,
+      oldValue: undefined,
+      newValue: undefined,
+    });
+
     return {
       success: true,
       message: 'Profile updated successfully',
@@ -206,7 +346,7 @@ export class UserService {
     };
   }
 
-  async updateUserStatus(id: number, status: USER_STATUS) {
+  async updateUserStatus(id: number, status: USER_STATUS, adminId: number) {
     const user = await this.userRepository.findById(id);
 
     if (!user) {
@@ -234,6 +374,19 @@ export class UserService {
     }
 
     await this.userRepository.save(user);
+
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(id),
+      action: 'USER_STATUS_CHANGED',
+      message: `User #${id} status changed to ${status}.`,
+      oldValue: undefined,
+      newValue: { status },
+    });
 
     return {
       success: true,
@@ -329,7 +482,17 @@ export class UserService {
     await this.otpRepository.save(otpRecord);
 
     if (phone) {
-      await this.smsService.sendOtpSms(phone, otp);
+      try {
+        await this.smsService.sendOtpSms(phone, otp);
+      } catch (error: any) {
+        this.logger.error(`Failed to send OTP SMS to ${phone}: ${error.message}`, error.stack);
+        if (email) {
+          this.logger.log(`Falling back to email for OTP delivery to ${email}`);
+          await this.emailService.sendOtpEmail(email, otp);
+        } else {
+          throw new InternalServerErrorException('Failed to send OTP via SMS and no email provided for fallback');
+        }
+      }
     } else if (email) {
       await this.emailService.sendOtpEmail(email, otp);
     }
@@ -338,6 +501,7 @@ export class UserService {
     return {
       success: true,
       message: 'OTP sent successfully',
+      otp,
     };
   }
 
@@ -615,26 +779,32 @@ export class UserService {
         } catch (e) { }
       }
 
-      const services = user.services ? await Promise.all(user.services.map(async (ps: any) => {
-        let iconDownloadurl: string | null = null;
-        if (ps.service?.iconUrl) {
-          try {
-            iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
-          } catch (e) { }
-        }
+      const purohitService = user.services ? user.services.map((ps: any) => {
         return {
-          ...ps,
-          service: {
-            ...ps.service,
-            iconDownloadurl
-          }
+          serviceName: ps.service?.name,
+          isOnlinePrice: ps.onlinePrice,
+          isOfflinePrice: ps.offlinePrice,
+          isOnlineAvailable: ps.isOnline,
+          isOfflineAvailable: ps.isOffline
         }
-      })) : [];
+      }) : [];
 
       return {
-        ...user,
+        userId: user.id,
+        purohitFirstName: user.firstName,
+        lastName: user.lastName,
+        username: user.username,
         profileImage,
-        services,
+        userRole: user.role,
+        status: user.status,
+        bio: user.profile?.bio,
+        qualification: user.profile?.qualification,
+        averageRating: user.profile?.avgRating,
+        experienceYears: user.profile?.experienceYears,
+        languages: user.profile?.languages,
+        specialization: user.profile?.specializations,
+        city: user.profile?.city,
+        purohitService,
       };
     }));
 
@@ -688,21 +858,15 @@ export class UserService {
       templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(templeAffiliationProofUrl);
     }
 
-    const services = profile?.purohitServices ? await Promise.all(profile.purohitServices.map(async (ps) => {
-      let iconDownloadurl: string | null = null;
-      if (ps.service?.iconUrl) {
-        try {
-          iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
-        } catch (e) { }
-      }
+    const purohitService = profile?.purohitServices ? profile.purohitServices.map((ps) => {
       return {
-        ...ps,
-        service: {
-          ...ps.service,
-          iconDownloadurl
-        }
+        serviceName: ps.service?.name,
+        isOnlinePrice: ps.onlinePrice,
+        isOfflinePrice: ps.offlinePrice,
+        isOnlineAvailable: ps.isOnline,
+        isOfflineAvailable: ps.isOffline
       }
-    })) : [];
+    }) : [];
 
     return {
       success: true,
@@ -740,7 +904,7 @@ export class UserService {
         status: user.status,
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt,
-        services,
+        purohitService,
       },
     };
   }
@@ -840,6 +1004,19 @@ export class UserService {
         isDefault,
       });
 
+      await this.auditLogService.createAuditLog({
+        actorId: userId,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: user.role,
+        module: AUDIT_MODULE.USER,
+        entity: 'User',
+        entityId: String(userId),
+        action: 'CUSTOMER_ADDRESS_UPDATED',
+        message: `Customer #${userId} added a new address #${address.id}.`,
+        oldValue: undefined,
+        newValue: { addressId: address.id },
+      });
+
       return {
         success: true,
         message: 'Address added successfully',
@@ -917,6 +1094,19 @@ export class UserService {
 
     const updated = await this.customerAddressRepository.update(id, dto);
 
+    await this.auditLogService.createAuditLog({
+      actorId: userId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.CUSTOMER,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(userId),
+      action: 'CUSTOMER_ADDRESS_UPDATED',
+      message: `Customer #${userId} updated address #${id}.`,
+      oldValue: undefined,
+      newValue: { addressId: id },
+    });
+
     return {
       success: true,
       message: 'Address updated successfully',
@@ -936,6 +1126,19 @@ export class UserService {
     }
 
     await this.customerAddressRepository.softDelete(id);
+
+    await this.auditLogService.createAuditLog({
+      actorId: userId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.CUSTOMER,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(userId),
+      action: 'CUSTOMER_ADDRESS_UPDATED',
+      message: `Customer #${userId} deleted address #${id}.`,
+      oldValue: undefined,
+      newValue: { addressId: id, deleted: true },
+    });
 
     return {
       success: true,
@@ -957,11 +1160,11 @@ export class UserService {
       },
     });
 
-    if (existing) {
-      throw new ConflictException(
-        'Service area already exists for this pincode',
-      );
-    }
+    // if (existing) {
+    //   throw new ConflictException(
+    //     'Service area already exists for this pincode',
+    //   );
+    // }
 
     if (dto.isDefault) {
       await this.purohitServiceAreaRepository.clearDefaultAddress(userId);
@@ -995,19 +1198,19 @@ export class UserService {
     }
 
     // Check duplicate pincode only if pincode is being updated
-    if (dto.pincode) {
-      const existing =
-        await this.purohitServiceAreaRepository.findByPurohitAndPincode(
-          userId,
-          dto.pincode,
-        );
+    // if (dto.pincode) {
+    //   const existing =
+    //     await this.purohitServiceAreaRepository.findByPurohitAndPincode(
+    //       userId,
+    //       dto.pincode,
+    //     );
 
-      if (existing && existing.id !== id) {
-        throw new ConflictException(
-          'Service area already exists for this pincode',
-        );
-      }
-    }
+    //   if (existing && existing.id !== id) {
+    //     throw new ConflictException(
+    //       'Service area already exists for this pincode',
+    //     );
+    //   }
+    // }
 
     if (dto.isDefault) {
       await this.purohitServiceAreaRepository.clearDefaultAddress(userId);
@@ -1060,7 +1263,21 @@ export class UserService {
       throw new ForbiddenException('You can delete only your own service area');
     }
 
+    if (area.isDefault) {
+      // Unset isDefault from the one being deleted
+      await this.purohitServiceAreaRepository.updateArea(id, { isDefault: false });
+    }
+
     await this.purohitServiceAreaRepository.deleteArea(id);
+
+    // If the deleted area was the default one, make the next most recent one the default
+    if (area.isDefault) {
+      const remainingAreas = await this.purohitServiceAreaRepository.findByPurohitId(userId);
+      if (remainingAreas.length > 0) {
+        const nextDefaultArea = remainingAreas.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+        await this.purohitServiceAreaRepository.updateArea(nextDefaultArea.id, { isDefault: true });
+      }
+    }
 
     return {
       success: true,
@@ -1140,6 +1357,19 @@ export class UserService {
       verificationStatus: initialVerificationStatus,
     });
 
+    await this.auditLogService.createAuditLog({
+      actorId: userId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.PUROHIT,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(userId),
+      action: 'PUROHIT_BANK_UPDATED',
+      message: `Purohit #${userId} added a new bank account #${account.id}.`,
+      oldValue: undefined,
+      newValue: { bankAccountId: account.id },
+    });
+
     return {
       success: true,
       message: 'Bank account added successfully',
@@ -1181,23 +1411,25 @@ export class UserService {
     };
   }
 
-  async getPurohitBankAccountById(userId: number, id: number) {
-    const profile = await this.purohitProfileRepository.findOne({
-      where: { userId },
-    });
-
-    if (!profile) {
-      throw new NotFoundException('Purohit profile not found');
-    }
-
+  async getPurohitBankAccountById(user: any, id: number) {
     const account = await this.purohitBankAccountRepository.findById(id);
 
     if (!account) {
       throw new NotFoundException('Bank account not found');
     }
 
-    if (account.purohitId !== profile.id) {
-      throw new ForbiddenException('You can access only your own bank account');
+    if (user.role !== USER_ROLE.ADMIN) {
+      const profile = await this.purohitProfileRepository.findOne({
+        where: { userId: user.id },
+      });
+
+      if (!profile) {
+        throw new NotFoundException('Purohit profile not found');
+      }
+
+      if (account.purohitId !== profile.id) {
+        throw new ForbiddenException('You can access only your own bank account');
+      }
     }
 
     return {
@@ -1278,6 +1510,19 @@ export class UserService {
 
     const freshUpdatedAccount = await this.purohitBankAccountRepository.findById(id);
 
+    await this.auditLogService.createAuditLog({
+      actorId: userId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.PUROHIT,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(userId),
+      action: 'PUROHIT_BANK_UPDATED',
+      message: `Purohit #${userId} updated bank account #${id}.`,
+      oldValue: undefined,
+      newValue: { bankAccountId: id },
+    });
+
     return {
       success: true,
       message: 'Bank account updated successfully',
@@ -1320,6 +1565,19 @@ export class UserService {
         );
       }
     }
+
+    await this.auditLogService.createAuditLog({
+      actorId: userId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.PUROHIT,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(userId),
+      action: 'PUROHIT_BANK_UPDATED',
+      message: `Purohit #${userId} deleted bank account #${id}.`,
+      oldValue: undefined,
+      newValue: { bankAccountId: id, deleted: true },
+    });
 
     return {
       success: true,
@@ -1739,6 +1997,19 @@ export class UserService {
       };
     });
 
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.USER,
+      entity: 'User',
+      entityId: String(purohitUserId),
+      action: 'USER_STATUS_CHANGED',
+      message: `Admin verified Purohit #${purohitUserId}. Status changed to ${dto.status}.`,
+      oldValue: undefined,
+      newValue: { status: dto.status, rejectionReason: dto.status === PUROHIT_VERIFICATION_STATUS.REJECTED ? rejectionReason : null },
+    });
+
     const emailSent = await this.sendPurohitVerificationEmail(result);
 
     const isApproved =
@@ -1760,6 +2031,78 @@ export class UserService {
         rejectionReason: result.rejectionReason,
         emailSent,
       },
+    };
+  }
+
+  async createCustomerByAdmin(dto: CreateCustomerByAdminDto) {
+    if (!dto.email && !dto.phone) {
+      throw new BadRequestException('At least email or phone number must be provided');
+    }
+
+    if (dto.phone) {
+      const existingUserByPhone = await this.userRepository.findOne({
+        where: { phone: dto.phone },
+      });
+      if (existingUserByPhone) throw new ConflictException('Phone number already in use');
+    }
+
+    if (dto.email) {
+      const existingUserByEmail = await this.userRepository.findByEmail(dto.email);
+      if (existingUserByEmail) throw new ConflictException('Email already in use');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      const userRepository = manager.getRepository(User);
+      const addressRepository = manager.getRepository(CustomerAddress);
+
+      const username = dto.firstName.replace(/\s+/g, '') + Math.floor(Math.random() * 1000);
+
+      const user = userRepository.create({
+        username,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        email: dto.email,
+        phone: dto.phone,
+        hashedPassword,
+        role: USER_ROLE.CUSTOMER,
+        status: USER_STATUS.ACTIVE,
+        isAdminCreated: true,
+      });
+
+      const savedUser = await userRepository.save(user);
+
+      if (dto.address || dto.city) {
+        const address = addressRepository.create({
+          customer: savedUser,
+          fullAddress: dto.address || 'N/A',
+          city: dto.city || 'N/A',
+          pincode: '000000',
+          addressLabel: 'HOME',
+          isDefault: true,
+        });
+        await addressRepository.save(address);
+      }
+
+      return savedUser;
+    });
+
+    if (dto.email) {
+      await this.emailService.sendCustomerCreatedByAdminEmail(
+        dto.email,
+        `${dto.firstName} ${dto.lastName || ''}`.trim(),
+        dto.phone ?? 'N/A',
+        dto.address ?? 'N/A',
+        dto.city ?? 'N/A',
+        dto.password
+      );
+    }
+
+    return {
+      success: true,
+      message: 'Customer created successfully',
+      data: result,
     };
   }
 
@@ -1804,17 +2147,38 @@ export class UserService {
         lastName: dto.lastName,
         status: USER_STATUS.PENDING,
         isAdminCreated: true,
+        dob: dto.dob ? new Date(dto.dob) : undefined,
       });
 
       const savedUser = await userRepository.save(user);
 
+      const profile = manager.create(PurohitProfile, {
+        userId: savedUser.id,
+        verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+      });
+      await manager.save(profile);
+
       return {
         user: savedUser,
-        message: 'Purohit created successfully by admin',
+        profile,
       };
     });
 
-    return result;
+    if (dto.email) {
+      await this.emailService.sendPurohitCreatedByAdminEmail(
+        dto.email,
+        `${dto.firstName} ${dto.lastName || ''}`.trim(),
+        result.user.username,
+        dto.phone ?? 'N/A',
+        dto.password
+      );
+    }
+
+    return {
+      success: true,
+      message: 'Purohit created successfully by admin',
+      data: result,
+    };
   }
 
   async registerUserService(
@@ -1827,45 +2191,51 @@ export class UserService {
       profileImage?: Express.Multer.File[];
     },
   ) {
-    if (!dto.email && !dto.phone) {
+    if (!dto.email && !dto.phone && !dto.id) {
       throw new BadRequestException(
-        'At least email or phone number must be provided',
+        'At least email, phone number, or id must be provided',
       );
     }
 
     // 1. Verify OTP record
     // const otpWhere: any[] = [];
 
-    let otpRecord;
+    let otpRecord: any;
+    let existingAdminCreatedUser: User | null = null;
 
-    if (dto.phone) {
-      otpRecord = await this.otpRepository.findOne({
-        where: {
-          phone: dto.phone,
-          isVerified: true,
-        },
-      });
-    } else if (dto.email) {
-      otpRecord = await this.otpRepository.findOne({
-        where: {
-          email: dto.email,
-          isVerified: true,
-        },
-      });
+    if (dto.id) {
+      existingAdminCreatedUser = await this.userRepository.findOne({ where: { id: dto.id } });
+      if (!existingAdminCreatedUser) {
+        throw new NotFoundException('Purohit not found');
+      }
+      if (existingAdminCreatedUser.role !== USER_ROLE.PUROHIT) {
+        throw new BadRequestException('User is not a purohit');
+      }
+      otpRecord = { role: USER_ROLE.PUROHIT }; // Mock for the rest of the flow
     } else {
-      throw new BadRequestException('Phone number or email is required');
-    }
+      if (dto.phone) {
+        otpRecord = await this.otpRepository.findOne({
+          where: {
+            phone: dto.phone,
+            isVerified: true,
+          },
+        });
+      } else if (dto.email) {
+        otpRecord = await this.otpRepository.findOne({
+          where: {
+            email: dto.email,
+            isVerified: true,
+          },
+        });
+      }
 
-    // const otpRecord = await this.otpRepository.findOne({
-    //   where: otpWhere,
-    // });
+      if (!otpRecord) {
+        throw new BadRequestException('Please verify your OTP first');
+      }
 
-    if (!otpRecord) {
-      throw new BadRequestException('Please verify your OTP first');
-    }
-
-    if (otpRecord.expiresAt < new Date()) {
-      throw new BadRequestException('OTP has expired');
+      if (otpRecord.expiresAt < new Date()) {
+        throw new BadRequestException('OTP has expired');
+      }
     }
 
     if (otpRecord.role === USER_ROLE.CUSTOMER) {
@@ -2006,34 +2376,36 @@ export class UserService {
       }
     }
 
-    // 2. Check if user already exists by email
-    if (dto.email) {
-      const existingUserByEmail = await this.userRepository.findByEmail(
-        dto.email,
-      );
-      if (existingUserByEmail) {
-        throw new ConflictException('Email already in use');
+    if (!dto.id) {
+      // 2. Check if user already exists by email
+      if (dto.email) {
+        const existingUserByEmail = await this.userRepository.findByEmail(
+          dto.email,
+        );
+        if (existingUserByEmail) {
+          throw new ConflictException('Email already in use');
+        }
       }
-    }
 
-    // 3. Check if user already exists by phone
-    if (dto.phone) {
-      const existingUserByPhone = await this.userRepository.findOne({
-        where: { phone: dto.phone },
-      });
-      if (existingUserByPhone) {
-        throw new ConflictException('Phone number already in use');
+      // 3. Check if user already exists by phone
+      if (dto.phone) {
+        const existingUserByPhone = await this.userRepository.findOne({
+          where: { phone: dto.phone },
+        });
+        if (existingUserByPhone) {
+          throw new ConflictException('Phone number already in use');
+        }
       }
-    }
 
-    // 4. Check if username already in use
-    if (dto.username) {
-      const existingUsername = await this.userRepository.findOne({
-        where: { username: dto.username },
-      });
+      // 4. Check if username already in use
+      if (dto.username) {
+        const existingUsername = await this.userRepository.findOne({
+          where: { username: dto.username },
+        });
 
-      if (existingUsername) {
-        throw new ConflictException('Username already in use');
+        if (existingUsername) {
+          throw new ConflictException('Username already in use');
+        }
       }
     }
 
@@ -2061,31 +2433,38 @@ export class UserService {
 
     // Run database writes inside a transaction
     const savedUser = await this.dataSource.transaction(async (manager) => {
-      // 5. Hash password and save user
-      const hashedPassword = await bcrypt.hash(dto.password, 10);
+      let saved: User;
 
-      const username =
-        dto.username ?? `user${Date.now()}${Math.floor(Math.random() * 1000)}`;
+      if (dto.id) {
+        saved = existingAdminCreatedUser!;
+        saved.isAdminCreated = false;
+        await manager.save(User, saved);
+      } else {
+        // 5. Hash password and save user
+        const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-      const newUser = manager.create(User, {
-        dob: dto.dob,
-        birthPlace: dto.birthPlace,
-        ...(dto.email && { email: dto.email.toLowerCase() }),
-        username,
-        ...(dto.phone && { phone: dto.phone }),
-        ...(dto.countryCode && { countryCode: dto.countryCode }),
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        hashedPassword: hashedPassword,
-        role: otpRecord.role || USER_ROLE.CUSTOMER,
-        // status: USER_STATUS.ACTIVE,
-        status:
-          otpRecord.role === USER_ROLE.PUROHIT
-            ? USER_STATUS.PENDING
-            : USER_STATUS.ACTIVE,
-      });
+        const username =
+          dto.username ?? `user${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
-      const saved = await manager.save(User, newUser);
+        const newUser = manager.create(User, {
+          dob: dto.dob,
+          birthPlace: dto.birthPlace,
+          ...(dto.email && { email: dto.email.toLowerCase() }),
+          username,
+          ...(dto.phone && { phone: dto.phone }),
+          ...(dto.countryCode && { countryCode: dto.countryCode }),
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          hashedPassword: hashedPassword,
+          role: otpRecord.role || USER_ROLE.CUSTOMER,
+          status:
+            otpRecord.role === USER_ROLE.PUROHIT
+              ? USER_STATUS.PENDING
+              : USER_STATUS.ACTIVE,
+        });
+
+        saved = await manager.save(User, newUser);
+      }
 
       const aadhaarDocUrl = files.aadhaarDoc?.length
         ? await this.s3Service.uploadFileHelper(
@@ -2149,27 +2528,45 @@ export class UserService {
         const isOnlineAvailable = dto.isOnlineAvailable === 'true';
 
         const isOfflineAvailable = dto.isOfflineAvailable === 'true';
-        const profile = manager.create(PurohitProfile, {
-          profileImage: profileImageUrl,
-          userId: saved.id,
-          bio: dto.bio,
-          qualification: dto.qualification,
-          experienceYears: dto.experienceYears,
-          aadhaarNumber: dto.aadhaarNumber,
 
-          aadhaarDocUrl,
-          panDocUrl,
-          certificateUrl,
-          templeAffiliationProofUrl,
+        let profile = await manager.findOne(PurohitProfile, { where: { userId: saved.id } });
 
-          city: dto.city,
-          languages: dto.languages,
-          specializations: dto.specializations,
-          isOnlineAvailable,
-          isOfflineAvailable,
-        });
-
-        await manager.save(profile);
+        if (profile) {
+          Object.assign(profile, {
+            bio: dto.bio ?? profile.bio,
+            qualification: dto.qualification ?? profile.qualification,
+            experienceYears: dto.experienceYears ?? profile.experienceYears,
+            aadhaarNumber: dto.aadhaarNumber ?? profile.aadhaarNumber,
+            aadhaarDocUrl: aadhaarDocUrl || profile.aadhaarDocUrl,
+            panDocUrl: panDocUrl || profile.panDocUrl,
+            certificateUrl: certificateUrl || profile.certificateUrl,
+            templeAffiliationProofUrl: templeAffiliationProofUrl || profile.templeAffiliationProofUrl,
+            city: dto.city ?? profile.city,
+            languages: dto.languages ?? profile.languages,
+            specializations: dto.specializations ?? profile.specializations,
+            isOnlineAvailable: dto.isOnlineAvailable !== undefined ? isOnlineAvailable : profile.isOnlineAvailable,
+            isOfflineAvailable: dto.isOfflineAvailable !== undefined ? isOfflineAvailable : profile.isOfflineAvailable,
+          });
+          await manager.save(profile);
+        } else {
+          profile = manager.create(PurohitProfile, {
+            userId: saved.id,
+            bio: dto.bio,
+            qualification: dto.qualification,
+            experienceYears: dto.experienceYears,
+            aadhaarNumber: dto.aadhaarNumber,
+            aadhaarDocUrl,
+            panDocUrl,
+            certificateUrl,
+            templeAffiliationProofUrl,
+            city: dto.city,
+            languages: dto.languages,
+            specializations: dto.specializations,
+            isOnlineAvailable,
+            isOfflineAvailable,
+          });
+          await manager.save(profile);
+        }
 
         const bankAccountData: any = {
           purohitId: profile.id,
@@ -2239,8 +2636,23 @@ export class UserService {
         }
       }
 
-      // 6. Delete OTP record after verification
-      await manager.delete(Otp, { id: otpRecord.id });
+      // 6. Delete OTP record after verification (skip if bypassed via purohitId)
+      if (otpRecord.id) {
+        await manager.delete(Otp, { id: otpRecord.id });
+      }
+
+      await this.auditLogService.createAuditLog({
+        actorId: saved.id,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: saved.role,
+        module: AUDIT_MODULE.USER,
+        entity: 'User',
+        entityId: String(saved.id),
+        action: 'USER_REGISTERED',
+        message: `User ${saved.username || saved.email || saved.phone} registered as ${saved.role}.`,
+        oldValue: undefined,
+        newValue: { role: saved.role, email: saved.email, phone: saved.phone },
+      }, manager);
 
       return saved;
     });
@@ -2296,6 +2708,7 @@ export class UserService {
         lastName: user.lastName,
         role: user.role,
         profileImage: user.profileImage,
+        isAdminCreated: user.isAdminCreated,
       },
     };
   }
@@ -2395,6 +2808,128 @@ export class UserService {
     return {
       success: true,
       message: 'Favorite removed successfully',
+    };
+  }
+
+  async scramblePhoneNumbers(phones?: string[]) {
+    if (process.env['NODE_ENV'] === 'production') {
+      this.logger.warn('Scramble phone cron skipped because environment is production');
+      return;
+    }
+
+    const targetPhones = phones && phones.length > 0 ? phones : [
+      '8468801711',
+      '9358081535',
+      '7082354083',
+      '7668697182',
+      '9354678205',
+    ];
+
+    for (const originalPhone of targetPhones) {
+      const user = await this.userRepository.findOne({
+        where: { phone: originalPhone }
+      });
+
+      if (user) {
+        let newPhone = '';
+        let isAlreadyUsed = true;
+
+        while (isAlreadyUsed) {
+          newPhone = this.generateRandomPhoneNumber();
+          const existing = await this.userRepository.findOne({
+            where: { phone: newPhone }
+          });
+          if (!existing) {
+            isAlreadyUsed = false;
+          }
+        }
+
+        user.phone = newPhone;
+        if (user.username === originalPhone) {
+          user.username = newPhone;
+        }
+
+        await this.userRepository.save(user);
+        this.logger.log(`Successfully scrambled phone ${originalPhone} -> ${newPhone} for user ID ${user.id}`);
+      }
+    }
+  }
+
+  private generateRandomPhoneNumber(): string {
+    const prefixes = ['9', '8', '7', '6'];
+    const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+    let rest = '';
+    for (let i = 0; i < 9; i++) {
+      rest += Math.floor(Math.random() * 10);
+    }
+    return prefix + rest;
+  }
+
+  async getPurohitDashboardStats(user: User) {
+    if (user.role !== USER_ROLE.PUROHIT) {
+      throw new ForbiddenException('Only purohits can access dashboard stats');
+    }
+
+    const purohitProfile = await this.purohitProfileRepository.findOne({
+      where: { userId: user.id },
+    });
+
+    if (!purohitProfile) {
+      throw new NotFoundException('Purohit profile not found');
+    }
+
+    const bookingStats = await this.bookingRepository.getPurohitDashboardStats(purohitProfile.id);
+
+    // Get total active services
+    const totalActiveServices = await this.purohitServiceRepository.count({
+      where: {
+        purohitId: purohitProfile.id,
+        isActive: true,
+      },
+    });
+
+    return {
+      ...bookingStats,
+      totalActiveServices,
+    };
+  }
+
+  async getCustomerDashboardStats(user: User) {
+    if (user.role !== USER_ROLE.CUSTOMER) {
+      throw new ForbiddenException('Only customers can access dashboard stats');
+    }
+
+    const bookingStats = await this.bookingRepository.getCustomerDashboardStats(user.id);
+
+    return bookingStats;
+  }
+
+  async getAdminDashboardStats(user: User) {
+    if (user.role !== USER_ROLE.ADMIN) {
+      throw new ForbiddenException('Only admins can access dashboard stats');
+    }
+
+    const [bookingStats, activePurohits, activeCustomers] = await Promise.all([
+      this.bookingRepository.getAdminDashboardStats(),
+      this.userRepository.count({
+        where: {
+          role: USER_ROLE.PUROHIT,
+          status: USER_STATUS.ACTIVE,
+        },
+      }),
+      this.userRepository.count({
+        where: {
+          role: USER_ROLE.CUSTOMER,
+          status: USER_STATUS.ACTIVE,
+        },
+      }),
+    ]);
+
+    return {
+      totalRevenue: bookingStats.totalRevenue,
+      totalBookings: bookingStats.totalBookings,
+      activePurohits,
+      activeCustomers,
     };
   }
 }

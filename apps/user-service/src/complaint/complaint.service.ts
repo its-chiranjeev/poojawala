@@ -6,6 +6,8 @@ import { Booking, COMPLAINT_STATUS, Payment, PurohitProfile, User, USER_ROLE, CO
 import { ComplaintRepository } from '@poojawala/repositories';
 import { CreateComplaintDto, ComplaintQueryDto, UpdateComplaintStatusDto, } from '@poojawala/dtos';
 import { S3Service } from '@poojawala/s3';
+import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 
 @Injectable()
 export class ComplaintService {
@@ -16,6 +18,7 @@ export class ComplaintService {
     private readonly purohitProfileRepository: Repository<PurohitProfile>,
     private readonly complaintRepository: ComplaintRepository,
     private readonly s3Service: S3Service,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async createComplaint(
@@ -52,7 +55,7 @@ export class ComplaintService {
     }> = [];
 
     try {
-      for (const file of files) {
+      for (const file of files || []) {
         const extension = this.getEvidenceExtension(file.originalname);
 
         const key = `complaints/${complaintNumber}/${crypto.randomUUID()}.${extension}`;
@@ -83,6 +86,28 @@ export class ComplaintService {
 
       const savedComplaint = await this.complaintRepository.save(complaint);
 
+      await this.auditLogService.createAuditLog({
+        actorId: user.id,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: user.role,
+        module: AUDIT_MODULE.COMPLAINT,
+        entity: 'Complaint',
+        entityId: String(savedComplaint.id),
+        action: 'COMPLAINT_CREATED',
+        message: `User #${user.id} created complaint #${savedComplaint.id}.`,
+        oldValue: undefined,
+        newValue: { category: dto.category, bookingId: booking?.id },
+      });
+
+      if (savedComplaint.evidenceUrls?.length) {
+        const downloadUrls = await Promise.all(
+          savedComplaint.evidenceUrls.map((url) =>
+            this.s3Service.getAttachmentDownloadUrl(url).catch(() => url)
+          )
+        );
+        savedComplaint.evidenceUrls = downloadUrls;
+      }
+
       return {
         message: 'Complaint created successfully',
         data: savedComplaint,
@@ -96,7 +121,7 @@ export class ComplaintService {
 
   private validateComplaintFiles(files: Express.Multer.File[]): void {
     if (!files?.length) {
-      throw new BadRequestException('At least one evidence file is required');
+      return;
     }
 
     if (files.length > 5) {
@@ -290,8 +315,8 @@ export class ComplaintService {
       throw new BadRequestException('Rejection message (resolution notes) is required when rejecting a complaint');
     }
 
-    if (resolvedStatuses.includes(dto.status) && !dto.resolutionNotes?.trim()) {
-      throw new BadRequestException('Resolution notes are required');
+    if (dto.status === COMPLAINT_STATUS.RESOLVED && !dto.resolutionNotes?.trim()) {
+      throw new BadRequestException('Resolution notes are required when resolving a complaint');
     }
 
     complaint.status = dto.status;
@@ -306,6 +331,19 @@ export class ComplaintService {
     }
 
     const updatedComplaint = await this.complaintRepository.save(complaint);
+
+    await this.auditLogService.createAuditLog({
+      actorId: admin.id,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.COMPLAINT,
+      entity: 'Complaint',
+      entityId: String(updatedComplaint.id),
+      action: dto.status === COMPLAINT_STATUS.RESOLVED ? 'COMPLAINT_RESOLVED' : 'COMPLAINT_UPDATED',
+      message: `Admin #${admin.id} updated complaint #${updatedComplaint.id} status to ${dto.status}.`,
+      oldValue: undefined,
+      newValue: { status: dto.status, resolutionNotes: dto.resolutionNotes },
+    });
 
     return {
       message: 'Complaint status updated successfully',
@@ -356,9 +394,35 @@ export class ComplaintService {
         raisedById,
       },
     );
+    const complaintsWithUrls = await Promise.all(
+      complaints.map(async (complaint) => {
+        if (complaint.booking?.service?.iconUrl) {
+          try {
+            const downloadUrl = await this.s3Service.getAttachmentDownloadUrl(
+              complaint.booking.service.iconUrl,
+            );
+            complaint.booking.service.iconUrl = downloadUrl;
+          } catch (error) {
+            // keep the original url if fetching download url fails
+          }
+        }
+
+        if (complaint.evidenceUrls?.length) {
+          const downloadUrls = await Promise.all(
+            complaint.evidenceUrls.map((url) =>
+              this.s3Service.getAttachmentDownloadUrl(url).catch(() => url)
+            )
+          );
+          complaint.evidenceUrls = downloadUrls;
+        }
+
+        return complaint;
+      }),
+    );
+
     return {
       message: 'Complaints retrieved successfully',
-      data: complaints,
+      data: complaintsWithUrls,
       meta: {
         page: query.page,
         limit: query.limit,
@@ -382,6 +446,26 @@ export class ComplaintService {
 
     if (!canAccess) {
       throw new ForbiddenException('You cannot access this complaint');
+    }
+
+    if (complaint.booking?.service?.iconUrl) {
+      try {
+        const downloadUrl = await this.s3Service.getAttachmentDownloadUrl(
+          complaint.booking.service.iconUrl,
+        );
+        complaint.booking.service.iconUrl = downloadUrl;
+      } catch (error) {
+        // keep original url
+      }
+    }
+
+    if (complaint.evidenceUrls?.length) {
+      const downloadUrls = await Promise.all(
+        complaint.evidenceUrls.map((url) =>
+          this.s3Service.getAttachmentDownloadUrl(url).catch(() => url)
+        )
+      );
+      complaint.evidenceUrls = downloadUrls;
     }
 
     return complaint;

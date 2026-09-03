@@ -1,9 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Booking, Payment, PaymentBooking, } from '@poojawala/entities';
-import { BookingRepository, PaymentRepository, } from '@poojawala/repositories';
+import { Booking, Payment, PaymentBooking } from '@poojawala/entities';
+import { BookingRepository, PaymentRepository } from '@poojawala/repositories';
 import { PaymentController } from './payment.controller';
 import { PaymentService } from './payment.service';
+import { NotificationModule } from '@poojawala/notification';
+import { GatewayModule } from '@poojawala/gateway';
+import { CommonModule } from '@poojawala/common';
 
 @Module({
   imports: [
@@ -12,6 +15,9 @@ import { PaymentService } from './payment.service';
       Payment,
       PaymentBooking,
     ]),
+    NotificationModule,
+    GatewayModule,
+    CommonModule,
   ],
   controllers: [PaymentController],
   providers: [

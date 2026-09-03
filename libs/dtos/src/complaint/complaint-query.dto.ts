@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { IsDateString, IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { COMPLAINT_CATEGORY, COMPLAINT_STATUS } from '@poojawala/entities';
 
@@ -17,8 +17,9 @@ export class ComplaintQueryDto {
   limit: number = 10;
 
   @IsOptional()
-  @IsEnum(COMPLAINT_STATUS)
-  status?: COMPLAINT_STATUS;
+  @IsEnum(COMPLAINT_STATUS, { each: true })
+  @Transform(({ value }) => (typeof value === 'string' ? value.split(',') : value))
+  status?: COMPLAINT_STATUS | COMPLAINT_STATUS[];
 
   @IsOptional()
   @IsEnum(COMPLAINT_CATEGORY)

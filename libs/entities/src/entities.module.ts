@@ -19,6 +19,9 @@ import { PlatformSetting } from './platform-setting.entity';
 import { Coupon } from './coupon.entity';
 import { CouponUsage } from './coupon-usage.entity';
 import { CmsContent } from './cms-content.entity';
+import { Notification } from './notification.entity';
+import { ContactUs } from './contact-us.entity';
+import { AuditLog } from './audit-log.entity';
 import { EntitiesService } from './entities.service';
 
 @Module({
@@ -42,6 +45,9 @@ import { EntitiesService } from './entities.service';
       Coupon,
       CouponUsage,
       CmsContent,
+      Notification,
+      ContactUs,
+      AuditLog,
     ]),
   ],
   providers: [EntitiesService],

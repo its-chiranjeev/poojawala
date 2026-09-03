@@ -7,7 +7,7 @@ import { BaseRepository } from './baseDb.repository';
 export interface FindComplaintsOptions {
   page: number;
   limit: number;
-  status?: COMPLAINT_STATUS;
+  status?: COMPLAINT_STATUS | COMPLAINT_STATUS[];
   category?: COMPLAINT_CATEGORY;
   search?: string;
   raisedById?: number;
@@ -146,8 +146,9 @@ export class ComplaintRepository extends BaseRepository<Complaint> {
     }
 
     if (options.status) {
-      query.andWhere('complaint.status = :status', {
-        status: options.status,
+      const statuses = Array.isArray(options.status) ? options.status : [options.status];
+      query.andWhere('complaint.status IN (:...statuses)', {
+        statuses,
       });
     }
 

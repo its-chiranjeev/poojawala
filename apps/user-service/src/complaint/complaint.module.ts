@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Booking, Complaint, PurohitProfile } from '@poojawala/entities';
 import { ComplaintRepository, BookingRepository } from '@poojawala/repositories';
 import { S3Module } from '@poojawala/s3';
+import { CommonModule } from '@poojawala/common';
 import { ComplaintController } from './complaint.controller';
 import { ComplaintService } from './complaint.service';
 
@@ -14,6 +15,7 @@ import { ComplaintService } from './complaint.service';
       PurohitProfile,
     ]),
     S3Module,
+    CommonModule,
   ],
   controllers: [ ComplaintController ],
   providers: [ ComplaintService, ComplaintRepository, BookingRepository],
