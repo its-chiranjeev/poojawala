@@ -6,7 +6,10 @@ import {
   IsString,
   Max,
   Min,
-  IsInt
+  IsInt,
+  IsDateString,
+  ValidateIf,
+  IsNotEmpty,
 } from 'class-validator';
 
 export class UpdateServiceDto {
@@ -54,9 +57,24 @@ export class UpdateServiceDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  isUpcomingFestival?: boolean;
+
+  @ValidateIf((o) => o.isUpcomingFestival === true || o.isUpcomingFestival === 'true')
+  @IsNotEmpty()
+  @IsDateString()
+  festivalStartDate?: Date | null;
+
+  @ValidateIf((o) => o.isUpcomingFestival === true || o.isUpcomingFestival === 'true')
+  @IsNotEmpty()
+  @IsDateString()
+  festivalEndDate?: Date | null;
 }
 
-export class UpdatePurohitServiceDto{
+export class UpdatePurohitServiceDto {
   @IsOptional()
   @IsBoolean()
   isOnline!: boolean;
@@ -83,8 +101,8 @@ export class UpdatePurohitServiceDto{
   @IsBoolean()
   isActive?: boolean;
 
-} 
- 
+}
+
 export class UpdateServiceStatusDto {
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()

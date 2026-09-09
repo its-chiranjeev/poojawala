@@ -15,7 +15,7 @@ export class ServiceRepository extends BaseRepository<Service> {
   }
 
   async findAllServices(query: GetServicesQueryDto) {
-    const { page = 1, limit = 10, search, isActive } = query;
+    const { page = 1, limit = 10, search, isActive, isUpcomingFestival } = query;
     console.log("=== API REQUEST RECEIVED ===");
     console.log("Original query object:", query);
 
@@ -26,8 +26,14 @@ export class ServiceRepository extends BaseRepository<Service> {
 
     console.log("Parsed isActive:", parsedIsActive);
 
+    let parsedIsUpcomingFestival: boolean | undefined = undefined;
+    if (isUpcomingFestival !== undefined) {
+      parsedIsUpcomingFestival = String(isUpcomingFestival) === 'true';
+    }
+
     const where: any = {
       ...(parsedIsActive !== undefined && { isActive: parsedIsActive }),
+      ...(parsedIsUpcomingFestival !== undefined && { isUpcomingFestival: parsedIsUpcomingFestival }),
       ...(search && {
         name: ILike(`%${search}%`),
       }),
@@ -52,6 +58,9 @@ export class ServiceRepository extends BaseRepository<Service> {
         durationMinutes: true,
         requiresVenue: true,
         isActive: true,
+        isUpcomingFestival: true,
+        festivalStartDate: true,
+        festivalEndDate: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -92,6 +101,9 @@ export class ServiceRepository extends BaseRepository<Service> {
         durationMinutes: true,
         requiresVenue: true,
         isActive: true,
+        isUpcomingFestival: true,
+        festivalStartDate: true,
+        festivalEndDate: true,
         createdAt: true,
         updatedAt: true,
       },

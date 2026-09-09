@@ -17,8 +17,8 @@ async function bootstrap(): Promise<void> {
 
   const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',')
-        .map((origin) => origin.trim())
-        .filter(Boolean)
+      .map((origin) => origin.trim())
+      .filter(Boolean)
     : [];
 
   const localOrigins = [
@@ -30,43 +30,13 @@ async function bootstrap(): Promise<void> {
     'http://127.0.0.1:5173',
   ];
 
-  app.enableCors({
-    origin: (origin, callback) => {
-      /*
-       * Postman, mobile apps and server-to-server
-       * calls may not send an Origin header.
-       */
-      if (!origin) {
-        callback(null, true);
-        return;
-      }
-
-      if (
-        allowedOrigins.includes('*') ||
-        allowedOrigins.includes(origin) ||
-        localOrigins.includes(origin)
-      ) {
-        callback(null, true);
-        return;
-      }
-
-      const isLocal =
-        /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(
-          origin,
-        );
-
-      if (isLocal || process.env.NODE_ENV !== 'production') {
-        callback(null, true);
-        return;
-      }
-
-      callback(new Error('Not allowed by CORS'));
-    },
-
-    credentials: true,
-
-    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-  });
+  if (process.env.NODE_ENV !== 'production') {
+    app.enableCors({
+      origin: true, // Allow all origins
+      credentials: true,
+      methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    });
+  }
 
   const logger = new Logger('HTTP');
 

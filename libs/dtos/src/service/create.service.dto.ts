@@ -7,6 +7,9 @@ import {
   IsString,
   Max,
   Min,
+  IsDateString,
+  ValidateIf,
+  IsNotEmpty,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ArrayNotEmpty, IsArray, ValidateNested } from 'class-validator';
@@ -50,6 +53,21 @@ export class CreateServiceDto {
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  isUpcomingFestival?: boolean;
+
+  @ValidateIf((o) => o.isUpcomingFestival === true || o.isUpcomingFestival === 'true')
+  @IsNotEmpty()
+  @IsDateString()
+  festivalStartDate?: Date | null;
+
+  @ValidateIf((o) => o.isUpcomingFestival === true || o.isUpcomingFestival === 'true')
+  @IsNotEmpty()
+  @IsDateString()
+  festivalEndDate?: Date | null;
 }
 export class PurohitServiceItemDto {
   @IsInt()

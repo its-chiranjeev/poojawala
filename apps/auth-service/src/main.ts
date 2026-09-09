@@ -27,38 +27,13 @@ async function bootstrap() {
     'http://127.0.0.1:5173',
   ];
 
-  app.enableCors({
-    origin: (origin, callback) => {
-      if (!origin) {
-        callback(null, true);
-        return;
-      }
-
-      if (
-        allowedOrigins.includes('*') ||
-        allowedOrigins.includes(origin) ||
-        localOrigins.includes(origin)
-      ) {
-        callback(null, true);
-        return;
-      }
-
-      // Check if origin is localhost or same local network / WiFi
-      const isLocal =
-        /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(
-          origin,
-        );
-
-      if (isLocal || process.env.NODE_ENV !== 'production') {
-        callback(null, true);
-        return;
-      }
-
-      callback(new Error('Not allowed by CORS'));
-    },
-    credentials: true,
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-  });
+  if (process.env.NODE_ENV !== 'production') {
+    app.enableCors({
+      origin: true, // Allow all origins
+      credentials: true,
+      methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    });
+  }
 
   const logger = new Logger('HTTP');
 

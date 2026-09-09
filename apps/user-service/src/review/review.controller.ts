@@ -28,16 +28,26 @@ export class ReviewController {
   create(
     @Req() req: any,
     @Param('bookingId', ParseIntPipe) bookingId: number,
-    @Body() dto: CreateReviewDto
+    @Body() dto: CreateReviewDto,
   ) {
     return this.reviewService.create(req.user, bookingId, dto);
   }
 
   @Get()
-  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   findAll(@Req() req: any, @Query() query: ReviewQueryDto) {
-    return this.reviewService.findAll(req.user, query);
+    let user = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      try {
+        const base64Payload = token.split('.')[1];
+        const payloadBuffer = Buffer.from(base64Payload, 'base64');
+        user = JSON.parse(payloadBuffer.toString());
+      } catch (e) {
+        // Ignore parsing errors
+      }
+    }
+    return this.reviewService.findAll(user, query);
   }
 
   @Get(':bookingId')
@@ -45,7 +55,7 @@ export class ReviewController {
   @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   findOne(
     @Req() req: any,
-    @Param('bookingId', ParseIntPipe) bookingId: number
+    @Param('bookingId', ParseIntPipe) bookingId: number,
   ) {
     return this.reviewService.findOne(req.user, bookingId);
   }
@@ -64,10 +74,7 @@ export class ReviewController {
   @Delete(':bookingId')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
-  remove(
-    @Req() req: any,
-    @Param('bookingId', ParseIntPipe) bookingId: number,
-  ) {
+  remove(@Req() req: any, @Param('bookingId', ParseIntPipe) bookingId: number) {
     return this.reviewService.remove(bookingId, req.user.id);
   }
 
@@ -81,9 +88,7 @@ export class ReviewController {
   }
 
   @Get('customers/given')
-  async getAllCustomerReviews(
-    @Query() query: ReviewQueryDto,
-  ) {
+  async getAllCustomerReviews(@Query() query: ReviewQueryDto) {
     return this.reviewService.getAllCustomerReviews(query);
   }
 }
