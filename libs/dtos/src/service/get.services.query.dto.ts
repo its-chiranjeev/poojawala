@@ -22,4 +22,8 @@ export class GetServicesQueryDto {
   @IsOptional()
   @IsString()
   isActive?: string;
+
+  @IsOptional()
+  @IsString()
+  isUpcomingFestival?: string;
 }

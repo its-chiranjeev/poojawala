@@ -108,10 +108,20 @@ export class ServiceService {
         );
       }
 
+      if (dto.isUpcomingFestival) {
+        if (!dto.festivalStartDate || !dto.festivalEndDate) {
+          throw new BadRequestException('Festival start and end dates are required.');
+        }
+        if (new Date(dto.festivalStartDate) >= new Date(dto.festivalEndDate)) {
+          throw new BadRequestException('Festival end date must be after the start date.');
+        }
+      }
+
       const service = this.serviceRepository.create({
         ...dto,
         iconUrl,
         isActive: dto.isActive ?? true,
+        isUpcomingFestival: dto.isUpcomingFestival ?? false,
       });
 
       const savedService = await this.serviceRepository.save(service);
@@ -199,18 +209,25 @@ export class ServiceService {
       );
     }
 
+    Object.assign(service, dto);
+
+    if (service.isUpcomingFestival) {
+      if (!service.festivalStartDate || !service.festivalEndDate) {
+        throw new BadRequestException('Festival start and end dates are required.');
+      }
+      if (new Date(service.festivalStartDate) >= new Date(service.festivalEndDate)) {
+        throw new BadRequestException('Festival end date must be after the start date.');
+      }
+    }
+
     // Upload new icon if provided
     if (files?.icon?.length) {
-      const folderName = dto.slug ?? service.slug;
-
       service.iconUrl = await this.s3Service.uploadFileHelper(
-        folderName,
+        service.slug,
         'icon',
         files.icon,
       );
     }
-
-    Object.assign(service, dto);
 
     const updated = await this.serviceRepository.save(service);
 

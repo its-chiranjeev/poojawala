@@ -1,7 +1,12 @@
 import { CreateReviewDto } from '@poojawala/dtos/review/create-review.dto';
 import { ReviewQueryDto } from '@poojawala/dtos/review/review-query.dto';
 import { UpdateReviewStatusDto } from '@poojawala/dtos/review/update-review-status.dto';
-import { BOOKING_STATUS, REVIEW_STATUS, User, USER_ROLE } from '@poojawala/entities';
+import {
+  BOOKING_STATUS,
+  REVIEW_STATUS,
+  User,
+  USER_ROLE,
+} from '@poojawala/entities';
 import {
   BookingRepository,
   PurohitProfileRepository,
@@ -100,7 +105,7 @@ export class ReviewService {
     };
   }
 
-  async findAll(user: User, query: ReviewQueryDto) {
+  async findAll(user: User | null | undefined, query: ReviewQueryDto) {
     const queryBuilder = this.bookingRepository
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.customer', 'customer')
@@ -111,22 +116,25 @@ export class ReviewService {
         '(booking.customerRating IS NOT NULL OR booking.purohitRating IS NOT NULL)',
       );
 
-    if (user.role === USER_ROLE.CUSTOMER) {
+    if (user?.role === USER_ROLE.CUSTOMER) {
       queryBuilder.andWhere('booking.customerId = :userId', {
         userId: user.id,
       });
-    } else if (user.role === USER_ROLE.PUROHIT) {
+    } else if (user?.role === USER_ROLE.PUROHIT) {
       queryBuilder.andWhere('purohit.userId = :userId', { userId: user.id });
+    } else if (user?.role === USER_ROLE.ADMIN) {
+      // Admin sees all reviews
+    } else {
+      queryBuilder.andWhere('booking.customerRating IS NOT NULL');
+      queryBuilder.andWhere('booking.reviewStatus = :status', {
+        status: REVIEW_STATUS.PUBLISHED,
+      });
     }
 
     if (query.status) {
       queryBuilder.andWhere('booking.reviewStatus = :status', {
         status: query.status,
       });
-    } else if (user.role !== USER_ROLE.ADMIN) {
-      // Non-admins can only see PUBLISHED reviews (or their own? but they can see their own anyway if we don't filter.
-      // Wait, if they submitted it they should probably see it regardless of status, but requirement says status filter.)
-      // Let's not restrict unless requested.
     }
 
     const total = await queryBuilder.getCount();

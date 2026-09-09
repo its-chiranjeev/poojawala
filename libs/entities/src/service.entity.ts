@@ -47,6 +47,15 @@ export class Service {
   @Column({ type: 'boolean', default: true })
   isActive!: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  isUpcomingFestival!: boolean;
+
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  festivalStartDate?: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  festivalEndDate?: Date | null;
+
   @OneToMany(() => PurohitService, (purohitService) => purohitService.service)
   purohitServices!: PurohitService[];
 
