@@ -53,7 +53,7 @@ export class GetAllUsersDto {
   city?: string;
 
   @IsOptional()
-  @Transform(({ value }) => Number(value))
+  @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
   @IsInt()
   serviceId?: number;
 
