@@ -1178,6 +1178,9 @@ export class BookingService {
 
           booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
 
+          booking.purohitPayoutAmount = null as unknown as undefined;
+          booking.finalAmount = null as unknown as undefined;
+
           /*
            * Recalculate Purohits through
            * AssignmentService.

@@ -110,6 +110,10 @@ export class UserRepository extends BaseRepository<User> {
       );
     }
 
+    if (query.serviceId) {
+      qb.andWhere('service.id = :serviceId', { serviceId: query.serviceId });
+    }
+
     qb.orderBy(`user.${sortBy}`, order);
 
     qb.skip((page - 1) * limit);

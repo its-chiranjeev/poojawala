@@ -53,6 +53,11 @@ export class GetAllUsersDto {
   city?: string;
 
   @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  serviceId?: number;
+
+  @IsOptional()
   @IsIn(['createdAt', 'updatedAt', 'username', 'email'])
   sortBy: string = 'createdAt';
 
