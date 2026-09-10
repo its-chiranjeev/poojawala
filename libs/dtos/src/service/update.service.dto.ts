@@ -63,13 +63,13 @@ export class UpdateServiceDto {
   @IsBoolean()
   isUpcomingFestival?: boolean;
 
-  @ValidateIf((o) => o.isUpcomingFestival === true || o.isUpcomingFestival === 'true')
-  @IsNotEmpty()
+  @IsOptional()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   @IsDateString()
   festivalStartDate?: Date | null;
 
-  @ValidateIf((o) => o.isUpcomingFestival === true || o.isUpcomingFestival === 'true')
-  @IsNotEmpty()
+  @IsOptional()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   @IsDateString()
   festivalEndDate?: Date | null;
 }
