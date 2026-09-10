@@ -46,16 +46,16 @@ export class CreateServiceDto {
   @Min(1)
   durationMinutes!: number;
 
-  @Transform(({ value }) => value === 'true' || value === true)
+  @Transform(({ obj }) => obj.requiresVenue === 'true' || obj.requiresVenue === true)
   @IsBoolean()
   requiresVenue!: boolean;
 
-  @Transform(({ value }) => value === 'true' || value === true)
+  @Transform(({ obj }) => obj.isActive === 'true' || obj.isActive === true)
   @IsBoolean()
   isActive?: boolean;
 
   @IsOptional()
-  @Transform(({ value }) => value === 'true' || value === true)
+  @Transform(({ obj }) => obj.isUpcomingFestival === 'true' || obj.isUpcomingFestival === true)
   @IsBoolean()
   isUpcomingFestival?: boolean;
 

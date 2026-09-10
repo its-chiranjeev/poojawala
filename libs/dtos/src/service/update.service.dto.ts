@@ -59,7 +59,7 @@ export class UpdateServiceDto {
   isActive?: boolean;
 
   @IsOptional()
-  @Transform(({ value }) => value === 'true' || value === true)
+  @Transform(({ obj }) => obj.isUpcomingFestival === 'true' || obj.isUpcomingFestival === true)
   @IsBoolean()
   isUpcomingFestival?: boolean;
 
@@ -104,7 +104,7 @@ export class UpdatePurohitServiceDto {
 }
 
 export class UpdateServiceStatusDto {
-  @Transform(({ value }) => value === 'true' || value === true)
+  @Transform(({ obj }) => obj.isActive === 'true' || obj.isActive === true)
   @IsBoolean()
   isActive!: boolean;
 }
