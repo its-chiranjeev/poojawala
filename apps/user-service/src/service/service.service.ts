@@ -572,6 +572,16 @@ export class ServiceService {
       throw new NotFoundException('Purohit service not found');
     }
 
+    if (purohitService.service?.iconUrl) {
+      try {
+        (purohitService.service as any).iconDownloadurl = await this.s3Service.getDownloadUrl(
+          purohitService.service.iconUrl,
+        );
+      } catch (e) {
+        console.error('Failed to generate pre-signed URL for icon:', e);
+      }
+    }
+
     return {
       success: true,
       message: 'Purohit service fetched successfully',

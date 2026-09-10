@@ -104,7 +104,7 @@ export class UserRepository extends BaseRepository<User> {
     if (query.city) {
       qb.andWhere(
         new Brackets((qb) => {
-          qb.where('LOWER(profile.city) LIKE LOWER(:city)', { city: `%${query.city}%` })
+          qb.where('LOWER(serviceAreas.city) LIKE LOWER(:city) AND serviceAreas.isDefault = true', { city: `%${query.city}%` })
             .orWhere('LOWER(addresses.city) LIKE LOWER(:city)', { city: `%${query.city}%` });
         })
       );
