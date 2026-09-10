@@ -1226,20 +1226,40 @@ export class BookingService {
 
       if (cancelledBy === CANCELLED_BY.CUSTOMER) {
         if (assignedPurohitUserId) {
-          this.bookingGateway.notifyUser(
+          // TODO: commented out to avoid duplicate notification
+          // this.bookingGateway.notifyUser(
+          //   assignedPurohitUserId,
+          //   'booking_cancelled',
+          //   savedBooking,
+          // );
+
+          await this.notificationService.createNotification(
             assignedPurohitUserId,
-            'booking_cancelled',
-            savedBooking,
+            'Booking Cancelled',
+            `Booking B-${savedBooking.id} has been cancelled by the customer.`,
+            NOTIFICATION_TYPE.BOOKING,
+            savedBooking.id,
+            'BOOKING',
           );
         }
       }
 
       // PUROHIT → CUSTOMER + ADMINS
       if (cancelledBy === CANCELLED_BY.PUROHIT) {
-        this.bookingGateway.notifyUser(
+        // TODO: commented out to avoid duplicate notification
+        // this.bookingGateway.notifyUser(
+        //   savedBooking.customerId,
+        //   'booking_released',
+        //   savedBooking,
+        // );
+
+        await this.notificationService.createNotification(
           savedBooking.customerId,
-          'booking_released',
-          savedBooking,
+          'Booking Released',
+          `Booking B-${savedBooking.id} released by purohit. We are finding an eligible purohit for this booking, please wait some time.`,
+          NOTIFICATION_TYPE.BOOKING,
+          savedBooking.id,
+          'BOOKING',
         );
 
         const admins = await manager.getRepository(User).find({
@@ -1251,27 +1271,57 @@ export class BookingService {
         });
 
         for (const admin of admins) {
-          this.bookingGateway.notifyUser(
+          // TODO: commented out to avoid duplicate notification
+          // this.bookingGateway.notifyUser(
+          //   admin.id,
+          //   'booking_released',
+          //   savedBooking,
+          // );
+
+          await this.notificationService.createNotification(
             admin.id,
-            'booking_released',
-            savedBooking,
+            'Booking Released',
+            `Booking B-${savedBooking.id} was released by the assigned Purohit.`,
+            NOTIFICATION_TYPE.BOOKING,
+            savedBooking.id,
+            'BOOKING',
           );
         }
       }
 
       // ADMIN → PUROHIT + CUSTOMER
       if (cancelledBy === CANCELLED_BY.ADMIN) {
-        this.bookingGateway.notifyUser(
+        // TODO: commented out to avoid duplicate notification
+        // this.bookingGateway.notifyUser(
+        //   savedBooking.customerId,
+        //   'booking_cancelled',
+        //   savedBooking,
+        // );
+
+        await this.notificationService.createNotification(
           savedBooking.customerId,
-          'booking_cancelled',
-          savedBooking,
+          'Booking Cancelled',
+          `Your booking B-${savedBooking.id} has been cancelled by the Admin.`,
+          NOTIFICATION_TYPE.BOOKING,
+          savedBooking.id,
+          'BOOKING',
         );
 
         if (assignedPurohitUserId) {
-          this.bookingGateway.notifyUser(
+          // TODO: commented out to avoid duplicate notification
+          // this.bookingGateway.notifyUser(
+          //   assignedPurohitUserId,
+          //   'booking_cancelled',
+          //   savedBooking,
+          // );
+
+          await this.notificationService.createNotification(
             assignedPurohitUserId,
-            'booking_cancelled',
-            savedBooking,
+            'Booking Cancelled',
+            `Booking B-${savedBooking.id} has been cancelled by the Admin.`,
+            NOTIFICATION_TYPE.BOOKING,
+            savedBooking.id,
+            'BOOKING',
           );
         }
       }
@@ -1999,19 +2049,39 @@ export class BookingService {
       });
 
       // real time socket event for booking.customerId and dto.purohitId
-      this.bookingGateway.notifyUser(
+      // TODO: commented out to avoid duplicate notification
+      // this.bookingGateway.notifyUser(
+      //   savedBooking.customerId,
+      //   'booking_assigned_by_admin',
+      //   {
+      //     message: 'Booking assigned to Purohit successfully',
+      //     booking: assignedBooking ?? savedBooking,
+      //   },
+      // );
+
+      await this.notificationService.createNotification(
         savedBooking.customerId,
-        'booking_assigned_by_admin',
-        {
-          message: 'Booking assigned to Purohit successfully',
-          booking: assignedBooking ?? savedBooking,
-        },
+        'Booking Assigned',
+        `Booking B-${savedBooking.id} assigned to Purohit successfully`,
+        NOTIFICATION_TYPE.BOOKING,
+        savedBooking.id,
+        'BOOKING',
       );
 
-      this.bookingGateway.notifyUser(dto.purohitId, 'booking_assigned_by_admin', {
-        message: 'Booking assigned to you by admin',
-        booking: assignedBooking ?? savedBooking,
-      });
+      // TODO: commented out to avoid duplicate notification
+      // this.bookingGateway.notifyUser(dto.purohitId, 'booking_assigned_by_admin', {
+      //   message: 'Booking assigned to you by admin',
+      //   booking: assignedBooking ?? savedBooking,
+      // });
+
+      await this.notificationService.createNotification(
+        dto.purohitId,
+        'Booking Assigned',
+        `Booking B-${savedBooking.id} assigned to you by admin`,
+        NOTIFICATION_TYPE.BOOKING,
+        savedBooking.id,
+        'BOOKING',
+      );
 
       await this.auditLogService.createAuditLog(
         {
@@ -3631,17 +3701,37 @@ export class BookingService {
       });
 
       if (transactionResult.notifyPurohitId) {
-        this.bookingGateway.notifyUser(
+        // TODO: commented out to avoid duplicate notification
+        // this.bookingGateway.notifyUser(
+        //   transactionResult.notifyPurohitId,
+        //   'create_booking_by_admin',
+        //   transactionResult.formattedSavedBooking,
+        // );
+
+        await this.notificationService.createNotification(
           transactionResult.notifyPurohitId,
-          'create_booking_by_admin',
-          transactionResult.formattedSavedBooking,
+          'Booking Assigned',
+          `Booking B-${transactionResult.formattedSavedBooking.id} assigned to you by admin`,
+          NOTIFICATION_TYPE.BOOKING,
+          transactionResult.formattedSavedBooking.id,
+          'BOOKING',
         );
       }
 
-      this.bookingGateway.notifyUser(
+      // TODO: commented out to avoid duplicate notification
+      // this.bookingGateway.notifyUser(
+      //   transactionResult.notifyCustomerId,
+      //   'create_booking_by_admin',
+      //   transactionResult.formattedSavedBooking,
+      // );
+
+      await this.notificationService.createNotification(
         transactionResult.notifyCustomerId,
-        'create_booking_by_admin',
-        transactionResult.formattedSavedBooking,
+        'Booking Created',
+        `Booking B-${transactionResult.formattedSavedBooking.id} created by admin for you`,
+        NOTIFICATION_TYPE.BOOKING,
+        transactionResult.formattedSavedBooking.id,
+        'BOOKING',
       );
 
       // Email notifications
