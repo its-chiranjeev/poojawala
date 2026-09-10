@@ -476,7 +476,7 @@ export class BookingService {
             entity: 'Booking',
             entityId: String(savedBooking.id),
             action: 'BOOKING_CREATED',
-            message: `Customer created Booking #${savedBooking.bookingNumber}.`,
+            message: `Customer created Booking B-${savedBooking.id}.`,
             oldValue: undefined,
             newValue: {
               status: savedBooking.status,
@@ -493,17 +493,18 @@ export class BookingService {
 
       for (const purohitUserId of transactionResult.eligiblePurohitUserIds) {
         // Emit legacy event
-        this.bookingGateway.notifyUser(
-          purohitUserId,
-          'create_booking',
-          transactionResult.savedBooking,
-        );
+        // TODO: commented out to avoid duplicate notification
+        // this.bookingGateway.notifyUser(
+//           purohitUserId,
+//           'create_booking',
+//           transactionResult.savedBooking,
+//         );
 
         // Save persistent notification
         await this.notificationService.createNotification(
           purohitUserId,
           'New Booking',
-          `You have received a new booking request (Booking #${transactionResult.savedBooking.bookingNumber}).`,
+          `You have received a new booking request (Booking B-${transactionResult.savedBooking.id}).`,
           NOTIFICATION_TYPE.BOOKING,
           transactionResult.savedBooking.id,
           'BOOKING',
@@ -921,7 +922,7 @@ export class BookingService {
           entity: 'Booking',
           entityId: String(savedBooking.id),
           action: 'BOOKING_UPDATED',
-          message: `Booking #${savedBooking.bookingNumber} details were updated.`,
+          message: `Booking B-${savedBooking.id} details were updated.`,
           oldValue: undefined,
           newValue: {
             scheduledAt: savedBooking.scheduledAt,
@@ -1225,21 +1226,23 @@ export class BookingService {
 
       if (cancelledBy === CANCELLED_BY.CUSTOMER) {
         if (assignedPurohitUserId) {
-          this.bookingGateway.notifyUser(
-            assignedPurohitUserId,
-            'booking_cancelled',
-            savedBooking,
-          );
+          // TODO: commented out to avoid duplicate notification
+          // this.bookingGateway.notifyUser(
+//             assignedPurohitUserId,
+//             'booking_cancelled',
+//             savedBooking,
+//           );
         }
       }
 
       // PUROHIT → CUSTOMER + ADMINS
       if (cancelledBy === CANCELLED_BY.PUROHIT) {
-        this.bookingGateway.notifyUser(
-          savedBooking.customerId,
-          'booking_released',
-          savedBooking,
-        );
+        // TODO: commented out to avoid duplicate notification
+        // this.bookingGateway.notifyUser(
+//           savedBooking.customerId,
+//           'booking_released',
+//           savedBooking,
+//         );
 
         const admins = await manager.getRepository(User).find({
           where: {
@@ -1250,28 +1253,31 @@ export class BookingService {
         });
 
         for (const admin of admins) {
-          this.bookingGateway.notifyUser(
-            admin.id,
-            'booking_released',
-            savedBooking,
-          );
+          // TODO: commented out to avoid duplicate notification
+          // this.bookingGateway.notifyUser(
+//             admin.id,
+//             'booking_released',
+//             savedBooking,
+//           );
         }
       }
 
       // ADMIN → PUROHIT + CUSTOMER
       if (cancelledBy === CANCELLED_BY.ADMIN) {
-        this.bookingGateway.notifyUser(
-          savedBooking.customerId,
-          'booking_cancelled',
-          savedBooking,
-        );
+        // TODO: commented out to avoid duplicate notification
+        // this.bookingGateway.notifyUser(
+//           savedBooking.customerId,
+//           'booking_cancelled',
+//           savedBooking,
+//         );
 
         if (assignedPurohitUserId) {
-          this.bookingGateway.notifyUser(
-            assignedPurohitUserId,
-            'booking_cancelled',
-            savedBooking,
-          );
+          // TODO: commented out to avoid duplicate notification
+          // this.bookingGateway.notifyUser(
+//             assignedPurohitUserId,
+//             'booking_cancelled',
+//             savedBooking,
+//           );
         }
       }
 
@@ -1294,7 +1300,7 @@ export class BookingService {
           entity: 'Booking',
           entityId: String(savedBooking.id),
           action: 'BOOKING_CANCELLED',
-          message: `Booking #${savedBooking.bookingNumber} was cancelled.`,
+          message: `Booking B-${savedBooking.id} was cancelled.`,
           oldValue: { status: booking.status },
           newValue: { status: savedBooking.status, cancellationReason },
         },
@@ -1727,19 +1733,20 @@ export class BookingService {
           });
 
           // real time socket event for booking.customerId
-          this.bookingGateway.notifyUser(
-            booking.customerId,
-            'booking_accepted',
-            {
-              message: 'Booking accepted successfully',
-              booking: acceptedBooking ?? savedBooking,
-            },
-          );
+          // TODO: commented out to avoid duplicate notification
+          // this.bookingGateway.notifyUser(
+//             booking.customerId,
+//             'booking_accepted',
+//             {
+//               message: 'Booking accepted successfully',
+//               booking: acceptedBooking ?? savedBooking,
+//             },
+//           );
 
           await this.notificationService.createNotification(
             booking.customerId,
             'Booking Accepted',
-            `Your booking #${savedBooking.bookingNumber} has been accepted by the Purohit.`,
+            `Your booking B-${savedBooking.id} has been accepted by the Purohit.`,
             NOTIFICATION_TYPE.BOOKING_STATUS,
             savedBooking.id,
             'BOOKING',
@@ -1754,7 +1761,7 @@ export class BookingService {
               entity: 'Booking',
               entityId: String(savedBooking.id),
               action: 'BOOKING_RESPONDED',
-              message: `Purohit #${purohitProfile.id} accepted Booking #${savedBooking.bookingNumber}.`,
+              message: `Purohit #${purohitProfile.id} accepted Booking B-${savedBooking.id}.`,
               oldValue: { status: BOOKING_STATUS.PENDING },
               newValue: { status: savedBooking.status, purohitId: savedBooking.purohitId },
             },
@@ -1783,7 +1790,7 @@ export class BookingService {
               entity: 'Booking',
               entityId: String(booking.id),
               action: 'BOOKING_RESPONDED',
-              message: `Purohit #${purohitProfile.id} rejected Booking #${booking.bookingNumber}.`,
+              message: `Purohit #${purohitProfile.id} rejected Booking B-${booking.id}.`,
               oldValue: { filteredPurohitIds },
               newValue: { filteredPurohitIds: booking.filteredPurohitIds },
             },
@@ -1997,19 +2004,21 @@ export class BookingService {
       });
 
       // real time socket event for booking.customerId and dto.purohitId
-      this.bookingGateway.notifyUser(
-        savedBooking.customerId,
-        'booking_assigned_by_admin',
-        {
-          message: 'Booking assigned to Purohit successfully',
-          booking: assignedBooking ?? savedBooking,
-        },
-      );
+      // TODO: commented out to avoid duplicate notification
+      // this.bookingGateway.notifyUser(
+//         savedBooking.customerId,
+//         'booking_assigned_by_admin',
+//         {
+//           message: 'Booking assigned to Purohit successfully',
+//           booking: assignedBooking ?? savedBooking,
+//         },
+//       );
 
-      this.bookingGateway.notifyUser(dto.purohitId, 'booking_assigned_by_admin', {
-        message: 'Booking assigned to you by admin',
-        booking: assignedBooking ?? savedBooking,
-      });
+      // TODO: commented out to avoid duplicate notification
+      // this.bookingGateway.notifyUser(dto.purohitId, 'booking_assigned_by_admin', {
+//         message: 'Booking assigned to you by admin',
+//         booking: assignedBooking ?? savedBooking,
+//       });
 
       await this.auditLogService.createAuditLog(
         {
@@ -2020,7 +2029,7 @@ export class BookingService {
           entity: 'Booking',
           entityId: String(savedBooking.id),
           action: 'PUROHIT_ASSIGNED',
-          message: `Admin manually assigned Purohit #${dto.purohitId} to Booking #${savedBooking.bookingNumber}.`,
+          message: `Admin manually assigned Purohit #${dto.purohitId} to Booking B-${savedBooking.id}.`,
           oldValue: { status: BOOKING_STATUS.PENDING },
           newValue: { status: savedBooking.status, purohitId: savedBooking.purohitId },
         },
@@ -2136,19 +2145,20 @@ export class BookingService {
       const updatedBooking = await bookingRepository.save(booking);
 
       // Notify customer for status change
-      this.bookingGateway.notifyUser(
-        updatedBooking.customerId,
-        'booking_status_updated',
-        {
-          message: `Booking status updated to ${updatedBooking.status}`,
-          booking: updatedBooking,
-        },
-      );
+      // TODO: commented out to avoid duplicate notification
+      // this.bookingGateway.notifyUser(
+//         updatedBooking.customerId,
+//         'booking_status_updated',
+//         {
+//           message: `Booking status updated to ${updatedBooking.status}`,
+//           booking: updatedBooking,
+//         },
+//       );
 
       await this.notificationService.createNotification(
         updatedBooking.customerId,
         'Booking Status Updated',
-        `Your booking #${updatedBooking.bookingNumber} status has been updated to ${updatedBooking.status}.`,
+        `Your booking B-${updatedBooking.id} status has been updated to ${updatedBooking.status}.`,
         NOTIFICATION_TYPE.BOOKING_STATUS,
         updatedBooking.id,
         'BOOKING',
@@ -2161,7 +2171,7 @@ export class BookingService {
           await this.notificationService.createNotification(
             purohitUserId,
             'Booking Status Updated',
-            `Booking #${updatedBooking.bookingNumber} status has been updated to ${updatedBooking.status}.`,
+            `Booking B-${updatedBooking.id} status has been updated to ${updatedBooking.status}.`,
             NOTIFICATION_TYPE.BOOKING_STATUS,
             updatedBooking.id,
             'BOOKING',
@@ -2178,7 +2188,7 @@ export class BookingService {
           entity: 'Booking',
           entityId: String(updatedBooking.id),
           action: 'BOOKING_STATUS_CHANGED',
-          message: `Booking #${updatedBooking.bookingNumber} status changed from ${booking.status} to ${updatedBooking.status}.`,
+          message: `Booking B-${updatedBooking.id} status changed from ${booking.status} to ${updatedBooking.status}.`,
           oldValue: { status: booking.status },
           newValue: { status: updatedBooking.status },
         },
@@ -2379,7 +2389,7 @@ export class BookingService {
         entity: 'Booking',
         entityId: String(savedBooking.id),
         action: 'COMPLETION_PROOF_UPLOADED',
-        message: `Purohit uploaded completion proof for Booking #${savedBooking.bookingNumber}.`,
+        message: `Purohit uploaded completion proof for Booking B-${savedBooking.id}.`,
         oldValue: undefined,
         newValue: { completionPhotoUrls: savedBooking.completionPhotoUrls },
       });
@@ -2657,7 +2667,7 @@ export class BookingService {
           entity: 'Booking',
           entityId: String(updatedBooking.id),
           action: 'BOOKING_STARTED',
-          message: `Booking #${updatedBooking.bookingNumber} was started after OTP verification.`,
+          message: `Booking B-${updatedBooking.id} was started after OTP verification.`,
           oldValue: { status: BOOKING_STATUS.ARRIVED },
           newValue: { status: updatedBooking.status },
         },
@@ -3122,7 +3132,7 @@ export class BookingService {
           entity: 'Booking',
           entityId: String(finalBooking.id),
           action: 'BOOKING_RESCHEDULED',
-          message: `Booking #${finalBooking.bookingNumber} was rescheduled to ${this.toIstString(newScheduledAt)}.`,
+          message: `Booking B-${finalBooking.id} was rescheduled to ${this.toIstString(newScheduledAt)}.`,
           oldValue: { scheduledAt: previousScheduledAt },
           newValue: { scheduledAt: newScheduledAt },
         },
@@ -3396,7 +3406,7 @@ export class BookingService {
       entity: 'Booking',
       entityId: String(repeatedBooking.id),
       action: 'BOOKING_REPEATED',
-      message: `A new repeated booking #${repeatedBooking.bookingNumber} was created from Booking #${originalBooking.bookingNumber}.`,
+      message: `A new repeated booking B-${repeatedBooking.id} was created from Booking B-${originalBooking.id}.`,
       oldValue: undefined,
       newValue: { originalBookingId: originalBooking.id, newBookingId: repeatedBooking.id },
     });
@@ -3595,7 +3605,7 @@ export class BookingService {
             entity: 'Booking',
             entityId: String(savedBooking.id),
             action: 'BOOKING_CREATED_ADMIN',
-            message: `Admin created Booking #${savedBooking.bookingNumber} for Customer #${customer.id}.`,
+            message: `Admin created Booking B-${savedBooking.id} for Customer #${customer.id}.`,
             oldValue: undefined,
             newValue: {
               status: savedBooking.status,
@@ -3628,18 +3638,20 @@ export class BookingService {
       });
 
       if (transactionResult.notifyPurohitId) {
-        this.bookingGateway.notifyUser(
-          transactionResult.notifyPurohitId,
-          'create_booking_by_admin',
-          transactionResult.formattedSavedBooking,
-        );
+        // TODO: commented out to avoid duplicate notification
+        // this.bookingGateway.notifyUser(
+//           transactionResult.notifyPurohitId,
+//           'create_booking_by_admin',
+//           transactionResult.formattedSavedBooking,
+//         );
       }
 
-      this.bookingGateway.notifyUser(
-        transactionResult.notifyCustomerId,
-        'create_booking_by_admin',
-        transactionResult.formattedSavedBooking,
-      );
+      // TODO: commented out to avoid duplicate notification
+      // this.bookingGateway.notifyUser(
+//         transactionResult.notifyCustomerId,
+//         'create_booking_by_admin',
+//         transactionResult.formattedSavedBooking,
+//       );
 
       // Email notifications
       const {
@@ -3660,7 +3672,7 @@ export class BookingService {
 
       if (customer.email) {
         try {
-          this.logger.log(`[BookingEmail] Sending booking confirmation email to customer for booking #${b.bookingNumber}...`);
+          this.logger.log(`[BookingEmail] Sending booking confirmation email to customer for booking B-${b.id}...`);
           await this.emailService.sendCustomerBookingConfirmationEmail({
             email: customer.email,
             customerName,
@@ -3677,15 +3689,15 @@ export class BookingService {
             bookingStatus: b.status,
             specialInstructions: b.specialInstructions,
           });
-          this.logger.log(`[BookingEmail] Customer booking email sent successfully for booking #${b.bookingNumber}.`);
+          this.logger.log(`[BookingEmail] Customer booking email sent successfully for booking B-${b.id}.`);
         } catch (error) {
-          this.logger.error(`[BookingEmail] Failed to send customer booking email for booking #${b.bookingNumber}`, error instanceof Error ? error.stack : String(error));
+          this.logger.error(`[BookingEmail] Failed to send customer booking email for booking B-${b.id}`, error instanceof Error ? error.stack : String(error));
         }
       }
 
       if (purohitUser && purohitUser.email) {
         try {
-          this.logger.log(`[BookingEmail] Sending booking assignment email to Purohit for booking #${b.bookingNumber}...`);
+          this.logger.log(`[BookingEmail] Sending booking assignment email to Purohit for booking B-${b.id}...`);
           await this.emailService.sendPurohitBookingAssignmentEmail({
             email: purohitUser.email,
             purohitName,
@@ -3702,9 +3714,9 @@ export class BookingService {
             bookingStatus: b.status,
             specialInstructions: b.specialInstructions,
           });
-          this.logger.log(`[BookingEmail] Purohit booking email sent successfully for booking #${b.bookingNumber}.`);
+          this.logger.log(`[BookingEmail] Purohit booking email sent successfully for booking B-${b.id}.`);
         } catch (error) {
-          this.logger.error(`[BookingEmail] Failed to send Purohit booking email for booking #${b.bookingNumber}`, error instanceof Error ? error.stack : String(error));
+          this.logger.error(`[BookingEmail] Failed to send Purohit booking email for booking B-${b.id}`, error instanceof Error ? error.stack : String(error));
         }
       }
 
