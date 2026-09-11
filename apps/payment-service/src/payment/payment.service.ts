@@ -1264,7 +1264,11 @@ export class PaymentService {
   ): Promise<PaymentDetailsResponse> {
     const payment = await this.paymentRepository.findPaymentById(paymentId);
 
-    if (!payment) {
+    if (
+      !payment ||
+      (payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT &&
+        !payment.razorpayPaymentLinkId?.trim())
+    ) {
       throw new NotFoundException('Payment not found');
     }
 
@@ -1316,8 +1320,14 @@ export class PaymentService {
     const payments =
       await this.paymentRepository.findPaymentsByBookingId(bookingId);
 
+    const filteredPayments = payments.filter(
+      (payment) =>
+        payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+        Boolean(payment.razorpayPaymentLinkId?.trim()),
+    );
+
     return Promise.all(
-      payments.map(async (payment) => {
+      filteredPayments.map(async (payment) => {
         const razorpayPayment = await this.resolveRazorpayPayment(payment);
 
         return this.buildCombinedPaymentResponse(payment, razorpayPayment);
@@ -1354,8 +1364,17 @@ export class PaymentService {
       search,
     });
 
+    const displayedPayments =
+      user.role === USER_ROLE.CUSTOMER
+        ? payments.filter(
+            (payment) =>
+              payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+              Boolean(payment.razorpayPaymentLinkId?.trim()),
+          )
+        : payments;
+
     const items = await Promise.all(
-      payments.map(async (payment) => {
+      displayedPayments.map(async (payment) => {
         const razorpayPayment = await this.resolveRazorpayPayment(payment);
 
         return this.buildCombinedPaymentResponse(payment, razorpayPayment, user.role);

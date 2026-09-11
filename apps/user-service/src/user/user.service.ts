@@ -484,17 +484,43 @@ export class UserService {
     if (phone) {
       try {
         await this.smsService.sendOtpSms(phone, otp);
+        this.logger.log(`OTP SMS sent successfully to ${phone}`);
       } catch (error: any) {
-        this.logger.error(`Failed to send OTP SMS to ${phone}: ${error.message}`, error.stack);
+        this.logger.error(
+          `Failed to send OTP SMS to ${phone}: ${error.message}`,
+          error.stack,
+        );
         if (email) {
           this.logger.log(`Falling back to email for OTP delivery to ${email}`);
-          await this.emailService.sendOtpEmail(email, otp);
+          try {
+            await this.emailService.sendOtpEmail(email, otp);
+            this.logger.log(`Fallback OTP email sent successfully to ${email}`);
+          } catch (emailError: any) {
+            this.logger.error(
+              `Failed to send fallback OTP email to ${email}: ${emailError.message}`,
+              emailError.stack,
+            );
+            throw new InternalServerErrorException(
+              'Failed to send OTP via SMS and fallback email delivery failed',
+            );
+          }
         } else {
-          throw new InternalServerErrorException('Failed to send OTP via SMS and no email provided for fallback');
+          throw new InternalServerErrorException(
+            'Failed to send OTP via SMS and no email provided for fallback',
+          );
         }
       }
     } else if (email) {
-      await this.emailService.sendOtpEmail(email, otp);
+      try {
+        await this.emailService.sendOtpEmail(email, otp);
+        this.logger.log(`OTP email sent successfully to ${email}`);
+      } catch (emailError: any) {
+        this.logger.error(
+          `Failed to send OTP email to ${email}: ${emailError.message}`,
+          emailError.stack,
+        );
+        throw new InternalServerErrorException('Failed to send OTP via email');
+      }
     }
     // }
 

@@ -151,21 +151,31 @@ export class EmailService {
       .replace(/'/g, '&#039;');
   }
 
-  async sendOtpEmail(email: string, otp: string, firstName?: string) {
+  async sendOtpEmail(email: string, otp: string, firstName?: string): Promise<void> {
     const html = `
             <div>
-            <h2>Hello ${firstName ?? 'User'}</h2>
+            <h2>Hello ${this.escapeHtml(firstName ?? 'User')}</h2>
             <p>Your OTP code is:</p>
-            <h1 style="letter-spacing:4px">${otp}</h1>
+            <h1 style="letter-spacing:4px">${this.escapeHtml(otp)}</h1>
             <p>This code expires in 10 minutes.</p>
             </div>
         `;
 
-    return this.sendMail({
-      to: email,
-      subject: 'Your OTP Code',
-      html,
-    });
+    try {
+      this.logger.log(`Attempting to send OTP email to ${email}`);
+      await this.sendMail({
+        to: email,
+        subject: 'Your OTP Code',
+        html,
+      });
+      this.logger.log(`OTP email sent successfully to ${email}`);
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to send OTP email to ${email}: ${error?.message || error}`,
+        error?.stack,
+      );
+      throw error;
+    }
   }
 
   async sendCustomerCreatedByAdminEmail(

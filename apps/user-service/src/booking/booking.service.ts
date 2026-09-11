@@ -587,7 +587,11 @@ export class BookingService {
     );
 
     const formattedBookings = bookings.map((booking) => {
-      const payments = booking.payments || [];
+      const payments = (booking.payments || []).filter(
+        (p) =>
+          p.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+          Boolean(p.razorpayPaymentLinkId?.trim()),
+      );
       const bookingPayment = payments.find(
         (p) => p.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
       ) || null;
@@ -597,6 +601,7 @@ export class BookingService {
 
       return {
         ...booking,
+        payments,
         bookingPayment,
         purohitPayout,
         scheduledAtIst: this.toIstString(booking.scheduledAt),
@@ -640,7 +645,12 @@ export class BookingService {
       throw new NotFoundException('Booking not found');
     }
 
-    const payments = booking.payments || [];
+    const payments = (booking.payments || []).filter(
+      (p) =>
+        p.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+        Boolean(p.razorpayPaymentLinkId?.trim()),
+    );
+    booking.payments = payments;
     const bookingPayment = payments.find(
       (p) => p.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
     ) || null;

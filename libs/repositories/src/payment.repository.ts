@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, In, Repository } from 'typeorm';
+import { FindOptionsWhere, In, IsNull, Not, Repository } from 'typeorm';
 import {
   Payment,
   PAYMENT_STATUS,
@@ -196,6 +196,8 @@ export class PaymentRepository extends BaseRepository<Payment> {
         bookingId,
 
         paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+
+        razorpayPaymentLinkId: Not(IsNull()),
       },
 
       relations: {
@@ -279,6 +281,11 @@ export class PaymentRepository extends BaseRepository<Payment> {
         {
           userId,
         },
+      );
+
+      query.andWhere(
+        '(payment."paymentType" != :bookingPaymentType OR (payment."razorpayPaymentLinkId" IS NOT NULL AND payment."razorpayPaymentLinkId" != \'\'))',
+        { bookingPaymentType: PAYMENT_TYPE.BOOKING_PAYMENT },
       );
     } else if (userRole === USER_ROLE.PUROHIT) {
       query.andWhere(
@@ -384,9 +391,17 @@ export class PaymentRepository extends BaseRepository<Payment> {
     const safeLimit = Math.min(Math.max(Number(limit), 1), 100);
 
     const [payments, total] = await this.repo.findAndCount({
-      where: {
-        payerId,
-      },
+      where: [
+        {
+          payerId,
+          paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+          razorpayPaymentLinkId: Not(IsNull()),
+        },
+        {
+          payerId,
+          paymentType: Not(PAYMENT_TYPE.BOOKING_PAYMENT),
+        },
+      ],
 
       relations: {
         booking: true,
@@ -466,6 +481,11 @@ export class PaymentRepository extends BaseRepository<Payment> {
       .leftJoinAndSelect('paymentBookings.booking', 'linkedBooking')
 
       .leftJoinAndSelect('linkedBooking.service', 'linkedService');
+
+    query.andWhere(
+      '(payment."paymentType" != :bookingPaymentType OR (payment."razorpayPaymentLinkId" IS NOT NULL AND payment."razorpayPaymentLinkId" != \'\'))',
+      { bookingPaymentType: PAYMENT_TYPE.BOOKING_PAYMENT },
+    );
 
     if (status) {
       if (Array.isArray(status)) {

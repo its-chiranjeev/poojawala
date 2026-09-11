@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
-import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, USER_ROLE, ASSIGNMENT_TYPE } from '@poojawala/entities';
+import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, USER_ROLE, ASSIGNMENT_TYPE, PAYMENT_TYPE } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 interface FindBookingsByRoleOptions {
@@ -63,7 +63,12 @@ export class BookingRepository extends BaseRepository<Booking> {
         'purohitUser.updatedAt',
       ])
       .leftJoinAndSelect('booking.customerAddress', 'customerAddress')
-      .leftJoinAndSelect('booking.payments', 'payments')
+      .leftJoinAndSelect(
+        'booking.payments',
+        'payments',
+        '(payments."paymentType" != :bookingPaymentType OR (payments."razorpayPaymentLinkId" IS NOT NULL AND payments."razorpayPaymentLinkId" != \'\'))',
+        { bookingPaymentType: PAYMENT_TYPE.BOOKING_PAYMENT },
+      )
       .leftJoinAndSelect('booking.complaints', 'complaints')
       .leftJoinAndSelect('purohit.bankAccounts', 'purohitBankAccounts')
       .where('booking.id = :bookingId', {
@@ -159,7 +164,12 @@ export class BookingRepository extends BaseRepository<Booking> {
         'purohitUser.status',
       ])
       .leftJoinAndSelect('booking.customerAddress', 'customerAddress')
-      .leftJoinAndSelect('booking.payments', 'payments')
+      .leftJoinAndSelect(
+        'booking.payments',
+        'payments',
+        '(payments."paymentType" != :bookingPaymentType OR (payments."razorpayPaymentLinkId" IS NOT NULL AND payments."razorpayPaymentLinkId" != \'\'))',
+        { bookingPaymentType: PAYMENT_TYPE.BOOKING_PAYMENT },
+      )
       .leftJoinAndSelect('payments.purohitBankAccount', 'purohitBankAccount');
 
     switch (userRole) {
