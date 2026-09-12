@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
-import { Service, Booking } from '@poojawala/entities';
+import { Service, Booking, PurohitService } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
 
@@ -66,7 +66,8 @@ export class ServiceRepository extends BaseRepository<Service> {
       },
     });
 
-    // Fetch total bookings from booking table for each service
+    // TODO: Previous mapping with only totalBookings kept for reference:
+    /*
     let servicesWithBookings: any[] = services;
     if (services && services.length > 0) {
       const serviceIds = services.map((s) => s.id);
@@ -89,6 +90,68 @@ export class ServiceRepository extends BaseRepository<Service> {
         ...service,
         totalBookings: countMap.get(service.id) || 0,
       }));
+    }
+    */
+
+    // Fetch total bookings from booking table and online/offline purohit counts from purohit_services for each service
+    let servicesWithBookings: any[] = services;
+    if (services && services.length > 0) {
+      const serviceIds = services.map((s) => s.id);
+
+      // 1. Fetch total bookings from booking table
+      const bookingCounts: { serviceId: string | number; count: string | number }[] =
+        await this.repo.manager
+          .createQueryBuilder(Booking, 'booking')
+          .select('booking.serviceId', 'serviceId')
+          .addSelect('COUNT(booking.id)', 'count')
+          .where('booking.serviceId IN (:...serviceIds)', { serviceIds })
+          .andWhere('booking.deletedAt IS NULL')
+          .groupBy('booking.serviceId')
+          .getRawMany();
+
+      const countMap = new Map<number, number>();
+      bookingCounts.forEach((bc) => {
+        countMap.set(Number(bc.serviceId), parseInt(String(bc.count), 10) || 0);
+      });
+
+      // 2. Fetch count of purohits providing that service (online vs offline)
+      const purohitCounts: {
+        serviceId: string | number;
+        onlineCount: string | number;
+        offlineCount: string | number;
+      }[] = await this.repo.manager
+        .createQueryBuilder(PurohitService, 'ps')
+        .select('ps.serviceId', 'serviceId')
+        .addSelect(
+          'COUNT(DISTINCT CASE WHEN ps.isOnline = true AND (ps.isActive = true OR ps.isActive IS NULL) THEN ps.purohitId END)',
+          'onlineCount',
+        )
+        .addSelect(
+          'COUNT(DISTINCT CASE WHEN ps.isOffline = true AND (ps.isActive = true OR ps.isActive IS NULL) THEN ps.purohitId END)',
+          'offlineCount',
+        )
+        .where('ps.serviceId IN (:...serviceIds)', { serviceIds })
+        .andWhere('ps.deletedAt IS NULL')
+        .groupBy('ps.serviceId')
+        .getRawMany();
+
+      const onlineCountMap = new Map<number, number>();
+      const offlineCountMap = new Map<number, number>();
+      purohitCounts.forEach((pc) => {
+        onlineCountMap.set(Number(pc.serviceId), parseInt(String(pc.onlineCount), 10) || 0);
+        offlineCountMap.set(Number(pc.serviceId), parseInt(String(pc.offlineCount), 10) || 0);
+      });
+
+      servicesWithBookings = services.map((service) => {
+        const onlineCount = onlineCountMap.get(service.id) || 0;
+        const offlineCount = offlineCountMap.get(service.id) || 0;
+        return {
+          ...service,
+          totalBookings: countMap.get(service.id) || 0,
+          onlinepurohitCount: onlineCount,
+          offlinepurohitCount: offlineCount,
+        };
+      });
     }
 
     // TODO: Old return without totalBookings from booking table:
@@ -143,6 +206,8 @@ export class ServiceRepository extends BaseRepository<Service> {
       },
     });
 
+    // TODO: Previous findById with only totalBookings kept for reference:
+    /*
     if (service) {
       const bookingCount = await this.repo.manager
         .createQueryBuilder(Booking, 'booking')
@@ -153,6 +218,39 @@ export class ServiceRepository extends BaseRepository<Service> {
       return {
         ...service,
         totalBookings: bookingCount,
+      };
+    }
+    */
+
+    if (service) {
+      const bookingCount = await this.repo.manager
+        .createQueryBuilder(Booking, 'booking')
+        .where('booking.serviceId = :id', { id })
+        .andWhere('booking.deletedAt IS NULL')
+        .getCount();
+
+      const purohitCount = await this.repo.manager
+        .createQueryBuilder(PurohitService, 'ps')
+        .select(
+          'COUNT(DISTINCT CASE WHEN ps.isOnline = true AND (ps.isActive = true OR ps.isActive IS NULL) THEN ps.purohitId END)',
+          'onlineCount',
+        )
+        .addSelect(
+          'COUNT(DISTINCT CASE WHEN ps.isOffline = true AND (ps.isActive = true OR ps.isActive IS NULL) THEN ps.purohitId END)',
+          'offlineCount',
+        )
+        .where('ps.serviceId = :id', { id })
+        .andWhere('ps.deletedAt IS NULL')
+        .getRawOne();
+
+      const onlineCount = parseInt(String(purohitCount?.onlineCount || '0'), 10) || 0;
+      const offlineCount = parseInt(String(purohitCount?.offlineCount || '0'), 10) || 0;
+
+      return {
+        ...service,
+        totalBookings: bookingCount,
+        onlinepurohitCount: onlineCount,
+        offlinepurohitCount: offlineCount,
       };
     }
 

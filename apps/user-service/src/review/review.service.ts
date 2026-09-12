@@ -20,6 +20,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ReviewJwtPayload } from './review.controller';
 
 @Injectable()
 export class ReviewService {
@@ -105,6 +106,13 @@ export class ReviewService {
     };
   }
 
+  // TODO: Previous implementation kept for reference.
+  // Replaced because:
+  // 1. Authenticated ADMIN was incorrectly restricted when status wasn't properly checked.
+  // 2. Used duplicate ':status' parameters which caused TypeORM parameter collisions.
+  // 3. Authenticated customer and purohit could not see their own draft reviews.
+  // 4. Default guest branch and status conditions conflicted.
+  /*
   async findAll(user: User | null | undefined, query: ReviewQueryDto) {
     const queryBuilder = this.bookingRepository
       .createQueryBuilder('booking')
@@ -135,6 +143,106 @@ export class ReviewService {
       queryBuilder.andWhere('booking.reviewStatus = :status', {
         status: query.status,
       });
+    }
+
+    const total = await queryBuilder.getCount();
+
+    queryBuilder
+      .orderBy('booking.updatedAt', 'DESC')
+      .skip((query.page - 1) * query.limit)
+      .take(query.limit);
+
+    const bookings = await queryBuilder.getMany();
+
+    return {
+      data: bookings.map((b) => this.mapReviewResponse(b)),
+      meta: {
+        total,
+        page: query.page,
+        limit: query.limit,
+      },
+    };
+  }
+  */
+
+  async findAll(
+    user: User | ReviewJwtPayload | null | undefined,
+    query: ReviewQueryDto,
+  ) {
+    const queryBuilder = this.bookingRepository
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.customer', 'customer')
+      .leftJoinAndSelect('booking.purohit', 'purohit')
+      .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('booking.service', 'service')
+      .where(
+        '(booking.customerRating IS NOT NULL OR booking.purohitRating IS NOT NULL)',
+      );
+
+    // Normalize user ID (supporting both user.id and user.sub from JWT payload)
+    const rawUserId = user?.id ?? (user as ReviewJwtPayload)?.sub;
+    const userId: number | null =
+      rawUserId !== undefined && rawUserId !== null ? Number(rawUserId) : null;
+
+    const userRole: string | null = user?.role
+      ? String(user.role).toUpperCase()
+      : null;
+
+    if (userRole === USER_ROLE.ADMIN) {
+      // 1. ADMIN:
+      // By default returns ALL reviews (PUBLISHED, DRAFT, etc.) where rating is not null.
+      // If ?status=... is explicitly passed, filter only by that requested status.
+      if (query.status) {
+        queryBuilder.andWhere('booking.reviewStatus = :adminReviewStatus', {
+          adminReviewStatus: query.status,
+        });
+      }
+    } else if (userRole === USER_ROLE.CUSTOMER) {
+      // 2. CUSTOMER:
+      // Must only see reviews belonging to that customer (booking.customerId = loggedInCustomer.id).
+      // Can see own reviews regardless of review status by default.
+      if (userId) {
+        queryBuilder.andWhere('booking.customerId = :customerUserId', {
+          customerUserId: userId,
+        });
+      } else {
+        queryBuilder.andWhere('booking.customerId = -1');
+      }
+
+      // If ?status=... is explicitly provided, filter own reviews by requested status
+      if (query.status) {
+        queryBuilder.andWhere('booking.reviewStatus = :customerReviewStatus', {
+          customerReviewStatus: query.status,
+        });
+      }
+    } else if (userRole === USER_ROLE.PUROHIT) {
+      // 3. PUROHIT:
+      // Must only see reviews related to that Purohit (purohit.userId = loggedInUser.id).
+      // Can see related reviews regardless of review status by default.
+      if (userId) {
+        queryBuilder.andWhere('purohit.userId = :purohitUserId', {
+          purohitUserId: userId,
+        });
+      } else {
+        queryBuilder.andWhere('purohit.userId = -1');
+      }
+
+      // If ?status=... is explicitly provided, filter related reviews by requested status
+      if (query.status) {
+        queryBuilder.andWhere('booking.reviewStatus = :purohitReviewStatus', {
+          purohitReviewStatus: query.status,
+        });
+      }
+    } else {
+      // 4. GUEST / NOT LOGGED IN:
+      // Unauthenticated users must ONLY see customer reviews with reviewStatus = PUBLISHED.
+      queryBuilder.andWhere('booking.customerRating IS NOT NULL');
+      queryBuilder.andWhere('booking.reviewStatus = :guestPublishedStatus', {
+        guestPublishedStatus: REVIEW_STATUS.PUBLISHED,
+      });
+      // Note: No unnecessary '1 = 0' is used here because booking.reviewStatus = PUBLISHED
+      // strictly ensures DRAFT reviews can never be returned, and query.status is never allowed
+      // to override this guest security restriction.
     }
 
     const total = await queryBuilder.getCount();
