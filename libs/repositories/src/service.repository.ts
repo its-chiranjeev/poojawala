@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
-import { Service } from '@poojawala/entities';
+import { Service, Booking } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
 
@@ -66,8 +66,42 @@ export class ServiceRepository extends BaseRepository<Service> {
       },
     });
 
+    // Fetch total bookings from booking table for each service
+    let servicesWithBookings: any[] = services;
+    if (services && services.length > 0) {
+      const serviceIds = services.map((s) => s.id);
+      const bookingCounts: { serviceId: string | number; count: string | number }[] =
+        await this.repo.manager
+          .createQueryBuilder(Booking, 'booking')
+          .select('booking.serviceId', 'serviceId')
+          .addSelect('COUNT(booking.id)', 'count')
+          .where('booking.serviceId IN (:...serviceIds)', { serviceIds })
+          .andWhere('booking.deletedAt IS NULL')
+          .groupBy('booking.serviceId')
+          .getRawMany();
+
+      const countMap = new Map<number, number>();
+      bookingCounts.forEach((bc) => {
+        countMap.set(Number(bc.serviceId), parseInt(String(bc.count), 10) || 0);
+      });
+
+      servicesWithBookings = services.map((service) => ({
+        ...service,
+        totalBookings: countMap.get(service.id) || 0,
+      }));
+    }
+
+    // TODO: Old return without totalBookings from booking table:
+    // return {
+    //   data: services,
+    //   page,
+    //   limit,
+    //   total,
+    //   totalPages: Math.ceil(total / limit),
+    // };
+
     return {
-      data: services,
+      data: servicesWithBookings,
       page,
       limit,
       total,
@@ -83,8 +117,8 @@ export class ServiceRepository extends BaseRepository<Service> {
     return this.repo.save(service);
   }
 
-  async findById(id: number): Promise<Service | null> {
-    return this.repo.findOne({
+  async findById(id: number): Promise<any | null> {
+    const service = await this.repo.findOne({
       where: {
         id,
         isActive: true,
@@ -108,6 +142,24 @@ export class ServiceRepository extends BaseRepository<Service> {
         updatedAt: true,
       },
     });
+
+    if (service) {
+      const bookingCount = await this.repo.manager
+        .createQueryBuilder(Booking, 'booking')
+        .where('booking.serviceId = :id', { id })
+        .andWhere('booking.deletedAt IS NULL')
+        .getCount();
+
+      return {
+        ...service,
+        totalBookings: bookingCount,
+      };
+    }
+
+    // TODO: Old return without totalBookings from booking table:
+    // return service;
+
+    return service;
   }
 
   async remove(service: Service): Promise<Service> {
