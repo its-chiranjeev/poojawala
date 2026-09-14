@@ -184,7 +184,7 @@ export class ServiceRepository extends BaseRepository<Service> {
     const service = await this.repo.findOne({
       where: {
         id,
-        isActive: true,
+        // isActive: true,
       },
       select: {
         id: true,
