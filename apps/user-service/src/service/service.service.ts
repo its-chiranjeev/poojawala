@@ -38,7 +38,7 @@ export class ServiceService {
     private readonly PurohitServiceRepository: PurohitServiceRepository,
     private readonly PurohitProfileRepository: PurohitProfileRepository,
     private readonly auditLogService: AuditLogService,
-  ) {}
+  ) { }
 
   async findAllServices(query: GetServicesQueryDto) {
     const result = await this.serviceRepository.findAllServices(query);
@@ -218,6 +218,9 @@ export class ServiceService {
       if (new Date(service.festivalStartDate) >= new Date(service.festivalEndDate)) {
         throw new BadRequestException('Festival end date must be after the start date.');
       }
+    } else {
+      service.festivalStartDate = null;
+      service.festivalEndDate = null;
     }
 
     // Upload new icon if provided

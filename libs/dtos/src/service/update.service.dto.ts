@@ -59,7 +59,11 @@ export class UpdateServiceDto {
   isActive?: boolean;
 
   @IsOptional()
-  @Transform(({ obj }) => obj.isUpcomingFestival === 'true' || obj.isUpcomingFestival === true)
+  @Transform(({ obj, value }) => {
+    const raw = obj?.isUpcomingFestival !== undefined ? obj.isUpcomingFestival : value;
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    return raw === 'true' || raw === true;
+  })
   @IsBoolean()
   isUpcomingFestival?: boolean;
 
