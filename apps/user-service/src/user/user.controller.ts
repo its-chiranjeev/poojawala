@@ -303,11 +303,19 @@ export class UserController {
     @Query('page') page = 1,
     @Query('limit') limit = 10,
     @Query('search') search?: string,
+    @Query('status') status?: USER_STATUS | string,
+    @Query('isActive') isActive?: string | boolean,
+    @Query('isOnlineAvailable') isOnlineAvailable?: string | boolean,
+    @Query('isOfflineAvailable') isOfflineAvailable?: string | boolean,
   ) {
     return this.userService.getApprovedPurohits(
       Number(page),
       Number(limit),
       search,
+      status,
+      isActive,
+      isOnlineAvailable,
+      isOfflineAvailable,
     );
   }
 

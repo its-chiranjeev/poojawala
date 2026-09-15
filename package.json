@@ -70,6 +70,7 @@
     "puppeteer": "^25.4.0",
     "razorpay": "^2.9.8",
     "reflect-metadata": "^0.2.2",
+    "resend": "^6.28.0",
     "rxjs": "^7.8.1",
     "socket.io": "^4.8.3",
     "stripe": "^20.4.0",

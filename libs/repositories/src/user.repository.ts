@@ -131,14 +131,51 @@ export class UserRepository extends BaseRepository<User> {
   async findById(id: string | number) {
     return this.repo.findOne({ where: { id } as any });
   }
-  async findApprovedPurohits(page = 1, limit = 10, search?: string) {
+  async findApprovedPurohits(
+    page = 1,
+    limit = 10,
+    search?: string,
+    status?: USER_STATUS | string,
+    isActive?: string | boolean,
+    isOnlineAvailable?: string | boolean,
+    isOfflineAvailable?: string | boolean,
+  ) {
     const query = this.repo
       .createQueryBuilder('user')
       .leftJoinAndMapOne('user.profile', 'purohit_profiles', 'profile', 'profile.userId = user.id')
       .leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id')
       .leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId')
-      .where('user.role = :role', { role: USER_ROLE.PUROHIT })
-      .andWhere('user.status = :status', { status: USER_STATUS.ACTIVE });
+      .where('user.role = :role', { role: USER_ROLE.PUROHIT });
+
+    // Status / isActive filter
+    if (status) {
+      if (typeof status === 'string' && status.toUpperCase() === 'ALL') {
+        // do not restrict status
+      } else {
+        query.andWhere('user.status = :status', { status });
+      }
+    } else if (isActive !== undefined && isActive !== null && isActive !== '') {
+      const activeFlag = isActive === true || isActive === 'true';
+      if (activeFlag) {
+        query.andWhere('user.status = :status', { status: USER_STATUS.ACTIVE });
+      } else {
+        query.andWhere('user.status != :status', { status: USER_STATUS.ACTIVE });
+      }
+    } else {
+      // Default behavior: active purohits
+      query.andWhere('user.status = :status', { status: USER_STATUS.ACTIVE });
+    }
+
+    // Availability filters
+    if (isOnlineAvailable !== undefined && isOnlineAvailable !== null && isOnlineAvailable !== '') {
+      const onlineFlag = isOnlineAvailable === true || isOnlineAvailable === 'true';
+      query.andWhere('profile.isOnlineAvailable = :isOnlineAvailable', { isOnlineAvailable: onlineFlag });
+    }
+
+    if (isOfflineAvailable !== undefined && isOfflineAvailable !== null && isOfflineAvailable !== '') {
+      const offlineFlag = isOfflineAvailable === true || isOfflineAvailable === 'true';
+      query.andWhere('profile.isOfflineAvailable = :isOfflineAvailable', { isOfflineAvailable: offlineFlag });
+    }
 
     if (search) {
       const isNumber = !isNaN(Number(search));

@@ -790,11 +790,23 @@ export class UserService {
   //   };
   // }
 
-  async getApprovedPurohits(page = 1, limit = 10, search?: string) {
+  async getApprovedPurohits(
+    page = 1,
+    limit = 10,
+    search?: string,
+    status?: USER_STATUS | string,
+    isActive?: string | boolean,
+    isOnlineAvailable?: string | boolean,
+    isOfflineAvailable?: string | boolean,
+  ) {
     const result = await this.userRepository.findApprovedPurohits(
       page,
       limit,
       search,
+      status,
+      isActive,
+      isOnlineAvailable,
+      isOfflineAvailable,
     );
 
     const dataWithServicesUrls = await Promise.all(result.data.map(async (user: any) => {
@@ -815,6 +827,17 @@ export class UserService {
         }
       }) : [];
 
+      const isOnline = Boolean(
+        user.profile?.isOnlineAvailable ??
+        user.profile?.isonlineAvailable ??
+        false,
+      );
+      const isOffline = Boolean(
+        user.profile?.isOfflineAvailable ??
+        user.profile?.isofflineAvailable ??
+        false,
+      );
+
       return {
         userId: user.id,
         purohitFirstName: user.firstName,
@@ -823,6 +846,9 @@ export class UserService {
         profileImage,
         userRole: user.role,
         status: user.status,
+        isActive: user.status === USER_STATUS.ACTIVE,
+        isOnlineAvailable: isOnline,
+        isOfflineAvailable: isOffline,
         bio: user.profile?.bio,
         qualification: user.profile?.qualification,
         averageRating: user.profile?.avgRating,
@@ -928,6 +954,9 @@ export class UserService {
         rejectionReason: profile?.rejectionReason,
         city: profile?.city,
         status: user.status,
+        isActive: user.status === USER_STATUS.ACTIVE,
+        isonlineAvailable: profile?.isOnlineAvailable,
+        isofflineAvailable: profile?.isOfflineAvailable,
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt,
         purohitService,

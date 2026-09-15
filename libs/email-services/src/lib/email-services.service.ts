@@ -1,69 +1,97 @@
-import { Injectable, Logger } from '@nestjs/common';
-import * as nodemailer from 'nodemailer';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+// import * as nodemailer from 'nodemailer';
+import { ResendProvider } from './providers/resend.provider';
+
+export interface SendEmailOptions {
+  to: string | string[];
+  subject: string;
+  html: string;
+}
+
+export class EmailVerificationRepository { }
 
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
-  private transporter: nodemailer.Transporter;
+  //   private transporter: nodemailer.Transporter;
+  private readonly resendProvider: ResendProvider;
 
   // TODO: This is for sendgrid
-  // constructor() {
+
+  // constructor(
+  //     private readonly emailVerificationRepo: EmailVerificationRepository,
+  // ) {
+  //     // Initialize SendGrid with API key
   //     sgMail.setApiKey(process.env['SENDGRID_API_KEY']!);
   // }
 
-  constructor() {
-    this.transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
-      tls: {
-        rejectUnauthorized: false,
-      },
-      auth: {
-        user: process.env['SMTP_USERNAME'],
-        pass: process.env['SMTP_PASSWORD'],
-      },
-      pool: true,
-      maxConnections: 5,
-    });
+  // TODO: This is for Nodemailer SMTP
+  // constructor() {
+  //   this.transporter = nodemailer.createTransport({
+  //     host: 'smtp.gmail.com',
+  //     port: 587,
+  //     secure: false,
+  //     tls: {
+  //       rejectUnauthorized: false,
+  //     },
+  //     auth: {
+  //       user: process.env['SMTP_USERNAME'],
+  //       pass: process.env['SMTP_PASSWORD'],
+  //     },
+  //     pool: true,
+  //     maxConnections: 5,
+  //   });
+  // }
+
+  constructor(
+    @Optional() private readonly emailVerificationRepo?: EmailVerificationRepository,
+    @Optional() resendProvider?: ResendProvider,
+  ) {
+    this.resendProvider = resendProvider || new ResendProvider();
   }
 
-  // TODO: This is for sendgrid
-  // private async sendMail(options: {
-  //     to: string | string[];
-  //     subject: string;
-  //     html: string;
-  // }) {
+  // TODO: This is for sendgrid 
+
+  // async sendMail(options: SendEmailOptions) {
   //     try {
   //         await sgMail.send({
+  //             from: {
+  //                 email: process.env['SMTP_FROM']!,
+  //                 name: process.env['SMTP_FROM_NAME'] || 'Your App',
+  //             },
   //             to: options.to,
-  //             from: process.env['EMAIL_FROM']!,
   //             subject: options.subject,
   //             html: options.html,
   //         });
+
+  //         this.logger.log(`Email sent successfully to ${options.to}`);
   //     } catch (error) {
-  //         this.logger.error('SendGrid email failed', error);
+  //         this.logger.error(`Failed to send email to ${options.to}`, error);
   //         throw error;
   //     }
   // }
 
-  // TODO:THis is for Nodemailer SMTP
-  private async sendMail(options: {
-    to: string | string[];
-    subject: string;
-    html: string;
-  }) {
-    try {
-      await this.transporter.sendMail({
-        from: process.env[`EMAIL_FROM`],
-        to: options.to,
-        subject: options.subject,
-        html: options.html,
-      });
-    } catch (error) {
-      this.logger.error('SMTP email failed', error);
-      throw error;
-    }
+  // TODO: This is for Nodemailer SMTP
+  // private async sendMail(options: {
+  //   to: string | string[];
+  //   subject: string;
+  //   html: string;
+  // }) {
+  //   try {
+  //     await this.transporter.sendMail({
+  //       from: process.env[`EMAIL_FROM`],
+  //       to: options.to,
+  //       subject: options.subject,
+  //       html: options.html,
+  //     });
+  //   } catch (error) {
+  //     this.logger.error('SMTP email failed', error);
+  //     throw error;
+  //   }
+  // }
+
+  async sendMail(options: SendEmailOptions) {
+    return await this.resendProvider.sendMail(options);
   }
 
   async sendPurohitApprovalEmail(
@@ -340,11 +368,10 @@ export class EmailService {
 
         <p style="margin-top: 24px;"><strong>Booking Status:</strong> ${this.escapeHtml(data.bookingStatus)}</p>
 
-        ${
-          data.specialInstructions
-            ? `<p><strong>Special Instructions:</strong><br/>${this.escapeHtml(data.specialInstructions)}</p>`
-            : ''
-        }
+        ${data.specialInstructions
+        ? `<p><strong>Special Instructions:</strong><br/>${this.escapeHtml(data.specialInstructions)}</p>`
+        : ''
+      }
 
         <p style="margin-top: 32px;">
           Thank you for choosing Poojawala.<br/>
@@ -436,11 +463,10 @@ export class EmailService {
 
         <p style="margin-top: 24px;"><strong>Booking Status:</strong> ${this.escapeHtml(data.bookingStatus)}</p>
 
-        ${
-          data.specialInstructions
-            ? `<p><strong>Special Instructions:</strong><br/>${this.escapeHtml(data.specialInstructions)}</p>`
-            : ''
-        }
+        ${data.specialInstructions
+        ? `<p><strong>Special Instructions:</strong><br/>${this.escapeHtml(data.specialInstructions)}</p>`
+        : ''
+      }
 
         <p style="margin-top: 32px;">
           Please review the booking details and be available at the scheduled date and time.<br/>

@@ -7,6 +7,7 @@ import {
   PAYMENT_TYPE,
   USER_ROLE,
   PAYMENT_METHOD,
+  CUSTOMER_PAYMENT_METHOD,
   BOOKING_PAYMENT_STATUS,
 } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
@@ -19,7 +20,7 @@ export interface FindMyPaymentsOptions {
   limit?: number;
 
   status?: PAYMENT_STATUS | PAYMENT_STATUS[];
-  paymentType?: PAYMENT_TYPE;
+  paymentType?: PAYMENT_TYPE | string;
   purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
   bookingPaymentStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
 
@@ -192,13 +193,24 @@ export class PaymentRepository extends BaseRepository<Payment> {
 
   async findPaymentsByBookingId(bookingId: number): Promise<Payment[]> {
     return this.repo.find({
-      where: {
-        bookingId,
-
-        paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
-
-        razorpayPaymentLinkId: Not(IsNull()),
-      },
+      where: [
+        // TODO: Old condition requiring razorpayPaymentLinkId only
+        // {
+        //   bookingId,
+        //   paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+        //   razorpayPaymentLinkId: Not(IsNull()),
+        // },
+        {
+          bookingId,
+          paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+          razorpayPaymentLinkId: Not(IsNull()),
+        },
+        {
+          bookingId,
+          paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+          customerPaymentMethod: CUSTOMER_PAYMENT_METHOD.CASH,
+        },
+      ],
 
       relations: {
         booking: {
@@ -283,9 +295,22 @@ export class PaymentRepository extends BaseRepository<Payment> {
         },
       );
 
+      // Exclude purohit payout payment details from customer
+      query.andWhere('payment."paymentType" != :payoutType', {
+        payoutType: PAYMENT_TYPE.PUROHIT_PAYOUT,
+      });
+
+      // TODO: Old filter requiring razorpayPaymentLinkId for all booking payments
+      // query.andWhere(
+      //   '(payment."paymentType" != :bookingPaymentType OR (payment."razorpayPaymentLinkId" IS NOT NULL AND payment."razorpayPaymentLinkId" != \'\'))',
+      //   { bookingPaymentType: PAYMENT_TYPE.BOOKING_PAYMENT },
+      // );
       query.andWhere(
-        '(payment."paymentType" != :bookingPaymentType OR (payment."razorpayPaymentLinkId" IS NOT NULL AND payment."razorpayPaymentLinkId" != \'\'))',
-        { bookingPaymentType: PAYMENT_TYPE.BOOKING_PAYMENT },
+        '(payment."paymentType" != :bookingPaymentType OR (payment."razorpayPaymentLinkId" IS NOT NULL AND payment."razorpayPaymentLinkId" != \'\') OR payment."customerPaymentMethod" = :cashMethod)',
+        {
+          bookingPaymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+          cashMethod: CUSTOMER_PAYMENT_METHOD.CASH,
+        },
       );
     } else if (userRole === USER_ROLE.PUROHIT) {
       query.andWhere(
@@ -311,9 +336,20 @@ export class PaymentRepository extends BaseRepository<Payment> {
     }
 
     if (paymentType) {
-      query.andWhere('payment."paymentType" = :paymentType', {
-        paymentType,
-      });
+      // TODO: Old direct paymentType filter
+      // query.andWhere('payment."paymentType" = :paymentType', {
+      //   paymentType,
+      // });
+      if ((paymentType as string) === 'CASH') {
+        query.andWhere(
+          '(payment."customerPaymentMethod" = :cashMethod OR (payment."createdById" != booking."customerId" AND payment."createdById" = payment."payeeId"))',
+          { cashMethod: CUSTOMER_PAYMENT_METHOD.CASH },
+        );
+      } else {
+        query.andWhere('payment."paymentType" = :paymentType', {
+          paymentType,
+        });
+      }
     }
 
     if (purohitPayoutStatus) {

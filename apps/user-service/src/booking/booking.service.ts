@@ -38,6 +38,7 @@ import {
   USER_STATUS,
   NOTIFICATION_TYPE,
   PAYMENT_TYPE,
+  CUSTOMER_PAYMENT_METHOD,
 } from '@poojawala/entities';
 import { BookingRepository } from '@poojawala/repositories';
 import {
@@ -541,7 +542,9 @@ export class BookingService {
     user: User,
     query: BookingQueryDto,
   ): Promise<{
-    bookings: Booking[];
+    // TODO: Old return type
+    // bookings: Booking[];
+    bookings: Array<Record<string, any>>;
     pagination: {
       total: number;
       page: number;
@@ -587,23 +590,40 @@ export class BookingService {
     );
 
     const formattedBookings = bookings.map((booking) => {
+      // TODO: Old payments and payout logic in findAllBookings
+      // const payments = (booking.payments || []).filter(
+      //   (p) =>
+      //     p.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+      //     Boolean(p.razorpayPaymentLinkId?.trim()),
+      // );
+      // const bookingPayment = payments.find(
+      //   (p) => p.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
+      // ) || null;
+      // const purohitPayout = payments.find(
+      //   (p) => p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT
+      // ) || null;
       const payments = (booking.payments || []).filter(
         (p) =>
-          p.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
-          Boolean(p.razorpayPaymentLinkId?.trim()),
+          (user.role !== USER_ROLE.CUSTOMER || p.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT) &&
+          (p.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+            Boolean(p.razorpayPaymentLinkId?.trim()) ||
+            p.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH),
       );
       const bookingPayment = payments.find(
         (p) => p.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
       ) || null;
-      const purohitPayout = payments.find(
-        (p) => p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT
-      ) || null;
+      const purohitPayout =
+        user.role === USER_ROLE.CUSTOMER
+          ? null
+          : (payments.find((p) => p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) || null);
 
       return {
         ...booking,
         payments,
         bookingPayment,
         purohitPayout,
+        purohitPayoutStatus: user.role === USER_ROLE.CUSTOMER ? null : booking.purohitPayoutStatus,
+        purohitPayoutAmount: user.role === USER_ROLE.CUSTOMER ? null : booking.purohitPayoutAmount,
         scheduledAtIst: this.toIstString(booking.scheduledAt),
         createdAtIst: this.toIstString(booking.createdAt),
         updatedAtIst: this.toIstString(booking.updatedAt),
@@ -678,10 +698,24 @@ export class BookingService {
           );
         }
 
+        // TODO: Old customer return including purohitPayout
+        // return {
+        //   ...booking,
+        //   bookingPayment,
+        //   purohitPayout,
+        //   scheduledAtIst: this.toIstString(booking.scheduledAt),
+        //   createdAtIst: this.toIstString(booking.createdAt),
+        //   updatedAtIst: this.toIstString(booking.updatedAt),
+        // };
         return {
           ...booking,
+          payments: (booking.payments || []).filter(
+            (p) => p.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT,
+          ),
           bookingPayment,
-          purohitPayout,
+          purohitPayout: null,
+          purohitPayoutStatus: null,
+          purohitPayoutAmount: null,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),

@@ -173,7 +173,9 @@ export interface PaymentProviderDetails {
 
 export interface PaymentDetailsResponse {
   id: number;
-  paymentType: PAYMENT_TYPE;
+  // TODO: Old paymentType definition
+  // paymentType: PAYMENT_TYPE;
+  paymentType: PAYMENT_TYPE | string;
   bookingId: number | null;
   bookingPaymentStatus: BOOKING_PAYMENT_STATUS | null;
   purohitPayoutStatus: BOOKING_PAYMENT_STATUS | null;
@@ -202,7 +204,10 @@ export interface PaymentDetailsResponse {
 
   status: PAYMENT_STATUS;
   providerStatus: string | null;
-  paymentMethod: PAYMENT_METHOD | null;
+  customerPaymentMethod?: CUSTOMER_PAYMENT_METHOD | null;
+  // TODO: Old paymentMethod definition
+  // paymentMethod: PAYMENT_METHOD | null;
+  paymentMethod: PAYMENT_METHOD | string | null;
 
   razorpayOrderId: string | null;
   razorpayPaymentLinkId: string | null;
@@ -1276,12 +1281,18 @@ export class PaymentService {
 
     const razorpayPayment = await this.resolveRazorpayPayment(payment);
 
-    return this.buildCombinedPaymentResponse(payment, razorpayPayment);
+    // TODO: Old call without viewerRole
+    // return this.buildCombinedPaymentResponse(payment, razorpayPayment);
+    return this.buildCombinedPaymentResponse(payment, razorpayPayment, user.role);
   }
 
   private validatePaymentViewAccess(user: User, payment: Payment): void {
     if (user.role === USER_ROLE.ADMIN) {
       return;
+    }
+
+    if (user.role === USER_ROLE.CUSTOMER && payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) {
+      throw new ForbiddenException('You cannot access this payment');
     }
 
     const canAccess =
@@ -1320,17 +1331,30 @@ export class PaymentService {
     const payments =
       await this.paymentRepository.findPaymentsByBookingId(bookingId);
 
-    const filteredPayments = payments.filter(
-      (payment) =>
+    // TODO: Old filter that only checked razorpayPaymentLinkId
+    // const filteredPayments = payments.filter(
+    //   (payment) =>
+    //     payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+    //     Boolean(payment.razorpayPaymentLinkId?.trim()),
+    // );
+    const filteredPayments = payments.filter((payment) => {
+      if (user.role === USER_ROLE.CUSTOMER && payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) {
+        return false;
+      }
+      return (
         payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
-        Boolean(payment.razorpayPaymentLinkId?.trim()),
-    );
+        Boolean(payment.razorpayPaymentLinkId?.trim()) ||
+        payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH
+      );
+    });
 
     return Promise.all(
       filteredPayments.map(async (payment) => {
         const razorpayPayment = await this.resolveRazorpayPayment(payment);
 
-        return this.buildCombinedPaymentResponse(payment, razorpayPayment);
+        // TODO: Old call without viewerRole
+        // return this.buildCombinedPaymentResponse(payment, razorpayPayment);
+        return this.buildCombinedPaymentResponse(payment, razorpayPayment, user.role);
       }),
     );
   }
@@ -1364,12 +1388,23 @@ export class PaymentService {
       search,
     });
 
+    // TODO: Old displayedPayments filter
+    // const displayedPayments =
+    //   user.role === USER_ROLE.CUSTOMER
+    //     ? payments.filter(
+    //         (payment) =>
+    //           payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+    //           Boolean(payment.razorpayPaymentLinkId?.trim()),
+    //       )
+    //     : payments;
     const displayedPayments =
       user.role === USER_ROLE.CUSTOMER
         ? payments.filter(
             (payment) =>
-              payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
-              Boolean(payment.razorpayPaymentLinkId?.trim()),
+              payment.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
+              (payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+                Boolean(payment.razorpayPaymentLinkId?.trim()) ||
+                payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH),
           )
         : payments;
 
@@ -1847,7 +1882,9 @@ export class PaymentService {
     const primaryBooking =
       payment.booking ?? payment.paymentBookings?.[0]?.booking;
 
-    let responsePaymentType = payment.paymentType;
+    // TODO: Old responsePaymentType calculation
+    // let responsePaymentType = payment.paymentType;
+    let responsePaymentType: PAYMENT_TYPE | string = payment.paymentType;
     let responseStatus = this.mapRazorpayStatus(razorpayPayment?.status, payment.status);
 
     if (viewerRole === USER_ROLE.PUROHIT && payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT) {
@@ -1857,21 +1894,53 @@ export class PaymentService {
       razorpayPayment = null; // Hide customer payment details from purohit
     }
 
+    const isBookingPayment = payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT;
+    const isInitiatedByPurohit =
+      isBookingPayment &&
+      (payment.createdBy?.role === USER_ROLE.PUROHIT ||
+        (primaryBooking?.purohit?.userId != null &&
+          payment.createdById === primaryBooking.purohit.userId) ||
+        (payment.payeeId != null &&
+          payment.createdById === payment.payeeId &&
+          payment.createdById !== primaryBooking?.customerId) ||
+        (primaryBooking?.customerId != null &&
+          payment.createdById !== primaryBooking.customerId));
+
+    const isCashPayment =
+      payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH;
+
+    if (viewerRole === USER_ROLE.CUSTOMER) {
+      if (isBookingPayment && (isInitiatedByPurohit || isCashPayment)) {
+        responsePaymentType = 'CASH';
+      }
+    }
+
     return {
       id: payment.id,
 
-      paymentType: responsePaymentType,
+      paymentType: responsePaymentType as any,
 
       bookingId:
         payment.bookingId ?? payment.paymentBookings?.[0]?.bookingId ?? null,
 
       bookingPaymentStatus: primaryBooking?.paymentStatus ?? null,
 
-      purohitPayoutStatus: primaryBooking?.purohitPayoutStatus ?? null,
+      // TODO: Old purohit payout details returned to all roles
+      // purohitPayoutStatus: primaryBooking?.purohitPayoutStatus ?? null,
+      // purohitPayoutAmount: primaryBooking?.purohitPayoutAmount != null
+      //   ? Number(primaryBooking.purohitPayoutAmount)
+      //   : null,
+      purohitPayoutStatus:
+        viewerRole === USER_ROLE.CUSTOMER
+          ? null
+          : (primaryBooking?.purohitPayoutStatus ?? null),
 
-      purohitPayoutAmount: primaryBooking?.purohitPayoutAmount != null
-        ? Number(primaryBooking.purohitPayoutAmount)
-        : null,
+      purohitPayoutAmount:
+        viewerRole === USER_ROLE.CUSTOMER
+          ? null
+          : (primaryBooking?.purohitPayoutAmount != null
+              ? Number(primaryBooking.purohitPayoutAmount)
+              : null),
 
       customerDetails: primaryBooking?.customer
         ? {
@@ -1905,11 +1974,19 @@ export class PaymentService {
 
       providerStatus: razorpayPayment?.status ?? null,
 
+      customerPaymentMethod: payment.customerPaymentMethod ?? null,
+
+      // TODO: Old paymentMethod mapping
+      // paymentMethod:
+      //   this.mapRazorpayMethod(
+      //     razorpayPayment?.method,
+      //     payment.paymentMethod,
+      //   ) ?? null,
       paymentMethod:
         this.mapRazorpayMethod(
           razorpayPayment?.method,
           payment.paymentMethod,
-        ) ?? null,
+        ) ?? (isCashPayment ? 'CASH' : null),
 
       razorpayOrderId:
         razorpayPayment?.order_id ?? payment.razorpayOrderId ?? null,
@@ -2026,7 +2103,9 @@ export class PaymentService {
       payments.map(async (payment) => {
         const razorpayPayment = await this.resolveRazorpayPayment(payment);
 
-        return this.buildCombinedPaymentResponse(payment, razorpayPayment);
+        // TODO: Old call without viewerRole
+        // return this.buildCombinedPaymentResponse(payment, razorpayPayment);
+        return this.buildCombinedPaymentResponse(payment, razorpayPayment, USER_ROLE.ADMIN);
       }),
     );
 
