@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 // import * as nodemailer from 'nodemailer';
 import { ResendProvider } from './providers/resend.provider';
+import { renderPoojawalaEmail } from './templates/email-base.template';
 
 export interface SendEmailOptions {
   to: string | string[];
@@ -98,30 +99,20 @@ export class EmailService {
     email: string,
     firstName?: string,
   ): Promise<void> {
-    const html = `
-      <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-        <h2>Hello ${this.escapeHtml(firstName ?? 'Purohit')},</h2>
-
-        <p>
-          Congratulations! Your Purohit profile and submitted documents
-          have been successfully verified and approved.
-        </p>
-
-        <p>
-          Your account is now active. You can access the available
-          Purohit features on the Poojawala platform.
-        </p>
-
-        <p>
-          Regards,<br />
-          Poojawala Team
-        </p>
-      </div>
-    `;
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Profile Approved',
+      userName: firstName || 'Purohit',
+      preheaderText: 'Congratulations! Your Purohit Profile has been verified and approved.',
+      emailMessage: 'Congratulations! Your Purohit profile and submitted documents have been successfully verified and approved by the Poojawala team.',
+      highlight: {
+        title: 'Account Active',
+        text: 'Your account is now active. You can now access all Purohit features, accept sacred pooja booking assignments, and manage your schedule on the Poojawala platform.',
+      },
+    });
 
     await this.sendMail({
       to: email,
-      subject: 'Your Purohit Profile Has Been Approved',
+      subject: 'Your Purohit Profile Has Been Approved - Poojawala',
       html,
     });
   }
@@ -131,41 +122,20 @@ export class EmailService {
     rejectionReason: string,
     firstName?: string,
   ): Promise<void> {
-    const html = `
-      <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-        <h2>Hello ${this.escapeHtml(firstName ?? 'Purohit')},</h2>
-
-        <p>
-          Your Purohit profile verification has been rejected.
-        </p>
-
-        <div
-          style="
-            padding: 12px;
-            border-left: 4px solid #d9534f;
-            background-color: #f8f8f8;
-            margin: 16px 0;
-          "
-        >
-          <strong>Rejection reason:</strong>
-          <p>${this.escapeHtml(rejectionReason)}</p>
-        </div>
-
-        <p>
-          Please correct the mentioned issue before contacting
-          the Poojawala support team for further review.
-        </p>
-
-        <p>
-          Regards,<br />
-          Poojawala Team
-        </p>
-      </div>
-    `;
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Verification Notice',
+      userName: firstName || 'Purohit',
+      preheaderText: 'Update regarding your Purohit profile verification.',
+      emailMessage: 'Thank you for your interest in joining Poojawala. After reviewing your submitted documents, your profile verification could not be approved at this time.',
+      highlight: {
+        title: 'Rejection Reason',
+        text: rejectionReason || 'Document verification could not be completed. Please review your credentials and contact support.',
+      },
+    });
 
     await this.sendMail({
       to: email,
-      subject: 'Your Purohit Profile Verification Was Rejected',
+      subject: 'Your Purohit Profile Verification Was Rejected - Poojawala',
       html,
     });
   }
@@ -179,21 +149,22 @@ export class EmailService {
       .replace(/'/g, '&#039;');
   }
 
-  async sendOtpEmail(email: string, otp: string, firstName?: string): Promise<void> {
-    const html = `
-            <div>
-            <h2>Hello ${this.escapeHtml(firstName ?? 'User')}</h2>
-            <p>Your OTP code is:</p>
-            <h1 style="letter-spacing:4px">${this.escapeHtml(otp)}</h1>
-            <p>This code expires in 10 minutes.</p>
-            </div>
-        `;
+  async sendOtpEmail(email: string, otp: string, firstName?: string, purpose?: string): Promise<void> {
+    const badge = purpose || 'OTP Verification';
+    const html = renderPoojawalaEmail({
+      statusBadge: badge,
+      userName: firstName || 'Devotee',
+      preheaderText: `Your verification OTP is ${otp}`,
+      emailMessage: 'Use the One-Time Password (OTP) below to complete your verification and continue with your sacred journey on Poojawala.',
+      otpCode: otp,
+      otpSubtitle: 'Valid for 10 minutes. Do not share this code with anyone.',
+    });
 
     try {
       this.logger.log(`Attempting to send OTP email to ${email}`);
       await this.sendMail({
         to: email,
-        subject: 'Your OTP Code',
+        subject: `${badge} - Poojawala`,
         html,
       });
       this.logger.log(`OTP email sent successfully to ${email}`);
@@ -214,34 +185,25 @@ export class EmailService {
     city: string,
     plainPassword: string,
   ): Promise<void> {
-    const html = `
-      <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-        <h2>Hello ${this.escapeHtml(name)},</h2>
-
-        <p>
-          An administrator has created a Poojawala customer account for you!
-        </p>
-        
-        <h3>Your Account Details:</h3>
-        <ul>
-          <li><strong>Email:</strong> ${this.escapeHtml(email)}</li>
-          <li><strong>Phone:</strong> ${this.escapeHtml(phone)}</li>
-          <li><strong>Address:</strong> ${this.escapeHtml(address)}, ${this.escapeHtml(city)}</li>
-        </ul>
-
-        <h3>Your Login Credentials:</h3>
-        <p><strong>Password:</strong> ${this.escapeHtml(plainPassword)}</p>
-
-        <p style="color: #d9534f; font-weight: bold;">
-          For your privacy and security, please log in and change your password immediately.
-        </p>
-
-        <p>
-          Regards,<br />
-          Poojawala Team
-        </p>
-      </div>
-    `;
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Account Created',
+      userName: name || 'Devotee',
+      preheaderText: 'Your Poojawala customer account has been created.',
+      emailMessage: 'An administrator has created a Poojawala customer account for you. Welcome to our sacred pooja family!',
+      detailsTable: {
+        title: 'Account & Login Credentials',
+        rows: [
+          { label: 'Email / Username', value: email },
+          { label: 'Phone', value: phone },
+          { label: 'Address', value: `${address || ''}${address && city ? ', ' : ''}${city || ''}` },
+          { label: 'Temporary Password', value: plainPassword, isHighlight: true },
+        ],
+      },
+      highlight: {
+        title: 'Security Notice',
+        text: 'For your privacy and security, please log in and change your password immediately upon your first visit.',
+      },
+    });
 
     await this.sendMail({
       to: email,
@@ -257,38 +219,25 @@ export class EmailService {
     phone: string,
     plainPassword: string,
   ): Promise<void> {
-    const html = `
-      <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-        <h2>Hello ${this.escapeHtml(name)},</h2>
-
-        <p>
-          An administrator has created a Poojawala Purohit account for you!
-        </p>
-        
-        <h3>Your Account Details:</h3>
-        <ul>
-          <li><strong>Email:</strong> ${this.escapeHtml(email)}</li>
-          <li><strong>Username:</strong> ${this.escapeHtml(username)}</li>
-          <li><strong>Phone:</strong> ${this.escapeHtml(phone)}</li>
-        </ul>
-
-        <h3>Your Login Credentials:</h3>
-        <p><strong>Password:</strong> ${this.escapeHtml(plainPassword)}</p>
-
-        <p style="color: #d9534f; font-weight: bold;">
-          For your privacy and security, please log in and change your password immediately.
-        </p>
-        
-        <p>
-          Once logged in, please go to your profile to upload your verification documents (Aadhaar, PAN, Certificate) and add your Bank Account details so the Admin can approve your profile.
-        </p>
-
-        <p>
-          Regards,<br />
-          Poojawala Team
-        </p>
-      </div>
-    `;
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Purohit Account Created',
+      userName: name || 'Purohit',
+      preheaderText: 'Your Poojawala Purohit account has been created.',
+      emailMessage: 'An administrator has created a Poojawala Purohit account for you. Welcome to the sacred network of Vedic pandits!',
+      detailsTable: {
+        title: 'Account & Login Credentials',
+        rows: [
+          { label: 'Email', value: email },
+          { label: 'Username', value: username },
+          { label: 'Phone', value: phone },
+          { label: 'Temporary Password', value: plainPassword, isHighlight: true },
+        ],
+      },
+      highlight: {
+        title: 'Next Steps to Complete Verification',
+        text: 'For your security, please log in and change your password immediately. Next, go to your profile to upload your verification documents (Aadhaar, PAN, Certificate) and bank account details so Admin can approve your profile.',
+      },
+    });
 
     await this.sendMail({
       to: email,
@@ -313,72 +262,40 @@ export class EmailService {
     bookingStatus: string;
     specialInstructions?: string;
   }): Promise<void> {
-    const html = `
-      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-        <h2>Hello ${this.escapeHtml(data.customerName)},</h2>
-
-        <p>Your Poojawala booking has been successfully scheduled.</p>
-
-        <h3 style="border-bottom: 1px solid #eee; padding-bottom: 8px;">Booking Details</h3>
-        <table style="width: 100%; max-width: 600px; border-collapse: collapse;">
-          <tr>
-            <td style="padding: 8px 0;"><strong>Booking ID:</strong></td>
-            <td>#${this.escapeHtml(data.bookingId)}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Service:</strong></td>
-            <td>${this.escapeHtml(data.serviceName)}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Date:</strong></td>
-            <td>${this.escapeHtml(data.bookingDate)}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Time:</strong></td>
-            <td>${this.escapeHtml(data.bookingTime)}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Address:</strong></td>
-            <td>${this.escapeHtml(data.bookingAddress)}</td>
-          </tr>
-        </table>
-
-        <h3 style="border-bottom: 1px solid #eee; padding-bottom: 8px; margin-top: 24px;">Purohit Details</h3>
-        <p><strong>Name:</strong> ${this.escapeHtml(data.purohitName)}</p>
-
-        <h3 style="border-bottom: 1px solid #eee; padding-bottom: 8px; margin-top: 24px;">Payment Details</h3>
-        <table style="width: 100%; max-width: 600px; border-collapse: collapse;">
-          <tr>
-            <td style="padding: 8px 0;"><strong>Total Amount:</strong></td>
-            <td>₹${data.totalAmount}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Amount Paid:</strong></td>
-            <td>₹${data.amountPaid}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Amount Pending:</strong></td>
-            <td>₹${data.pendingAmount}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Payment Status:</strong></td>
-            <td>${this.escapeHtml(data.paymentStatus)}</td>
-          </tr>
-        </table>
-
-        <p style="margin-top: 24px;"><strong>Booking Status:</strong> ${this.escapeHtml(data.bookingStatus)}</p>
-
-        ${data.specialInstructions
-        ? `<p><strong>Special Instructions:</strong><br/>${this.escapeHtml(data.specialInstructions)}</p>`
-        : ''
-      }
-
-        <p style="margin-top: 32px;">
-          Thank you for choosing Poojawala.<br/>
-          For any assistance, please contact Poojawala support.
-        </p>
-      </div>
-    `;
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Booking Confirmed',
+      userName: data.customerName || 'Devotee',
+      preheaderText: `Booking #${data.bookingId} for ${data.serviceName} confirmed!`,
+      emailMessage: `Your sacred pooja service for <strong>${this.escapeHtml(data.serviceName)}</strong> has been scheduled successfully.`,
+      detailsTable: {
+        title: 'Booking & Payment Details',
+        rows: [
+          { label: 'Booking ID', value: `#${data.bookingId}` },
+          { label: 'pooja Service', value: data.serviceName },
+          { label: 'Date', value: data.bookingDate },
+          { label: 'Time', value: data.bookingTime },
+          { label: 'pooja Location', value: data.bookingAddress },
+          { label: 'Assigned Purohit', value: data.purohitName },
+          { label: 'Amount Paid', value: `₹${data.amountPaid}` },
+          { label: 'Pending Amount', value: `₹${data.pendingAmount}` },
+          { label: 'Payment Status', value: data.paymentStatus, isHighlight: true },
+          { label: 'Booking Status', value: data.bookingStatus },
+        ],
+        totalRow: {
+          label: 'Total Amount',
+          value: `₹${data.totalAmount}`,
+        },
+      },
+      highlight: data.specialInstructions
+        ? {
+          title: 'Special Instructions',
+          text: data.specialInstructions,
+        }
+        : {
+          title: 'pooja Day Preparation',
+          text: 'Please ensure basic household pooja essentials and a clean, quiet space are ready at least 15 minutes before the scheduled time.',
+        },
+    });
 
     await this.sendMail({
       to: data.email,
@@ -403,78 +320,40 @@ export class EmailService {
     bookingStatus: string;
     specialInstructions?: string;
   }): Promise<void> {
-    const html = `
-      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-        <h2>Hello ${this.escapeHtml(data.purohitName)},</h2>
-
-        <p>A new booking has been assigned to you through Poojawala.</p>
-
-        <h3 style="border-bottom: 1px solid #eee; padding-bottom: 8px;">Booking Details</h3>
-        <table style="width: 100%; max-width: 600px; border-collapse: collapse;">
-          <tr>
-            <td style="padding: 8px 0;"><strong>Booking ID:</strong></td>
-            <td>#${this.escapeHtml(data.bookingId)}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Service:</strong></td>
-            <td>${this.escapeHtml(data.serviceName)}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Date:</strong></td>
-            <td>${this.escapeHtml(data.bookingDate)}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Time:</strong></td>
-            <td>${this.escapeHtml(data.bookingTime)}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Address:</strong></td>
-            <td>${this.escapeHtml(data.bookingAddress)}</td>
-          </tr>
-        </table>
-
-        <h3 style="border-bottom: 1px solid #eee; padding-bottom: 8px; margin-top: 24px;">Customer Details</h3>
-        <table style="width: 100%; max-width: 600px; border-collapse: collapse;">
-          <tr>
-            <td style="padding: 8px 0;"><strong>Name:</strong></td>
-            <td>${this.escapeHtml(data.customerName)}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Phone:</strong></td>
-            <td>${this.escapeHtml(data.customerPhone)}</td>
-          </tr>
-        </table>
-
-        <h3 style="border-bottom: 1px solid #eee; padding-bottom: 8px; margin-top: 24px;">Payment / Earnings</h3>
-        <table style="width: 100%; max-width: 600px; border-collapse: collapse;">
-          <tr>
-            <td style="padding: 8px 0;"><strong>Booking Amount:</strong></td>
-            <td>₹${data.totalAmount}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Your Payout:</strong></td>
-            <td>₹${data.purohitPayoutAmount}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;"><strong>Payment Status:</strong></td>
-            <td>${this.escapeHtml(data.paymentStatus)}</td>
-          </tr>
-        </table>
-
-        <p style="margin-top: 24px;"><strong>Booking Status:</strong> ${this.escapeHtml(data.bookingStatus)}</p>
-
-        ${data.specialInstructions
-        ? `<p><strong>Special Instructions:</strong><br/>${this.escapeHtml(data.specialInstructions)}</p>`
-        : ''
-      }
-
-        <p style="margin-top: 32px;">
-          Please review the booking details and be available at the scheduled date and time.<br/>
-          Thank you,<br/>
-          Poojawala Team
-        </p>
-      </div>
-    `;
+    const html = renderPoojawalaEmail({
+      statusBadge: 'New Booking Assigned',
+      userName: data.purohitName || 'Purohit',
+      preheaderText: `New Booking #${data.bookingId} assigned to you!`,
+      emailMessage: `A new sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong> has been assigned to you. Please review the details below.`,
+      detailsTable: {
+        title: 'Booking & Devotee Details',
+        rows: [
+          { label: 'Booking ID', value: `#${data.bookingId}` },
+          { label: 'Pooja Service', value: data.serviceName },
+          { label: 'Date', value: data.bookingDate },
+          { label: 'Time', value: data.bookingTime },
+          { label: 'Pooja Location', value: data.bookingAddress },
+          { label: 'Devotee Name', value: data.customerName },
+          { label: 'Devotee Phone', value: data.customerPhone },
+          { label: 'Total Booking Value', value: `₹${data.totalAmount}` },
+          { label: 'Payment Status', value: data.paymentStatus },
+          { label: 'Booking Status', value: data.bookingStatus },
+        ],
+        totalRow: {
+          label: 'Your Payout',
+          value: `₹${data.purohitPayoutAmount}`,
+        },
+      },
+      highlight: data.specialInstructions
+        ? {
+          title: 'Devotee Instructions',
+          text: data.specialInstructions,
+        }
+        : {
+          title: 'Purohit Guidelines',
+          text: 'Please arrive at the venue in traditional Vedic attire at least 15 minutes before the scheduled time with the necessary pooja samagri.',
+        },
+    });
 
     await this.sendMail({
       to: data.email,
