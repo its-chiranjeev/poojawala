@@ -5,12 +5,13 @@ import {
   UnprocessableEntityException,
   ValidationPipe,
 } from '@nestjs/common';
-import { ResponseInterceptor } from '@poojawala/common';
-import { GlobalExceptionFilter } from '@poojawala/common';
+import { ResponseInterceptor, GlobalExceptionFilter, requestContextMiddleware } from '@poojawala/common';
 import { Request, Response, NextFunction } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(UserManagementModule);
+  app.getHttpAdapter().getInstance().set('trust proxy', true);
+  app.use(requestContextMiddleware);
   app.setGlobalPrefix('api');
 
   const allowedOrigins = process.env.ALLOWED_ORIGINS

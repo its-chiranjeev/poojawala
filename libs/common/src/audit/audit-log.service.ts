@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AuditLog, ACTOR_TYPE, AUDIT_MODULE } from '@poojawala/entities';
+import { RequestContext } from '../context/request-context';
 
 export interface CreateAuditLogDto {
   actorId?: number | null;
@@ -55,8 +56,13 @@ export class AuditLogService {
       const safeNewValue = this.sanitize(dto.newValue);
       const safeMetadata = this.sanitize(dto.metadata);
 
+      const ipAddress = dto.ipAddress || RequestContext.getIp();
+      const requestId = dto.requestId || RequestContext.getRequestId();
+
       const auditLog = this.auditLogRepository.create({
         ...dto,
+        ipAddress,
+        requestId,
         oldValue: safeOldValue,
         newValue: safeNewValue,
         metadata: safeMetadata,

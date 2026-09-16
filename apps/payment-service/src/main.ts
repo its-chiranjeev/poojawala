@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { Logger, UnprocessableEntityException, ValidationPipe, } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
-import { ResponseInterceptor, GlobalExceptionFilter, } from '@poojawala/common';
+import { ResponseInterceptor, GlobalExceptionFilter, requestContextMiddleware } from '@poojawala/common';
 import { PaymentManagementModule } from './payment-management.module';
 
 async function bootstrap(): Promise<void> {
@@ -13,6 +13,8 @@ async function bootstrap(): Promise<void> {
     rawBody: true,
   });
 
+  app.getHttpAdapter().getInstance().set('trust proxy', true);
+  app.use(requestContextMiddleware);
   app.setGlobalPrefix('api');
 
   const allowedOrigins = process.env.ALLOWED_ORIGINS
