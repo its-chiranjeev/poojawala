@@ -25,7 +25,7 @@ import {
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { QueryFailedError, ILike } from 'typeorm';
-import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
+import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE, PUROHIT_VERIFICATION_STATUS } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
 
 // 177 87
@@ -346,6 +346,14 @@ export class ServiceService {
 
     if (!purohitProfile) {
       throw new NotFoundException('Purohit profile not found');
+    }
+
+    if (
+      purohitProfile.verificationStatus !== PUROHIT_VERIFICATION_STATUS.APPROVED
+    ) {
+      throw new ForbiddenException(
+        'You cannot access this functionality until Administration verifies your Purohit profile.',
+      );
     }
 
     const added: any[] = [];
