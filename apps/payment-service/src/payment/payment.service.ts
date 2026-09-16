@@ -6,6 +6,7 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 
 import Razorpay from 'razorpay';
@@ -47,6 +48,7 @@ import { NOTIFICATION_TYPE, PurohitProfile, PurohitBankAccount } from '@poojawal
 import { BookingGateway } from '@poojawala/gateway';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
+import { EmailService } from '@poojawala/email-services';
 
 interface RazorpayError {
   error?: {
@@ -347,6 +349,7 @@ export class PaymentService {
     private readonly notificationService: NotificationService,
     private readonly bookingGateway: BookingGateway,
     private readonly auditLogService: AuditLogService,
+    @Optional() private readonly emailService?: EmailService,
   ) {
     const keyId = process.env['RAZORPAY_KEY_ID'];
     const keySecret = process.env['RAZORPAY_KEY_SECRET'];
@@ -1907,13 +1910,16 @@ export class PaymentService {
           payment.createdById !== primaryBooking.customerId));
 
     const isCashPayment =
-      payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH;
+      payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH ||
+      (payment.paymentMethod as string)?.toUpperCase() === 'CASH';
 
-    if (viewerRole === USER_ROLE.CUSTOMER) {
-      if (isBookingPayment && (isInitiatedByPurohit || isCashPayment)) {
-        responsePaymentType = 'CASH';
-      }
-    }
+    // TODO: Old behavior where paymentType was overridden to 'CASH' for customers.
+    // paymentType should remain BOOKING_PAYMENT, while paymentMethod shows 'CASH'.
+    // if (viewerRole === USER_ROLE.CUSTOMER) {
+    //   if (isBookingPayment && (isInitiatedByPurohit || isCashPayment)) {
+    //     responsePaymentType = 'CASH';
+    //   }
+    // }
 
     return {
       id: payment.id,
@@ -1983,10 +1989,12 @@ export class PaymentService {
       //     payment.paymentMethod,
       //   ) ?? null,
       paymentMethod:
-        this.mapRazorpayMethod(
-          razorpayPayment?.method,
-          payment.paymentMethod,
-        ) ?? (isCashPayment ? 'CASH' : null),
+        (isCashPayment || (viewerRole === USER_ROLE.CUSTOMER && isInitiatedByPurohit))
+          ? 'CASH'
+          : (this.mapRazorpayMethod(
+              razorpayPayment?.method,
+              payment.paymentMethod,
+            ) ?? null),
 
       razorpayOrderId:
         razorpayPayment?.order_id ?? payment.razorpayOrderId ?? null,
@@ -2825,6 +2833,43 @@ export class PaymentService {
           payment.booking.id,
           'BOOKING',
         );
+
+        if (this.emailService) {
+          try {
+            const fullBooking = await this.bookingRepository.findBookingById(payment.booking.id);
+            if (fullBooking?.customer?.email) {
+              const customerName = fullBooking.customer.firstName
+                ? `${fullBooking.customer.firstName} ${fullBooking.customer.lastName || ''}`.trim()
+                : 'Devotee';
+              const purohitUser = fullBooking.purohit?.user;
+              const purohitName = purohitUser?.firstName
+                ? `${purohitUser.firstName} ${purohitUser.lastName || ''}`.trim()
+                : 'Assigned Purohit';
+              const bookingDate = fullBooking.scheduledAt
+                ? new Date(fullBooking.scheduledAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' })
+                : 'Scheduled Date';
+              const bookingTime = fullBooking.scheduledAt
+                ? new Date(fullBooking.scheduledAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })
+                : 'Scheduled Time';
+
+              this.logger.log(`[BookingEmail] Sending booking completed email to customer for booking #${fullBooking.bookingNumber}...`);
+              await this.emailService.sendCustomerBookingCompletedEmail({
+                email: fullBooking.customer.email,
+                customerName,
+                bookingId: fullBooking.bookingNumber || `B-${fullBooking.id}`,
+                serviceName: fullBooking.service?.name || 'Vedic Pooja',
+                bookingDate,
+                bookingTime,
+                purohitName,
+                totalAmount: Number(fullBooking.finalAmount) || Number(payment.amount) || 0,
+                paymentStatus: fullBooking.paymentStatus || 'PAID',
+              });
+              this.logger.log(`[BookingEmail] Customer booking completed email sent successfully for booking #${fullBooking.bookingNumber}.`);
+            }
+          } catch (emailErr) {
+            this.logger.error(`[BookingEmail] Failed to send customer booking completed email for booking #${payment.booking.bookingNumber}`, emailErr instanceof Error ? emailErr.stack : String(emailErr));
+          }
+        }
       }
 
       if (payment.booking.purohitId) {

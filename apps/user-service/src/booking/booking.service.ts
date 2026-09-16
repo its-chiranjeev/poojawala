@@ -1860,6 +1860,48 @@ export class BookingService {
             manager,
           );
 
+          const b = acceptedBooking ?? savedBooking;
+          const customerEmail = acceptedBooking?.customer?.email;
+          if (customerEmail) {
+            try {
+              const customerName = acceptedBooking?.customer?.firstName
+                ? `${acceptedBooking.customer.firstName} ${acceptedBooking.customer.lastName || ''}`.trim()
+                : 'Devotee';
+              const purohitUser = acceptedBooking?.purohit?.user;
+              const purohitName = purohitUser?.firstName
+                ? `${purohitUser.firstName} ${purohitUser.lastName || ''}`.trim()
+                : 'Assigned Purohit';
+              const purohitPhone = purohitUser?.phone;
+              const address = acceptedBooking?.customerAddress;
+              const addressString = address
+                ? `${address.fullAddress || ''}, ${address.city || ''} - ${address.pincode || ''}`
+                : 'As registered in booking';
+
+              const istString = this.toIstString(b.scheduledAt);
+              const splitDateIst = istString ? istString.split(', ') : [];
+              const bookingDate = splitDateIst.length > 0 ? splitDateIst[0] : (b.scheduledAt ? new Date(b.scheduledAt).toLocaleDateString() : 'Scheduled Date');
+              const bookingTime = splitDateIst.length > 1 ? splitDateIst[1] : (b.scheduledAt ? new Date(b.scheduledAt).toLocaleTimeString() : 'Scheduled Time');
+
+              this.logger.log(`[BookingEmail] Sending booking accepted email to customer for booking ${b.bookingNumber || `B-${b.id}`}...`);
+              await this.emailService.sendCustomerBookingAcceptedEmail({
+                email: customerEmail,
+                customerName,
+                bookingId: b.bookingNumber || `B-${b.id}`,
+                serviceName: acceptedBooking?.service?.name || 'Vedic Pooja',
+                bookingDate,
+                bookingTime,
+                bookingAddress: addressString,
+                purohitName,
+                purohitPhone,
+                totalAmount: Number(b.finalAmount) || 0,
+                bookingStatus: b.status,
+              });
+              this.logger.log(`[BookingEmail] Customer booking accepted email sent successfully for booking ${b.bookingNumber || `B-${b.id}`}.`);
+            } catch (emailErr) {
+              this.logger.error(`[BookingEmail] Failed to send customer booking accepted email for booking ${b.bookingNumber || `B-${b.id}`}`, emailErr instanceof Error ? emailErr.stack : String(emailErr));
+            }
+          }
+
           return {
             message: 'Booking accepted successfully',
             booking: acceptedBooking ?? savedBooking,
@@ -2304,6 +2346,41 @@ export class BookingService {
         },
         manager,
       );
+
+      if (dto.status === BOOKING_STATUS.COMPLETED && booking.status !== BOOKING_STATUS.COMPLETED) {
+        try {
+          const completedBooking = await this.bookingRepository.findBookingById(updatedBooking.id);
+          if (completedBooking?.customer?.email) {
+            const customerName = completedBooking.customer.firstName
+              ? `${completedBooking.customer.firstName} ${completedBooking.customer.lastName || ''}`.trim()
+              : 'Devotee';
+            const purohitUser = completedBooking.purohit?.user;
+            const purohitName = purohitUser?.firstName
+              ? `${purohitUser.firstName} ${purohitUser.lastName || ''}`.trim()
+              : 'Assigned Purohit';
+            const istString = this.toIstString(completedBooking.scheduledAt);
+            const splitDateIst = istString ? istString.split(', ') : [];
+            const bookingDate = splitDateIst.length > 0 ? splitDateIst[0] : (completedBooking.scheduledAt ? new Date(completedBooking.scheduledAt).toLocaleDateString() : 'Scheduled Date');
+            const bookingTime = splitDateIst.length > 1 ? splitDateIst[1] : (completedBooking.scheduledAt ? new Date(completedBooking.scheduledAt).toLocaleTimeString() : 'Scheduled Time');
+
+            this.logger.log(`[BookingEmail] Sending booking completed email to customer for booking ${completedBooking.bookingNumber || `B-${completedBooking.id}`}...`);
+            await this.emailService.sendCustomerBookingCompletedEmail({
+              email: completedBooking.customer.email,
+              customerName,
+              bookingId: completedBooking.bookingNumber || `B-${completedBooking.id}`,
+              serviceName: completedBooking.service?.name || 'Vedic Pooja',
+              bookingDate,
+              bookingTime,
+              purohitName,
+              totalAmount: Number(completedBooking.finalAmount) || 0,
+              paymentStatus: completedBooking.paymentStatus || 'PAID',
+            });
+            this.logger.log(`[BookingEmail] Customer booking completed email sent successfully for booking ${completedBooking.bookingNumber || `B-${completedBooking.id}`}.`);
+          }
+        } catch (error) {
+          this.logger.error(`[BookingEmail] Failed to send customer booking completed email for booking B-${updatedBooking.id}`, error instanceof Error ? error.stack : String(error));
+        }
+      }
 
       return {
         message: 'Booking status updated successfully',

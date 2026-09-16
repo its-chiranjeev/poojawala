@@ -361,4 +361,175 @@ export class EmailService {
       html,
     });
   }
+
+  async sendCustomerBookingAcceptedEmail(data: {
+    email: string;
+    customerName: string;
+    bookingId: string;
+    serviceName: string;
+    bookingDate: string;
+    bookingTime: string;
+    bookingAddress: string;
+    purohitName: string;
+    purohitPhone?: string;
+    totalAmount?: number;
+    bookingStatus?: string;
+  }): Promise<void> {
+    const rows = [
+      { label: 'Booking ID', value: `#${data.bookingId}` },
+      { label: 'Pooja Service', value: data.serviceName },
+      { label: 'Date', value: data.bookingDate },
+      { label: 'Time', value: data.bookingTime },
+      { label: 'Pooja Location', value: data.bookingAddress },
+      { label: 'Assigned Purohit', value: data.purohitName },
+      ...(data.purohitPhone ? [{ label: 'Purohit Contact', value: data.purohitPhone }] : []),
+      { label: 'Booking Status', value: data.bookingStatus || 'Accepted', isHighlight: true },
+    ];
+
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Booking Accepted',
+      userName: data.customerName || 'Devotee',
+      preheaderText: `Booking #${data.bookingId} has been accepted by Purohit ${data.purohitName}!`,
+      emailMessage: `Your sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong> has been accepted by Purohit <strong>${this.escapeHtml(data.purohitName)}</strong>. Our verified Vedic purohit is preparing to conduct your rituals with complete devotion and Vedic sanctity.`,
+      detailsTable: {
+        title: 'Booking & Purohit Details',
+        rows,
+        ...(data.totalAmount !== undefined
+          ? {
+              totalRow: {
+                label: 'Booking Amount',
+                value: `₹${data.totalAmount}`,
+              },
+            }
+          : {}),
+      },
+      highlight: {
+        title: 'Next Steps for the Pooja',
+        text: 'Your assigned Purohit will arrive at your venue (or connect for the online ritual) at least 15 minutes prior to the auspicious muhurat. Please ensure a clean and sanctified area is ready for the sacred ceremony.',
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject: `Booking Accepted by Purohit - Poojawala | Booking #${data.bookingId}`,
+      html,
+    });
+  }
+
+  async sendCustomerBookingCompletedEmail(data: {
+    email: string;
+    customerName: string;
+    bookingId: string;
+    serviceName: string;
+    bookingDate: string;
+    bookingTime: string;
+    purohitName: string;
+    totalAmount: number;
+    paymentStatus?: string;
+  }): Promise<void> {
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Pooja Completed',
+      userName: data.customerName || 'Devotee',
+      preheaderText: `Your sacred pooja #${data.bookingId} has been completed successfully!`,
+      emailMessage: `May the divine blessings of your <strong>${this.escapeHtml(data.serviceName)}</strong> bring peace, prosperity, and happiness to you and your loved ones. The sacred ceremony has been completed and your payment has been processed successfully.`,
+      detailsTable: {
+        title: 'Ceremony & Payment Summary',
+        rows: [
+          { label: 'Booking ID', value: `#${data.bookingId}` },
+          { label: 'Pooja Service', value: data.serviceName },
+          { label: 'Conducted By', value: data.purohitName },
+          { label: 'Date', value: data.bookingDate },
+          { label: 'Time', value: data.bookingTime },
+          { label: 'Payment Status', value: data.paymentStatus || 'Paid & Settled', isHighlight: true },
+          { label: 'Booking Status', value: 'Completed' },
+        ],
+        totalRow: {
+          label: 'Total Paid',
+          value: `₹${data.totalAmount}`,
+        },
+      },
+      highlight: {
+        title: 'Divine Blessings & Feedback',
+        text: 'Thank you for choosing Poojawala for your sacred ceremonies. We welcome your blessings and valuable feedback. Please visit your dashboard to rate your experience with your Purohit.',
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject: `Pooja Completed Successfully - Poojawala | Booking #${data.bookingId}`,
+      html,
+    });
+  }
+
+  async sendCustomerRegistrationEmail(data: {
+    email: string;
+    name: string;
+    username?: string;
+    phone?: string;
+  }): Promise<void> {
+    const rows = [
+      { label: 'Name', value: data.name || 'Devotee' },
+      { label: 'Email', value: data.email },
+      ...(data.username ? [{ label: 'Username', value: data.username }] : []),
+      ...(data.phone ? [{ label: 'Phone', value: data.phone }] : []),
+      { label: 'Account Status', value: 'Active', isHighlight: true },
+    ];
+
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Welcome to Poojawala',
+      userName: data.name || 'Devotee',
+      preheaderText: 'Welcome to Poojawala! Your account has been registered successfully.',
+      emailMessage: 'Welcome to the Poojawala family! Your customer account has been successfully created. You can now explore Vedic pooja services, book verified purohits, and schedule sacred ceremonies with ease.',
+      detailsTable: {
+        title: 'Account Summary',
+        rows,
+      },
+      highlight: {
+        title: 'Start Your Sacred Journey',
+        text: 'Browse through a wide range of authentic Vedic poojas, havans, and rituals performed by certified pandits at your doorstep, temple, or online via live streaming.',
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject: 'Welcome to Poojawala - Your Sacred Journey Begins',
+      html,
+    });
+  }
+
+  async sendPurohitRegistrationEmail(data: {
+    email: string;
+    name: string;
+    username?: string;
+    phone?: string;
+  }): Promise<void> {
+    const rows = [
+      { label: 'Purohit Name', value: data.name || 'Purohit' },
+      { label: 'Email', value: data.email },
+      ...(data.username ? [{ label: 'Username', value: data.username }] : []),
+      ...(data.phone ? [{ label: 'Phone', value: data.phone }] : []),
+      { label: 'Profile Status', value: 'Under Review', isHighlight: true },
+    ];
+
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Registration Received',
+      userName: data.name || 'Purohit',
+      preheaderText: 'Thank you for registering as a Purohit with Poojawala.',
+      emailMessage: 'Thank you for joining Poojawala as a Vedic Purohit. Your registration and verification details have been received successfully. Our administrative team is currently reviewing your profile and credentials.',
+      detailsTable: {
+        title: 'Registration Details',
+        rows,
+      },
+      highlight: {
+        title: 'Verification Process',
+        text: 'Our team verifies all credentials to maintain the highest standards of Vedic sanctity. Once your documents are verified and approved by the admin team, you will receive an activation email and can begin accepting booking requests.',
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject: 'Purohit Registration Received - Poojawala',
+      html,
+    });
+  }
 }

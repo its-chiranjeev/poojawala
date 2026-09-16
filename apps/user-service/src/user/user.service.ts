@@ -2712,7 +2712,41 @@ export class UserService {
       return saved;
     });
 
-    // 7. Issue Auth Tokens
+    // 7. Send Registration Email to Customer or Purohit
+    if (savedUser.email) {
+      try {
+        const fullName = savedUser.firstName
+          ? `${savedUser.firstName} ${savedUser.lastName || ''}`.trim()
+          : (savedUser.role === USER_ROLE.PUROHIT ? 'Purohit' : 'Devotee');
+
+        if (savedUser.role === USER_ROLE.PUROHIT) {
+          this.logger.log(`[UserRegistration] Sending registration email to Purohit ${savedUser.email}...`);
+          await this.emailService.sendPurohitRegistrationEmail({
+            email: savedUser.email,
+            name: fullName,
+            username: savedUser.username,
+            phone: savedUser.phone,
+          });
+          this.logger.log(`[UserRegistration] Purohit registration email sent successfully to ${savedUser.email}.`);
+        } else {
+          this.logger.log(`[UserRegistration] Sending welcome registration email to customer ${savedUser.email}...`);
+          await this.emailService.sendCustomerRegistrationEmail({
+            email: savedUser.email,
+            name: fullName,
+            username: savedUser.username,
+            phone: savedUser.phone,
+          });
+          this.logger.log(`[UserRegistration] Customer registration email sent successfully to ${savedUser.email}.`);
+        }
+      } catch (emailErr) {
+        this.logger.error(
+          `[UserRegistration] Failed to send registration email to ${savedUser.email}`,
+          emailErr instanceof Error ? emailErr.stack : String(emailErr),
+        );
+      }
+    }
+
+    // 8. Issue Auth Tokens
     const data = await this.issueAuthTokens(savedUser);
 
     return {
