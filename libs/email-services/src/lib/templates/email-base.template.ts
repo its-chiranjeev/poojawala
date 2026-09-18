@@ -76,21 +76,78 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
   // Optional Highlight / Callout Box
   let highlightBlock = '';
   if (options.highlight) {
-    const title = escapeHtml(options.highlight.title);
-    const text = escapeHtml(options.highlight.text);
+    const rawTitle = options.highlight.title;
+    const title = escapeHtml(rawTitle);
+    const rawText = options.highlight.text;
+    const formattedText = escapeHtml(rawText).replace(/\n/g, '<br>');
+    const isResponse = rawTitle.toLowerCase().includes('response') || rawTitle.toLowerCase().includes('reply');
+
     highlightBlock = `
-      <!-- MODULAR CONTENT BLOCK 2: HIGHLIGHT / CALLOUT BOX -->
+      <!-- MODULAR CONTENT BLOCK 2: INTERACTIVE HIGHLIGHT / RESPONSE CARD -->
       <tr>
         <td style="padding: 0 40px 24px 40px;" class="mobile-padding">
-          <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #FFFDF9; border-left: 4px solid #FF6200; border-radius: 12px; border-top: 1px solid #FFEBDC; border-right: 1px solid #FFEBDC; border-bottom: 1px solid #FFEBDC;">
+          <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #FFFFFF; border: 1.5px solid #FFDFC7; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 16px rgba(255, 98, 0, 0.06);">
+            <!-- Header bar of card -->
             <tr>
-              <td style="padding: 18px 22px;">
-                <p style="margin: 0 0 6px 0; font-size: 14px; font-weight: 700; color: #FF6200;">
-                  📌 ${title}
-                </p>
-                <p style="margin: 0; font-size: 13.5px; line-height: 1.5; color: #666666;">
-                  ${text}
-                </p>
+              <td style="background-color: #FFF2EB; padding: 13px 20px; border-bottom: 1px solid #FFE0D0;">
+                <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                  <tr>
+                    <td style="vertical-align: middle;">
+                      <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                        <tr>
+                          <td style="width: 26px; height: 26px; background: linear-gradient(135deg, #FF6200 0%, #D32F2F 100%); border-radius: 50%; text-align: center; vertical-align: middle;">
+                            <span style="font-size: 13px; line-height: 26px; display: block;">${isResponse ? '🪔' : '📌'}</span>
+                          </td>
+                          <td style="padding-left: 10px; vertical-align: middle;">
+                            <h3 style="margin: 0; font-size: 14.5px; font-weight: 700; color: #D32F2F; font-family: 'Outfit', -apple-system, sans-serif;">
+                              ${title}
+                            </h3>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                    <td align="right" style="vertical-align: middle;">
+                      <span style="display: inline-block; background-color: #E8F5E9; color: #2E7D32; font-size: 10.5px; font-weight: 700; padding: 3px 10px; border-radius: 20px; border: 1px solid #C8E6C9; white-space: nowrap;">
+                        ✓ Official
+                      </span>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Card Content -->
+            <tr>
+              <td style="padding: 20px 22px; background: linear-gradient(180deg, #FFFFFF 0%, #FFFDF9 100%);">
+                <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                  <tr>
+                    <td style="vertical-align: top; width: 22px; padding-right: 8px;">
+                      <span style="font-size: 26px; line-height: 1; color: #FFA366; font-family: Georgia, serif; display: block;">“</span>
+                    </td>
+                    <td style="vertical-align: top;">
+                      <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #2C2420; font-weight: 500;">
+                        ${formattedText}
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+
+                ${
+                  isResponse
+                    ? `
+                  <!-- Sign-off inside card -->
+                  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #FFE2CE;">
+                    <tr>
+                      <td style="vertical-align: middle;">
+                        <span style="font-size: 11.5px; color: #A67D65; font-style: italic;">
+                          — Poojawala Devotee Care Desk
+                        </span>
+                      </td>
+                    </tr>
+                  </table>
+                `
+                    : ''
+                }
               </td>
             </tr>
           </table>
