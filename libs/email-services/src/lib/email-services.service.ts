@@ -532,4 +532,44 @@ export class EmailService {
       html,
     });
   }
+
+  async sendContactUsReplyEmail(data: {
+    email: string;
+    name: string;
+    status: string;
+    adminMessage: string;
+    subject?: string;
+    userOriginalMessage?: string;
+  }): Promise<void> {
+    const rows = [
+      { label: 'Name', value: data.name || 'Valued User' },
+      { label: 'Inquiry Status', value: data.status, isHighlight: true },
+      ...(data.subject ? [{ label: 'Subject', value: data.subject }] : []),
+      ...(data.userOriginalMessage
+        ? [{ label: 'Your Original Query', value: data.userOriginalMessage }]
+        : []),
+    ];
+
+    const html = renderPoojawalaEmail({
+      statusBadge: `Inquiry ${data.status}`,
+      userName: data.name || 'Devotee',
+      preheaderText: `Update regarding your contact request (${data.status}) - Poojawala`,
+      emailMessage: `Thank you for contacting Poojawala. Our administrative team has reviewed your query regarding "<strong>${this.escapeHtml(data.subject || 'Inquiry')}</strong>" and updated its status to <strong>${this.escapeHtml(data.status)}</strong>. Please find our response below:`,
+      detailsTable: {
+        title: 'Inquiry Details',
+        rows,
+      },
+      highlight: {
+        title: 'Response from Poojawala Team',
+        text: data.adminMessage,
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject: `Update on your contact inquiry [${data.status}] - Poojawala`,
+      html,
+    });
+  }
 }
+
