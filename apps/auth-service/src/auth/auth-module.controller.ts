@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { AuthModuleService } from './auth-module.service';
 import { JwtAuthGuard, CsrfGuard } from '@poojawala/common';
-import { LoginDto, VerifyOtpDto, RegisterSuperAdminDto, RegisterNormalUserDto, OtpDto, RegisterUserDto ,resetPasswordDto,forgotPasswordDto} from '@poojawala/dtos';
+import { LoginDto, VerifyOtpDto, RegisterSuperAdminDto, RegisterNormalUserDto, OtpDto, RegisterUserDto, resetPasswordDto, forgotPasswordDto } from '@poojawala/dtos';
 import type { Response } from 'express';
 import * as crypto from 'crypto';
 import { S3Service } from '@poojawala/s3';
@@ -47,32 +47,26 @@ export class AuthModuleController {
 
   private setAuthCookies(res: Response, accessToken: string, refreshToken: string, csrfToken: string) {
     const isProd = process.env.NODE_ENV === 'production';
-    const origin = (res as any).req?.headers?.origin;
-    const isCrossSite = origin && (origin.includes('localhost') || origin.includes('127.0.0.1'));
-
-    const sameSite = isCrossSite ? 'none' : 'lax';
-    const secure = isCrossSite ? true : isProd;
-
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
-      secure,
-      sameSite,
+      secure: isProd,
+      sameSite: 'lax',
       maxAge: 15 * 60 * 1000, // 15 minutes
       path: '/',
     });
 
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
-      secure,
-      sameSite,
+      secure: isProd,
+      sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       path: '/',
     });
 
     res.cookie('csrf-token', csrfToken, {
       httpOnly: true,
-      secure,
-      sameSite,
+      secure: isProd,
+      sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
     });
@@ -80,15 +74,9 @@ export class AuthModuleController {
 
   private clearAuthCookies(res: Response) {
     const isProd = process.env.NODE_ENV === 'production';
-    const origin = (res as any).req?.headers?.origin;
-    const isCrossSite = origin && (origin.includes('localhost') || origin.includes('127.0.0.1'));
-
-    const sameSite = isCrossSite ? 'none' : 'lax';
-    const secure = isCrossSite ? true : isProd;
-
-    res.clearCookie('accessToken', { httpOnly: true, secure, sameSite, path: '/' });
-    res.clearCookie('refreshToken', { httpOnly: true, secure, sameSite, path: '/' });
-    res.clearCookie('csrf-token', { httpOnly: true, secure, sameSite, path: '/' });
+    res.clearCookie('accessToken', { httpOnly: true, secure: isProd, sameSite: 'lax', path: '/' });
+    res.clearCookie('refreshToken', { httpOnly: true, secure: isProd, sameSite: 'lax', path: '/' });
+    res.clearCookie('csrf-token', { httpOnly: true, secure: isProd, sameSite: 'lax', path: '/' });
   }
 
   private parseCookies(cookieHeader?: string): Record<string, string> {
@@ -142,32 +130,32 @@ export class AuthModuleController {
   //   return this.authModuleService.registerUserService(dto);
   // }
 
- /* @Post('register-user')
-  @HttpCode(HttpStatus.CREATED)
-  async registerUser(
-    @Body(new ValidationPipe()) dto: RegisterNormalUserDto,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const result = await this.authModuleService.registerUserService(dto);
-    const csrfToken = crypto.randomUUID();
-    this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
-
-    if (result.user && result.user.profileImage) {
-      try {
-        result.user.profileImage = await this.s3Service.getDownloadUrl(result.user.profileImage);
-      } catch (e) {
-        console.error('Failed to generate pre-signed URL for profileImage:', e);
-      }
-    }
-
-    return {
-      success: true,
-      statusCode: HttpStatus.CREATED,
-      message: result.message,
-      csrfToken,
-      user: result.user,
-    };
-  }*/
+  /* @Post('register-user')
+   @HttpCode(HttpStatus.CREATED)
+   async registerUser(
+     @Body(new ValidationPipe()) dto: RegisterNormalUserDto,
+     @Res({ passthrough: true }) res: Response,
+   ) {
+     const result = await this.authModuleService.registerUserService(dto);
+     const csrfToken = crypto.randomUUID();
+     this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
+ 
+     if (result.user && result.user.profileImage) {
+       try {
+         result.user.profileImage = await this.s3Service.getDownloadUrl(result.user.profileImage);
+       } catch (e) {
+         console.error('Failed to generate pre-signed URL for profileImage:', e);
+       }
+     }
+ 
+     return {
+       success: true,
+       statusCode: HttpStatus.CREATED,
+       message: result.message,
+       csrfToken,
+       user: result.user,
+     };
+   }*/
 
   // [EXISTING CODE]
   // @Post('login')
@@ -252,7 +240,7 @@ export class AuthModuleController {
     };
   }
 
- @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Get('me')
   @HttpCode(HttpStatus.OK)
   async getMe(@Req() req: any) {
