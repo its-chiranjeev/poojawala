@@ -11,6 +11,11 @@ export class CsrfGuard implements CanActivate {
       return true;
     }
 
+    // Bypass CSRF check in development environment for smooth cross-origin testing
+    if (process.env.NODE_ENV !== 'production') {
+      return true;
+    }
+
     const cookies = this.parseCookies(request.headers.cookie);
     const cookieCsrfToken = cookies['csrf-token'];
     const headerCsrfToken = request.headers['x-csrf-token'];
