@@ -47,26 +47,32 @@ export class AuthModuleController {
 
   private setAuthCookies(res: Response, accessToken: string, refreshToken: string, csrfToken: string) {
     const isProd = process.env.NODE_ENV === 'production';
+    const origin = (res as any).req?.headers?.origin;
+    const isCrossSite = origin && (origin.includes('localhost') || origin.includes('127.0.0.1'));
+
+    const sameSite = isCrossSite ? 'none' : 'lax';
+    const secure = isCrossSite ? true : isProd;
+
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
+      secure,
+      sameSite,
       maxAge: 15 * 60 * 1000, // 15 minutes
       path: '/',
     });
 
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
+      secure,
+      sameSite,
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       path: '/',
     });
 
     res.cookie('csrf-token', csrfToken, {
       httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
+      secure,
+      sameSite,
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
     });
@@ -74,9 +80,15 @@ export class AuthModuleController {
 
   private clearAuthCookies(res: Response) {
     const isProd = process.env.NODE_ENV === 'production';
-    res.clearCookie('accessToken', { httpOnly: true, secure: isProd, sameSite: 'lax', path: '/' });
-    res.clearCookie('refreshToken', { httpOnly: true, secure: isProd, sameSite: 'lax', path: '/' });
-    res.clearCookie('csrf-token', { httpOnly: true, secure: isProd, sameSite: 'lax', path: '/' });
+    const origin = (res as any).req?.headers?.origin;
+    const isCrossSite = origin && (origin.includes('localhost') || origin.includes('127.0.0.1'));
+
+    const sameSite = isCrossSite ? 'none' : 'lax';
+    const secure = isCrossSite ? true : isProd;
+
+    res.clearCookie('accessToken', { httpOnly: true, secure, sameSite, path: '/' });
+    res.clearCookie('refreshToken', { httpOnly: true, secure, sameSite, path: '/' });
+    res.clearCookie('csrf-token', { httpOnly: true, secure, sameSite, path: '/' });
   }
 
   private parseCookies(cookieHeader?: string): Record<string, string> {
