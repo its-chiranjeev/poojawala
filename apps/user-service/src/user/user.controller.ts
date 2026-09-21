@@ -363,27 +363,32 @@ export class UserController {
     csrfToken: string,
   ) {
     const isProd = process.env.NODE_ENV === 'production';
+    const origin = (res as any).req?.headers?.origin;
+    const isCrossSiteLocal = origin && (origin.includes('192.168.') || origin.includes('10.') || origin.includes('172.') || origin.includes('localhost') || origin.includes('127.0.0.1'));
+
+    const sameSite = isCrossSiteLocal ? 'none' : 'lax';
+    const secure = isCrossSiteLocal ? true : isProd;
 
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
+      secure,
+      sameSite,
       maxAge: 15 * 60 * 1000,
       path: '/',
     });
 
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
+      secure,
+      sameSite,
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
     });
 
     res.cookie('csrf-token', csrfToken, {
       httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
+      secure,
+      sameSite,
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
     });
