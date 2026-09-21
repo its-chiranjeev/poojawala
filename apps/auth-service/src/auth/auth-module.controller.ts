@@ -47,48 +47,57 @@ export class AuthModuleController {
 
   private setAuthCookies(res: Response, accessToken: string, refreshToken: string, csrfToken: string) {
     const isProd = process.env.NODE_ENV === 'production';
-    const origin = (res as any).req?.headers?.origin;
-    const isCrossSiteLocal = origin && (origin.includes('192.168.') || origin.includes('10.') || origin.includes('172.') || origin.includes('localhost') || origin.includes('127.0.0.1'));
+    const req = (res as any).req;
+    const origin = req?.headers?.origin;
+    const isCrossSite = origin && (origin.includes('192.168.') || origin.includes('10.') || origin.includes('172.') || origin.includes('localhost') || origin.includes('127.0.0.1'));
 
-    const sameSite = isCrossSiteLocal ? 'none' : 'lax';
-    const secure = isCrossSiteLocal ? true : isProd;
+    const sameSite = (isCrossSite || !isProd) ? 'none' : 'lax';
+    const secure = true;
 
-    res.cookie('accessToken', accessToken, {
+    const cookieOptions: any = {
       httpOnly: true,
       secure,
       sameSite,
-      maxAge: 15 * 60 * 1000, // 15 minutes
+      partitioned: Boolean(isCrossSite || !isProd),
       path: '/',
+    };
+
+    res.cookie('accessToken', accessToken, {
+      ...cookieOptions,
+      maxAge: 15 * 60 * 1000, // 15 minutes
     });
 
     res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure,
-      sameSite,
+      ...cookieOptions,
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      path: '/',
     });
 
     res.cookie('csrf-token', csrfToken, {
-      httpOnly: true,
-      secure,
-      sameSite,
+      ...cookieOptions,
       maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: '/',
     });
   }
 
   private clearAuthCookies(res: Response) {
     const isProd = process.env.NODE_ENV === 'production';
-    const origin = (res as any).req?.headers?.origin;
-    const isCrossSiteLocal = origin && (origin.includes('192.168.') || origin.includes('10.') || origin.includes('172.') || origin.includes('localhost') || origin.includes('127.0.0.1'));
+    const req = (res as any).req;
+    const origin = req?.headers?.origin;
+    const isCrossSite = origin && (origin.includes('192.168.') || origin.includes('10.') || origin.includes('172.') || origin.includes('localhost') || origin.includes('127.0.0.1'));
 
-    const sameSite = isCrossSiteLocal ? 'none' : 'lax';
-    const secure = isCrossSiteLocal ? true : isProd;
+    const sameSite = (isCrossSite || !isProd) ? 'none' : 'lax';
+    const secure = true;
 
-    res.clearCookie('accessToken', { httpOnly: true, secure, sameSite, path: '/' });
-    res.clearCookie('refreshToken', { httpOnly: true, secure, sameSite, path: '/' });
-    res.clearCookie('csrf-token', { httpOnly: true, secure, sameSite, path: '/' });
+    const cookieOptions: any = {
+      httpOnly: true,
+      secure,
+      sameSite,
+      partitioned: Boolean(isCrossSite || !isProd),
+      path: '/',
+    };
+
+    res.clearCookie('accessToken', cookieOptions);
+    res.clearCookie('refreshToken', cookieOptions);
+    res.clearCookie('csrf-token', cookieOptions);
   }
 
   private parseCookies(cookieHeader?: string): Record<string, string> {
