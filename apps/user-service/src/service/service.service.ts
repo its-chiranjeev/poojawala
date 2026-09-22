@@ -18,6 +18,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -117,8 +118,21 @@ export class ServiceService {
         }
       }
 
+      // TODO: Original createService instantiation kept for reference:
+      /*
       const service = this.serviceRepository.create({
         ...dto,
+        iconUrl,
+        isActive: dto.isActive ?? true,
+        isUpcomingFestival: dto.isUpcomingFestival ?? false,
+      });
+      */
+
+      const service = this.serviceRepository.create({
+        ...dto,
+        cities: dto.cities ?? [],
+        languages: dto.languages ?? [],
+        benefits: dto.benefits ?? [],
         iconUrl,
         isActive: dto.isActive ?? true,
         isUpcomingFestival: dto.isUpcomingFestival ?? false,
@@ -155,6 +169,9 @@ export class ServiceService {
         data: savedService,
       };
     } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
       console.error('Error in createService:', error);
       const errorMsg =
         error instanceof Error ? error.stack : JSON.stringify(error);
@@ -209,7 +226,25 @@ export class ServiceService {
       );
     }
 
+    // TODO: Previous Object.assign(service, dto) kept for reference:
+    /*
     Object.assign(service, dto);
+    */
+    const oldCities = service.cities;
+    const oldLanguages = service.languages;
+    const oldBenefits = service.benefits;
+
+    Object.assign(service, dto);
+
+    if (dto.cities !== undefined) {
+      service.cities = dto.cities ?? [];
+    }
+    if (dto.languages !== undefined) {
+      service.languages = dto.languages ?? [];
+    }
+    if (dto.benefits !== undefined) {
+      service.benefits = dto.benefits ?? [];
+    }
 
     if (service.isUpcomingFestival) {
       if (!service.festivalStartDate || !service.festivalEndDate) {
@@ -234,6 +269,11 @@ export class ServiceService {
 
     const updated = await this.serviceRepository.save(service);
 
+    const updatedFields: Record<string, unknown> = { name: updated.name };
+    if (dto.cities !== undefined) updatedFields.cities = updated.cities;
+    if (dto.languages !== undefined) updatedFields.languages = updated.languages;
+    if (dto.benefits !== undefined) updatedFields.benefits = updated.benefits;
+
     await this.auditLogService.createAuditLog({
       actorId: adminId,
       actorType: ACTOR_TYPE.USER,
@@ -243,8 +283,12 @@ export class ServiceService {
       entityId: String(updated.id),
       action: 'SERVICE_UPDATED',
       message: `Admin updated service ${updated.name}.`,
-      oldValue: undefined,
-      newValue: { name: updated.name },
+      oldValue: {
+        cities: oldCities,
+        languages: oldLanguages,
+        benefits: oldBenefits,
+      },
+      newValue: updatedFields,
     });
 
     return {

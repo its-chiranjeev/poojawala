@@ -20,3 +20,4 @@ export * from './contact-us.repository';
 export * from './coupon.repository';
 export * from './coupon-usage.repository';
 export * from './cms-content.repository';
+export * from './product.repository';

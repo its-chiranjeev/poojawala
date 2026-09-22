@@ -42,3 +42,6 @@ export * from './contact-us/create-contact-us.dto';
 export * from './contact-us/get-all-contact-us.dto';
 export * from './contact-us/update-contact-us-status.dto';
 export * from './user/create-customer-by-admin.dto';
+export * from './product/create.product.dto';
+export * from './product/update.product.dto';
+export * from './product/get.products.query.dto';

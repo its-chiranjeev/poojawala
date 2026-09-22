@@ -14,3 +14,4 @@ export * from './decorators/parse-int-array.decorator';
 export * from './types/jwt-payload.type';
 export * from './audit/audit-log.service';
 export * from './context/request-context';
+export * from './utils/city.util';

@@ -22,6 +22,7 @@ import { CmsContent } from './cms-content.entity';
 import { Notification } from './notification.entity';
 import { ContactUs } from './contact-us.entity';
 import { AuditLog } from './audit-log.entity';
+import { Product } from './product.entity';
 import { EntitiesService } from './entities.service';
 
 @Module({
@@ -48,6 +49,7 @@ import { EntitiesService } from './entities.service';
       Notification,
       ContactUs,
       AuditLog,
+      Product,
     ]),
   ],
   providers: [EntitiesService],

@@ -345,6 +345,24 @@ export class BookingRepository extends BaseRepository<Booking> {
         {
           purohitId,
         },
+      )
+      .andWhere(
+        `
+        EXISTS (
+          SELECT 1
+          FROM purohit_service_areas psa
+          JOIN purohit_profiles pp ON pp."userId" = psa."purohitId"
+          WHERE pp.id = :purohitId
+            AND psa."deletedAt" IS NULL
+            AND (
+              LOWER(TRIM(psa.city)) = LOWER(TRIM("customerAddress"."city"))
+              OR LOWER(TRIM(psa.city)) = LOWER(TRIM(booking."addressSnapshot"->>'city'))
+            )
+        )
+        `,
+        {
+          purohitId,
+        },
       );
 
     if (search?.trim()) {

@@ -21,3 +21,4 @@ export * from './cms-content.entity';
 export * from './notification.entity';
 export * from './contact-us.entity';
 export * from './audit-log.entity';
+export * from './product.entity';

@@ -62,7 +62,7 @@ import { AssignmentService } from '../assignment/assignment.service';
 import { BookingGateway } from '@poojawala/gateway';
 import { NotificationService } from '@poojawala/notification';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
-import { AuditLogService } from '@poojawala/common';
+import { AuditLogService, normalizeCityName } from '@poojawala/common';
 
 interface CouponCalculationResult {
   coupon: Coupon;
@@ -240,6 +240,26 @@ export class BookingService {
         if (!customerAddress) {
           throw new NotFoundException(
             'Customer address not found or does not belong to you',
+          );
+        }
+
+        // Validate Service is available in customer address booking city
+        const bookingCity = customerAddress.city?.trim();
+        if (!bookingCity) {
+          throw new BadRequestException(
+            'Selected customer address does not contain a valid city',
+          );
+        }
+
+        const serviceCities = Array.isArray(service.cities) ? service.cities : [];
+        const normalizedBookingCity = normalizeCityName(bookingCity);
+        const isCityAvailable = serviceCities.some(
+          (c) => normalizeCityName(c.name) === normalizedBookingCity,
+        );
+
+        if (!isCityAvailable) {
+          throw new BadRequestException(
+            'Selected service is not available in the booking city.',
           );
         }
 
@@ -2086,13 +2106,30 @@ export class BookingService {
         }
 
         const purohitServiceAreaRepository = manager.getRepository(PurohitServiceArea);
-        const serviceArea = await purohitServiceAreaRepository.findOne({
+        const serviceAreas = await purohitServiceAreaRepository.find({
           where: { purohitId: purohit.userId },
         });
 
-        if (!serviceArea || serviceArea.latitude === null || serviceArea.longitude === null) {
+        if (!serviceAreas.length) {
           throw new BadRequestException(
             'Selected Purohit does not have a valid service area configured',
+          );
+        }
+
+        const bookingCity = (
+          booking.customerAddress?.city ||
+          (booking.addressSnapshot as any)?.city ||
+          ''
+        ).trim();
+
+        const normalizedBookingCity = normalizeCityName(bookingCity);
+        const servesCity = serviceAreas.some(
+          (area) => normalizeCityName(area.city) === normalizedBookingCity,
+        );
+
+        if (!servesCity) {
+          throw new BadRequestException(
+            'Selected Purohit does not serve the customer booking city',
           );
         }
 
@@ -3682,6 +3719,42 @@ export class BookingService {
 
         if (!customerAddress) {
           throw new NotFoundException('Customer address not found');
+        }
+
+        // Validate Service availability in the booking city
+        const bookingCity = customerAddress.city?.trim();
+        if (!bookingCity) {
+          throw new BadRequestException(
+            'Selected customer address does not contain a valid city',
+          );
+        }
+
+        const serviceCities = Array.isArray(service.cities) ? service.cities : [];
+        const normalizedBookingCity = normalizeCityName(bookingCity);
+        const isCityAvailable = serviceCities.some(
+          (c) => normalizeCityName(c.name) === normalizedBookingCity,
+        );
+
+        if (!isCityAvailable) {
+          throw new BadRequestException(
+            'Selected service is not available in the booking city.',
+          );
+        }
+
+        // Validate selected Purohit serves this booking city
+        const purohitServiceAreaRepo = manager.getRepository(PurohitServiceArea);
+        const purohitAreas = await purohitServiceAreaRepo.find({
+          where: { purohitId: dto.purohitId },
+        });
+
+        const servesCity = purohitAreas.some(
+          (area) => normalizeCityName(area.city) === normalizedBookingCity,
+        );
+
+        if (!servesCity) {
+          throw new BadRequestException(
+            'Selected Purohit does not serve the customer booking city',
+          );
         }
 
         const duplicateLockKey = [

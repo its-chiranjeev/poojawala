@@ -15,7 +15,7 @@ export class ServiceRepository extends BaseRepository<Service> {
   }
 
   async findAllServices(query: GetServicesQueryDto) {
-    const { page = 1, limit = 10, search, isActive, isUpcomingFestival } = query;
+    const { page = 1, limit = 10, search, isActive, isUpcomingFestival, city, language } = query;
     console.log("=== API REQUEST RECEIVED ===");
     console.log("Original query object:", query);
 
@@ -31,6 +31,8 @@ export class ServiceRepository extends BaseRepository<Service> {
       parsedIsUpcomingFestival = String(isUpcomingFestival) === 'true';
     }
 
+    // TODO: Original findAndCount implementation kept for reference:
+    /*
     const where: any = {
       ...(parsedIsActive !== undefined && { isActive: parsedIsActive }),
       ...(parsedIsUpcomingFestival !== undefined && { isUpcomingFestival: parsedIsUpcomingFestival }),
@@ -65,6 +67,52 @@ export class ServiceRepository extends BaseRepository<Service> {
         updatedAt: true,
       },
     });
+    */
+
+    const qb = this.repo.createQueryBuilder('service');
+
+    if (parsedIsActive !== undefined) {
+      qb.andWhere('service.isActive = :isActive', { isActive: parsedIsActive });
+    }
+
+    if (parsedIsUpcomingFestival !== undefined) {
+      qb.andWhere('service.isUpcomingFestival = :isUpcomingFestival', {
+        isUpcomingFestival: parsedIsUpcomingFestival,
+      });
+    }
+
+    if (search) {
+      qb.andWhere(
+        '(service.name ILIKE :search OR service.description ILIKE :search)',
+        { search: `%${search.trim()}%` },
+      );
+    }
+
+    if (city) {
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM jsonb_array_elements(service.cities) AS c
+          WHERE LOWER(TRIM(c->>'name')) = LOWER(TRIM(:city))
+        )`,
+        { city: city.trim() },
+      );
+    }
+
+    if (language) {
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM jsonb_array_elements(service.languages) AS l
+          WHERE LOWER(TRIM(l->>'name')) = LOWER(TRIM(:language))
+        )`,
+        { language: language.trim() },
+      );
+    }
+
+    qb.orderBy('service.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [services, total] = await qb.getManyAndCount();
 
     // TODO: Previous mapping with only totalBookings kept for reference:
     /*
@@ -147,11 +195,21 @@ export class ServiceRepository extends BaseRepository<Service> {
         const offlineCount = offlineCountMap.get(service.id) || 0;
         return {
           ...service,
+          cities: service.cities ?? [],
+          languages: service.languages ?? [],
+          benefits: service.benefits ?? [],
           totalBookings: countMap.get(service.id) || 0,
           onlinepurohitCount: onlineCount,
           offlinepurohitCount: offlineCount,
         };
       });
+    } else if (services && services.length > 0) {
+      servicesWithBookings = services.map((service) => ({
+        ...service,
+        cities: service.cities ?? [],
+        languages: service.languages ?? [],
+        benefits: service.benefits ?? [],
+      }));
     }
 
     // TODO: Old return without totalBookings from booking table:
@@ -191,6 +249,9 @@ export class ServiceRepository extends BaseRepository<Service> {
         name: true,
         slug: true,
         description: true,
+        cities: true,
+        languages: true,
+        benefits: true,
         iconUrl: true,
         minPrice: true,
         maxPrice: true,
@@ -248,6 +309,9 @@ export class ServiceRepository extends BaseRepository<Service> {
 
       return {
         ...service,
+        cities: service.cities ?? [],
+        languages: service.languages ?? [],
+        benefits: service.benefits ?? [],
         totalBookings: bookingCount,
         onlinepurohitCount: onlineCount,
         offlinepurohitCount: offlineCount,
@@ -257,7 +321,19 @@ export class ServiceRepository extends BaseRepository<Service> {
     // TODO: Old return without totalBookings from booking table:
     // return service;
 
+    // TODO: Dead code — service is always returned early above when truthy.
+    // Kept for reference, removed to fix TypeScript 'never' narrowing error.
+    /*
+    if (service) {
+      service.cities = service.cities ?? [];
+      service.languages = service.languages ?? [];
+      service.benefits = service.benefits ?? [];
+    }
+
     return service;
+    */
+
+    return null;
   }
 
   async remove(service: Service): Promise<Service> {

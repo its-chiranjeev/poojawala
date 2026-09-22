@@ -18,7 +18,8 @@ export enum AUDIT_MODULE {
   SERVICE = 'SERVICE',
   SYSTEM = 'SYSTEM',
   SETTING = 'SETTING',
-  CONTACT_US = 'CONTACT_US'
+  CONTACT_US = 'CONTACT_US',
+  PRODUCT = 'PRODUCT',
 }
 
 @Entity('audit_logs')
