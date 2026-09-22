@@ -33,5 +33,9 @@ export class GetServicesQueryDto {
 
   @IsOptional()
   @IsString()
+  state?: string;
+
+  @IsOptional()
+  @IsString()
   language?: string;
 }

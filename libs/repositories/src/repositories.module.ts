@@ -21,6 +21,9 @@ import { CmsContentRepository } from './cms-content.repository';
 import { NotificationRepository } from './notification.repository';
 import { ContactUsRepository } from './contact-us.repository';
 import { ProductRepository } from './product.repository';
+import { CartRepository } from './cart.repository';
+import { CartItemRepository } from './cart-item.repository';
+import { BookingProductRepository } from './booking-product.repository';
 
 @Module({
   imports: [EntitiesModule],
@@ -46,6 +49,9 @@ import { ProductRepository } from './product.repository';
     NotificationRepository,
     ContactUsRepository,
     ProductRepository,
+    CartRepository,
+    CartItemRepository,
+    BookingProductRepository,
   ],
   exports: [
     RepositoriesService,
@@ -69,6 +75,9 @@ import { ProductRepository } from './product.repository';
     NotificationRepository,
     ContactUsRepository,
     ProductRepository,
+    CartRepository,
+    CartItemRepository,
+    BookingProductRepository,
   ],
 })
-export class RepositoriesModule { }
+export class RepositoriesModule {}

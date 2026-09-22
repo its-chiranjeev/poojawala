@@ -27,6 +27,10 @@ export class CreateCustomerAddressDto {
   city!: string;
 
   @IsString()
+  @Length(2, 100)
+  state!: string;
+
+  @IsString()
   @Length(6, 10)
   pincode!: string;
 

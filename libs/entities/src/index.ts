@@ -22,3 +22,6 @@ export * from './notification.entity';
 export * from './contact-us.entity';
 export * from './audit-log.entity';
 export * from './product.entity';
+export * from './cart.entity';
+export * from './cart-item.entity';
+export * from './booking-product.entity';

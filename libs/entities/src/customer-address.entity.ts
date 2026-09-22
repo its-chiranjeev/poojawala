@@ -1,4 +1,3 @@
-
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -38,7 +37,6 @@ export class CustomerAddress {
   })
   venueType!: VENUE_TYPE;
 
-
   @Column({
     type: 'decimal',
     precision: 10,
@@ -63,6 +61,9 @@ export class CustomerAddress {
 
   @Column({ type: 'varchar', length: 100 })
   city!: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  state?: string;
 
   @Column({ type: 'varchar', length: 10 })
   pincode!: string;
@@ -161,5 +162,3 @@ export class CustomerAddress {
 //   @UpdateDateColumn()
 //   updatedAt!: Date;
 // }
-
-

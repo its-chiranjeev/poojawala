@@ -18,6 +18,9 @@ import {
   Booking,
   BOOKING_PAYMENT_STATUS,
   BOOKING_STATUS,
+  BookingProduct,
+  Cart,
+  CartItem,
   PaymentBooking,
   Payment,
   CUSTOMER_PAYMENT_METHOD,
@@ -29,10 +32,7 @@ import {
   BANK_VERIFICATION_STATUS,
 } from '@poojawala/entities';
 
-import {
-  BookingRepository,
-  PaymentRepository,
-} from '@poojawala/repositories';
+import { BookingRepository, PaymentRepository } from '@poojawala/repositories';
 
 import {
   CreatePaymentLinkDto,
@@ -44,7 +44,11 @@ import {
 
 import { paymentInvoiceTemplate } from './templates/invoice.template';
 import { NotificationService } from '@poojawala/notification';
-import { NOTIFICATION_TYPE, PurohitProfile, PurohitBankAccount } from '@poojawala/entities';
+import {
+  NOTIFICATION_TYPE,
+  PurohitProfile,
+  PurohitBankAccount,
+} from '@poojawala/entities';
 import { BookingGateway } from '@poojawala/gateway';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
@@ -386,7 +390,8 @@ export class PaymentService {
       throw new BadRequestException('No Purohit is assigned to this booking');
     }
 
-    const purohitBankAccountRepository = this.dataSource.getRepository(PurohitBankAccount);
+    const purohitBankAccountRepository =
+      this.dataSource.getRepository(PurohitBankAccount);
     const bankAccount = await purohitBankAccountRepository.findOne({
       where: { purohitId: booking.purohitId, isPrimary: true },
     });
@@ -403,14 +408,17 @@ export class PaymentService {
 
     // Mask account number
     const maskedAccountNumber = bankAccount.accountNumber
-      ? 'X'.repeat(Math.max(0, bankAccount.accountNumber.length - 4)) + bankAccount.accountNumber.slice(-4)
+      ? 'X'.repeat(Math.max(0, bankAccount.accountNumber.length - 4)) +
+      bankAccount.accountNumber.slice(-4)
       : null;
 
     return {
       bookingId: booking.id,
       bookingNumber: booking.bookingNumber,
       purohitId: booking.purohitId,
-      purohitName: booking.purohit.user ? `${booking.purohit.user.firstName} ${booking.purohit.user.lastName}` : 'Unknown',
+      purohitName: booking.purohit.user
+        ? `${booking.purohit.user.firstName} ${booking.purohit.user.lastName}`
+        : 'Unknown',
       payoutAmount,
       bookingStatus: booking.status,
       bookingPaymentStatus: booking.paymentStatus,
@@ -424,11 +432,14 @@ export class PaymentService {
         ifscCode: bankAccount.ifscCode,
         upiId: bankAccount.upiId,
         verificationStatus: bankAccount.verificationStatus,
-      }
+      },
     };
   }
 
-  async adminRecordPurohitPayout(adminId: number, dto: AdminCreatePurohitPayoutDto) {
+  async adminRecordPurohitPayout(
+    adminId: number,
+    dto: AdminCreatePurohitPayoutDto,
+  ) {
     const booking = await this.bookingRepository.findOne({
       where: { id: dto.bookingId },
     });
@@ -449,15 +460,18 @@ export class PaymentService {
       throw new BadRequestException('No Purohit is assigned to this booking');
     }
 
-    const purohitProfile = await this.dataSource.getRepository(PurohitProfile).findOne({
-      where: { id: booking.purohitId },
-    });
+    const purohitProfile = await this.dataSource
+      .getRepository(PurohitProfile)
+      .findOne({
+        where: { id: booking.purohitId },
+      });
 
     if (!purohitProfile) {
       throw new NotFoundException('Purohit profile not found');
     }
 
-    const purohitBankAccountRepository = this.dataSource.getRepository(PurohitBankAccount);
+    const purohitBankAccountRepository =
+      this.dataSource.getRepository(PurohitBankAccount);
     const bankAccount = await purohitBankAccountRepository.findOne({
       where: { purohitId: booking.purohitId, isPrimary: true },
     });
@@ -478,12 +492,17 @@ export class PaymentService {
 
     // Check if payout already exists for this booking
     const existingPayouts = await this.paymentRepository.find({
-      where: { bookingId: booking.id, paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT },
+      where: {
+        bookingId: booking.id,
+        paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT,
+      },
     });
 
     for (const ep of existingPayouts) {
       if (ep.status === PAYMENT_STATUS.SUCCESS) {
-        throw new BadRequestException('Payout has already been completed for this booking');
+        throw new BadRequestException(
+          'Payout has already been completed for this booking',
+        );
       }
     }
 
@@ -511,7 +530,10 @@ export class PaymentService {
         payeeId: purohitProfile.userId,
         amount: payoutAmount,
         currency: 'INR',
-        paymentMethod: bankAccount.paymentMethod === 'UPI' ? PAYMENT_METHOD.UPI : PAYMENT_METHOD.BANK_TRANSFER,
+        paymentMethod:
+          bankAccount.paymentMethod === 'UPI'
+            ? PAYMENT_METHOD.UPI
+            : PAYMENT_METHOD.BANK_TRANSFER,
         idempotencyKey,
         purohitBankAccountId: bankAccount.id,
         status: PAYMENT_STATUS.SUCCESS,
@@ -536,7 +558,10 @@ export class PaymentService {
           action: 'PAYOUT_PROCESSED',
           message: `Admin manually processed a payout of ₹${payoutAmount} for Purohit #${purohitProfile.userId} (Booking #${booking.bookingNumber}).`,
           oldValue: { purohitPayoutStatus: BOOKING_PAYMENT_STATUS.PENDING },
-          newValue: { purohitPayoutStatus: booking.purohitPayoutStatus, paymentId: payoutRecord.id },
+          newValue: {
+            purohitPayoutStatus: booking.purohitPayoutStatus,
+            paymentId: payoutRecord.id,
+          },
         },
         manager,
       );
@@ -594,7 +619,7 @@ export class PaymentService {
         throw new ConflictException('This booking is already paid');
       }
 
-      let isUsable = false;
+      const isUsable = false;
 
       if (existingPayment.razorpayPaymentLinkId) {
         try {
@@ -615,13 +640,15 @@ export class PaymentService {
               customerPaymentMethod: existingPayment.customerPaymentMethod,
               paymentMethod: existingPayment.paymentMethod,
               razorpayOrderId: existingPayment.razorpayOrderId ?? undefined,
-              razorpayPaymentLinkId: existingPayment.razorpayPaymentLinkId ?? undefined,
+              razorpayPaymentLinkId:
+                existingPayment.razorpayPaymentLinkId ?? undefined,
               razorpayPaymentId: existingPayment.razorpayPaymentId ?? undefined,
             };
           } else {
             // Status is cancelled, expired, paid, or partially_paid
             existingPayment.status = PAYMENT_STATUS.FAILED;
-            existingPayment.failureReason = 'Previous payment link is no longer usable';
+            existingPayment.failureReason =
+              'Previous payment link is no longer usable';
             await this.paymentRepository.savePayment(existingPayment);
           }
         } catch (error) {
@@ -630,12 +657,14 @@ export class PaymentService {
             }`,
           );
           existingPayment.status = PAYMENT_STATUS.FAILED;
-          existingPayment.failureReason = 'Failed to verify previous payment link';
+          existingPayment.failureReason =
+            'Failed to verify previous payment link';
           await this.paymentRepository.savePayment(existingPayment);
         }
       } else {
         existingPayment.status = PAYMENT_STATUS.FAILED;
-        existingPayment.failureReason = 'Previous active payment was incomplete';
+        existingPayment.failureReason =
+          'Previous active payment was incomplete';
         await this.paymentRepository.savePayment(existingPayment);
       }
     }
@@ -1034,7 +1063,10 @@ export class PaymentService {
       action: 'PAYMENT_SUCCESS',
       message: `Payment #${payment.id} completed successfully via Razorpay Webhook.`,
       oldValue: { status: PAYMENT_STATUS.PENDING },
-      newValue: { status: PAYMENT_STATUS.SUCCESS, razorpayPaymentId: payment.razorpayPaymentId },
+      newValue: {
+        status: PAYMENT_STATUS.SUCCESS,
+        razorpayPaymentId: payment.razorpayPaymentId,
+      },
     });
 
     this.logger.log(
@@ -1091,7 +1123,10 @@ export class PaymentService {
       action: 'PAYMENT_FAILED',
       message: `Payment #${payment.id} failed: ${payment.failureReason}.`,
       oldValue: { status: PAYMENT_STATUS.PENDING },
-      newValue: { status: payment.status, failureReason: payment.failureReason },
+      newValue: {
+        status: payment.status,
+        failureReason: payment.failureReason,
+      },
     });
   }
 
@@ -1171,7 +1206,10 @@ export class PaymentService {
       action: 'PAYMENT_SUCCESS',
       message: `Payment #${payment.id} completed successfully via Razorpay Webhook (captured).`,
       oldValue: { status: PAYMENT_STATUS.PENDING },
-      newValue: { status: PAYMENT_STATUS.SUCCESS, razorpayPaymentId: payment.razorpayPaymentId },
+      newValue: {
+        status: PAYMENT_STATUS.SUCCESS,
+        razorpayPaymentId: payment.razorpayPaymentId,
+      },
     });
   }
 
@@ -1235,7 +1273,10 @@ export class PaymentService {
       action: 'PAYMENT_FAILED',
       message: `Payment #${payment.id} failed: ${payment.failureReason}.`,
       oldValue: { status: PAYMENT_STATUS.PENDING },
-      newValue: { status: payment.status, failureReason: payment.failureReason },
+      newValue: {
+        status: payment.status,
+        failureReason: payment.failureReason,
+      },
     });
   }
 
@@ -1286,7 +1327,11 @@ export class PaymentService {
 
     // TODO: Old call without viewerRole
     // return this.buildCombinedPaymentResponse(payment, razorpayPayment);
-    return this.buildCombinedPaymentResponse(payment, razorpayPayment, user.role);
+    return this.buildCombinedPaymentResponse(
+      payment,
+      razorpayPayment,
+      user.role,
+    );
   }
 
   private validatePaymentViewAccess(user: User, payment: Payment): void {
@@ -1294,7 +1339,10 @@ export class PaymentService {
       return;
     }
 
-    if (user.role === USER_ROLE.CUSTOMER && payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) {
+    if (
+      user.role === USER_ROLE.CUSTOMER &&
+      payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT
+    ) {
       throw new ForbiddenException('You cannot access this payment');
     }
 
@@ -1341,7 +1389,10 @@ export class PaymentService {
     //     Boolean(payment.razorpayPaymentLinkId?.trim()),
     // );
     const filteredPayments = payments.filter((payment) => {
-      if (user.role === USER_ROLE.CUSTOMER && payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) {
+      if (
+        user.role === USER_ROLE.CUSTOMER &&
+        payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT
+      ) {
         return false;
       }
       return (
@@ -1357,7 +1408,11 @@ export class PaymentService {
 
         // TODO: Old call without viewerRole
         // return this.buildCombinedPaymentResponse(payment, razorpayPayment);
-        return this.buildCombinedPaymentResponse(payment, razorpayPayment, user.role);
+        return this.buildCombinedPaymentResponse(
+          payment,
+          razorpayPayment,
+          user.role,
+        );
       }),
     );
   }
@@ -1403,19 +1458,23 @@ export class PaymentService {
     const displayedPayments =
       user.role === USER_ROLE.CUSTOMER
         ? payments.filter(
-            (payment) =>
-              payment.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
-              (payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
-                Boolean(payment.razorpayPaymentLinkId?.trim()) ||
-                payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH),
-          )
+          (payment) =>
+            payment.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
+            (payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+              Boolean(payment.razorpayPaymentLinkId?.trim()) ||
+              payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH),
+        )
         : payments;
 
     const items = await Promise.all(
       displayedPayments.map(async (payment) => {
         const razorpayPayment = await this.resolveRazorpayPayment(payment);
 
-        return this.buildCombinedPaymentResponse(payment, razorpayPayment, user.role);
+        return this.buildCombinedPaymentResponse(
+          payment,
+          razorpayPayment,
+          user.role,
+        );
       }),
     );
 
@@ -1525,9 +1584,10 @@ export class PaymentService {
         razorpayPayment?.order_id ?? payment.razorpayOrderId ?? '-',
       ),
 
-      paymentMethod: payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH
-        ? 'Cash'
-        : this.formatPaymentMethod(
+      paymentMethod:
+        payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH
+          ? 'Cash'
+          : this.formatPaymentMethod(
             razorpayPayment?.method ?? payment.paymentMethod ?? '-',
           ),
 
@@ -1888,16 +1948,29 @@ export class PaymentService {
     // TODO: Old responsePaymentType calculation
     // let responsePaymentType = payment.paymentType;
     let responsePaymentType: PAYMENT_TYPE | string = payment.paymentType;
-    let responseStatus = this.mapRazorpayStatus(razorpayPayment?.status, payment.status);
+    let responseStatus = this.mapRazorpayStatus(
+      razorpayPayment?.status,
+      payment.status,
+    );
 
-    if (viewerRole === USER_ROLE.PUROHIT && payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT) {
+    if (
+      viewerRole === USER_ROLE.PUROHIT &&
+      payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
+    ) {
       responsePaymentType = PAYMENT_TYPE.PUROHIT_PAYOUT;
-      amount = primaryBooking?.purohitPayoutAmount != null ? Number(primaryBooking.purohitPayoutAmount) : 0;
-      responseStatus = primaryBooking?.purohitPayoutStatus === BOOKING_PAYMENT_STATUS.PAID ? PAYMENT_STATUS.SUCCESS : PAYMENT_STATUS.PENDING;
+      amount =
+        primaryBooking?.purohitPayoutAmount != null
+          ? Number(primaryBooking.purohitPayoutAmount)
+          : 0;
+      responseStatus =
+        primaryBooking?.purohitPayoutStatus === BOOKING_PAYMENT_STATUS.PAID
+          ? PAYMENT_STATUS.SUCCESS
+          : PAYMENT_STATUS.PENDING;
       razorpayPayment = null; // Hide customer payment details from purohit
     }
 
-    const isBookingPayment = payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT;
+    const isBookingPayment =
+      payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT;
     const isInitiatedByPurohit =
       isBookingPayment &&
       (payment.createdBy?.role === USER_ROLE.PUROHIT ||
@@ -1944,9 +2017,9 @@ export class PaymentService {
       purohitPayoutAmount:
         viewerRole === USER_ROLE.CUSTOMER
           ? null
-          : (primaryBooking?.purohitPayoutAmount != null
-              ? Number(primaryBooking.purohitPayoutAmount)
-              : null),
+          : primaryBooking?.purohitPayoutAmount != null
+            ? Number(primaryBooking.purohitPayoutAmount)
+            : null,
 
       customerDetails: primaryBooking?.customer
         ? {
@@ -1989,12 +2062,13 @@ export class PaymentService {
       //     payment.paymentMethod,
       //   ) ?? null,
       paymentMethod:
-        (isCashPayment || (viewerRole === USER_ROLE.CUSTOMER && isInitiatedByPurohit))
+        isCashPayment ||
+          (viewerRole === USER_ROLE.CUSTOMER && isInitiatedByPurohit)
           ? 'CASH'
           : (this.mapRazorpayMethod(
-              razorpayPayment?.method,
-              payment.paymentMethod,
-            ) ?? null),
+            razorpayPayment?.method,
+            payment.paymentMethod,
+          ) ?? null),
 
       razorpayOrderId:
         razorpayPayment?.order_id ?? payment.razorpayOrderId ?? null,
@@ -2113,7 +2187,11 @@ export class PaymentService {
 
         // TODO: Old call without viewerRole
         // return this.buildCombinedPaymentResponse(payment, razorpayPayment);
-        return this.buildCombinedPaymentResponse(payment, razorpayPayment, USER_ROLE.ADMIN);
+        return this.buildCombinedPaymentResponse(
+          payment,
+          razorpayPayment,
+          USER_ROLE.ADMIN,
+        );
       }),
     );
 
@@ -2607,7 +2685,7 @@ export class PaymentService {
       const lockedRefundPayment = await paymentRepository
         .createQueryBuilder('payment')
         .where('payment.id = :paymentId', {
-          paymentId: refundPayment!.id,
+          paymentId: refundPayment.id,
         })
         .setLock('pessimistic_write')
         .getOne();
@@ -2642,18 +2720,24 @@ export class PaymentService {
 
       await paymentRepository.save(lockedRefundPayment);
 
-      await this.auditLogService.createAuditLog({
-        actorId: null,
-        actorType: ACTOR_TYPE.WEBHOOK,
-        actorRole: undefined,
-        module: AUDIT_MODULE.PAYMENT,
-        entity: 'Payment',
-        entityId: String(lockedRefundPayment.id),
-        action: 'REFUND_SUCCESS',
-        message: `Refund #${lockedRefundPayment.id} processed successfully via Razorpay Webhook.`,
-        oldValue: { status: PAYMENT_STATUS.PENDING },
-        newValue: { status: PAYMENT_STATUS.SUCCESS, razorpayRefundId: lockedRefundPayment.razorpayRefundId },
-      }, manager);
+      await this.auditLogService.createAuditLog(
+        {
+          actorId: null,
+          actorType: ACTOR_TYPE.WEBHOOK,
+          actorRole: undefined,
+          module: AUDIT_MODULE.PAYMENT,
+          entity: 'Payment',
+          entityId: String(lockedRefundPayment.id),
+          action: 'REFUND_SUCCESS',
+          message: `Refund #${lockedRefundPayment.id} processed successfully via Razorpay Webhook.`,
+          oldValue: { status: PAYMENT_STATUS.PENDING },
+          newValue: {
+            status: PAYMENT_STATUS.SUCCESS,
+            razorpayRefundId: lockedRefundPayment.razorpayRefundId,
+          },
+        },
+        manager,
+      );
     });
 
     const originalRazorpayPaymentId =
@@ -2757,7 +2841,10 @@ export class PaymentService {
       action: 'REFUND_FAILED',
       message: `Refund #${refundPayment.id} failed: ${refundPayment.failureReason}.`,
       oldValue: { status: PAYMENT_STATUS.PENDING },
-      newValue: { status: refundPayment.status, failureReason: refundPayment.failureReason },
+      newValue: {
+        status: refundPayment.status,
+        failureReason: refundPayment.failureReason,
+      },
     });
 
     /*
@@ -2785,8 +2872,10 @@ export class PaymentService {
   }
 
   private async finalizeSuccessfulPayment(payment: Payment): Promise<void> {
-    const wasBookingCompleted = payment.booking?.status === BOOKING_STATUS.COMPLETED;
-    const wasPaymentPaid = payment.booking?.paymentStatus === BOOKING_PAYMENT_STATUS.PAID;
+    const wasBookingCompleted =
+      payment.booking?.status === BOOKING_STATUS.COMPLETED;
+    const wasPaymentPaid =
+      payment.booking?.paymentStatus === BOOKING_PAYMENT_STATUS.PAID;
 
     await this.dataSource.transaction(async (manager) => {
       await manager.save(Payment, payment);
@@ -2800,6 +2889,58 @@ export class PaymentService {
         }
 
         await manager.save(Booking, payment.booking);
+      }
+
+      // Safe, idempotent cart clearing and BookingProduct synchronization
+      const bookingProductRepo = manager.getRepository(BookingProduct);
+      const cartRepo = manager.getRepository(Cart);
+      const cartItemRepo = manager.getRepository(CartItem);
+
+      // Link any unlinked BookingProduct records for this booking/customer to this payment
+      if (payment.bookingId && payment.payerId) {
+        await bookingProductRepo
+          .createQueryBuilder()
+          .update(BookingProduct)
+          .set({ paymentId: payment.id })
+          .where(
+            'customerId = :customerId AND bookingId = :bookingId AND paymentId IS NULL',
+            {
+              customerId: payment.payerId,
+              bookingId: payment.bookingId,
+            },
+          )
+          .execute();
+      }
+
+      // Find purchased products linked to this payment
+      const purchasedProducts = await bookingProductRepo.find({
+        where: { paymentId: payment.id },
+      });
+
+      if (payment.payerId && purchasedProducts.length > 0) {
+        const customerCart = await cartRepo.findOne({
+          where: { customerId: payment.payerId },
+        });
+
+        if (customerCart) {
+          // Safe removal: only remove the items that were actually purchased
+          for (const purchased of purchasedProducts) {
+            const cartItem = await cartItemRepo.findOne({
+              where: {
+                cartId: customerCart.id,
+                productId: purchased.productId,
+              },
+            });
+            if (cartItem) {
+              if (cartItem.quantity <= purchased.quantity) {
+                await cartItemRepo.delete(cartItem.id);
+              } else {
+                cartItem.quantity -= purchased.quantity;
+                await cartItemRepo.save(cartItem);
+              }
+            }
+          }
+        }
       }
     });
 
@@ -2836,7 +2977,9 @@ export class PaymentService {
 
         if (this.emailService) {
           try {
-            const fullBooking = await this.bookingRepository.findBookingById(payment.booking.id);
+            const fullBooking = await this.bookingRepository.findBookingById(
+              payment.booking.id,
+            );
             if (fullBooking?.customer?.email) {
               const customerName = fullBooking.customer.firstName
                 ? `${fullBooking.customer.firstName} ${fullBooking.customer.lastName || ''}`.trim()
@@ -2846,13 +2989,31 @@ export class PaymentService {
                 ? `${purohitUser.firstName} ${purohitUser.lastName || ''}`.trim()
                 : 'Assigned Purohit';
               const bookingDate = fullBooking.scheduledAt
-                ? new Date(fullBooking.scheduledAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' })
+                ? new Date(fullBooking.scheduledAt).toLocaleDateString(
+                  'en-IN',
+                  {
+                    timeZone: 'Asia/Kolkata',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                  },
+                )
                 : 'Scheduled Date';
               const bookingTime = fullBooking.scheduledAt
-                ? new Date(fullBooking.scheduledAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })
+                ? new Date(fullBooking.scheduledAt).toLocaleTimeString(
+                  'en-IN',
+                  {
+                    timeZone: 'Asia/Kolkata',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: true,
+                  },
+                )
                 : 'Scheduled Time';
 
-              this.logger.log(`[BookingEmail] Sending booking completed email to customer for booking #${fullBooking.bookingNumber}...`);
+              this.logger.log(
+                `[BookingEmail] Sending booking completed email to customer for booking #${fullBooking.bookingNumber}...`,
+              );
               await this.emailService.sendCustomerBookingCompletedEmail({
                 email: fullBooking.customer.email,
                 customerName,
@@ -2861,21 +3022,31 @@ export class PaymentService {
                 bookingDate,
                 bookingTime,
                 purohitName,
-                totalAmount: Number(fullBooking.finalAmount) || Number(payment.amount) || 0,
+                totalAmount:
+                  Number(fullBooking.finalAmount) ||
+                  Number(payment.amount) ||
+                  0,
                 paymentStatus: fullBooking.paymentStatus || 'PAID',
               });
-              this.logger.log(`[BookingEmail] Customer booking completed email sent successfully for booking #${fullBooking.bookingNumber}.`);
+              this.logger.log(
+                `[BookingEmail] Customer booking completed email sent successfully for booking #${fullBooking.bookingNumber}.`,
+              );
             }
           } catch (emailErr) {
-            this.logger.error(`[BookingEmail] Failed to send customer booking completed email for booking #${payment.booking.bookingNumber}`, emailErr instanceof Error ? emailErr.stack : String(emailErr));
+            this.logger.error(
+              `[BookingEmail] Failed to send customer booking completed email for booking #${payment.booking.bookingNumber}`,
+              emailErr instanceof Error ? emailErr.stack : String(emailErr),
+            );
           }
         }
       }
 
       if (payment.booking.purohitId) {
-        const purohitProfile = await this.dataSource.getRepository(PurohitProfile).findOne({
-          where: { id: payment.booking.purohitId },
-        });
+        const purohitProfile = await this.dataSource
+          .getRepository(PurohitProfile)
+          .findOne({
+            where: { id: payment.booking.purohitId },
+          });
 
         if (purohitProfile) {
           if (!wasPaymentPaid) {
@@ -2923,7 +3094,12 @@ export class PaymentService {
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.purohit', 'purohit')
       .leftJoinAndSelect('purohit.user', 'purohitUser')
-      .leftJoinAndSelect('booking.payments', 'payments', 'payments.paymentType = :payoutType', { payoutType: PAYMENT_TYPE.PUROHIT_PAYOUT })
+      .leftJoinAndSelect(
+        'booking.payments',
+        'payments',
+        'payments.paymentType = :payoutType',
+        { payoutType: PAYMENT_TYPE.PUROHIT_PAYOUT },
+      )
       .where('booking.purohitId IS NOT NULL')
       .orderBy('booking.createdAt', 'DESC')
       .skip((page - 1) * limit)
@@ -2941,9 +3117,13 @@ export class PaymentService {
         paymentId: payoutPayment ? payoutPayment.id : null,
         bookingId: booking.id,
         bookingNumber: booking.bookingNumber,
-        purohitPayoutDate: payoutPayment ? payoutPayment.paidAt ?? payoutPayment.createdAt : null,
+        purohitPayoutDate: payoutPayment
+          ? (payoutPayment.paidAt ?? payoutPayment.createdAt)
+          : null,
         purohitPayoutStatus: booking.purohitPayoutStatus,
-        purohitName: booking.purohit?.user ? `${booking.purohit.user.firstName} ${booking.purohit.user.lastName}`.trim() : null,
+        purohitName: booking.purohit?.user
+          ? `${booking.purohit.user.firstName} ${booking.purohit.user.lastName}`.trim()
+          : null,
         finalAmount: booking.finalAmount,
         payoutAmount: booking.purohitPayoutAmount,
       };
@@ -2966,25 +3146,35 @@ export class PaymentService {
     const { totalRevenue } = await bookingRepo
       .createQueryBuilder('booking')
       .select('SUM(booking.finalAmount)', 'totalRevenue')
-      .where('booking.paymentStatus = :status', { status: BOOKING_PAYMENT_STATUS.PAID })
+      .where('booking.paymentStatus = :status', {
+        status: BOOKING_PAYMENT_STATUS.PAID,
+      })
       .getRawOne();
 
     const { purohitPayoutsAmount } = await bookingRepo
       .createQueryBuilder('booking')
       .select('SUM(booking.purohitPayoutAmount)', 'purohitPayoutsAmount')
-      .where('booking.purohitPayoutStatus = :status', { status: BOOKING_PAYMENT_STATUS.PAID })
+      .where('booking.purohitPayoutStatus = :status', {
+        status: BOOKING_PAYMENT_STATUS.PAID,
+      })
       .getRawOne();
 
     const pendingPayoutsNumber = await bookingRepo
       .createQueryBuilder('booking')
-      .where('booking.paymentStatus = :paymentStatus', { paymentStatus: BOOKING_PAYMENT_STATUS.PAID })
-      .andWhere('booking.purohitPayoutStatus = :payoutStatus', { payoutStatus: BOOKING_PAYMENT_STATUS.PENDING })
+      .where('booking.paymentStatus = :paymentStatus', {
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+      })
+      .andWhere('booking.purohitPayoutStatus = :payoutStatus', {
+        payoutStatus: BOOKING_PAYMENT_STATUS.PENDING,
+      })
       .andWhere('booking.purohitId IS NOT NULL')
       .getCount();
 
     const successfulPayoutsNumber = await bookingRepo
       .createQueryBuilder('booking')
-      .where('booking.purohitPayoutStatus = :payoutStatus', { payoutStatus: BOOKING_PAYMENT_STATUS.PAID })
+      .where('booking.purohitPayoutStatus = :payoutStatus', {
+        payoutStatus: BOOKING_PAYMENT_STATUS.PAID,
+      })
       .andWhere('booking.purohitId IS NOT NULL')
       .getCount();
 

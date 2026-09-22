@@ -1,6 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Booking, Payment, PaymentBooking } from '@poojawala/entities';
+import {
+  Booking,
+  BookingProduct,
+  Cart,
+  CartItem,
+  Payment,
+  PaymentBooking,
+} from '@poojawala/entities';
 import { BookingRepository, PaymentRepository } from '@poojawala/repositories';
 import { PaymentController } from './payment.controller';
 import { PaymentService } from './payment.service';
@@ -15,6 +22,9 @@ import { EmailServicesModule } from '@poojawala/email-services';
       Booking,
       Payment,
       PaymentBooking,
+      BookingProduct,
+      Cart,
+      CartItem,
     ]),
     NotificationModule,
     GatewayModule,
@@ -22,11 +32,7 @@ import { EmailServicesModule } from '@poojawala/email-services';
     EmailServicesModule,
   ],
   controllers: [PaymentController],
-  providers: [
-    PaymentService,
-    BookingRepository,
-    PaymentRepository,
-  ],
+  providers: [PaymentService, BookingRepository, PaymentRepository],
 
   exports: [PaymentService],
 })

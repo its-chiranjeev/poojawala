@@ -129,14 +129,21 @@
     ],
     "coverageDirectory": "coverage",
     "testEnvironment": "node",
-    "moduleNameMapping": {
-      "^@hichandra/(.*)": "<rootDir>/libs/$1/src"
-    },
     "roots": [
       "<rootDir>/libs/",
       "<rootDir>/apps/"
     ],
     "moduleNameMapper": {
+      "^@poojawala/common(|/.*)$": "<rootDir>/libs/common/src/$1",
+      "^@poojawala/database(|/.*)$": "<rootDir>/libs/database/src/$1",
+      "^@poojawala/dtos(|/.*)$": "<rootDir>/libs/dtos/src/$1",
+      "^@poojawala/email-services(|/.*)$": "<rootDir>/libs/email-services/src/$1",
+      "^@poojawala/entities(|/.*)$": "<rootDir>/libs/entities/src/$1",
+      "^@poojawala/repositories(|/.*)$": "<rootDir>/libs/repositories/src/$1",
+      "^@poojawala/s3(|/.*)$": "<rootDir>/libs/s3/src/$1",
+      "^@poojawala/sms-services(|/.*)$": "<rootDir>/libs/sms-services/src/$1",
+      "^@poojawala/gateway(|/.*)$": "<rootDir>/libs/gateway/src/$1",
+      "^@poojawala/notification(|/.*)$": "<rootDir>/libs/notification/src/$1",
       "^@hichandra/billing(|/.*)$": "<rootDir>/libs/billing/src/$1",
       "^@hichandra/common(|/.*)$": "<rootDir>/libs/common/src/$1",
       "^@hichandra/database(|/.*)$": "<rootDir>/libs/database/src/$1",

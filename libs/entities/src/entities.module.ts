@@ -23,6 +23,9 @@ import { Notification } from './notification.entity';
 import { ContactUs } from './contact-us.entity';
 import { AuditLog } from './audit-log.entity';
 import { Product } from './product.entity';
+import { Cart } from './cart.entity';
+import { CartItem } from './cart-item.entity';
+import { BookingProduct } from './booking-product.entity';
 import { EntitiesService } from './entities.service';
 
 @Module({
@@ -50,6 +53,9 @@ import { EntitiesService } from './entities.service';
       ContactUs,
       AuditLog,
       Product,
+      Cart,
+      CartItem,
+      BookingProduct,
     ]),
   ],
   providers: [EntitiesService],
@@ -57,4 +63,4 @@ import { EntitiesService } from './entities.service';
     TypeOrmModule, // VERY IMPORTANT
   ],
 })
-export class EntitiesModule { }
+export class EntitiesModule {}

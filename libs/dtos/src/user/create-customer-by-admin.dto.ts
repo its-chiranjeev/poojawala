@@ -35,4 +35,8 @@ export class CreateCustomerByAdminDto {
   @IsOptional()
   @IsString()
   city?: string;
+
+  @IsOptional()
+  @IsString()
+  state?: string;
 }

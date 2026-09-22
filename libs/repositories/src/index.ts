@@ -21,3 +21,6 @@ export * from './coupon.repository';
 export * from './coupon-usage.repository';
 export * from './cms-content.repository';
 export * from './product.repository';
+export * from './cart.repository';
+export * from './cart-item.repository';
+export * from './booking-product.repository';

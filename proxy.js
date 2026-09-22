@@ -32,9 +32,11 @@ proxy.on('proxyRes', (proxyRes, req, res) => {
 });
 
 proxy.on('error', (err, req, res) => {
-  console.error(`\x1b[31m[Proxy Error]\x1b[0m ${req.method} ${req.url}: ${err.message}`);
-  if (res && !res.headersSent) {
-    const origin = req.headers.origin || '*';
+  const method = req?.method || 'WS';
+  const url = req?.url || '';
+  console.error(`\x1b[31m[Proxy Error]\x1b[0m ${method} ${url}: ${err.message}`);
+  if (res && typeof res.writeHead === 'function' && !res.headersSent) {
+    const origin = (req.headers && req.headers.origin) || '*';
     res.writeHead(502, {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': origin,
@@ -47,6 +49,8 @@ proxy.on('error', (err, req, res) => {
         message: `Proxy failed to connect to upstream service: ${err.message}`,
       })
     );
+  } else if (res && typeof res.destroy === 'function') {
+    res.destroy();
   }
 });
 
@@ -95,7 +99,27 @@ const server = http.createServer((req, res) => {
 server.on('upgrade', (req, socket, head) => {
   const { name, target } = resolveTarget(req.url);
   console.log(`\x1b[35m[Proxy WS]\x1b[0m Upgrade ${req.url} -> ${name}`);
-  proxy.ws(req, socket, head, { target });
+
+  socket.on('error', (err) => {
+    console.error(`\x1b[31m[Proxy WS Client Socket Error]\x1b[0m: ${err.message}`);
+  });
+
+  proxy.ws(req, socket, head, { target }, (err) => {
+    if (err) {
+      console.error(`\x1b[31m[Proxy WS Error]\x1b[0m: ${err.message}`);
+      if (socket && !socket.destroyed && typeof socket.destroy === 'function') {
+        socket.destroy();
+      }
+    }
+  });
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('\x1b[31m[Proxy Uncaught Exception]:\x1b[0m', err.message);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('\x1b[31m[Proxy Unhandled Rejection]:\x1b[0m', reason);
 });
 
 server.listen(PROXY_PORT, () => {

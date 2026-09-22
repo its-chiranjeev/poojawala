@@ -1,0 +1,498 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { CartService } from './cart.service';
+import {
+  BookingProductRepository,
+  BookingRepository,
+  CartItemRepository,
+  CartRepository,
+  PaymentRepository,
+  ProductRepository,
+} from '@poojawala/repositories';
+import {
+  Booking,
+  BOOKING_STATUS,
+  BookingProduct,
+  Cart,
+  CartItem,
+  PAYMENT_STATUS,
+  Payment,
+  Product,
+  PRODUCT_PRICING_UNIT,
+  User,
+  USER_ROLE,
+  USER_STATUS,
+} from '@poojawala/entities';
+
+describe('CartService', () => {
+  let service: CartService;
+  let cartRepository: jest.Mocked<CartRepository>;
+  let cartItemRepository: jest.Mocked<CartItemRepository>;
+  let productRepository: jest.Mocked<ProductRepository>;
+  let bookingRepository: jest.Mocked<BookingRepository>;
+  let bookingProductRepository: jest.Mocked<BookingProductRepository>;
+  let paymentRepository: jest.Mocked<PaymentRepository>;
+  let dataSource: jest.Mocked<DataSource>;
+
+  const customerUser: User = {
+    id: 1,
+    username: 'testcustomer',
+    firstName: 'Devotee',
+    lastName: 'Sharma',
+    email: 'devotee@example.com',
+    phone: '9876543210',
+    role: USER_ROLE.CUSTOMER,
+    status: USER_STATUS.ACTIVE,
+    hashedPassword: 'hash',
+    tokenVersion: 1,
+    isAdminCreated: false,
+    addresses: [],
+    favorites: [],
+    bookings: [],
+    serviceAreas: [],
+    avgRating: 5.0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  const otherCustomer: User = {
+    ...customerUser,
+    id: 2,
+    username: 'othercustomer',
+  };
+
+  const activeProduct: Product = {
+    id: 10,
+    name: 'Puja Thali',
+    description: 'Brass puja thali with diya',
+    price: 499.0,
+    pricingUnit: PRODUCT_PRICING_UNIT.PIECE,
+    quantity: 50,
+    isActive: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  const inactiveProduct: Product = {
+    ...activeProduct,
+    id: 11,
+    name: 'Rare Idol',
+    isActive: false,
+  };
+
+  const mockCart: Cart = {
+    id: 100,
+    customerId: customerUser.id,
+    customer: customerUser,
+    items: [],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  beforeEach(async () => {
+    cartRepository = {
+      findOrCreateCart: jest.fn().mockResolvedValue(mockCart),
+      findCartWithItems: jest.fn().mockResolvedValue(mockCart),
+      findOne: jest.fn().mockResolvedValue(mockCart),
+      save: jest.fn().mockImplementation((cart) => Promise.resolve(cart)),
+    } as unknown as jest.Mocked<CartRepository>;
+
+    cartItemRepository = {
+      findOne: jest.fn(),
+      save: jest.fn().mockImplementation((item) => Promise.resolve(item)),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
+      removeByCartId: jest.fn().mockResolvedValue(undefined),
+      findCartItemsWithPagination: jest.fn().mockResolvedValue({
+        items: [],
+        totalItems: 0,
+      }),
+      findAllValidItemsByCartId: jest.fn().mockResolvedValue([]),
+    } as unknown as jest.Mocked<CartItemRepository>;
+
+    productRepository = {
+      findOne: jest.fn().mockResolvedValue(activeProduct),
+    } as unknown as jest.Mocked<ProductRepository>;
+
+    bookingRepository = {
+      findOne: jest.fn(),
+    } as unknown as jest.Mocked<BookingRepository>;
+
+    bookingProductRepository = {
+      findByBookingId: jest.fn().mockResolvedValue([]),
+      findByCustomerId: jest.fn().mockResolvedValue([]),
+      findByPaymentId: jest.fn().mockResolvedValue([]),
+    } as unknown as jest.Mocked<BookingProductRepository>;
+
+    paymentRepository = {
+      savePayment: jest.fn().mockImplementation((p) => Promise.resolve(p)),
+      findPaymentById: jest.fn(),
+    } as unknown as jest.Mocked<PaymentRepository>;
+
+    dataSource = {
+      transaction: jest.fn().mockImplementation(async (cb) => {
+        const mockManager = {
+          getRepository: jest.fn().mockImplementation((entity) => {
+            if (entity === Cart) {
+              return {
+                findOne: jest.fn().mockResolvedValue(mockCart),
+                create: jest.fn().mockReturnValue(mockCart),
+                save: jest.fn().mockResolvedValue(mockCart),
+              };
+            }
+            if (entity === CartItem) {
+              return {
+                findOne: jest.fn().mockResolvedValue(null),
+                create: jest
+                  .fn()
+                  .mockImplementation((dto) => ({ id: 200, ...dto })),
+                save: jest
+                  .fn()
+                  .mockImplementation((item) =>
+                    Promise.resolve({ id: 200, ...item }),
+                  ),
+                delete: jest.fn().mockResolvedValue({ affected: 1 }),
+              };
+            }
+            if (entity === Payment) {
+              return {
+                create: jest
+                  .fn()
+                  .mockImplementation((dto) => ({ id: 500, ...dto })),
+                save: jest
+                  .fn()
+                  .mockImplementation((item) =>
+                    Promise.resolve({ id: 500, ...item }),
+                  ),
+              };
+            }
+            if (entity === BookingProduct) {
+              return {
+                create: jest
+                  .fn()
+                  .mockImplementation((dto) => ({ id: 600, ...dto })),
+                save: jest
+                  .fn()
+                  .mockImplementation((item) =>
+                    Promise.resolve({ id: 600, ...item }),
+                  ),
+              };
+            }
+            return {};
+          }),
+        };
+        return cb(mockManager);
+      }),
+    } as unknown as jest.Mocked<DataSource>;
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        CartService,
+        { provide: CartRepository, useValue: cartRepository },
+        { provide: CartItemRepository, useValue: cartItemRepository },
+        { provide: ProductRepository, useValue: productRepository },
+        { provide: BookingRepository, useValue: bookingRepository },
+        {
+          provide: BookingProductRepository,
+          useValue: bookingProductRepository,
+        },
+        { provide: PaymentRepository, useValue: paymentRepository },
+        { provide: DataSource, useValue: dataSource },
+      ],
+    }).compile();
+
+    service = module.get<CartService>(CartService);
+  });
+
+  it('should be defined', () => {
+    expect(service).toBeDefined();
+  });
+
+  describe('addToCart', () => {
+    it('should successfully add a new product to customer cart', async () => {
+      const result = await service.addToCart(customerUser, {
+        productId: 10,
+        quantity: 2,
+      });
+
+      expect(productRepository.findOne).toHaveBeenCalledWith({
+        where: { id: 10 },
+      });
+      expect(dataSource.transaction).toHaveBeenCalled();
+      expect(result).toBeDefined();
+    });
+
+    it('should throw ForbiddenException if user is not a customer', async () => {
+      const purohitUser = { ...customerUser, role: USER_ROLE.PUROHIT };
+      await expect(
+        service.addToCart(purohitUser, { productId: 10, quantity: 1 }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should throw NotFoundException if product does not exist', async () => {
+      productRepository.findOne.mockResolvedValueOnce(null);
+      await expect(
+        service.addToCart(customerUser, { productId: 999, quantity: 1 }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw BadRequestException if product is inactive', async () => {
+      productRepository.findOne.mockResolvedValueOnce(inactiveProduct);
+      await expect(
+        service.addToCart(customerUser, { productId: 11, quantity: 1 }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException if quantity is zero or negative', async () => {
+      await expect(
+        service.addToCart(customerUser, { productId: 10, quantity: 0 }),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('getCart', () => {
+    const cartItem: CartItem = {
+      id: 201,
+      cartId: mockCart.id,
+      cart: mockCart,
+      productId: activeProduct.id,
+      product: activeProduct,
+      quantity: 3,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    it('should calculate subtotal, total, and return pagination metadata', async () => {
+      cartItemRepository.findCartItemsWithPagination.mockResolvedValueOnce({
+        items: [cartItem],
+        totalItems: 1,
+      });
+      cartItemRepository.findAllValidItemsByCartId.mockResolvedValueOnce([
+        cartItem,
+      ]);
+
+      const result = await service.getCart(customerUser, {
+        page: 1,
+        limit: 10,
+      });
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].unitPrice).toBe(499);
+      expect(result.items[0].quantity).toBe(3);
+      expect(result.items[0].subtotal).toBe(1497);
+      expect(result.total).toBe(1497);
+      expect(result.page).toBe(1);
+      expect(result.limit).toBe(10);
+      expect(result.totalItems).toBe(1);
+      expect(result.totalPages).toBe(1);
+    });
+
+    it('should pass search filter to repository and return matching items', async () => {
+      cartItemRepository.findCartItemsWithPagination.mockResolvedValueOnce({
+        items: [cartItem],
+        totalItems: 1,
+      });
+      cartItemRepository.findAllValidItemsByCartId.mockResolvedValueOnce([
+        cartItem,
+      ]);
+
+      const result = await service.getCart(customerUser, {
+        page: 1,
+        limit: 5,
+        search: 'Puja',
+      });
+      expect(
+        cartItemRepository.findCartItemsWithPagination,
+      ).toHaveBeenCalledWith(mockCart.id, {
+        page: 1,
+        limit: 5,
+        search: 'Puja',
+      });
+      expect(
+        cartItemRepository.findAllValidItemsByCartId,
+      ).toHaveBeenCalledWith(mockCart.id, 'Puja');
+      expect(result.items[0].name).toBe('Puja Thali');
+    });
+  });
+
+  describe('updateCartItem', () => {
+    it('should update item quantity for owner', async () => {
+      const existingItem: CartItem = {
+        id: 201,
+        cartId: mockCart.id,
+        cart: mockCart,
+        productId: activeProduct.id,
+        product: activeProduct,
+        quantity: 2,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      cartItemRepository.findOne.mockResolvedValueOnce(existingItem);
+
+      await service.updateCartItem(customerUser, 201, { quantity: 5 });
+      expect(existingItem.quantity).toBe(5);
+      expect(cartItemRepository.save).toHaveBeenCalledWith(existingItem);
+    });
+
+    it('should throw ForbiddenException if customer does not own the cart item (Horizontal Escalation)', async () => {
+      const otherCart: Cart = {
+        ...mockCart,
+        id: 999,
+        customerId: otherCustomer.id,
+      };
+      const otherItem: CartItem = {
+        id: 301,
+        cartId: otherCart.id,
+        cart: otherCart,
+        productId: activeProduct.id,
+        product: activeProduct,
+        quantity: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      cartItemRepository.findOne.mockResolvedValueOnce(otherItem);
+
+      await expect(
+        service.updateCartItem(customerUser, 301, { quantity: 4 }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('removeCartItem', () => {
+    it('should remove item when owned by customer', async () => {
+      const existingItem: CartItem = {
+        id: 201,
+        cartId: mockCart.id,
+        cart: mockCart,
+        productId: activeProduct.id,
+        product: activeProduct,
+        quantity: 2,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      cartItemRepository.findOne.mockResolvedValueOnce(existingItem);
+
+      const res = await service.removeCartItem(customerUser, 201);
+      expect(res.success).toBe(true);
+      expect(cartItemRepository.delete).toHaveBeenCalledWith(201);
+    });
+
+    it('should throw ForbiddenException if customer does not own the cart item', async () => {
+      const otherCart: Cart = {
+        ...mockCart,
+        id: 999,
+        customerId: otherCustomer.id,
+      };
+      const otherItem: CartItem = {
+        id: 301,
+        cartId: otherCart.id,
+        cart: otherCart,
+        productId: activeProduct.id,
+        product: activeProduct,
+        quantity: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      cartItemRepository.findOne.mockResolvedValueOnce(otherItem);
+
+      await expect(service.removeCartItem(customerUser, 301)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+  });
+
+  describe('clearCart', () => {
+    it('should remove all items from the customer cart', async () => {
+      const res = await service.clearCart(customerUser);
+      expect(res.success).toBe(true);
+      expect(cartItemRepository.removeByCartId).toHaveBeenCalledWith(
+        mockCart.id,
+      );
+    });
+  });
+
+  describe('checkout', () => {
+    it('should throw BadRequestException when checking out an empty cart', async () => {
+      cartRepository.findCartWithItems.mockResolvedValueOnce({
+        ...mockCart,
+        items: [],
+      });
+
+      await expect(service.checkout(customerUser, {})).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('should throw ForbiddenException when trying to attach to another customer booking', async () => {
+      const cartWithItem: Cart = {
+        ...mockCart,
+        items: [
+          {
+            id: 201,
+            cartId: mockCart.id,
+            cart: mockCart,
+            productId: activeProduct.id,
+            product: activeProduct,
+            quantity: 1,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      };
+      cartRepository.findCartWithItems.mockResolvedValueOnce(cartWithItem);
+
+      const otherBooking: Booking = {
+        id: 777,
+        bookingNumber: 'BK-777',
+        customerId: otherCustomer.id,
+        status: BOOKING_STATUS.PENDING,
+      } as unknown as Booking;
+      bookingRepository.findOne.mockResolvedValueOnce(otherBooking);
+
+      await expect(
+        service.checkout(customerUser, { bookingId: 777 }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should create BookingProduct snapshot and Payment record transactionally and return payment link', async () => {
+      const cartWithItem: Cart = {
+        ...mockCart,
+        items: [
+          {
+            id: 201,
+            cartId: mockCart.id,
+            cart: mockCart,
+            productId: activeProduct.id,
+            product: activeProduct,
+            quantity: 2,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      };
+      cartRepository.findCartWithItems.mockResolvedValueOnce(cartWithItem);
+
+      // Mock Razorpay paymentLink.create
+      (service as any).razorpay = {
+        paymentLink: {
+          create: jest.fn().mockResolvedValue({
+            id: 'plink_test123',
+            short_url: 'https://rzp.io/i/test1234',
+          }),
+        },
+      };
+
+      const result = await service.checkout(customerUser, {});
+      expect(result.amount).toBe(998);
+      expect(result.paymentUrl).toBe('https://rzp.io/i/test1234');
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].productName).toBe('Puja Thali');
+      expect(result.items[0].unitPrice).toBe(499);
+      expect(result.items[0].quantity).toBe(2);
+      expect(result.items[0].total).toBe(998);
+    });
+  });
+});

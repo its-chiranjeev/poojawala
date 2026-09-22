@@ -11,12 +11,12 @@ import { ContactUsModule } from './contact-us/contact-us.module';
 import { UserManagementService } from './user-management.service';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { ProductModule } from './product/product.module';
+import { CartModule } from './cart/cart.module';
 
 import { DatabaseModule } from '@poojawala/database';
 import { EntitiesModule } from '@poojawala/entities';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
-
 
 @Module({
   imports: [
@@ -29,6 +29,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     UserModule,
     ServiceModule,
     ProductModule,
+    CartModule,
     ReviewModule,
     BookingModule,
     ComplaintModule,
@@ -40,4 +41,4 @@ import { ScheduleModule } from '@nestjs/schedule';
   controllers: [UserManagementController],
   providers: [UserManagementService],
 })
-export class UserManagementModule { }
+export class UserManagementModule {}

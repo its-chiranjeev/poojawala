@@ -45,3 +45,7 @@ export * from './user/create-customer-by-admin.dto';
 export * from './product/create.product.dto';
 export * from './product/update.product.dto';
 export * from './product/get.products.query.dto';
+export * from './cart/add-to-cart.dto';
+export * from './cart/update-cart-item.dto';
+export * from './cart/checkout.dto';
+export * from './cart/get-cart-query.dto';

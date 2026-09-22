@@ -31,6 +31,11 @@ export class UpdatePurohitServiceAreaDto {
 
   @IsOptional()
   @IsString()
+  @Length(2, 100)
+  state?: string;
+
+  @IsOptional()
+  @IsString()
   @Length(6, 10)
   pincode?: string;
 

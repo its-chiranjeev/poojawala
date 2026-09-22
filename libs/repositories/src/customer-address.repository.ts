@@ -33,17 +33,19 @@ export class CustomerAddressRepository extends BaseRepository<CustomerAddress> {
     limit: number = 10,
     search?: string,
   ) {
-    const query = this.repo.createQueryBuilder('address')
+    const query = this.repo
+      .createQueryBuilder('address')
       .where('address.customerId = :customerId', { customerId });
 
-    if (search) {
+    if (search && search.trim() !== '') {
       query.andWhere(
         '(address.addressLabel ILIKE :search OR address.fullAddress ILIKE :search OR address.city ILIKE :search OR address.pincode ILIKE :search)',
-        { search: `%${search}%` }
+        { search: `%${search.trim()}%` },
       );
     }
 
-    query.orderBy('address.isDefault', 'DESC')
+    query
+      .orderBy('address.isDefault', 'DESC')
       .addOrderBy('address.createdAt', 'DESC');
 
     const [data, total] = await query
