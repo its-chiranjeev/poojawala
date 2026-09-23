@@ -148,6 +148,8 @@ export class UserService {
       // phone: dto.phone,
       profileImage: dto.profileImage,
       birthPlace: dto.birthPlace,
+      ...(dto.rashi !== undefined && { rashi: dto.rashi }),
+      ...(dto.gotra !== undefined && { gotra: dto.gotra }),
     };
 
     if (dto.dob) {
@@ -278,6 +280,8 @@ export class UserService {
       lastName: dto.lastName,
       profileImage: dto.profileImage,
       birthPlace: dto.birthPlace,
+      ...(dto.rashi !== undefined && { rashi: dto.rashi }),
+      ...(dto.gotra !== undefined && { gotra: dto.gotra }),
     };
 
     if (dto.dob) {
@@ -2687,6 +2691,8 @@ export class UserService {
           const newUser = manager.create(User, {
             dob: dto.dob,
             birthPlace: dto.birthPlace,
+            rashi: dto.rashi,
+            gotra: dto.gotra,
             ...(dto.email && { email: dto.email.toLowerCase() }),
             username,
             ...(dto.phone && { phone: dto.phone }),

@@ -51,3 +51,4 @@ export * from './cart/add-to-cart.dto';
 export * from './cart/update-cart-item.dto';
 export * from './cart/checkout.dto';
 export * from './cart/get-cart-query.dto';
+export * from './order/order.dto';

@@ -24,3 +24,4 @@ export * from './product.repository';
 export * from './cart.repository';
 export * from './cart-item.repository';
 export * from './booking-product.repository';
+export * from './order.repository';

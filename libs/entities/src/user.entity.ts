@@ -68,6 +68,12 @@ export class User {
   @Column({ type: 'varchar', length: 255, nullable: true })
   birthPlace?: string;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  rashi?: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  gotra?: string;
+
   // Authentication
   @Column({ type: 'varchar', length: 255, nullable: true })
   hashedPassword?: string;

@@ -54,6 +54,14 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsString()
+  rashi?: string;
+
+  @IsOptional()
+  @IsString()
+  gotra?: string;
+
+  @IsOptional()
+  @IsString()
   bio?: string;
 
   @IsOptional()

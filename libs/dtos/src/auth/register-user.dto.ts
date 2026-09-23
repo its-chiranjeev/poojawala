@@ -145,6 +145,16 @@ export class RegisterNormalUserDto {
 
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => value?.trim())
+  rashi?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  gotra?: string;
+
+  @IsOptional()
+  @IsString()
   @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
   accountHolderName?: string;

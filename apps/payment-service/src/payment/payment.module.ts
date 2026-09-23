@@ -5,6 +5,8 @@ import {
   BookingProduct,
   Cart,
   CartItem,
+  Order,
+  OrderItem,
   Payment,
   PaymentBooking,
 } from '@poojawala/entities';
@@ -25,6 +27,8 @@ import { EmailServicesModule } from '@poojawala/email-services';
       BookingProduct,
       Cart,
       CartItem,
+      Order,
+      OrderItem,
     ]),
     NotificationModule,
     GatewayModule,

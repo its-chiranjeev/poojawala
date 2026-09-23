@@ -28,6 +28,9 @@ import {
   PAYMENT_METHOD,
   PAYMENT_STATUS,
   PAYMENT_TYPE,
+  Order,
+  ORDER_STATUS,
+  ORDER_PAYMENT_STATUS,
   User,
   USER_ROLE,
   BANK_VERIFICATION_STATUS,
@@ -825,12 +828,29 @@ export class PaymentService {
     customer: PaymentLinkCustomer,
     description?: string,
     extraNotes?: Record<string, string>,
+    customCallbackUrl?: string,
   ): Promise<RazorpayPaymentLinkData> {
     const amountInPaise = Math.round(Number(payment.amount) * 100);
 
-    const callbackUrl =
+    const baseFrontendUrl =
       this.configService?.get<string>('FRONTEND_PAYMENT_CALLBACK_URL')?.trim() ||
-      process.env['FRONTEND_PAYMENT_CALLBACK_URL']?.trim();
+      process.env['FRONTEND_PAYMENT_CALLBACK_URL']?.trim() ||
+      'http://localhost:3000';
+
+    const cleanBase = baseFrontendUrl.replace(/\/+$/, '');
+
+    let callbackUrl: string | undefined;
+
+    if (customCallbackUrl?.trim()) {
+      callbackUrl = customCallbackUrl.trim();
+    } else if (
+      payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT ||
+      extraNotes?.['isCartCheckout'] === 'true'
+    ) {
+      callbackUrl = `${cleanBase}/customer/orders`;
+    } else if (cleanBase) {
+      callbackUrl = cleanBase;
+    }
 
     const notify: {
       sms: boolean;
@@ -1138,6 +1158,17 @@ export class PaymentService {
 
     await this.paymentRepository.savePayment(payment);
 
+    if (payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT) {
+      const orderRepo = this.dataSource.getRepository(Order);
+      const order = await orderRepo.findOne({
+        where: { paymentId: payment.id },
+      });
+      if (order && order.paymentStatus !== ORDER_PAYMENT_STATUS.PAID) {
+        order.paymentStatus = ORDER_PAYMENT_STATUS.FAILED;
+        await orderRepo.save(order);
+      }
+    }
+
     await this.auditLogService.createAuditLog({
       actorId: null,
       actorType: ACTOR_TYPE.SYSTEM,
@@ -1343,10 +1374,18 @@ export class PaymentService {
       payment.paymentMethod,
     );
 
-    payment.failureReason =
-      razorpayPayment.error_description ?? 'Payment failed';
-
     await this.paymentRepository.savePayment(payment);
+
+    if (payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT) {
+      const orderRepo = this.dataSource.getRepository(Order);
+      const order = await orderRepo.findOne({
+        where: { paymentId: payment.id },
+      });
+      if (order && order.paymentStatus !== ORDER_PAYMENT_STATUS.PAID) {
+        order.paymentStatus = ORDER_PAYMENT_STATUS.FAILED;
+        await orderRepo.save(order);
+      }
+    }
 
     await this.auditLogService.createAuditLog({
       actorId: null,
@@ -3070,7 +3109,50 @@ export class PaymentService {
           }
         }
       }
+
+      // PRODUCT_PAYMENT: Update Order to PAID & CONFIRMED, and clear cart
+      if (payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT) {
+        const orderRepo = manager.getRepository(Order);
+        const order = await orderRepo.findOne({
+          where: { paymentId: payment.id },
+        });
+
+        if (order) {
+          if (order.paymentStatus !== ORDER_PAYMENT_STATUS.PAID) {
+            order.paymentStatus = ORDER_PAYMENT_STATUS.PAID;
+            if (order.orderStatus === ORDER_STATUS.PENDING_PAYMENT) {
+              order.orderStatus = ORDER_STATUS.CONFIRMED;
+            }
+            await orderRepo.save(order);
+          }
+        }
+
+        // Safe, idempotent cart clearing upon payment confirmation
+        if (payment.payerId) {
+          const customerCart = await cartRepo.findOne({
+            where: { customerId: payment.payerId },
+          });
+          if (customerCart) {
+            await cartItemRepo.delete({ cartId: customerCart.id });
+          }
+        }
+      }
     });
+
+    if (payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT && payment.payerId) {
+      try {
+        await this.notificationService.createNotification(
+          payment.payerId,
+          'Payment Successful',
+          `Your payment of ₹${payment.amount} for your order was successful.`,
+          NOTIFICATION_TYPE.PAYMENT,
+          payment.id,
+          'PAYMENT',
+        );
+      } catch (err: any) {
+        this.logger.warn(`Could not send payment notification: ${err?.message}`);
+      }
+    }
 
     if (payment.booking && payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT) {
       if (!wasPaymentPaid) {

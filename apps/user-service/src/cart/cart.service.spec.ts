@@ -5,6 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+
+jest.mock('puppeteer', () => ({}));
+
 import { CartService } from './cart.service';
 import { PaymentService } from '../../../payment-service/src/payment/payment.service';
 import {
@@ -12,6 +15,8 @@ import {
   BookingRepository,
   CartItemRepository,
   CartRepository,
+  CustomerAddressRepository,
+  OrderRepository,
   PaymentRepository,
   ProductRepository,
 } from '@poojawala/repositories';
@@ -21,6 +26,12 @@ import {
   BookingProduct,
   Cart,
   CartItem,
+  CustomerAddress,
+  Order,
+  OrderItem,
+  ORDER_PAYMENT_METHOD,
+  ORDER_PAYMENT_STATUS,
+  ORDER_STATUS,
   PAYMENT_STATUS,
   Payment,
   Product,
@@ -38,6 +49,8 @@ describe('CartService', () => {
   let bookingRepository: jest.Mocked<BookingRepository>;
   let bookingProductRepository: jest.Mocked<BookingProductRepository>;
   let paymentRepository: jest.Mocked<PaymentRepository>;
+  let orderRepository: jest.Mocked<OrderRepository>;
+  let customerAddressRepository: jest.Mocked<CustomerAddressRepository>;
   let dataSource: jest.Mocked<DataSource>;
   let paymentService: { createRazorpayPaymentLink: jest.Mock };
 
@@ -135,6 +148,28 @@ describe('CartService', () => {
       findPaymentById: jest.fn(),
     } as unknown as jest.Mocked<PaymentRepository>;
 
+    orderRepository = {
+      findCustomerOrders: jest.fn(),
+      findCustomerOrderById: jest.fn(),
+      findAllOrdersAdmin: jest.fn(),
+      findOrderByIdWithDetails: jest.fn(),
+      findByPaymentId: jest.fn(),
+      save: jest.fn().mockImplementation((order) => Promise.resolve(order)),
+    } as unknown as jest.Mocked<OrderRepository>;
+
+    customerAddressRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 1,
+        customerId: customerUser.id,
+        addressLabel: 'Home',
+        fullAddress: '123 Temple Road',
+        city: 'Varanasi',
+        state: 'Uttar Pradesh',
+        pincode: '221001',
+        isDefault: true,
+      }),
+    } as unknown as jest.Mocked<CustomerAddressRepository>;
+
     dataSource = {
       transaction: jest.fn().mockImplementation(async (cb) => {
         const mockManager = {
@@ -169,6 +204,30 @@ describe('CartService', () => {
                   .fn()
                   .mockImplementation((item) =>
                     Promise.resolve({ id: 500, ...item }),
+                  ),
+              };
+            }
+            if (entity === Order) {
+              return {
+                create: jest
+                  .fn()
+                  .mockImplementation((dto) => ({ id: 1001, ...dto, createdAt: new Date(), updatedAt: new Date() })),
+                save: jest
+                  .fn()
+                  .mockImplementation((item) =>
+                    Promise.resolve({ id: 1001, ...item, createdAt: new Date(), updatedAt: new Date() }),
+                  ),
+              };
+            }
+            if (entity === OrderItem) {
+              return {
+                create: jest
+                  .fn()
+                  .mockImplementation((dto) => ({ id: 2001, ...dto })),
+                save: jest
+                  .fn()
+                  .mockImplementation((items) =>
+                    Promise.resolve(Array.isArray(items) ? items : [items]),
                   ),
               };
             }
@@ -213,6 +272,11 @@ describe('CartService', () => {
           useValue: bookingProductRepository,
         },
         { provide: PaymentRepository, useValue: paymentRepository },
+        { provide: OrderRepository, useValue: orderRepository },
+        {
+          provide: CustomerAddressRepository,
+          useValue: customerAddressRepository,
+        },
         { provide: DataSource, useValue: dataSource },
         { provide: PaymentService, useValue: paymentService },
       ],
@@ -439,38 +503,7 @@ describe('CartService', () => {
       );
     });
 
-    it('should throw ForbiddenException when trying to attach to another customer booking', async () => {
-      const cartWithItem: Cart = {
-        ...mockCart,
-        items: [
-          {
-            id: 201,
-            cartId: mockCart.id,
-            cart: mockCart,
-            productId: activeProduct.id,
-            product: activeProduct,
-            quantity: 1,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        ],
-      };
-      cartRepository.findCartWithItems.mockResolvedValueOnce(cartWithItem);
-
-      const otherBooking: Booking = {
-        id: 777,
-        bookingNumber: 'BK-777',
-        customerId: otherCustomer.id,
-        status: BOOKING_STATUS.PENDING,
-      } as unknown as Booking;
-      bookingRepository.findOne.mockResolvedValueOnce(otherBooking);
-
-      await expect(
-        service.checkout(customerUser, { bookingId: 777 }),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('should create BookingProduct snapshot and Payment record transactionally and return payment link', async () => {
+    it('should create Order, OrderItem snapshot, and Payment record for ONLINE checkout and return payment link', async () => {
       const cartWithItem: Cart = {
         ...mockCart,
         items: [
@@ -493,14 +526,125 @@ describe('CartService', () => {
         short_url: 'https://rzp.io/i/test1234',
       });
 
-      const result = await service.checkout(customerUser, {});
+      const result = await service.checkout(customerUser, {
+        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
+      });
+
       expect(result.amount).toBe(998);
       expect(result.paymentUrl).toBe('https://rzp.io/i/test1234');
+      expect(result.orderId).toBeDefined();
+      expect(result.orderNumber).toBeDefined();
+      expect(result.paymentMethod).toBe(ORDER_PAYMENT_METHOD.ONLINE);
+      expect(result.paymentStatus).toBe(ORDER_PAYMENT_STATUS.PENDING);
+      expect(result.orderStatus).toBe(ORDER_STATUS.PENDING_PAYMENT);
       expect(result.items).toHaveLength(1);
       expect(result.items[0].productName).toBe('Puja Thali');
       expect(result.items[0].unitPrice).toBe(499);
       expect(result.items[0].quantity).toBe(2);
       expect(result.items[0].total).toBe(998);
+    });
+
+    it('should create Order, OrderItem snapshot, and Payment record for COD, clear cart, and NOT call Razorpay', async () => {
+      const cartWithItem: Cart = {
+        ...mockCart,
+        items: [
+          {
+            id: 201,
+            cartId: mockCart.id,
+            cart: mockCart,
+            productId: activeProduct.id,
+            product: activeProduct,
+            quantity: 1,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      };
+      cartRepository.findCartWithItems.mockResolvedValueOnce(cartWithItem);
+
+      const result = await service.checkout(customerUser, {
+        paymentMethod: ORDER_PAYMENT_METHOD.COD,
+      });
+
+      expect(result.amount).toBe(499);
+      expect(result.paymentUrl).toBeNull();
+      expect(result.orderId).toBeDefined();
+      expect(result.paymentMethod).toBe(ORDER_PAYMENT_METHOD.COD);
+      expect(result.paymentStatus).toBe(ORDER_PAYMENT_STATUS.COD_PENDING);
+      expect(result.orderStatus).toBe(ORDER_STATUS.CONFIRMED);
+      expect(paymentService.createRazorpayPaymentLink).not.toHaveBeenCalled();
+    });
+
+    it('should retry payment for an existing unpaid order without creating duplicate orders', async () => {
+      const mockOrder: Order = {
+        id: 55,
+        orderNumber: 'PW-ORD-100001',
+        customerId: customerUser.id,
+        subtotal: 998,
+        discountAmount: 0,
+        totalAmount: 998,
+        paymentId: 501,
+        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
+        paymentStatus: ORDER_PAYMENT_STATUS.FAILED,
+        orderStatus: ORDER_STATUS.PENDING_PAYMENT,
+        shippingAddressSnapshot: {
+          name: 'Devotee Sharma',
+          phone: '9876543210',
+          addressLine1: '123 Temple Road',
+          city: 'Varanasi',
+          pincode: '221001',
+        },
+        items: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      orderRepository.findCustomerOrderById.mockResolvedValueOnce(mockOrder);
+
+      paymentService.createRazorpayPaymentLink.mockResolvedValueOnce({
+        id: 'plink_retry_123',
+        short_url: 'https://rzp.io/i/retry1234',
+      });
+
+      const result = await service.checkout(customerUser, {
+        orderId: 55,
+      });
+
+      expect(result.orderId).toBe(55);
+      expect(result.orderNumber).toBe('PW-ORD-100001');
+      expect(result.paymentUrl).toBe('https://rzp.io/i/retry1234');
+      expect(paymentService.createRazorpayPaymentLink).toHaveBeenCalled();
+    });
+
+    it('should throw BadRequestException when retrying payment for an already paid order', async () => {
+      const paidOrder: Order = {
+        id: 56,
+        orderNumber: 'PW-ORD-100002',
+        customerId: customerUser.id,
+        subtotal: 998,
+        discountAmount: 0,
+        totalAmount: 998,
+        paymentId: 502,
+        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
+        paymentStatus: ORDER_PAYMENT_STATUS.PAID,
+        orderStatus: ORDER_STATUS.CONFIRMED,
+        shippingAddressSnapshot: {
+          name: 'Devotee Sharma',
+          phone: '9876543210',
+          addressLine1: '123 Temple Road',
+          city: 'Varanasi',
+          pincode: '221001',
+        },
+        items: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      orderRepository.findCustomerOrderById.mockResolvedValueOnce(paidOrder);
+
+      await expect(
+        service.checkout(customerUser, { orderId: 56 }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

@@ -24,6 +24,7 @@ import { ProductRepository } from './product.repository';
 import { CartRepository } from './cart.repository';
 import { CartItemRepository } from './cart-item.repository';
 import { BookingProductRepository } from './booking-product.repository';
+import { OrderRepository } from './order.repository';
 
 @Module({
   imports: [EntitiesModule],
@@ -52,6 +53,7 @@ import { BookingProductRepository } from './booking-product.repository';
     CartRepository,
     CartItemRepository,
     BookingProductRepository,
+    OrderRepository,
   ],
   exports: [
     RepositoriesService,
@@ -78,6 +80,7 @@ import { BookingProductRepository } from './booking-product.repository';
     CartRepository,
     CartItemRepository,
     BookingProductRepository,
+    OrderRepository,
   ],
 })
 export class RepositoriesModule {}

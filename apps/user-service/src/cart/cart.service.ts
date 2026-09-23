@@ -17,10 +17,16 @@ import {
   Cart,
   CartItem,
   CUSTOMER_PAYMENT_METHOD,
+  Order,
+  OrderItem,
+  ORDER_PAYMENT_METHOD,
+  ORDER_PAYMENT_STATUS,
+  ORDER_STATUS,
   PAYMENT_STATUS,
   PAYMENT_TYPE,
   Payment,
   Product,
+  ShippingAddressSnapshot,
   User,
   USER_ROLE,
 } from '@poojawala/entities';
@@ -29,6 +35,8 @@ import {
   BookingRepository,
   CartItemRepository,
   CartRepository,
+  CustomerAddressRepository,
+  OrderRepository,
   PaymentRepository,
   ProductRepository,
 } from '@poojawala/repositories';
@@ -63,20 +71,34 @@ export interface FormattedCartResponse {
 }
 
 export interface CheckoutResponse {
+  orderId: number;
+  orderNumber: string;
+  customerId?: number | null;
   paymentId: number;
-  paymentUrl: string;
+  paymentUrl: string | null;
   amount: number;
   amountInPaise: number;
   currency: string;
-  bookingId?: number | null;
-  status: PAYMENT_STATUS;
+  subtotal: number;
+  discountAmount: number;
+  totalAmount: number;
+  paymentMethod: ORDER_PAYMENT_METHOD;
+  paymentStatus: ORDER_PAYMENT_STATUS;
+  orderStatus: ORDER_STATUS;
+  shippingAddressSnapshot: ShippingAddressSnapshot;
   items: {
-    productId: number;
+    id?: number;
+    productId: number | null;
     productName: string;
+    productImage?: string | null;
     unitPrice: number;
     quantity: number;
     total: number;
   }[];
+  createdAt: Date;
+  updatedAt: Date;
+  status?: PAYMENT_STATUS;
+  bookingId?: number | null;
 }
 
 @Injectable()
@@ -90,10 +112,12 @@ export class CartService {
     private readonly bookingRepository: BookingRepository,
     private readonly bookingProductRepository: BookingProductRepository,
     private readonly paymentRepository: PaymentRepository,
+    private readonly orderRepository: OrderRepository,
+    private readonly customerAddressRepository: CustomerAddressRepository,
     private readonly dataSource: DataSource,
     private readonly paymentService: PaymentService,
     @Optional() private readonly s3Service?: S3Service,
-  ) {}
+  ) { }
 
   /**
    * Helper to format cart items with dynamic, DB-sourced prices.
@@ -356,29 +380,178 @@ export class CartService {
   }
 
   /**
-   * Initiates checkout for the items in the customer's cart.
+   * Initiates checkout for the items in the customer's cart or retries payment for an existing unpaid order.
    *
    * Flow:
-   * 1. Validate cart has items and products are active.
-   * 2. Recalculate price from DB (frontend prices never trusted).
-   * 3. If bookingId provided, validate booking belongs to customer & is active.
-   * 4. In a DB transaction: Create BookingProduct snapshots and Payment record.
-   * 5. Outside DB transaction: Create Razorpay payment link (external call).
-   * 6. Update payment with Razorpay link ID and return payment information.
-   * 7. Cart is NOT cleared here; it will be cleared upon confirmed payment.
+   * 1. If dto.orderId is provided:
+   *    - Verify order exists, belongs to user, and is not already paid.
+   *    - Create a new Payment record in DB transaction and link to existing order.
+   *    - Outside DB transaction, create Razorpay Payment Link and return.
+   * 2. If new checkout (no orderId):
+   *    - Validate cart items & active products from DB.
+   *    - Calculate totals (frontend prices are never trusted).
+   *    - Resolve shipping address (from dto.shippingAddress, dto.addressId, or customer default address).
+   *    - In DB transaction: Create Payment, Order, and OrderItems. If COD, clear cart.
+   *    - Outside DB transaction: If ONLINE, generate Razorpay payment link. If COD, confirm immediately.
    */
   async checkout(user: User, dto: CheckoutDto): Promise<CheckoutResponse> {
     if (user.role !== USER_ROLE.CUSTOMER) {
       throw new ForbiddenException('Only customers can checkout a cart');
     }
 
+    // ==========================================
+    // 1. PAYMENT RETRY FLOW
+    // ==========================================
+    if (dto.orderId) {
+      const existingOrder = await this.orderRepository.findCustomerOrderById(
+        user.id,
+        dto.orderId,
+      );
+
+      if (!existingOrder) {
+        throw new NotFoundException(`Order #${dto.orderId} not found`);
+      }
+
+      if (existingOrder.paymentStatus === ORDER_PAYMENT_STATUS.PAID) {
+        throw new BadRequestException('This order has already been paid');
+      }
+
+      if (existingOrder.orderStatus === ORDER_STATUS.CANCELLED) {
+        throw new BadRequestException(
+          'Cannot retry payment for a cancelled order',
+        );
+      }
+
+      const totalAmount = Number(existingOrder.totalAmount);
+      const amountInPaise = Math.round(totalAmount * 100);
+
+      const savedPayment = await this.dataSource.transaction(
+        async (manager) => {
+          const paymentRepo = manager.getRepository(Payment);
+          const orderRepo = manager.getRepository(Order);
+
+          const payment = paymentRepo.create({
+            paymentType: PAYMENT_TYPE.PRODUCT_PAYMENT,
+            createdById: user.id,
+            payerId: user.id,
+            amount: totalAmount,
+            currency: 'INR',
+            customerPaymentMethod: CUSTOMER_PAYMENT_METHOD.ONLINE,
+            status: PAYMENT_STATUS.CREATED,
+            remark: `Payment retry for Order #${existingOrder.orderNumber}`,
+          });
+
+          const newPayment = await paymentRepo.save(payment);
+
+          existingOrder.paymentId = newPayment.id;
+          existingOrder.paymentStatus = ORDER_PAYMENT_STATUS.PENDING;
+          await orderRepo.save(existingOrder);
+
+          return newPayment;
+        },
+      );
+
+      const customerName =
+        [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+        'Customer';
+
+      try {
+        const paymentLink = await this.paymentService.createRazorpayPaymentLink(
+          savedPayment,
+          null,
+          {
+            name: customerName,
+            ...(user.email ? { email: user.email } : {}),
+            ...(user.phone ? { contact: user.phone } : {}),
+          },
+          `Poojawala Order #${existingOrder.orderNumber}`,
+          {
+            paymentId: String(savedPayment.id),
+            customerId: String(user.id),
+            orderId: String(existingOrder.id),
+            orderNumber: existingOrder.orderNumber,
+            paymentType: String(savedPayment.paymentType),
+            isCartCheckout: 'true',
+          },
+        );
+
+        return {
+          orderId: existingOrder.id,
+          orderNumber: existingOrder.orderNumber,
+          customerId: existingOrder.customerId,
+          paymentId: savedPayment.id,
+          paymentUrl: paymentLink.short_url,
+          amount: totalAmount,
+          amountInPaise,
+          currency: 'INR',
+          subtotal: Number(existingOrder.subtotal),
+          discountAmount: Number(existingOrder.discountAmount),
+          totalAmount,
+          paymentMethod: existingOrder.paymentMethod,
+          paymentStatus: existingOrder.paymentStatus,
+          orderStatus: existingOrder.orderStatus,
+          shippingAddressSnapshot: existingOrder.shippingAddressSnapshot,
+          items: await Promise.all(
+            (existingOrder.items || []).map(async (item) => {
+              let img =
+                item.productImageSnapshot || item.product?.imageUrl || null;
+              if (img && this.s3Service) {
+                try {
+                  img = await this.s3Service.getDownloadUrl(img);
+                } catch {
+                  // retain
+                }
+              }
+              return {
+                id: item.id,
+                productId: item.productId ?? null,
+                productName: item.productNameSnapshot,
+                productImage: img,
+                pricingUnit: item.product?.pricingUnit || 'PIECE',
+                unitPrice: Number(item.unitPriceSnapshot),
+                quantity: item.quantity,
+                total: Number(item.totalAmount),
+              };
+            }),
+          ),
+          createdAt: existingOrder.createdAt,
+          updatedAt: existingOrder.updatedAt,
+          status: savedPayment.status,
+        };
+      } catch (error: unknown) {
+        if (error instanceof HttpException) {
+          throw error;
+        }
+
+        const errorMessage =
+          (error as { message?: string })?.message ||
+          'Razorpay payment link creation failed';
+
+        savedPayment.status = PAYMENT_STATUS.FAILED;
+        savedPayment.failureReason = errorMessage;
+        await this.paymentRepository.savePayment(savedPayment);
+
+        existingOrder.paymentStatus = ORDER_PAYMENT_STATUS.FAILED;
+        await this.orderRepository.save(existingOrder);
+
+        this.logger.error(
+          `Failed to create Razorpay payment link for payment #${savedPayment.id}: ${errorMessage}`,
+        );
+
+        throw new BadRequestException(errorMessage);
+      }
+    }
+
+    // ==========================================
+    // 2. NEW CART CHECKOUT FLOW
+    // ==========================================
     const cart = await this.cartRepository.findCartWithItems(user.id);
 
     if (!cart || !cart.items || cart.items.length === 0) {
       throw new BadRequestException('Cannot checkout an empty cart');
     }
 
-    // Filter valid products and calculate latest total
+    // Validate active products and calculate totals
     const validItems: {
       product: Product;
       quantity: number;
@@ -411,118 +584,237 @@ export class CartService {
       throw new BadRequestException('No valid products to checkout');
     }
 
-    let booking: Booking | null = null;
-    if (dto.bookingId) {
-      booking = await this.bookingRepository.findOne({
-        where: { id: dto.bookingId },
+    // Resolve Shipping Address Snapshot
+    let resolvedAddress: ShippingAddressSnapshot;
+
+    if (dto.shippingAddress) {
+      resolvedAddress = {
+        name: dto.shippingAddress.name,
+        phone: dto.shippingAddress.phone,
+        addressLine1: dto.shippingAddress.addressLine1,
+        addressLine2: dto.shippingAddress.addressLine2,
+        city: dto.shippingAddress.city,
+        state: dto.shippingAddress.state,
+        pincode: dto.shippingAddress.pincode,
+      };
+    } else if (dto.addressId) {
+      const address = await this.customerAddressRepository.findOne({
+        where: { id: dto.addressId, customerId: user.id },
       });
-
-      if (!booking) {
-        throw new NotFoundException('Booking not found');
+      if (!address) {
+        throw new NotFoundException('Address not found');
       }
-
-      if (booking.customerId !== user.id) {
-        throw new ForbiddenException('You do not own this booking');
+      resolvedAddress = {
+        name:
+          [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+          'Customer',
+        phone: user.phone || '',
+        addressLine1: address.fullAddress,
+        addressLine2: address.addressLabel,
+        city: address.city,
+        state: address.state,
+        pincode: address.pincode,
+      };
+    } else {
+      let address = await this.customerAddressRepository.findOne({
+        where: { customerId: user.id, isDefault: true },
+      });
+      if (!address) {
+        address = await this.customerAddressRepository.findOne({
+          where: { customerId: user.id },
+          order: { createdAt: 'DESC' },
+        });
       }
-
-      if (booking.status === BOOKING_STATUS.CANCELLED) {
+      if (!address) {
         throw new BadRequestException(
-          'Cannot attach products to a cancelled booking',
+          'Shipping address is required. Please provide a shipping address or select a saved address.',
         );
       }
+      resolvedAddress = {
+        name:
+          [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+          'Customer',
+        phone: user.phone || '',
+        addressLine1: address.fullAddress,
+        addressLine2: address.addressLabel,
+        city: address.city,
+        state: address.state,
+        pincode: address.pincode,
+      };
     }
 
-    // Step A: Database transaction for creating BookingProduct snapshots and Payment record
-    const { savedPayment, snapshots } = await this.dataSource.transaction(
+    const paymentMethod = dto.paymentMethod || ORDER_PAYMENT_METHOD.ONLINE;
+    const isCod = paymentMethod === ORDER_PAYMENT_METHOD.COD;
+
+    // Inside DB transaction: Create Payment, Order, OrderItems (and clear cart if COD)
+    const { savedPayment, savedOrder } = await this.dataSource.transaction(
       async (manager) => {
         const paymentRepo = manager.getRepository(Payment);
-        const bookingProductRepo = manager.getRepository(BookingProduct);
+        const orderRepo = manager.getRepository(Order);
+        const orderItemRepo = manager.getRepository(OrderItem);
+        const cartItemRepo = manager.getRepository(CartItem);
 
         const payment = paymentRepo.create({
           paymentType: PAYMENT_TYPE.PRODUCT_PAYMENT,
-          bookingId: booking ? booking.id : undefined,
           createdById: user.id,
           payerId: user.id,
           amount: totalAmount,
           currency: 'INR',
-          customerPaymentMethod: CUSTOMER_PAYMENT_METHOD.ONLINE,
-          status: PAYMENT_STATUS.CREATED,
-          remark: booking
-            ? `Product purchase for Booking #${booking.bookingNumber}`
-            : 'Cart product purchase',
+          customerPaymentMethod: isCod
+            ? CUSTOMER_PAYMENT_METHOD.CASH
+            : CUSTOMER_PAYMENT_METHOD.ONLINE,
+          status: isCod ? PAYMENT_STATUS.PENDING : PAYMENT_STATUS.CREATED,
+          remark: `Product purchase Order - ${paymentMethod}`,
         });
 
         const newPayment = await paymentRepo.save(payment);
 
-        const createdSnapshots: {
-          productId: number;
-          productName: string;
-          unitPrice: number;
-          quantity: number;
-          total: number;
-        }[] = [];
+        const timestamp = Date.now().toString().slice(-6);
+        const randomPart = Math.floor(1000 + Math.random() * 9000);
+        const orderNumber = `PW-ORD-${timestamp}-${randomPart}`;
+
+        const order = orderRepo.create({
+          orderNumber,
+          customerId: user.id,
+          subtotal: totalAmount,
+          discountAmount: 0,
+          totalAmount: totalAmount,
+          paymentId: newPayment.id,
+          paymentMethod,
+          paymentStatus: isCod
+            ? ORDER_PAYMENT_STATUS.COD_PENDING
+            : ORDER_PAYMENT_STATUS.PENDING,
+          orderStatus: isCod
+            ? ORDER_STATUS.CONFIRMED
+            : ORDER_STATUS.PENDING_PAYMENT,
+          shippingAddressSnapshot: resolvedAddress,
+        });
+
+        const newOrder = await orderRepo.save(order);
+
+        const createdItems: OrderItem[] = [];
         for (const validItem of validItems) {
-          const bp = bookingProductRepo.create({
-            bookingId: booking ? booking.id : null,
-            customerId: user.id,
-            paymentId: newPayment.id,
+          let imageUrl: string | null = validItem.product.imageUrl || null;
+          if (imageUrl && this.s3Service) {
+            try {
+              imageUrl = await this.s3Service.getDownloadUrl(imageUrl);
+            } catch {
+              // retain raw imageUrl if presigning fails
+            }
+          }
+
+          const orderItem = orderItemRepo.create({
+            orderId: newOrder.id,
             productId: validItem.product.id,
             productNameSnapshot: validItem.product.name,
+            productImageSnapshot: imageUrl,
             unitPriceSnapshot: validItem.unitPrice,
             quantity: validItem.quantity,
-            total: validItem.subtotal,
+            totalAmount: validItem.subtotal,
           });
-
-          const savedBp = await bookingProductRepo.save(bp);
-          createdSnapshots.push({
-            productId: savedBp.productId,
-            productName: savedBp.productNameSnapshot,
-            unitPrice: Number(savedBp.unitPriceSnapshot),
-            quantity: savedBp.quantity,
-            total: Number(savedBp.total),
-          });
+          createdItems.push(orderItem);
         }
 
-        return { savedPayment: newPayment, snapshots: createdSnapshots };
+        await orderItemRepo.save(createdItems);
+        newOrder.items = createdItems;
+
+        // If COD: Clear cart immediately inside transaction
+        if (isCod) {
+          await cartItemRepo.delete({ cartId: cart.id });
+        }
+
+        return { savedPayment: newPayment, savedOrder: newOrder };
       },
     );
 
-    // Step B: External Razorpay Payment Link creation (delegated to PaymentService)
     const amountInPaise = Math.round(totalAmount * 100);
+
+    // COD Checkout: No Razorpay call
+    if (isCod) {
+      return {
+        orderId: savedOrder.id,
+        orderNumber: savedOrder.orderNumber,
+        customerId: savedOrder.customerId,
+        paymentId: savedPayment.id,
+        paymentUrl: null,
+        amount: totalAmount,
+        amountInPaise,
+        currency: 'INR',
+        subtotal: Number(savedOrder.subtotal),
+        discountAmount: Number(savedOrder.discountAmount),
+        totalAmount,
+        paymentMethod: savedOrder.paymentMethod,
+        paymentStatus: savedOrder.paymentStatus,
+        orderStatus: savedOrder.orderStatus,
+        shippingAddressSnapshot: savedOrder.shippingAddressSnapshot,
+        items: (savedOrder.items || []).map((item) => ({
+          id: item.id,
+          productId: item.productId ?? null,
+          productName: item.productNameSnapshot,
+          productImage: item.productImageSnapshot ?? null,
+          unitPrice: Number(item.unitPriceSnapshot),
+          quantity: item.quantity,
+          total: Number(item.totalAmount),
+        })),
+        createdAt: savedOrder.createdAt,
+        updatedAt: savedOrder.updatedAt,
+        status: savedPayment.status,
+      };
+    }
+
+    // ONLINE Checkout: Create Razorpay payment link outside DB transaction
     const customerName =
-      [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Customer';
+      [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+      'Customer';
 
     try {
       const paymentLink = await this.paymentService.createRazorpayPaymentLink(
         savedPayment,
-        booking,
+        null,
         {
           name: customerName,
           ...(user.email ? { email: user.email } : {}),
           ...(user.phone ? { contact: user.phone } : {}),
         },
-        booking
-          ? `Payment for items attached to Booking #${booking.bookingNumber}`
-          : `Poojawala Product Purchase #${savedPayment.id}`,
+        `Poojawala Order #${savedOrder.orderNumber}`,
         {
           paymentId: String(savedPayment.id),
           customerId: String(user.id),
+          orderId: String(savedOrder.id),
+          orderNumber: savedOrder.orderNumber,
           paymentType: String(savedPayment.paymentType),
           isCartCheckout: 'true',
-          bookingId: String(booking?.id ?? ''),
-          bookingNumber: booking?.bookingNumber ?? '',
         },
       );
 
       return {
+        orderId: savedOrder.id,
+        orderNumber: savedOrder.orderNumber,
+        customerId: savedOrder.customerId,
         paymentId: savedPayment.id,
         paymentUrl: paymentLink.short_url,
         amount: totalAmount,
         amountInPaise,
         currency: 'INR',
-        bookingId: booking?.id ?? null,
+        subtotal: Number(savedOrder.subtotal),
+        discountAmount: Number(savedOrder.discountAmount),
+        totalAmount,
+        paymentMethod: savedOrder.paymentMethod,
+        paymentStatus: savedOrder.paymentStatus,
+        orderStatus: savedOrder.orderStatus,
+        shippingAddressSnapshot: savedOrder.shippingAddressSnapshot,
+        items: (savedOrder.items || []).map((item) => ({
+          id: item.id,
+          productId: item.productId ?? null,
+          productName: item.productNameSnapshot,
+          productImage: item.productImageSnapshot ?? null,
+          unitPrice: Number(item.unitPriceSnapshot),
+          quantity: item.quantity,
+          total: Number(item.totalAmount),
+        })),
+        createdAt: savedOrder.createdAt,
+        updatedAt: savedOrder.updatedAt,
         status: savedPayment.status,
-        items: snapshots,
       };
     } catch (error: unknown) {
       if (error instanceof HttpException) {
@@ -537,6 +829,9 @@ export class CartService {
       savedPayment.status = PAYMENT_STATUS.FAILED;
       savedPayment.failureReason = errorMessage;
       await this.paymentRepository.savePayment(savedPayment);
+
+      savedOrder.paymentStatus = ORDER_PAYMENT_STATUS.FAILED;
+      await this.orderRepository.save(savedOrder);
 
       this.logger.error(
         `Failed to create Razorpay payment link for payment #${savedPayment.id}: ${errorMessage}`,

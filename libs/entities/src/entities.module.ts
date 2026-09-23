@@ -26,6 +26,8 @@ import { Product } from './product.entity';
 import { Cart } from './cart.entity';
 import { CartItem } from './cart-item.entity';
 import { BookingProduct } from './booking-product.entity';
+import { Order } from './order.entity';
+import { OrderItem } from './order-item.entity';
 import { EntitiesService } from './entities.service';
 
 @Module({
@@ -56,6 +58,8 @@ import { EntitiesService } from './entities.service';
       Cart,
       CartItem,
       BookingProduct,
+      Order,
+      OrderItem,
     ]),
   ],
   providers: [EntitiesService],
