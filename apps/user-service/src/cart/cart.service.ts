@@ -29,7 +29,13 @@ import {
   ShippingAddressSnapshot,
   User,
   USER_ROLE,
+  ACTOR_TYPE,
+  AUDIT_MODULE,
+  NOTIFICATION_TYPE,
 } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
+import { NotificationService } from '@poojawala/notification';
+import { EmailService, renderPoojawalaEmail } from '@poojawala/email-services';
 import {
   BookingProductRepository,
   BookingRepository,
@@ -117,6 +123,9 @@ export class CartService {
     private readonly dataSource: DataSource,
     private readonly paymentService: PaymentService,
     @Optional() private readonly s3Service?: S3Service,
+    @Optional() private readonly auditLogService?: AuditLogService,
+    @Optional() private readonly notificationService?: NotificationService,
+    @Optional() private readonly emailService?: EmailService,
   ) { }
 
   /**
@@ -731,6 +740,8 @@ export class CartService {
 
     // COD Checkout: No Razorpay call
     if (isCod) {
+      await this.notifyAndEmailOrderPlaced(user, savedOrder, true, null);
+
       return {
         orderId: savedOrder.id,
         orderNumber: savedOrder.orderNumber,
@@ -787,6 +798,13 @@ export class CartService {
         },
       );
 
+      await this.notifyAndEmailOrderPlaced(
+        user,
+        savedOrder,
+        false,
+        paymentLink.short_url,
+      );
+
       return {
         orderId: savedOrder.id,
         orderNumber: savedOrder.orderNumber,
@@ -833,11 +851,182 @@ export class CartService {
       savedOrder.paymentStatus = ORDER_PAYMENT_STATUS.FAILED;
       await this.orderRepository.save(savedOrder);
 
+      // Audit and notify payment link failure
+      if (this.auditLogService) {
+        try {
+          await this.auditLogService.createAuditLog({
+            actorId: user.id,
+            actorType: ACTOR_TYPE.USER,
+            actorRole: user.role,
+            module: AUDIT_MODULE.PAYMENT,
+            entity: 'Payment',
+            entityId: String(savedPayment.id),
+            action: 'PAYMENT_FAILED',
+            message: `Razorpay payment link creation failed for Order #${savedOrder.orderNumber}: ${errorMessage}`,
+            oldValue: { status: PAYMENT_STATUS.PENDING },
+            newValue: { status: PAYMENT_STATUS.FAILED, failureReason: errorMessage },
+            metadata: { orderId: savedOrder.id, orderNumber: savedOrder.orderNumber },
+          });
+        } catch (err: any) {
+          this.logger.warn(`Failed to create payment failure audit: ${err?.message}`);
+        }
+      }
+
+      if (this.notificationService) {
+        try {
+          await this.notificationService.createNotification(
+            user.id,
+            'Payment Failed',
+            `Payment link creation failed for Order #${savedOrder.orderNumber}. Please retry checkout.`,
+            NOTIFICATION_TYPE.PAYMENT,
+            savedOrder.id,
+            'ORDER',
+          );
+        } catch (err: any) {
+          this.logger.warn(`Failed to send payment failure notification: ${err?.message}`);
+        }
+      }
+
       this.logger.error(
         `Failed to create Razorpay payment link for payment #${savedPayment.id}: ${errorMessage}`,
       );
 
       throw new BadRequestException(errorMessage);
+    }
+  }
+
+  /**
+   * Helper to safely send audit, notification, and email for newly placed orders.
+   * Transaction is already committed before this is called.
+   */
+  private async notifyAndEmailOrderPlaced(
+    user: User,
+    order: Order,
+    isCod: boolean,
+    paymentUrl?: string | null,
+  ): Promise<void> {
+    // 1. Audit Log: ORDER_CREATED
+    if (this.auditLogService) {
+      try {
+        await this.auditLogService.createAuditLog({
+          actorId: user.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: user.role,
+          module: AUDIT_MODULE.PRODUCT,
+          entity: 'Order',
+          entityId: String(order.id),
+          action: 'ORDER_CREATED',
+          message: `Order #${order.orderNumber} created with payment method ${isCod ? 'COD' : 'ONLINE'}.`,
+          oldValue: undefined,
+          newValue: {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            totalAmount: order.totalAmount,
+            paymentMethod: order.paymentMethod,
+            paymentStatus: order.paymentStatus,
+            orderStatus: order.orderStatus,
+          },
+          metadata: {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            customerId: user.id,
+            paymentMethod: isCod ? 'COD' : 'ONLINE',
+            totalAmount: order.totalAmount,
+            paymentUrl: paymentUrl || undefined,
+          },
+        });
+      } catch (err: any) {
+        this.logger.warn(`Failed to create order audit log: ${err?.message}`);
+      }
+    }
+
+    // 2. Notification to customer
+    if (this.notificationService) {
+      try {
+        const title = isCod ? 'Order Placed (COD)' : 'Order Placed - Payment Pending';
+        const message = isCod
+          ? `Your order #${order.orderNumber} for ₹${order.totalAmount} has been placed successfully via Cash on Delivery.`
+          : `Your order #${order.orderNumber} for ₹${order.totalAmount} has been created. Please complete payment to confirm.`;
+
+        await this.notificationService.createNotification(
+          user.id,
+          title,
+          message,
+          NOTIFICATION_TYPE.SYSTEM,
+          order.id,
+          'ORDER',
+        );
+      } catch (err: any) {
+        this.logger.warn(`Failed to send order notification: ${err?.message}`);
+      }
+    }
+
+    // 3. Email to customer
+    if (user.email && this.emailService) {
+      try {
+        const customerName =
+          [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+          'Devotee';
+        const statusBadge = isCod
+          ? 'Order Confirmed (COD)'
+          : 'Order Created (Pending Payment)';
+        const emailMessage = isCod
+          ? `Thank you for your order! Your order <strong>#${order.orderNumber}</strong> has been placed under <strong>Cash on Delivery</strong>.`
+          : `Thank you for your order! Your order <strong>#${order.orderNumber}</strong> has been created. Please complete your payment using the link below to confirm.`;
+
+        const html = renderPoojawalaEmail({
+          statusBadge,
+          userName: customerName,
+          preheaderText: `Order #${order.orderNumber} created!`,
+          emailMessage,
+          detailsTable: {
+            title: 'Order Details',
+            rows: [
+              { label: 'Order Number', value: `#${order.orderNumber}` },
+              {
+                label: 'Payment Method',
+                value: isCod ? 'Cash on Delivery (COD)' : 'Online Payment',
+              },
+              {
+                label: 'Payment Status',
+                value: isCod ? 'COD Pending' : 'Pending',
+                isHighlight: true,
+              },
+              {
+                label: 'Delivery Address',
+                value: order.shippingAddressSnapshot
+                  ? `${order.shippingAddressSnapshot.addressLine1}, ${order.shippingAddressSnapshot.city} - ${order.shippingAddressSnapshot.pincode}`
+                  : 'Saved Address',
+              },
+            ],
+            totalRow: {
+              label: 'Total Amount',
+              value: `₹${order.totalAmount}`,
+            },
+          },
+          highlight: isCod
+            ? {
+                title: 'Cash on Delivery',
+                text: `Please keep ₹${order.totalAmount} ready in cash at the time of delivery.`,
+              }
+            : paymentUrl
+            ? {
+                title: 'Complete Your Payment',
+                text: `Click the payment link or copy to browser: ${paymentUrl}`,
+              }
+            : undefined,
+        });
+
+        await this.emailService.sendMail({
+          to: user.email,
+          subject: isCod
+            ? `Order Confirmed - Poojawala | Order #${order.orderNumber}`
+            : `Complete Payment for Order #${order.orderNumber} - Poojawala`,
+          html,
+        });
+      } catch (err: any) {
+        this.logger.warn(`Failed to send order email: ${err?.message}`);
+      }
     }
   }
 }

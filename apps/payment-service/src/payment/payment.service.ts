@@ -56,7 +56,7 @@ import {
 import { BookingGateway } from '@poojawala/gateway';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
-import { EmailService } from '@poojawala/email-services';
+import { EmailService, renderPoojawalaEmail } from '@poojawala/email-services';
 
 interface RazorpayError {
   error?: {
@@ -1184,6 +1184,8 @@ export class PaymentService {
         failureReason: payment.failureReason,
       },
     });
+
+    await this.notifyAndEmailProductPaymentFailure(payment, payment.failureReason);
   }
 
   /**
@@ -1402,6 +1404,8 @@ export class PaymentService {
         failureReason: payment.failureReason,
       },
     });
+
+    await this.notifyAndEmailProductPaymentFailure(payment, payment.failureReason);
   }
 
   private resolveDatabasePaymentId(
@@ -3141,16 +3145,66 @@ export class PaymentService {
 
     if (payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT && payment.payerId) {
       try {
+        const order = await this.dataSource
+          .getRepository(Order)
+          .findOne({ where: { paymentId: payment.id } });
+        const orderNumber = order?.orderNumber || String(payment.id);
+
         await this.notificationService.createNotification(
           payment.payerId,
           'Payment Successful',
-          `Your payment of ₹${payment.amount} for your order was successful.`,
+          `Your payment of ₹${payment.amount} for Order #${orderNumber} was successful.`,
           NOTIFICATION_TYPE.PAYMENT,
-          payment.id,
-          'PAYMENT',
+          order?.id || payment.id,
+          'ORDER',
         );
+
+        if (this.emailService) {
+          const userRepo = this.dataSource.getRepository(User);
+          const payer = await userRepo.findOne({
+            where: { id: payment.payerId },
+          });
+          if (payer?.email) {
+            const customerName =
+              [payer.firstName, payer.lastName].filter(Boolean).join(' ') ||
+              'Devotee';
+            const html = renderPoojawalaEmail({
+              statusBadge: 'Payment Successful',
+              userName: customerName,
+              preheaderText: `Payment confirmed for Order #${orderNumber}!`,
+              emailMessage: `We have received your payment of <strong>₹${payment.amount}</strong> for Order <strong>#${orderNumber}</strong>. Your order is confirmed and will be processed soon.`,
+              detailsTable: {
+                title: 'Payment Receipt',
+                rows: [
+                  { label: 'Order Number', value: `#${orderNumber}` },
+                  { label: 'Payment ID', value: String(payment.id) },
+                  {
+                    label: 'Payment Method',
+                    value: payment.paymentMethod || 'ONLINE',
+                  },
+                  {
+                    label: 'Amount Paid',
+                    value: `₹${payment.amount}`,
+                    isHighlight: true,
+                  },
+                  { label: 'Order Status', value: 'CONFIRMED' },
+                ],
+                totalRow: {
+                  label: 'Total Paid',
+                  value: `₹${payment.amount}`,
+                },
+              },
+            });
+
+            await this.emailService.sendMail({
+              to: payer.email,
+              subject: `Payment Successful - Poojawala | Order #${orderNumber}`,
+              html,
+            });
+          }
+        }
       } catch (err: any) {
-        this.logger.warn(`Could not send payment notification: ${err?.message}`);
+        this.logger.warn(`Could not send payment notification/email: ${err?.message}`);
       }
     }
 
@@ -3291,15 +3345,6 @@ export class PaymentService {
           }
         }
       }
-    } else if (payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT && payment.payerId) {
-      await this.notificationService.createNotification(
-        payment.payerId,
-        'Product Order Successful',
-        `Your product order payment of ₹${payment.amount} was successful.`,
-        NOTIFICATION_TYPE.PAYMENT,
-        payment.id,
-        'PAYMENT',
-      );
     }
   }
 
@@ -3403,5 +3448,74 @@ export class PaymentService {
       pendingPayoutsNumber,
       successfulPayoutsNumber,
     };
+  }
+
+  private async notifyAndEmailProductPaymentFailure(
+    payment: Payment,
+    reason?: string,
+  ): Promise<void> {
+    if (payment.paymentType !== PAYMENT_TYPE.PRODUCT_PAYMENT || !payment.payerId) {
+      return;
+    }
+
+    try {
+      const order = await this.dataSource
+        .getRepository(Order)
+        .findOne({ where: { paymentId: payment.id } });
+      const orderNumber = order?.orderNumber || String(payment.id);
+
+      // Notification
+      await this.notificationService.createNotification(
+        payment.payerId,
+        'Payment Failed',
+        `Payment of ₹${payment.amount} for Order #${orderNumber} failed. Reason: ${reason || payment.failureReason || 'Declined'}. You can retry from your cart or orders.`,
+        NOTIFICATION_TYPE.PAYMENT,
+        order?.id || payment.id,
+        'ORDER',
+      );
+
+      // Email
+      if (this.emailService) {
+        const userRepo = this.dataSource.getRepository(User);
+        const payer = await userRepo.findOne({ where: { id: payment.payerId } });
+        if (payer?.email) {
+          const customerName =
+            [payer.firstName, payer.lastName].filter(Boolean).join(' ') ||
+            'Devotee';
+          const html = renderPoojawalaEmail({
+            statusBadge: 'Payment Failed',
+            userName: customerName,
+            preheaderText: `Payment failed for Order #${orderNumber}`,
+            emailMessage: `Your payment of <strong>₹${payment.amount}</strong> for Order <strong>#${orderNumber}</strong> was not successful. Reason: ${reason || payment.failureReason || 'Transaction could not be completed'}. Your cart items remain saved so you can retry whenever you are ready.`,
+            detailsTable: {
+              title: 'Transaction Details',
+              rows: [
+                { label: 'Order Number', value: `#${orderNumber}` },
+                { label: 'Amount', value: `₹${payment.amount}` },
+                { label: 'Payment Status', value: 'FAILED', isHighlight: true },
+                {
+                  label: 'Reason',
+                  value: reason || payment.failureReason || 'Payment failed',
+                },
+              ],
+            },
+            highlight: {
+              title: 'Retry Your Payment',
+              text: 'You can retry payment anytime by visiting your orders or cart on the PoojaWala app/website.',
+            },
+          });
+
+          await this.emailService.sendMail({
+            to: payer.email,
+            subject: `Payment Failed - Poojawala | Order #${orderNumber}`,
+            html,
+          });
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to send payment failure notification/email: ${err?.message}`,
+      );
+    }
   }
 }

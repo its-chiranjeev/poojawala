@@ -19,6 +19,9 @@ import {
   USER_ROLE,
   USER_STATUS,
 } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
+import { NotificationService } from '@poojawala/notification';
+import { EmailService } from '@poojawala/email-services';
 
 describe('OrderService', () => {
   let service: OrderService;
@@ -95,6 +98,10 @@ describe('OrderService', () => {
     status: PAYMENT_STATUS.PENDING,
   } as unknown as Payment;
 
+  let mockAuditLogService: { createAuditLog: jest.Mock };
+  let mockNotificationService: { createNotification: jest.Mock };
+  let mockEmailService: { sendMail: jest.Mock };
+
   beforeEach(async () => {
     orderRepository = {
       findCustomerOrders: jest.fn().mockResolvedValue({
@@ -132,11 +139,24 @@ describe('OrderService', () => {
       }),
     } as unknown as jest.Mocked<DataSource>;
 
+    mockAuditLogService = {
+      createAuditLog: jest.fn().mockResolvedValue(undefined),
+    };
+    mockNotificationService = {
+      createNotification: jest.fn().mockResolvedValue(undefined),
+    };
+    mockEmailService = {
+      sendMail: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrderService,
         { provide: OrderRepository, useValue: orderRepository },
         { provide: DataSource, useValue: dataSource },
+        { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: NotificationService, useValue: mockNotificationService },
+        { provide: EmailService, useValue: mockEmailService },
       ],
     }).compile();
 
@@ -203,12 +223,40 @@ describe('OrderService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('ADMIN can update order fulfillment status', async () => {
+    it('ADMIN can update order fulfillment status and triggers audit, notification, and email', async () => {
       const updated = await service.updateOrderStatus(adminUser, 101, {
         status: ORDER_STATUS.SHIPPED,
       });
       expect(updated.orderStatus).toBe(ORDER_STATUS.SHIPPED);
       expect(orderRepository.save).toHaveBeenCalled();
+      expect(mockAuditLogService.createAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'ORDER_STATUS_CHANGED',
+          entityId: '101',
+        }),
+      );
+      expect(mockNotificationService.createNotification).toHaveBeenCalledWith(
+        customerUser.id,
+        'Order Status Updated',
+        expect.stringContaining('SHIPPED'),
+        expect.anything(),
+        101,
+        'ORDER',
+      );
+    });
+
+    it('ADMIN updating with SAME status does NOT trigger audit, notification, or email', async () => {
+      mockOrder.orderStatus = ORDER_STATUS.SHIPPED;
+      orderRepository.findOrderByIdWithDetails.mockResolvedValueOnce(mockOrder);
+
+      await service.updateOrderStatus(adminUser, 101, {
+        status: ORDER_STATUS.SHIPPED,
+      });
+
+      expect(orderRepository.save).not.toHaveBeenCalled();
+      expect(mockAuditLogService.createAuditLog).not.toHaveBeenCalled();
+      expect(mockNotificationService.createNotification).not.toHaveBeenCalled();
+      expect(mockEmailService.sendMail).not.toHaveBeenCalled();
     });
   });
 
@@ -219,13 +267,31 @@ describe('OrderService', () => {
       );
     });
 
-    it('ADMIN can collect COD payment: updates Payment and Order paymentStatus to PAID', async () => {
+    it('ADMIN can collect COD payment: updates Payment and Order paymentStatus to PAID and triggers audit, notification, email', async () => {
+      mockOrder.orderStatus = ORDER_STATUS.CONFIRMED;
+      mockOrder.paymentStatus = ORDER_PAYMENT_STATUS.COD_PENDING;
+      orderRepository.findOrderByIdWithDetails.mockResolvedValueOnce(mockOrder);
+
       const updated = await service.collectCodPayment(adminUser, 101, {
         collectedAmount: 500,
         remark: 'Received cash at delivery',
       });
       expect(dataSource.transaction).toHaveBeenCalled();
       expect(updated.paymentStatus).toBe(ORDER_PAYMENT_STATUS.PAID);
+      expect(mockAuditLogService.createAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'COD_PAYMENT_COLLECTED',
+          entityId: '101',
+        }),
+      );
+      expect(mockNotificationService.createNotification).toHaveBeenCalledWith(
+        customerUser.id,
+        'COD Payment Collected',
+        expect.stringContaining('500'),
+        expect.anything(),
+        101,
+        'ORDER',
+      );
     });
 
     it('ADMIN collecting COD for already paid order throws BadRequestException', async () => {

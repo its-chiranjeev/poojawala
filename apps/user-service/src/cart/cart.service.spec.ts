@@ -40,6 +40,9 @@ import {
   USER_ROLE,
   USER_STATUS,
 } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
+import { NotificationService } from '@poojawala/notification';
+import { EmailService } from '@poojawala/email-services';
 
 describe('CartService', () => {
   let service: CartService;
@@ -53,6 +56,9 @@ describe('CartService', () => {
   let customerAddressRepository: jest.Mocked<CustomerAddressRepository>;
   let dataSource: jest.Mocked<DataSource>;
   let paymentService: { createRazorpayPaymentLink: jest.Mock };
+  let auditLogService: { createAuditLog: jest.Mock };
+  let notificationService: { createNotification: jest.Mock };
+  let emailService: { sendMail: jest.Mock };
 
   const customerUser: User = {
     id: 1,
@@ -260,6 +266,18 @@ describe('CartService', () => {
       }),
     };
 
+    auditLogService = {
+      createAuditLog: jest.fn().mockResolvedValue({}),
+    };
+
+    notificationService = {
+      createNotification: jest.fn().mockResolvedValue({}),
+    };
+
+    emailService = {
+      sendMail: jest.fn().mockResolvedValue(true),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CartService,
@@ -279,6 +297,9 @@ describe('CartService', () => {
         },
         { provide: DataSource, useValue: dataSource },
         { provide: PaymentService, useValue: paymentService },
+        { provide: AuditLogService, useValue: auditLogService },
+        { provide: NotificationService, useValue: notificationService },
+        { provide: EmailService, useValue: emailService },
       ],
     }).compile();
 
@@ -301,6 +322,7 @@ describe('CartService', () => {
       });
       expect(dataSource.transaction).toHaveBeenCalled();
       expect(result).toBeDefined();
+      expect(auditLogService.createAuditLog).not.toHaveBeenCalled();
     });
 
     it('should throw ForbiddenException if user is not a customer', async () => {
@@ -542,6 +564,15 @@ describe('CartService', () => {
       expect(result.items[0].unitPrice).toBe(499);
       expect(result.items[0].quantity).toBe(2);
       expect(result.items[0].total).toBe(998);
+
+      expect(auditLogService.createAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'ORDER_CREATED',
+          entityId: '1001',
+        }),
+      );
+      expect(notificationService.createNotification).toHaveBeenCalled();
+      expect(emailService.sendMail).toHaveBeenCalled();
     });
 
     it('should create Order, OrderItem snapshot, and Payment record for COD, clear cart, and NOT call Razorpay', async () => {
@@ -573,6 +604,15 @@ describe('CartService', () => {
       expect(result.paymentStatus).toBe(ORDER_PAYMENT_STATUS.COD_PENDING);
       expect(result.orderStatus).toBe(ORDER_STATUS.CONFIRMED);
       expect(paymentService.createRazorpayPaymentLink).not.toHaveBeenCalled();
+
+      expect(auditLogService.createAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'ORDER_CREATED',
+          entityId: '1001',
+        }),
+      );
+      expect(notificationService.createNotification).toHaveBeenCalled();
+      expect(emailService.sendMail).toHaveBeenCalled();
     });
 
     it('should retry payment for an existing unpaid order without creating duplicate orders', async () => {
