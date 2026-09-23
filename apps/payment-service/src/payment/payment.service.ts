@@ -8,6 +8,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import Razorpay from 'razorpay';
 import * as crypto from 'crypto';
@@ -62,13 +63,13 @@ interface RazorpayError {
   message?: string;
 }
 
-interface PaymentLinkCustomer {
+export interface PaymentLinkCustomer {
   name: string;
   email?: string;
   contact?: string;
 }
 
-interface RazorpayPaymentLinkData {
+export interface RazorpayPaymentLinkData {
   id: string;
   entity?: string;
   amount?: number;
@@ -354,6 +355,7 @@ export class PaymentService {
     private readonly bookingGateway: BookingGateway,
     private readonly auditLogService: AuditLogService,
     @Optional() private readonly emailService?: EmailService,
+    @Optional() private readonly configService?: ConfigService,
   ) {
     const keyId = process.env['RAZORPAY_KEY_ID'];
     const keySecret = process.env['RAZORPAY_KEY_SECRET'];
@@ -712,7 +714,6 @@ export class PaymentService {
         booking,
         customer,
         dto.description,
-        dto.callbackUrl,
       );
 
       return {
@@ -805,17 +806,17 @@ export class PaymentService {
     };
   }
 
-  private async createRazorpayPaymentLink(
+  public async createRazorpayPaymentLink(
     payment: Payment,
-    booking: Booking,
+    booking: Booking | null | undefined,
     customer: PaymentLinkCustomer,
     description?: string,
-    customCallbackUrl?: string,
+    extraNotes?: Record<string, string>,
   ): Promise<RazorpayPaymentLinkData> {
     const amountInPaise = Math.round(Number(payment.amount) * 100);
 
     const callbackUrl =
-      customCallbackUrl?.trim() ||
+      this.configService?.get<string>('FRONTEND_PAYMENT_CALLBACK_URL')?.trim() ||
       process.env['FRONTEND_PAYMENT_CALLBACK_URL']?.trim();
 
     const notify: {
@@ -835,7 +836,10 @@ export class PaymentService {
         accept_partial: false,
 
         description:
-          description?.trim() || `Payment for booking ${booking.bookingNumber}`,
+          description?.trim() ||
+          (booking
+            ? `Payment for booking ${booking.bookingNumber}`
+            : `Poojawala Product Purchase #${payment.id}`),
 
         customer: {
           name: customer.name,
@@ -866,9 +870,13 @@ export class PaymentService {
         notes: {
           paymentId: String(payment.id),
 
-          bookingId: String(booking.id),
+          bookingId: String(booking?.id ?? ''),
 
-          bookingNumber: booking.bookingNumber,
+          bookingNumber: booking?.bookingNumber ?? '',
+
+          customerId: String(payment.payerId ?? ''),
+
+          ...(extraNotes || {}),
         },
 
         ...(callbackUrl
@@ -2235,8 +2243,11 @@ export class PaymentService {
       throw new NotFoundException('Payment not found');
     }
 
-    if (originalPayment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT) {
-      throw new BadRequestException('Only booking payments can be refunded');
+    if (
+      originalPayment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT &&
+      originalPayment.paymentType !== PAYMENT_TYPE.PRODUCT_PAYMENT
+    ) {
+      throw new BadRequestException('Only booking and product payments can be refunded');
     }
 
     if (originalPayment.status !== PAYMENT_STATUS.SUCCESS) {
@@ -2880,7 +2891,7 @@ export class PaymentService {
     await this.dataSource.transaction(async (manager) => {
       await manager.save(Payment, payment);
 
-      if (payment.booking) {
+      if (payment.booking && payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT) {
         payment.booking.paymentStatus = BOOKING_PAYMENT_STATUS.PAID;
         payment.booking.bookingPaymentId = payment.id;
 
@@ -2944,7 +2955,7 @@ export class PaymentService {
       }
     });
 
-    if (payment.booking) {
+    if (payment.booking && payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT) {
       if (!wasPaymentPaid) {
         await this.notificationService.createNotification(
           payment.booking.customerId,
@@ -3081,6 +3092,15 @@ export class PaymentService {
           }
         }
       }
+    } else if (payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT && payment.payerId) {
+      await this.notificationService.createNotification(
+        payment.payerId,
+        'Product Order Successful',
+        `Your product order payment of ₹${payment.amount} was successful.`,
+        NOTIFICATION_TYPE.PAYMENT,
+        payment.id,
+        'PAYMENT',
+      );
     }
   }
 

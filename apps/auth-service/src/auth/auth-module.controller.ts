@@ -6,19 +6,33 @@ import {
   HttpStatus,
   Patch,
   Post,
+  Query,
   Req,
   Res,
+  BadRequestException,
   UnauthorizedException,
   UseGuards,
   ValidationPipe,
 } from '@nestjs/common';
 import { AuthModuleService } from './auth-module.service';
 import { JwtAuthGuard, CsrfGuard } from '@poojawala/common';
-import { LoginDto, VerifyOtpDto, RegisterSuperAdminDto, RegisterNormalUserDto, OtpDto, RegisterUserDto, resetPasswordDto, forgotPasswordDto } from '@poojawala/dtos';
+import {
+  LoginDto,
+  VerifyOtpDto,
+  RegisterSuperAdminDto,
+  RegisterNormalUserDto,
+  OtpDto,
+  RegisterUserDto,
+  resetPasswordDto,
+  forgotPasswordDto,
+  ResendOtpDto,
+  GoogleAuthDto,
+  SwitchIntentDto,
+} from '@poojawala/dtos';
+import { USER_ROLE } from '@poojawala/entities';
 import type { Response } from 'express';
 import * as crypto from 'crypto';
 import { S3Service } from '@poojawala/s3';
-import { ResendOtpDto } from '@poojawala/dtos';
 
 @Controller('auth')
 export class AuthModuleController {
@@ -340,5 +354,133 @@ export class AuthModuleController {
     dto: ResendOtpDto,
   ) {
     return this.authModuleService.resendOtpService(dto);
+  }
+
+  @Get('google')
+  async googleAuth(
+    @Query('intent') intentParam: string,
+    @Res() res: Response,
+  ) {
+    const { url, state } = this.authModuleService.getGoogleOAuthRedirect(intentParam);
+
+    const isProd = process.env.NODE_ENV === 'production';
+    res.cookie('google_oauth_state', state, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'lax',
+      maxAge: 10 * 60 * 1000, // 10 minutes
+      path: '/',
+    });
+
+    return res.redirect(url);
+  }
+
+  @Get('google/callback')
+  async googleAuthCallback(
+    @Req() req: any,
+    @Res() res: Response,
+    @Query('code') code?: string,
+    @Query('state') state?: string,
+    @Query('error') error?: string,
+  ) {
+    const frontendUrl = this.authModuleService.getFrontendUrl();
+
+    if (error) {
+      return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent(error)}`);
+    }
+
+    if (!code || !state) {
+      return res.redirect(
+        `${frontendUrl}/login?error=${encodeURIComponent('Missing authorization code or state')}`,
+      );
+    }
+
+    const cookies = this.parseCookies(req.headers.cookie);
+    const savedState = cookies['google_oauth_state'];
+
+    if (!savedState || savedState !== state) {
+      return res.redirect(
+        `${frontendUrl}/login?error=${encodeURIComponent('Invalid or expired OAuth state')}`,
+      );
+    }
+
+    res.clearCookie('google_oauth_state', { path: '/' });
+
+    try {
+      const { result, redirectUrl, csrfToken } =
+        await this.authModuleService.processGoogleOAuthCallback(code, state);
+
+      this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
+      return res.redirect(redirectUrl);
+    } catch (err: any) {
+      const message = err.message || 'Google authentication failed';
+      return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent(message)}`);
+    }
+  }
+
+  @Post('google')
+  @HttpCode(HttpStatus.OK)
+  async googleAuthDirect(
+    @Body(new ValidationPipe({ whitelist: true, transform: true })) dto: GoogleAuthDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    let identity;
+    if (dto.credential) {
+      identity = await this.authModuleService.verifyGoogleToken(dto.credential);
+    } else if (dto.code) {
+      identity = await this.authModuleService.exchangeGoogleCode(dto.code);
+    } else {
+      throw new BadRequestException('Either credential (ID token) or code must be provided');
+    }
+
+    const result = await this.authModuleService.handleGoogleAuth(identity, dto.intent);
+    const csrfToken = crypto.randomUUID();
+    this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
+
+    if (result.user && result.user.profileImage) {
+      try {
+        result.user.profileImage = await this.s3Service.getDownloadUrl(result.user.profileImage);
+      } catch (e) {
+        console.error('Failed to generate pre-signed URL for profileImage:', e);
+      }
+    }
+
+    return {
+      success: true,
+      statusCode: HttpStatus.OK,
+      message: result.message,
+      csrfToken,
+      user: result.user,
+      isNewUser: result.isNewUser,
+    };
+  }
+
+  @UseGuards(JwtAuthGuard, CsrfGuard)
+  @Post('intent')
+  @HttpCode(HttpStatus.OK)
+  async switchIntent(
+    @Req() req: any,
+    @Body(new ValidationPipe({ whitelist: true, transform: true })) dto: SwitchIntentDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authModuleService.switchIntentService(req.user.id, dto);
+    const csrfToken = crypto.randomUUID();
+    this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
+
+    if (result.user && result.user.profileImage) {
+      try {
+        result.user.profileImage = await this.s3Service.getDownloadUrl(result.user.profileImage);
+      } catch (e) {
+        console.error('Failed to generate pre-signed URL for profileImage:', e);
+      }
+    }
+
+    return {
+      success: true,
+      statusCode: HttpStatus.OK,
+      message: result.message,
+      csrfToken,
+      user: result.user,
+    };
   }
 }

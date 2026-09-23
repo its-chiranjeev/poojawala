@@ -587,7 +587,7 @@ export class BookingRepository extends BaseRepository<Booking> {
       })
       .andWhere('"purohitId" IS NULL')
       .andWhere(
-        `"createdAt" <= CURRENT_TIMESTAMP - INTERVAL '5 minutes'`,
+        `"createdAt" <= CURRENT_TIMESTAMP - INTERVAL '24 hours'`,
       )
       .returning('*')
       .execute();

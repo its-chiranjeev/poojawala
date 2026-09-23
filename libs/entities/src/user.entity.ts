@@ -36,7 +36,7 @@ export class User {
 
   // Basic Info
   @Index({ unique: true })
-  @Column({ type: 'varchar', length: 150, nullable: true })
+  @Column({ type: 'varchar', length: 150, nullable: true, unique: true })
   email?: string;
 
   @Index({ unique: true })
@@ -69,8 +69,23 @@ export class User {
   birthPlace?: string;
 
   // Authentication
-  @Column({ type: 'varchar', length: 255 })
-  hashedPassword!: string;
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  hashedPassword?: string;
+
+  @Column({
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+    unique: true,
+  })
+  googleId?: string;
+
+  @Column({
+    type: 'varchar',
+    length: 50,
+    default: 'LOCAL',
+  })
+  authProvider!: string;
 
   @Column({ type: 'varchar', nullable: true })
   hashedRefreshToken?: string | null;

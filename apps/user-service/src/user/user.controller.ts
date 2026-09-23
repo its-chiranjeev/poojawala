@@ -270,6 +270,7 @@ export class UserController {
       message: result.message,
       csrfToken,
       user: result.user,
+      ...(result.address && { address: result.address }),
     };
   }
 

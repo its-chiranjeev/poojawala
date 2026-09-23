@@ -31,6 +31,7 @@ import {
   USER_ROLE,
   USER_STATUS,
   CustomerAddress,
+  VENUE_TYPE,
 } from '@poojawala/entities';
 import {
   BookingRepository,
@@ -799,6 +800,9 @@ export class UserService {
     }
 
     otpRecord.isVerified = true;
+    const verifiedExpiresAt = new Date();
+    verifiedExpiresAt.setMinutes(verifiedExpiresAt.getMinutes() + 30);
+    otpRecord.expiresAt = verifiedExpiresAt;
 
     await this.otpRepository.save(otpRecord);
 
@@ -2447,21 +2451,24 @@ export class UserService {
       }
       otpRecord = { role: USER_ROLE.PUROHIT }; // Mock for the rest of the flow
     } else {
-      if (dto.phone) {
-        otpRecord = await this.otpRepository.findOne({
-          where: {
-            phone: dto.phone,
-            isVerified: true,
-          },
-        });
-      } else if (dto.email) {
-        otpRecord = await this.otpRepository.findOne({
-          where: {
-            email: dto.email,
-            isVerified: true,
-          },
+      const otpConditions: any[] = [];
+      if (dto.email) {
+        otpConditions.push({
+          email: dto.email.trim().toLowerCase(),
+          isVerified: true,
         });
       }
+      if (dto.phone) {
+        otpConditions.push({
+          phone: dto.phone.trim(),
+          isVerified: true,
+        });
+      }
+
+      otpRecord = await this.otpRepository.findOne({
+        where: otpConditions.length > 1 ? otpConditions : otpConditions[0],
+        order: { id: 'DESC' },
+      });
 
       if (!otpRecord) {
         throw new BadRequestException('Please verify your OTP first');
@@ -2491,11 +2498,6 @@ export class UserService {
       if (dto.aadhaarNumber)
         throw new BadRequestException(
           'aadhaarNumber is not allowed for CUSTOMER registration',
-        );
-
-      if (dto.city)
-        throw new BadRequestException(
-          'city is not allowed for CUSTOMER registration',
         );
 
       if (dto.languages?.length)
@@ -2666,247 +2668,379 @@ export class UserService {
     }
 
     // Run database writes inside a transaction
-    const savedUser = await this.dataSource.transaction(async (manager) => {
-      let saved: User;
+    const { saved: savedUser, savedCustomerAddress } =
+      await this.dataSource.transaction(async (manager) => {
+        let saved: User;
 
-      if (dto.id) {
-        saved = existingAdminCreatedUser!;
-        saved.isAdminCreated = false;
-        await manager.save(User, saved);
-      } else {
-        // 5. Hash password and save user
-        const hashedPassword = await bcrypt.hash(dto.password, 10);
-
-        const username =
-          dto.username ??
-          `user${Date.now()}${Math.floor(Math.random() * 1000)}`;
-
-        const newUser = manager.create(User, {
-          dob: dto.dob,
-          birthPlace: dto.birthPlace,
-          ...(dto.email && { email: dto.email.toLowerCase() }),
-          username,
-          ...(dto.phone && { phone: dto.phone }),
-          ...(dto.countryCode && { countryCode: dto.countryCode }),
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          hashedPassword: hashedPassword,
-          role: otpRecord.role || USER_ROLE.CUSTOMER,
-          status:
-            otpRecord.role === USER_ROLE.PUROHIT
-              ? USER_STATUS.PENDING
-              : USER_STATUS.ACTIVE,
-        });
-
-        saved = await manager.save(User, newUser);
-      }
-
-      const aadhaarDocUrl = files.aadhaarDoc?.length
-        ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'aadhaarDoc',
-            files.aadhaarDoc,
-          )
-        : dto.aadhaarDoc;
-
-      const panDocUrl = files.panDoc?.length
-        ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'panDoc',
-            files.panDoc,
-          )
-        : dto.panDoc;
-
-      const certificateUrl = files.certificate?.length
-        ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'certificate',
-            files.certificate,
-          )
-        : dto.certificate;
-
-      const templeAffiliationProofUrl = files.templeAffiliationProof?.length
-        ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'templeAffiliationProof',
-            files.templeAffiliationProof,
-          )
-        : dto.templeAffiliationProof;
-
-      const profileImageUrl = files.profileImage?.length
-        ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'profileImage',
-            files.profileImage,
-          )
-        : undefined;
-
-      if (profileImageUrl) {
-        await manager.update(User, saved.id, { profileImage: profileImageUrl });
-        saved.profileImage = profileImageUrl;
-      }
-
-      if (otpRecord.role === USER_ROLE.PUROHIT) {
-        const missingDocs: string[] = [];
-        if (!aadhaarDocUrl && !panDocUrl)
-          missingDocs.push('Aadhaar or PAN document');
-        if (!certificateUrl) missingDocs.push('Certificate');
-        if (!templeAffiliationProofUrl)
-          missingDocs.push('Temple affiliation proof');
-
-        if (missingDocs.length > 0) {
-          throw new BadRequestException(
-            `Please provide all required images. Missing: ${missingDocs.join(', ')}`,
-          );
-        }
-
-        const isOnlineAvailable = dto.isOnlineAvailable === 'true';
-
-        const isOfflineAvailable = dto.isOfflineAvailable === 'true';
-
-        let profile = await manager.findOne(PurohitProfile, {
-          where: { userId: saved.id },
-        });
-
-        if (profile) {
-          Object.assign(profile, {
-            bio: dto.bio ?? profile.bio,
-            qualification: dto.qualification ?? profile.qualification,
-            experienceYears: dto.experienceYears ?? profile.experienceYears,
-            aadhaarNumber: dto.aadhaarNumber ?? profile.aadhaarNumber,
-            aadhaarDocUrl: aadhaarDocUrl || profile.aadhaarDocUrl,
-            panDocUrl: panDocUrl || profile.panDocUrl,
-            certificateUrl: certificateUrl || profile.certificateUrl,
-            templeAffiliationProofUrl:
-              templeAffiliationProofUrl || profile.templeAffiliationProofUrl,
-            city: dto.city ?? profile.city,
-            languages: dto.languages ?? profile.languages,
-            specializations: dto.specializations ?? profile.specializations,
-            isOnlineAvailable:
-              dto.isOnlineAvailable !== undefined
-                ? isOnlineAvailable
-                : profile.isOnlineAvailable,
-            isOfflineAvailable:
-              dto.isOfflineAvailable !== undefined
-                ? isOfflineAvailable
-                : profile.isOfflineAvailable,
-          });
-          await manager.save(profile);
+        if (dto.id) {
+          saved = existingAdminCreatedUser!;
+          saved.isAdminCreated = false;
+          await manager.save(User, saved);
         } else {
-          profile = manager.create(PurohitProfile, {
-            userId: saved.id,
-            bio: dto.bio,
-            qualification: dto.qualification,
-            experienceYears: dto.experienceYears,
-            aadhaarNumber: dto.aadhaarNumber,
-            aadhaarDocUrl,
-            panDocUrl,
-            certificateUrl,
-            templeAffiliationProofUrl,
-            city: dto.city,
-            languages: dto.languages,
-            specializations: dto.specializations,
-            isOnlineAvailable,
-            isOfflineAvailable,
+          // 5. Hash password and save user
+          const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+          const username =
+            dto.username ??
+            `user${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+          const newUser = manager.create(User, {
+            dob: dto.dob,
+            birthPlace: dto.birthPlace,
+            ...(dto.email && { email: dto.email.toLowerCase() }),
+            username,
+            ...(dto.phone && { phone: dto.phone }),
+            ...(dto.countryCode && { countryCode: dto.countryCode }),
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            hashedPassword: hashedPassword,
+            role: otpRecord.role || USER_ROLE.CUSTOMER,
+            status:
+              otpRecord.role === USER_ROLE.PUROHIT
+                ? USER_STATUS.PENDING
+                : USER_STATUS.ACTIVE,
           });
-          await manager.save(profile);
+
+          saved = await manager.save(User, newUser);
         }
 
-        const bankAccountData: any = {
-          purohitId: profile.id,
-          paymentMethod: dto.paymentMethod,
-          isPrimary: true,
-          verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
-        };
+        const aadhaarDocUrl = files.aadhaarDoc?.length
+          ? await this.s3Service.uploadFileHelper(
+              saved.id,
+              'aadhaarDoc',
+              files.aadhaarDoc,
+            )
+          : dto.aadhaarDoc;
 
-        if (dto.paymentMethod === 'BANK') {
-          bankAccountData.accountHolderName = dto.accountHolderName;
-          bankAccountData.accountNumber = dto.accountNumber;
-          bankAccountData.ifscCode = dto.ifscCode;
-          bankAccountData.bankName = dto.bankName;
-        } else if (dto.paymentMethod === 'UPI') {
-          bankAccountData.upiId = dto.upiId;
+        const panDocUrl = files.panDoc?.length
+          ? await this.s3Service.uploadFileHelper(
+              saved.id,
+              'panDoc',
+              files.panDoc,
+            )
+          : dto.panDoc;
+
+        const certificateUrl = files.certificate?.length
+          ? await this.s3Service.uploadFileHelper(
+              saved.id,
+              'certificate',
+              files.certificate,
+            )
+          : dto.certificate;
+
+        const templeAffiliationProofUrl = files.templeAffiliationProof?.length
+          ? await this.s3Service.uploadFileHelper(
+              saved.id,
+              'templeAffiliationProof',
+              files.templeAffiliationProof,
+            )
+          : dto.templeAffiliationProof;
+
+        const profileImageUrl = files.profileImage?.length
+          ? await this.s3Service.uploadFileHelper(
+              saved.id,
+              'profileImage',
+              files.profileImage,
+            )
+          : undefined;
+
+        if (profileImageUrl) {
+          await manager.update(User, saved.id, { profileImage: profileImageUrl });
+          saved.profileImage = profileImageUrl;
         }
 
-        await manager.save(manager.create(PurohitBankAccount, bankAccountData));
+        if (otpRecord.role === USER_ROLE.PUROHIT) {
+          const missingDocs: string[] = [];
+          if (!aadhaarDocUrl && !panDocUrl)
+            missingDocs.push('Aadhaar or PAN document');
+          if (!certificateUrl) missingDocs.push('Certificate');
+          if (!templeAffiliationProofUrl)
+            missingDocs.push('Temple affiliation proof');
 
-        const mediaEntries: PurohitMedia[] = [];
-        if (aadhaarDocUrl) {
-          mediaEntries.push(
-            manager.create(PurohitMedia, {
-              purohitId: profile.id,
-              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-              documentType: 'AADHAAR',
-              mediaUrl: aadhaarDocUrl,
-            }),
-          );
+          if (missingDocs.length > 0) {
+            throw new BadRequestException(
+              `Please provide all required images. Missing: ${missingDocs.join(', ')}`,
+            );
+          }
+
+          const isOnlineAvailable = dto.isOnlineAvailable === 'true';
+
+          const isOfflineAvailable = dto.isOfflineAvailable === 'true';
+
+          let profile = await manager.findOne(PurohitProfile, {
+            where: { userId: saved.id },
+          });
+
+          if (profile) {
+            Object.assign(profile, {
+              bio: dto.bio ?? profile.bio,
+              qualification: dto.qualification ?? profile.qualification,
+              experienceYears: dto.experienceYears ?? profile.experienceYears,
+              aadhaarNumber: dto.aadhaarNumber ?? profile.aadhaarNumber,
+              aadhaarDocUrl: aadhaarDocUrl || profile.aadhaarDocUrl,
+              panDocUrl: panDocUrl || profile.panDocUrl,
+              certificateUrl: certificateUrl || profile.certificateUrl,
+              templeAffiliationProofUrl:
+                templeAffiliationProofUrl || profile.templeAffiliationProofUrl,
+              city: dto.city ?? profile.city,
+              languages: dto.languages ?? profile.languages,
+              specializations: dto.specializations ?? profile.specializations,
+              isOnlineAvailable:
+                dto.isOnlineAvailable !== undefined
+                  ? isOnlineAvailable
+                  : profile.isOnlineAvailable,
+              isOfflineAvailable:
+                dto.isOfflineAvailable !== undefined
+                  ? isOfflineAvailable
+                  : profile.isOfflineAvailable,
+            });
+            await manager.save(profile);
+          } else {
+            profile = manager.create(PurohitProfile, {
+              userId: saved.id,
+              bio: dto.bio,
+              qualification: dto.qualification,
+              experienceYears: dto.experienceYears,
+              aadhaarNumber: dto.aadhaarNumber,
+              aadhaarDocUrl,
+              panDocUrl,
+              certificateUrl,
+              templeAffiliationProofUrl,
+              city: dto.city,
+              languages: dto.languages,
+              specializations: dto.specializations,
+              isOnlineAvailable,
+              isOfflineAvailable,
+            });
+            await manager.save(profile);
+          }
+
+          const bankAccountData: any = {
+            purohitId: profile.id,
+            paymentMethod: dto.paymentMethod,
+            isPrimary: true,
+            verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
+          };
+
+          if (dto.paymentMethod === 'BANK') {
+            bankAccountData.accountHolderName = dto.accountHolderName;
+            bankAccountData.accountNumber = dto.accountNumber;
+            bankAccountData.ifscCode = dto.ifscCode;
+            bankAccountData.bankName = dto.bankName;
+          } else if (dto.paymentMethod === 'UPI') {
+            bankAccountData.upiId = dto.upiId;
+          }
+
+          await manager.save(manager.create(PurohitBankAccount, bankAccountData));
+
+          const mediaEntries: PurohitMedia[] = [];
+          if (aadhaarDocUrl) {
+            mediaEntries.push(
+              manager.create(PurohitMedia, {
+                purohitId: profile.id,
+                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                documentType: 'AADHAAR',
+                mediaUrl: aadhaarDocUrl,
+              }),
+            );
+          }
+
+          if (panDocUrl) {
+            mediaEntries.push(
+              manager.create(PurohitMedia, {
+                purohitId: profile.id,
+                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                documentType: 'PAN',
+                mediaUrl: panDocUrl,
+              }),
+            );
+          }
+
+          if (certificateUrl) {
+            mediaEntries.push(
+              manager.create(PurohitMedia, {
+                purohitId: profile.id,
+                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                documentType: 'CERTIFICATE',
+                mediaUrl: certificateUrl,
+              }),
+            );
+          }
+
+          if (templeAffiliationProofUrl) {
+            mediaEntries.push(
+              manager.create(PurohitMedia, {
+                purohitId: profile.id,
+                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                documentType: 'TEMPLE_PROOF',
+                mediaUrl: templeAffiliationProofUrl,
+              }),
+            );
+          }
+
+          if (mediaEntries.length > 0) {
+            await manager.save(PurohitMedia, mediaEntries);
+          }
         }
 
-        if (panDocUrl) {
-          mediaEntries.push(
-            manager.create(PurohitMedia, {
-              purohitId: profile.id,
-              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-              documentType: 'PAN',
-              mediaUrl: panDocUrl,
-            }),
-          );
+        let savedCustomerAddress: CustomerAddress | null = null;
+        if (saved.role === USER_ROLE.CUSTOMER) {
+          let addressData = dto.address;
+          if (typeof addressData === 'string') {
+            try {
+              addressData = JSON.parse(addressData);
+            } catch {
+              // ignore json parse error
+            }
+          }
+
+          const fullAddress =
+            dto.fullAddress ||
+            (typeof addressData === 'object' && addressData !== null
+              ? addressData.fullAddress
+              : undefined);
+
+          if (
+            fullAddress &&
+            typeof fullAddress === 'string' &&
+            fullAddress.trim() !== ''
+          ) {
+            const addressLabel =
+              dto.addressLabel ||
+              (typeof addressData === 'object' && addressData !== null
+                ? addressData.addressLabel
+                : undefined) ||
+              'HOME';
+
+            let city =
+              (typeof addressData === 'object' && addressData !== null
+                ? addressData.city
+                : undefined) ||
+              dto.city ||
+              '';
+
+            let pincode =
+              dto.pincode ||
+              (typeof addressData === 'object' && addressData !== null
+                ? addressData.pincode
+                : undefined) ||
+              '';
+
+            if (!pincode || pincode.trim() === '') {
+              const pinMatch = fullAddress.match(/\b\d{6}\b/);
+              if (pinMatch) pincode = pinMatch[0];
+              else pincode = '000000';
+            }
+
+            if (!city || city.trim() === '') {
+              city = 'N/A';
+            }
+
+            const state =
+              dto.state ||
+              (typeof addressData === 'object' && addressData !== null
+                ? addressData.state
+                : undefined) ||
+              undefined;
+
+            const venueType =
+              dto.venueType ||
+              (typeof addressData === 'object' && addressData !== null
+                ? addressData.venueType
+                : undefined) ||
+              VENUE_TYPE.HOME;
+
+            const latitude =
+              dto.latitude !== undefined
+                ? dto.latitude
+                : typeof addressData === 'object' &&
+                    addressData !== null &&
+                    addressData.latitude !== undefined
+                  ? Number(addressData.latitude)
+                  : undefined;
+
+            const longitude =
+              dto.longitude !== undefined
+                ? dto.longitude
+                : typeof addressData === 'object' &&
+                    addressData !== null &&
+                    addressData.longitude !== undefined
+                  ? Number(addressData.longitude)
+                  : undefined;
+
+            // Clear any existing default address for this customer just in case
+            await manager.update(
+              CustomerAddress,
+              { customerId: saved.id, isDefault: true },
+              { isDefault: false },
+            );
+
+            const newAddress = manager.create(CustomerAddress, {
+              customerId: saved.id,
+              addressLabel: addressLabel.trim(),
+              fullAddress: fullAddress.trim(),
+              city: city.trim(),
+              state: state ? state.trim() : undefined,
+              pincode: pincode.trim(),
+              venueType,
+              latitude,
+              longitude,
+              isDefault: true,
+            });
+
+            savedCustomerAddress = await manager.save(
+              CustomerAddress,
+              newAddress,
+            );
+
+            await this.auditLogService.createAuditLog(
+              {
+                actorId: saved.id,
+                actorType: ACTOR_TYPE.USER,
+                actorRole: saved.role,
+                module: AUDIT_MODULE.USER,
+                entity: 'CustomerAddress',
+                entityId: String(savedCustomerAddress.id),
+                action: 'CUSTOMER_ADDRESS_CREATED',
+                message: `Customer #${saved.id} registered with default address #${savedCustomerAddress.id}.`,
+                newValue: {
+                  addressId: savedCustomerAddress.id,
+                  fullAddress: savedCustomerAddress.fullAddress,
+                  isDefault: true,
+                },
+              },
+              manager,
+            );
+          }
         }
 
-        if (certificateUrl) {
-          mediaEntries.push(
-            manager.create(PurohitMedia, {
-              purohitId: profile.id,
-              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-              documentType: 'CERTIFICATE',
-              mediaUrl: certificateUrl,
-            }),
-          );
+        // 6. Delete OTP record after verification (skip if bypassed via purohitId)
+        if (otpRecord.id) {
+          await manager.delete(Otp, { id: otpRecord.id });
         }
 
-        if (templeAffiliationProofUrl) {
-          mediaEntries.push(
-            manager.create(PurohitMedia, {
-              purohitId: profile.id,
-              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-              documentType: 'TEMPLE_PROOF',
-              mediaUrl: templeAffiliationProofUrl,
-            }),
-          );
-        }
-
-        if (mediaEntries.length > 0) {
-          await manager.save(PurohitMedia, mediaEntries);
-        }
-      }
-
-      // 6. Delete OTP record after verification (skip if bypassed via purohitId)
-      if (otpRecord.id) {
-        await manager.delete(Otp, { id: otpRecord.id });
-      }
-
-      await this.auditLogService.createAuditLog(
-        {
-          actorId: saved.id,
-          actorType: ACTOR_TYPE.USER,
-          actorRole: saved.role,
-          module: AUDIT_MODULE.USER,
-          entity: 'User',
-          entityId: String(saved.id),
-          action: 'USER_REGISTERED',
-          message: `User ${saved.username || saved.email || saved.phone} registered as ${saved.role}.`,
-          oldValue: undefined,
-          newValue: {
-            role: saved.role,
-            email: saved.email,
-            phone: saved.phone,
+        await this.auditLogService.createAuditLog(
+          {
+            actorId: saved.id,
+            actorType: ACTOR_TYPE.USER,
+            actorRole: saved.role,
+            module: AUDIT_MODULE.USER,
+            entity: 'User',
+            entityId: String(saved.id),
+            action: 'USER_REGISTERED',
+            message: `User ${saved.username || saved.email || saved.phone} registered as ${saved.role}.`,
+            oldValue: undefined,
+            newValue: {
+              role: saved.role,
+              email: saved.email,
+              phone: saved.phone,
+            },
           },
-        },
-        manager,
-      );
+          manager,
+        );
 
-      return saved;
-    });
+        return { saved, savedCustomerAddress };
+      });
 
     // 7. Send Registration Email to Customer or Purohit
     if (savedUser.email) {
@@ -2958,6 +3092,7 @@ export class UserService {
     return {
       message: 'User registration successful',
       ...data,
+      ...(savedCustomerAddress && { address: savedCustomerAddress }),
     };
   }
 

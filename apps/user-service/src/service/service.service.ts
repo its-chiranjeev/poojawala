@@ -443,30 +443,81 @@ export class ServiceService {
         continue;
       }
 
-      // Check duplicate
+      // Check duplicate (including soft-deleted records)
       const existing = await this.PurohitServiceRepository.findOne({
         where: {
           purohitId: purohitProfile.id,
           serviceId: serviceDto.serviceId,
         },
+        withDeleted: true,
       });
 
       if (existing) {
-        failed.push({
-          serviceId: serviceDto.serviceId,
-          reason: ['Service already added'],
+        if (!existing.deletedAt) {
+          failed.push({
+            serviceId: serviceDto.serviceId,
+            reason: ['Service already added'],
+          });
+          continue;
+        }
+
+        // Service was previously soft-deleted: restore and update with new settings
+        await this.PurohitServiceRepository.restore(existing.id);
+        await this.PurohitServiceRepository.update(existing.id, {
+          deletedAt: null as any,
+          isOnline: serviceDto.isOnline ?? existing.isOnline,
+          isOffline: serviceDto.isOffline ?? existing.isOffline,
+          onlinePrice: serviceDto.onlinePrice ?? existing.onlinePrice,
+          offlinePrice: serviceDto.offlinePrice ?? existing.offlinePrice,
+          durationMinutes: serviceDto.durationMinutes ?? existing.durationMinutes,
+          isActive: serviceDto.isActive ?? true,
         });
+
+        const restored = await this.PurohitServiceRepository.findById(existing.id);
+        if (restored) added.push(restored);
         continue;
       }
 
-      // Save
+      // Save new
       const entity = this.PurohitServiceRepository.create({
         ...serviceDto,
         purohitId: purohitProfile.id,
       });
 
-      const saved = await this.PurohitServiceRepository.save(entity);
-      added.push(saved);
+      try {
+        const saved = await this.PurohitServiceRepository.save(entity);
+        added.push(saved);
+      } catch (err: any) {
+        if (
+          err.code === '23505' ||
+          err.message?.includes('duplicate key') ||
+          err.message?.includes('unique constraint')
+        ) {
+          const softDeleted = await this.PurohitServiceRepository.findOne({
+            where: {
+              purohitId: purohitProfile.id,
+              serviceId: serviceDto.serviceId,
+            },
+            withDeleted: true,
+          });
+          if (softDeleted) {
+            await this.PurohitServiceRepository.restore(softDeleted.id);
+            await this.PurohitServiceRepository.update(softDeleted.id, {
+              deletedAt: null as any,
+              isOnline: serviceDto.isOnline ?? softDeleted.isOnline,
+              isOffline: serviceDto.isOffline ?? softDeleted.isOffline,
+              onlinePrice: serviceDto.onlinePrice ?? softDeleted.onlinePrice,
+              offlinePrice: serviceDto.offlinePrice ?? softDeleted.offlinePrice,
+              durationMinutes: serviceDto.durationMinutes ?? softDeleted.durationMinutes,
+              isActive: serviceDto.isActive ?? true,
+            });
+            const restored = await this.PurohitServiceRepository.findById(softDeleted.id);
+            if (restored) added.push(restored);
+            continue;
+          }
+        }
+        throw err;
+      }
     }
 
     return {

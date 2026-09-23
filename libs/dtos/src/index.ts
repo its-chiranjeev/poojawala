@@ -5,6 +5,8 @@ export * from './auth/register-user.dto';
 export * from './auth/register.dto';
 export * from './auth/update-user.dto';
 export * from './auth/verify-otp.dto';
+export * from './auth/google-auth.dto';
+export * from './auth/switch-intent.dto';
 export * from './booking/assign-booking.dto';
 export * from './booking/booking-query.dto';
 export * from './booking/cancel-booking.dto';

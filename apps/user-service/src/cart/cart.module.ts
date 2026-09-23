@@ -6,6 +6,7 @@ import {
   Cart,
   CartItem,
   Payment,
+  PaymentBooking,
   Product,
 } from '@poojawala/entities';
 import {
@@ -18,6 +19,10 @@ import {
 } from '@poojawala/repositories';
 import { S3Module } from '@poojawala/s3';
 import { CommonModule } from '@poojawala/common';
+import { NotificationModule } from '@poojawala/notification';
+import { GatewayModule } from '@poojawala/gateway';
+import { EmailServicesModule } from '@poojawala/email-services';
+import { PaymentService } from 'apps/payment-service/src/payment/payment.service';
 import { CartController } from './cart.controller';
 import { CartService } from './cart.service';
 
@@ -30,13 +35,18 @@ import { CartService } from './cart.service';
       Booking,
       BookingProduct,
       Payment,
+      PaymentBooking,
     ]),
     CommonModule,
     S3Module,
+    NotificationModule,
+    GatewayModule,
+    EmailServicesModule,
   ],
   controllers: [CartController],
   providers: [
     CartService,
+    PaymentService,
     CartRepository,
     CartItemRepository,
     ProductRepository,

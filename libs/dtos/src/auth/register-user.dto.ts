@@ -1,6 +1,6 @@
-import { USER_ROLE, QUALIFICATION, PUROHIT_PAYMENT_METHOD } from '@poojawala/entities';
-import { Transform } from 'class-transformer';
-import { IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, ValidateIf, IsNumber } from 'class-validator';
+import { USER_ROLE, QUALIFICATION, PUROHIT_PAYMENT_METHOD, VENUE_TYPE } from '@poojawala/entities';
+import { Transform, Type } from 'class-transformer';
+import { IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, ValidateIf, IsNumber, Min, Max } from 'class-validator';
 
 export class OtpDto {
   @IsOptional()
@@ -175,6 +175,47 @@ export class RegisterNormalUserDto {
   @IsString()
   @Transform(({ value }) => value?.trim())
   upiId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  fullAddress?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  addressLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  state?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  pincode?: string;
+
+  @IsOptional()
+  @IsEnum(VENUE_TYPE)
+  venueType?: VENUE_TYPE;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  latitude?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  longitude?: number;
+
+  @IsOptional()
+  address?: any;
 }
 
 export class GenerateOtpDto {

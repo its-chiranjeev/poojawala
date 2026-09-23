@@ -9,7 +9,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import Razorpay from 'razorpay';
+import { PaymentService } from 'apps/payment-service/src/payment/payment.service';
 import {
   Booking,
   BOOKING_STATUS,
@@ -82,7 +82,6 @@ export interface CheckoutResponse {
 @Injectable()
 export class CartService {
   private readonly logger = new Logger(CartService.name);
-  private readonly razorpay: Razorpay;
 
   constructor(
     private readonly cartRepository: CartRepository,
@@ -92,26 +91,9 @@ export class CartService {
     private readonly bookingProductRepository: BookingProductRepository,
     private readonly paymentRepository: PaymentRepository,
     private readonly dataSource: DataSource,
+    private readonly paymentService: PaymentService,
     @Optional() private readonly s3Service?: S3Service,
-  ) {
-    const keyId = process.env['RAZORPAY_KEY_ID'] || 'rzp_test_placeholder';
-    const keySecret =
-      process.env['RAZORPAY_KEY_SECRET'] || 'placeholder_secret';
-
-    if (
-      !process.env['RAZORPAY_KEY_ID'] ||
-      !process.env['RAZORPAY_KEY_SECRET']
-    ) {
-      this.logger.warn(
-        'Razorpay credentials are not fully configured in environment',
-      );
-    }
-
-    this.razorpay = new Razorpay({
-      key_id: keyId,
-      key_secret: keySecret,
-    });
-  }
+  ) {}
 
   /**
    * Helper to format cart items with dynamic, DB-sourced prices.
@@ -457,7 +439,7 @@ export class CartService {
         const bookingProductRepo = manager.getRepository(BookingProduct);
 
         const payment = paymentRepo.create({
-          paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+          paymentType: PAYMENT_TYPE.PRODUCT_PAYMENT,
           bookingId: booking ? booking.id : undefined,
           createdById: user.id,
           payerId: user.id,
@@ -505,53 +487,31 @@ export class CartService {
       },
     );
 
-    // Step B: External Razorpay Payment Link creation (outside DB transaction)
+    // Step B: External Razorpay Payment Link creation (delegated to PaymentService)
     const amountInPaise = Math.round(totalAmount * 100);
     const customerName =
       [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Customer';
 
     try {
-      const paymentLink = await this.razorpay.paymentLink.create({
-        amount: amountInPaise,
-        currency: 'INR',
-        accept_partial: false,
-        description: booking
-          ? `Payment for items attached to Booking #${booking.bookingNumber}`
-          : `Poojawala Product Purchase #${savedPayment.id}`,
-        customer: {
+      const paymentLink = await this.paymentService.createRazorpayPaymentLink(
+        savedPayment,
+        booking,
+        {
           name: customerName,
           ...(user.email ? { email: user.email } : {}),
           ...(user.phone ? { contact: user.phone } : {}),
         },
-        notify: {
-          sms: Boolean(user.phone),
-          email: Boolean(user.email),
-        },
-        reminder_enable: true,
-        reference_id: `payment_${savedPayment.id}`,
-        notes: {
+        booking
+          ? `Payment for items attached to Booking #${booking.bookingNumber}`
+          : `Poojawala Product Purchase #${savedPayment.id}`,
+        {
           paymentId: String(savedPayment.id),
           bookingId: String(booking?.id ?? ''),
           bookingNumber: booking?.bookingNumber ?? '',
           customerId: String(user.id),
           isCartCheckout: 'true',
         },
-        ...(dto.callbackUrl
-          ? {
-            callback_url: dto.callbackUrl,
-            callback_method: 'get' as const,
-          }
-          : {}),
-      } as unknown as Parameters<Razorpay['paymentLink']['create']>[0]);
-
-      if (!paymentLink?.id || !paymentLink?.short_url) {
-        throw new InternalServerErrorException(
-          'Invalid payment-link response received from Razorpay',
-        );
-      }
-
-      savedPayment.razorpayPaymentLinkId = paymentLink.id;
-      await this.paymentRepository.savePayment(savedPayment);
+      );
 
       return {
         paymentId: savedPayment.id,
@@ -568,13 +528,8 @@ export class CartService {
         throw error;
       }
 
-      const razorpayErr = error as {
-        message?: string;
-        error?: { description?: string };
-      };
       const errorMessage =
-        razorpayErr?.error?.description ||
-        razorpayErr?.message ||
+        (error as { message?: string })?.message ||
         'Razorpay payment link creation failed';
 
       // Mark payment as failed if Razorpay creation failed
