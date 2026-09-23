@@ -9,7 +9,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { PaymentService } from 'apps/payment-service/src/payment/payment.service';
+import { PaymentService } from '../../../payment-service/src/payment/payment.service';
 import {
   Booking,
   BOOKING_STATUS,
@@ -506,10 +506,11 @@ export class CartService {
           : `Poojawala Product Purchase #${savedPayment.id}`,
         {
           paymentId: String(savedPayment.id),
+          customerId: String(user.id),
+          paymentType: String(savedPayment.paymentType),
+          isCartCheckout: 'true',
           bookingId: String(booking?.id ?? ''),
           bookingNumber: booking?.bookingNumber ?? '',
-          customerId: String(user.id),
-          isCartCheckout: 'true',
         },
       );
 

@@ -207,6 +207,7 @@ export interface PaymentDetailsResponse {
   payeeId: number | null;
 
   amount: number;
+  customerPaidAmount?: number | null;
   currency: string;
 
   status: PAYMENT_STATUS;
@@ -220,6 +221,8 @@ export interface PaymentDetailsResponse {
   razorpayPaymentLinkId: string | null;
   razorpayPaymentId: string | null;
   razorpayRefundId: string | null;
+  razorpayFee?: number | null;
+  razorpayTax?: number | null;
 
   bankTransferReference: string | null;
   failureReason: string | null;
@@ -231,6 +234,14 @@ export interface PaymentDetailsResponse {
   providerDetails: PaymentProviderDetails | null;
 
   source: 'RAZORPAY_WITH_DB_FALLBACK' | 'DATABASE_ONLY';
+
+  razorpay?: {
+    paymentId: string | null;
+    paymentLinkId: string | null;
+    customerPaidAmount: number | null;
+    fee: number | null;
+    tax: number | null;
+  } | null;
 }
 
 export interface BookingPaymentLinkResponse {
@@ -259,6 +270,8 @@ export interface RazorpayWebhookPaymentEntity {
   amount?: number;
   currency?: string;
   method?: string;
+  fee?: number;
+  tax?: number;
   error_description?: string | null;
   created_at?: number;
 
@@ -1031,6 +1044,8 @@ export class PaymentService {
       payment.status === PAYMENT_STATUS.SUCCESS &&
       (!razorpayPayment?.id || payment.razorpayPaymentId === razorpayPayment.id)
     ) {
+      await this.populateRazorpayMetadata(payment, razorpayPayment, paymentLink);
+      await this.paymentRepository.savePayment(payment);
       this.logger.log(
         `Duplicate payment_link.paid webhook ignored for payment ${payment.id}`,
       );
@@ -1058,6 +1073,8 @@ export class PaymentService {
     payment.paidAt = razorpayPayment?.created_at
       ? new Date(razorpayPayment.created_at * 1000)
       : new Date();
+
+    await this.populateRazorpayMetadata(payment, razorpayPayment, paymentLink);
 
     await this.finalizeSuccessfulPayment(payment);
 
@@ -1180,12 +1197,16 @@ export class PaymentService {
       payment.status === PAYMENT_STATUS.SUCCESS &&
       payment.razorpayPaymentId === razorpayPayment.id
     ) {
+      await this.populateRazorpayMetadata(payment, razorpayPayment, undefined);
+      await this.paymentRepository.savePayment(payment);
       return;
     }
 
     payment.status = PAYMENT_STATUS.SUCCESS;
 
-    payment.razorpayPaymentId = razorpayPayment.id;
+    if (razorpayPayment.id) {
+      payment.razorpayPaymentId = razorpayPayment.id;
+    }
 
     if (razorpayPayment.order_id) {
       payment.razorpayOrderId = razorpayPayment.order_id;
@@ -1202,6 +1223,8 @@ export class PaymentService {
       ? new Date(razorpayPayment.created_at * 1000)
       : new Date();
 
+    await this.populateRazorpayMetadata(payment, razorpayPayment, undefined);
+
     await this.finalizeSuccessfulPayment(payment);
 
     await this.auditLogService.createAuditLog({
@@ -1213,12 +1236,66 @@ export class PaymentService {
       entityId: String(payment.id),
       action: 'PAYMENT_SUCCESS',
       message: `Payment #${payment.id} completed successfully via Razorpay Webhook (captured).`,
-      oldValue: { status: PAYMENT_STATUS.PENDING },
       newValue: {
         status: PAYMENT_STATUS.SUCCESS,
         razorpayPaymentId: payment.razorpayPaymentId,
       },
     });
+  }
+
+  private async populateRazorpayMetadata(
+    payment: Payment,
+    razorpayPayment?: RazorpayWebhookPaymentEntity,
+    paymentLink?: RazorpayWebhookPaymentLinkEntity,
+  ): Promise<void> {
+    if (razorpayPayment?.id) {
+      payment.razorpayPaymentId = razorpayPayment.id;
+    }
+    if (paymentLink?.id) {
+      payment.razorpayPaymentLinkId = paymentLink.id;
+    }
+    if (razorpayPayment?.order_id) {
+      payment.razorpayOrderId = razorpayPayment.order_id;
+    }
+
+    if (razorpayPayment?.amount != null) {
+      payment.customerPaidAmount = Number(razorpayPayment.amount) / 100;
+    } else if (paymentLink?.amount_paid != null) {
+      payment.customerPaidAmount = Number(paymentLink.amount_paid) / 100;
+    }
+
+    let fee =
+      razorpayPayment?.fee != null ? Number(razorpayPayment.fee) / 100 : null;
+    let tax =
+      razorpayPayment?.tax != null ? Number(razorpayPayment.tax) / 100 : null;
+
+    if (razorpayPayment?.id) {
+      try {
+        const fetched = await this.razorpay.payments.fetch(razorpayPayment.id);
+        if (fetched) {
+          if (fee == null && fetched.fee != null) {
+            fee = Number(fetched.fee) / 100;
+          }
+          if (tax == null && fetched.tax != null) {
+            tax = Number(fetched.tax) / 100;
+          }
+          if (payment.customerPaidAmount == null && fetched.amount != null) {
+            payment.customerPaidAmount = Number(fetched.amount) / 100;
+          }
+        }
+      } catch (fetchErr: any) {
+        this.logger.warn(
+          `Could not fetch additional Razorpay payment metadata for ${razorpayPayment.id}: ${fetchErr?.message}`,
+        );
+      }
+    }
+
+    if (fee != null) {
+      payment.razorpayFee = fee;
+    }
+    if (tax != null) {
+      payment.razorpayTax = tax;
+    }
   }
 
   private async handlePaymentFailed(
@@ -2055,6 +2132,11 @@ export class PaymentService {
 
       amount,
 
+      customerPaidAmount:
+        payment.customerPaidAmount != null
+          ? Number(payment.customerPaidAmount)
+          : null,
+
       currency: razorpayPayment?.currency ?? payment.currency,
 
       status: responseStatus,
@@ -2087,6 +2169,16 @@ export class PaymentService {
         razorpayPayment?.id ?? payment.razorpayPaymentId ?? null,
 
       razorpayRefundId: payment.razorpayRefundId ?? null,
+
+      razorpayFee:
+        payment.razorpayFee != null
+          ? Number(payment.razorpayFee)
+          : fee,
+
+      razorpayTax:
+        payment.razorpayTax != null
+          ? Number(payment.razorpayTax)
+          : tax,
 
       bankTransferReference: payment.bankTransferReference ?? null,
 
@@ -2150,6 +2242,31 @@ export class PaymentService {
         : null,
 
       source: razorpayPayment ? 'RAZORPAY_WITH_DB_FALLBACK' : 'DATABASE_ONLY',
+
+      razorpay:
+        payment.razorpayPaymentId ||
+          razorpayPayment?.id ||
+          payment.razorpayPaymentLinkId
+          ? {
+            paymentId:
+              payment.razorpayPaymentId ?? razorpayPayment?.id ?? null,
+            paymentLinkId: payment.razorpayPaymentLinkId ?? null,
+            customerPaidAmount:
+              payment.customerPaidAmount != null
+                ? Number(payment.customerPaidAmount)
+                : razorpayPayment?.amount != null
+                  ? Number(razorpayPayment.amount) / 100
+                  : null,
+            fee:
+              payment.razorpayFee != null
+                ? Number(payment.razorpayFee)
+                : fee,
+            tax:
+              payment.razorpayTax != null
+                ? Number(payment.razorpayTax)
+                : tax,
+          }
+          : null,
     };
   }
 

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CartService } from './cart.service';
+import { PaymentService } from '../../../payment-service/src/payment/payment.service';
 import {
   BookingProductRepository,
   BookingRepository,
@@ -38,6 +39,7 @@ describe('CartService', () => {
   let bookingProductRepository: jest.Mocked<BookingProductRepository>;
   let paymentRepository: jest.Mocked<PaymentRepository>;
   let dataSource: jest.Mocked<DataSource>;
+  let paymentService: { createRazorpayPaymentLink: jest.Mock };
 
   const customerUser: User = {
     id: 1,
@@ -189,6 +191,16 @@ describe('CartService', () => {
       }),
     } as unknown as jest.Mocked<DataSource>;
 
+    paymentService = {
+      createRazorpayPaymentLink: jest.fn().mockResolvedValue({
+        id: 'plink_test123',
+        short_url: 'https://rzp.io/i/test1234',
+        currency: 'INR',
+        amount: 99800,
+        status: 'created',
+      }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CartService,
@@ -202,6 +214,7 @@ describe('CartService', () => {
         },
         { provide: PaymentRepository, useValue: paymentRepository },
         { provide: DataSource, useValue: dataSource },
+        { provide: PaymentService, useValue: paymentService },
       ],
     }).compile();
 
@@ -475,15 +488,10 @@ describe('CartService', () => {
       };
       cartRepository.findCartWithItems.mockResolvedValueOnce(cartWithItem);
 
-      // Mock Razorpay paymentLink.create
-      (service as any).razorpay = {
-        paymentLink: {
-          create: jest.fn().mockResolvedValue({
-            id: 'plink_test123',
-            short_url: 'https://rzp.io/i/test1234',
-          }),
-        },
-      };
+      paymentService.createRazorpayPaymentLink.mockResolvedValueOnce({
+        id: 'plink_test123',
+        short_url: 'https://rzp.io/i/test1234',
+      });
 
       const result = await service.checkout(customerUser, {});
       expect(result.amount).toBe(998);

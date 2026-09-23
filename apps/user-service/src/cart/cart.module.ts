@@ -22,7 +22,7 @@ import { CommonModule } from '@poojawala/common';
 import { NotificationModule } from '@poojawala/notification';
 import { GatewayModule } from '@poojawala/gateway';
 import { EmailServicesModule } from '@poojawala/email-services';
-import { PaymentService } from 'apps/payment-service/src/payment/payment.service';
+import { PaymentService } from '../../../payment-service/src/payment/payment.service';
 import { CartController } from './cart.controller';
 import { CartService } from './cart.service';
 
