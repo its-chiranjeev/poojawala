@@ -31,6 +31,8 @@ import {
   Order,
   ORDER_STATUS,
   ORDER_PAYMENT_STATUS,
+  ORDER_PAYMENT_METHOD,
+  ShippingAddressSnapshot,
   User,
   USER_ROLE,
   BANK_VERIFICATION_STATUS,
@@ -46,7 +48,10 @@ import {
   AdminCreatePurohitPayoutDto,
 } from '@poojawala/dtos';
 
-import { paymentInvoiceTemplate } from './templates/invoice.template';
+import {
+  paymentInvoiceTemplate,
+  InvoiceOrderItem,
+} from './templates/invoice.template';
 import { NotificationService } from '@poojawala/notification';
 import {
   NOTIFICATION_TYPE,
@@ -591,7 +596,7 @@ export class PaymentService {
     await this.notificationService.createNotification(
       purohitProfile.userId,
       'Payout Processed',
-      `A payout of ₹${payoutAmount} has been processed for Booking #${booking.bookingNumber}.`,
+      `A payout of ₹${payoutAmount} has been processed for Booking B-${booking.id}.`,
       NOTIFICATION_TYPE.PAYOUT,
       savedPayout.id,
       'PAYOUT',
@@ -1626,6 +1631,16 @@ export class PaymentService {
     buffer: Buffer;
     filename: string;
   }> {
+    return this.generateBookingInvoicePdf(user, bookingId);
+  }
+
+  async generateBookingInvoicePdf(
+    user: User,
+    bookingId: number,
+  ): Promise<{
+    buffer: Buffer;
+    filename: string;
+  }> {
     const booking = await this.bookingRepository.findBookingById(bookingId);
 
     if (!booking) {
@@ -1671,86 +1686,253 @@ export class PaymentService {
       : `PROFORMA-${booking.bookingNumber}`;
 
     const html = paymentInvoiceTemplate({
+      invoiceType: 'BOOKING',
       companyName: process.env['POOJAWALA_COMPANY_NAME'] ?? 'Poojawala',
-
       companyEmail: process.env['POOJAWALA_COMPANY_EMAIL'] ?? '-',
-
       companyPhone: process.env['POOJAWALA_COMPANY_PHONE'] ?? '-',
-
       companyAddress: process.env['POOJAWALA_COMPANY_ADDRESS'] ?? '-',
-
       companyGstin: process.env['POOJAWALA_GSTIN'] ?? '-',
-
       billingAddress: this.getBillingAddress(booking),
-
       purohitName: this.getPurohitName(booking),
-
       invoiceTitle,
       invoiceId,
-
       dateLabel: isPaid ? 'Payment Date' : 'Invoice Date',
-
       bookingId: booking.id,
-
       bookingNumber: booking.bookingNumber,
-
       customerName: this.getCustomerName(booking),
-
       customerEmail: booking.customer?.email ?? '-',
-
       customerPhone: booking.customer?.phone ?? '-',
-
       serviceName: booking.service?.name ?? '-',
-
       bookingStatus: booking.status,
-
       paymentId: String(
         razorpayPayment?.id ?? payment.razorpayPaymentId ?? '-',
       ),
-
       orderId: String(
         razorpayPayment?.order_id ?? payment.razorpayOrderId ?? '-',
       ),
-
       paymentMethod:
         payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH
           ? 'Cash'
           : this.formatPaymentMethod(
             razorpayPayment?.method ?? payment.paymentMethod ?? '-',
           ),
-
       paymentStatus: this.getPaymentStatusDisplay(finalStatus),
-
       statusClass: this.getStatusClass(finalStatus),
-
       currency: String(razorpayPayment?.currency ?? payment.currency ?? 'INR'),
-
       amount: amount.toFixed(2),
-
       finalAmount: Number(booking.finalAmount).toFixed(2),
-
       donationAmount: Number(booking.donationAmount ?? 0).toFixed(2),
-
       discountAmount: Number(booking.discountAmount ?? 0).toFixed(2),
-
       date: new Date(payment.paidAt ?? payment.createdAt).toLocaleString(
         'en-IN',
         {
           timeZone: 'Asia/Kolkata',
         },
       ),
-
       errorMessage: String(
         razorpayPayment?.error_description ?? payment.failureReason ?? '-',
       ),
     });
 
+    return this.renderHtmlToPdf(
+      html,
+      `invoice-${booking.bookingNumber}.pdf`,
+      `booking ${booking.id}`,
+    );
+  }
+
+  async generateOrderInvoicePdf(
+    user: User,
+    orderId: number,
+  ): Promise<{
+    buffer: Buffer;
+    filename: string;
+  }> {
+    const order = await this.findOrderForInvoice(orderId);
+
+    if (!order) {
+      throw new NotFoundException(`Order ORD-${orderId} not found`);
+    }
+
+    const canDownload =
+      user.role === USER_ROLE.ADMIN ||
+      order.customerId === user.id;
+
+    if (!canDownload) {
+      throw new ForbiddenException(
+        'You are not allowed to download this invoice',
+      );
+    }
+
+    let payment = order.payment;
+    if (!payment && order.paymentId) {
+      payment =
+        (await this.paymentRepository.findOne({
+          where: { id: order.paymentId },
+        })) ?? undefined;
+    }
+
+    const razorpayPayment = payment
+      ? await this.resolveRazorpayPayment(payment)
+      : undefined;
+
+    const isPaid = order.paymentStatus === ORDER_PAYMENT_STATUS.PAID;
+
+    const invoiceTitle = isPaid
+      ? 'Poojawala Tax Invoice'
+      : 'Poojawala Proforma Invoice';
+
+    const invoiceId = isPaid
+      ? `INV-${order.orderNumber}`
+      : `PROFORMA-${order.orderNumber}`;
+
+    const totalAmount = Number(order.totalAmount);
+    const subtotal = Number(order.subtotal ?? totalAmount);
+    const discountAmount = Number(order.discountAmount ?? 0);
+
+    const paidAmount = isPaid
+      ? (razorpayPayment?.amount != null
+        ? Number(razorpayPayment.amount) / 100
+        : (payment?.amount != null ? Number(payment.amount) : totalAmount))
+      : 0;
+
+    const paymentMethodDisplay =
+      order.paymentMethod === ORDER_PAYMENT_METHOD.COD
+        ? 'Cash on Delivery (COD)'
+        : (payment?.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH
+          ? 'Cash'
+          : this.formatPaymentMethod(
+            razorpayPayment?.method ?? payment?.paymentMethod ?? 'ONLINE',
+          ));
+
+    const paymentStatusDisplay = isPaid
+      ? 'Paid'
+      : order.paymentStatus === ORDER_PAYMENT_STATUS.COD_PENDING
+        ? 'COD Pending'
+        : order.paymentStatus === ORDER_PAYMENT_STATUS.FAILED
+          ? 'Failed'
+          : order.paymentStatus === ORDER_PAYMENT_STATUS.REFUNDED
+            ? 'Refunded'
+            : 'Pending';
+
+    const statusClass = isPaid
+      ? 'success'
+      : order.paymentStatus === ORDER_PAYMENT_STATUS.FAILED
+        ? 'failed'
+        : order.paymentStatus === ORDER_PAYMENT_STATUS.REFUNDED
+          ? 'refunded'
+          : 'pending';
+
+    const orderItems: InvoiceOrderItem[] = (order.items || []).map((item) => ({
+      productName: item.productNameSnapshot || 'Product',
+      quantity: Number(item.quantity) || 1,
+      unitPrice: Number(item.unitPriceSnapshot) || 0,
+      totalAmount: Number(item.totalAmount) || 0,
+    }));
+
+    const customerName =
+      order.shippingAddressSnapshot?.name?.trim() ||
+      (order.customer
+        ? [order.customer.firstName, order.customer.lastName].filter(Boolean).join(' ')
+        : 'Customer');
+
+    const customerPhone =
+      order.shippingAddressSnapshot?.phone?.trim() ||
+      order.customer?.phone ||
+      '-';
+
+    const customerEmail = order.customer?.email || '-';
+
+    const billingAddress = this.formatOrderAddress(order.shippingAddressSnapshot);
+
+    const html = paymentInvoiceTemplate({
+      invoiceType: 'ORDER',
+      companyName: process.env['POOJAWALA_COMPANY_NAME'] ?? 'Poojawala',
+      companyEmail: process.env['POOJAWALA_COMPANY_EMAIL'] ?? '-',
+      companyPhone: process.env['POOJAWALA_COMPANY_PHONE'] ?? '-',
+      companyAddress: process.env['POOJAWALA_COMPANY_ADDRESS'] ?? '-',
+      companyGstin: process.env['POOJAWALA_GSTIN'] ?? '-',
+      billingAddress,
+      customerName,
+      customerEmail,
+      customerPhone,
+      invoiceTitle,
+      invoiceId,
+      dateLabel: isPaid ? 'Payment Date' : 'Order Date',
+      orderNumber: order.orderNumber,
+      orderStatus: order.orderStatus,
+      orderItems,
+      subtotal: subtotal.toFixed(2),
+      discountAmount: discountAmount.toFixed(2),
+      feeAmount: '0.00',
+      taxAmount: '0.00',
+      paymentId: String(
+        razorpayPayment?.id ??
+        payment?.razorpayPaymentId ??
+        (order.paymentId
+          ? `PAY-${order.paymentId}`
+          : order.paymentMethod === ORDER_PAYMENT_METHOD.COD && isPaid
+            ? `COD-${order.id}`
+            : '-'),
+      ),
+      orderId: `ORD-${order.id}`,
+      razorpayOrderId: String(
+        razorpayPayment?.order_id ?? payment?.razorpayOrderId ?? '-',
+      ),
+      paymentMethod: paymentMethodDisplay,
+      paymentStatus: paymentStatusDisplay,
+      statusClass,
+      currency: String(razorpayPayment?.currency ?? payment?.currency ?? 'INR'),
+      amount: paidAmount.toFixed(2),
+      finalAmount: totalAmount.toFixed(2),
+      date: new Date(payment?.paidAt ?? order.createdAt).toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+      }),
+      errorMessage: String(
+        razorpayPayment?.error_description ?? payment?.failureReason ?? '-',
+      ),
+    });
+
+    return this.renderHtmlToPdf(
+      html,
+      `invoice-${order.orderNumber}.pdf`,
+      `order ${order.id}`,
+    );
+  }
+
+  private async findOrderForInvoice(orderId: number): Promise<Order | null> {
+    const orderRepo = this.dataSource.getRepository(Order);
+    return orderRepo.findOne({
+      where: { id: orderId },
+      relations: ['items', 'payment', 'customer'],
+    });
+  }
+
+  private formatOrderAddress(snapshot?: ShippingAddressSnapshot | null): string {
+    if (!snapshot) return '-';
+    const parts = [
+      snapshot.addressLine1,
+      snapshot.addressLine2,
+      snapshot.city,
+      snapshot.state,
+      snapshot.pincode,
+    ].filter((p): p is string => Boolean(p && p.trim()));
+    return parts.length > 0 ? parts.join(', ') : '-';
+  }
+
+  private async renderHtmlToPdf(
+    html: string,
+    filename: string,
+    logContext: string,
+  ): Promise<{
+    buffer: Buffer;
+    filename: string;
+  }> {
     let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
 
     try {
       browser = await puppeteer.launch({
         headless: true,
-
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
       });
 
@@ -1767,12 +1949,11 @@ export class PaymentService {
 
       return {
         buffer: Buffer.from(pdfBuffer),
-
-        filename: `invoice-${booking.bookingNumber}.pdf`,
+        filename,
       };
     } catch (error) {
       this.logger.error(
-        `Invoice generation failed for booking ${booking.id}`,
+        `Invoice generation failed for ${logContext}`,
         error instanceof Error ? error.stack : String(error),
       );
 
@@ -3047,6 +3228,7 @@ export class PaymentService {
       payment.booking?.status === BOOKING_STATUS.COMPLETED;
     const wasPaymentPaid =
       payment.booking?.paymentStatus === BOOKING_PAYMENT_STATUS.PAID;
+    let wasOrderAlreadyPaid = false;
 
     await this.dataSource.transaction(async (manager) => {
       await manager.save(Payment, payment);
@@ -3122,9 +3304,14 @@ export class PaymentService {
         });
 
         if (order) {
-          if (order.paymentStatus !== ORDER_PAYMENT_STATUS.PAID) {
+          if (order.paymentStatus === ORDER_PAYMENT_STATUS.PAID) {
+            wasOrderAlreadyPaid = true;
+          } else {
             order.paymentStatus = ORDER_PAYMENT_STATUS.PAID;
-            if (order.orderStatus === ORDER_STATUS.PENDING_PAYMENT) {
+            if (
+              order.orderStatus === ORDER_STATUS.PENDING_PAYMENT ||
+              order.orderStatus === ORDER_STATUS.EXPIRED
+            ) {
               order.orderStatus = ORDER_STATUS.CONFIRMED;
             }
             await orderRepo.save(order);
@@ -3143,40 +3330,72 @@ export class PaymentService {
       }
     });
 
-    if (payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT && payment.payerId) {
+    if (
+      payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT &&
+      payment.payerId &&
+      !wasOrderAlreadyPaid
+    ) {
       try {
         const order = await this.dataSource
           .getRepository(Order)
           .findOne({ where: { paymentId: payment.id } });
         const orderNumber = order?.orderNumber || String(payment.id);
+        const orderCode = order?.id ? `ORD-${order.id}` : `#${orderNumber}`;
+
+        const userRepo = this.dataSource.getRepository(User);
+        const payer = await userRepo.findOne({
+          where: { id: payment.payerId },
+        });
+        const customerName =
+          [payer?.firstName, payer?.lastName].filter(Boolean).join(' ') ||
+          'Customer';
+        const paymentReference = payment.razorpayPaymentId || `PAY-${payment.id}`;
 
         await this.notificationService.createNotification(
           payment.payerId,
           'Payment Successful',
-          `Your payment of ₹${payment.amount} for Order #${orderNumber} was successful.`,
+          `Your payment of ₹${payment.amount} for Order ${orderCode} was successful. Payment ID: ${paymentReference}.`,
           NOTIFICATION_TYPE.PAYMENT,
           order?.id || payment.id,
           'ORDER',
         );
 
+        // Real-time Socket.IO and DB notification for Admin on Payment Success
+        await this.notificationService.notifyAdmins(
+          'Order Payment Received',
+          `Order Payment Successful — Order ${orderCode} has been successfully paid by ${customerName}. Payment ID: ${paymentReference}. Amount: ₹${payment.amount}.`,
+          NOTIFICATION_TYPE.PAYMENT,
+          order?.id || payment.id,
+          'ORDER',
+          {
+            orderId: order?.id,
+            orderCode,
+            orderNumber: order?.orderNumber || orderCode,
+            customerId: payment.payerId,
+            customerName,
+            paymentId: payment.id,
+            razorpayPaymentId: payment.razorpayPaymentId,
+            paymentReference,
+            amount: payment.amount,
+            status: 'PAID',
+            paymentStatus: ORDER_PAYMENT_STATUS.PAID,
+          },
+        );
+
         if (this.emailService) {
-          const userRepo = this.dataSource.getRepository(User);
-          const payer = await userRepo.findOne({
-            where: { id: payment.payerId },
-          });
           if (payer?.email) {
-            const customerName =
+            const customerEmailName =
               [payer.firstName, payer.lastName].filter(Boolean).join(' ') ||
               'Devotee';
             const html = renderPoojawalaEmail({
               statusBadge: 'Payment Successful',
               userName: customerName,
-              preheaderText: `Payment confirmed for Order #${orderNumber}!`,
-              emailMessage: `We have received your payment of <strong>₹${payment.amount}</strong> for Order <strong>#${orderNumber}</strong>. Your order is confirmed and will be processed soon.`,
+              preheaderText: `Payment confirmed for Order ORD-${orderCode}!`,
+              emailMessage: `We have received your payment of <strong>₹${payment.amount}</strong> for Order <strong>#${orderCode}</strong>. Your order is confirmed and will be processed soon.`,
               detailsTable: {
                 title: 'Payment Receipt',
                 rows: [
-                  { label: 'Order Number', value: `#${orderNumber}` },
+                  { label: 'Order ID', value: `${orderCode}` },
                   { label: 'Payment ID', value: String(payment.id) },
                   {
                     label: 'Payment Method',
@@ -3187,6 +3406,7 @@ export class PaymentService {
                     value: `₹${payment.amount}`,
                     isHighlight: true,
                   },
+                  { label: 'Payment Status', value: 'PAID' },
                   { label: 'Order Status', value: 'CONFIRMED' },
                 ],
                 totalRow: {
@@ -3198,7 +3418,7 @@ export class PaymentService {
 
             await this.emailService.sendMail({
               to: payer.email,
-              subject: `Payment Successful - Poojawala | Order #${orderNumber}`,
+              subject: `Payment Successful - Poojawala | Order ${orderCode}`,
               html,
             });
           }
@@ -3233,7 +3453,7 @@ export class PaymentService {
         await this.notificationService.createNotification(
           payment.booking.customerId,
           'Booking Status Updated',
-          `Your booking #${payment.booking.bookingNumber} status has been updated to ${payment.booking.status}.`,
+          `Your booking B-${payment.booking.id} status has been updated to ${payment.booking.status}.`,
           NOTIFICATION_TYPE.BOOKING_STATUS,
           payment.booking.id,
           'BOOKING',
@@ -3337,7 +3557,7 @@ export class PaymentService {
             await this.notificationService.createNotification(
               purohitProfile.userId,
               'Booking Status Updated',
-              `Booking #${payment.booking.bookingNumber} status has been updated to ${payment.booking.status}.`,
+              `Booking B-${payment.booking.id} status has been updated to ${payment.booking.status}.`,
               NOTIFICATION_TYPE.BOOKING_STATUS,
               payment.booking.id,
               'BOOKING',
@@ -3517,5 +3737,249 @@ export class PaymentService {
         `Failed to send payment failure notification/email: ${err?.message}`,
       );
     }
+  }
+
+  /**
+   * Retries/initiates payment for an existing unpaid order.
+   * Validates customer ownership, order status, non-expired window,
+   * generates a new payment attempt record, and produces a Razorpay checkout payment link.
+   */
+  async createOrderPaymentRetry(user: User, orderId: number) {
+    if (user.role !== USER_ROLE.CUSTOMER) {
+      throw new ForbiddenException('Only customers can retry payment for an order');
+    }
+
+    const orderRepo = this.dataSource.getRepository(Order);
+    const order = await orderRepo.findOne({
+      where: { id: orderId, customerId: user.id },
+      relations: ['items'],
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Order #${orderId} not found`);
+    }
+
+    if (order.paymentStatus === ORDER_PAYMENT_STATUS.PAID) {
+      throw new BadRequestException('This order has already been paid');
+    }
+
+    if (order.orderStatus === ORDER_STATUS.CANCELLED) {
+      throw new BadRequestException('Cannot retry payment for a cancelled order');
+    }
+
+    if (
+      order.orderStatus === ORDER_STATUS.EXPIRED ||
+      (order.expiredAt && new Date(order.expiredAt).getTime() <= Date.now())
+    ) {
+      if (order.orderStatus !== ORDER_STATUS.EXPIRED) {
+        order.orderStatus = ORDER_STATUS.EXPIRED;
+        if (!order.expiredAt) {
+          order.expiredAt = new Date();
+        }
+        await orderRepo.save(order);
+      }
+      throw new BadRequestException(
+        'This order has expired. Please place a new order.',
+      );
+    }
+
+    if (order.orderStatus !== ORDER_STATUS.PENDING_PAYMENT) {
+      throw new BadRequestException('This order is not eligible for payment');
+    }
+
+    const totalAmount = Number(order.totalAmount);
+    const amountInPaise = Math.round(totalAmount * 100);
+
+    const savedPayment = await this.dataSource.transaction(async (manager) => {
+      const paymentRepo = manager.getRepository(Payment);
+      const oRepo = manager.getRepository(Order);
+
+      const payment = paymentRepo.create({
+        paymentType: PAYMENT_TYPE.PRODUCT_PAYMENT,
+        createdById: user.id,
+        payerId: user.id,
+        amount: totalAmount,
+        currency: 'INR',
+        customerPaymentMethod: CUSTOMER_PAYMENT_METHOD.ONLINE,
+        status: PAYMENT_STATUS.CREATED,
+        remark: `Payment retry for Order ORD-${order.id}`,
+      });
+
+      const newPayment = await paymentRepo.save(payment);
+
+      order.paymentId = newPayment.id;
+      order.paymentStatus = ORDER_PAYMENT_STATUS.PENDING;
+      // NOTE: order.expiredAt MUST REMAIN UNCHANGED
+      await oRepo.save(order);
+
+      return newPayment;
+    });
+
+    if (this.auditLogService) {
+      try {
+        await this.auditLogService.createAuditLog({
+          actorId: user.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: user.role,
+          module: AUDIT_MODULE.PAYMENT,
+          entity: 'Order',
+          entityId: String(order.id),
+          action: 'ORDER_PAYMENT_RETRY_INITIATED',
+          message: `Customer initiated payment retry for Order ORD-${order.id}.`,
+          newValue: {
+            paymentId: savedPayment.id,
+            amount: totalAmount,
+            status: savedPayment.status,
+          },
+          metadata: {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            paymentId: savedPayment.id,
+            amount: totalAmount,
+          },
+        });
+      } catch (err: any) {
+        this.logger.warn(`Failed to create payment retry audit: ${err?.message}`);
+      }
+    }
+
+    const customerName =
+      [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Customer';
+
+    const paymentLink = await this.createRazorpayPaymentLink(
+      savedPayment,
+      null,
+      {
+        name: customerName,
+        ...(user.email ? { email: user.email } : {}),
+        ...(user.phone ? { contact: user.phone } : {}),
+      },
+      `Poojawala Order #${order.orderNumber}`,
+      {
+        paymentId: String(savedPayment.id),
+        customerId: String(user.id),
+        orderId: String(order.id),
+        orderNumber: order.orderNumber,
+        paymentType: String(savedPayment.paymentType),
+        isCartCheckout: 'true',
+      },
+    );
+
+    // ── Notify customer & admin about the payment link initiation ──────────
+    const orderCode = `ORD-${order.id}`;
+    const paymentReference = `PAY-${savedPayment.id}`;
+
+    try {
+      // Customer: payment link is ready
+      await this.notificationService.createNotification(
+        user.id,
+        'Payment Link Generated',
+        `Your payment link for Order ${orderCode} is ready. Amount: ₹${totalAmount}. Please complete your payment before it expires.`,
+        NOTIFICATION_TYPE.PAYMENT,
+        order.id,
+        'ORDER',
+      );
+
+      // Admin: customer initiated a payment attempt
+      await this.notificationService.notifyAdmins(
+        'Order Payment Initiated',
+        `${customerName} has initiated payment for Order ${orderCode}. Amount: ₹${totalAmount}. Payment Ref: ${paymentReference}.`,
+        NOTIFICATION_TYPE.PAYMENT,
+        order.id,
+        'ORDER',
+        {
+          orderId: order.id,
+          orderCode,
+          orderNumber: order.orderNumber,
+          customerId: user.id,
+          customerName,
+          paymentId: savedPayment.id,
+          paymentReference,
+          amount: totalAmount,
+          status: 'INITIATED',
+        },
+      );
+
+      // Customer: email with clickable payment link
+      if (this.emailService && user.email) {
+        const html = renderPoojawalaEmail({
+          statusBadge: 'Payment Link Ready',
+          userName: customerName,
+          preheaderText: `Complete your payment for Order ${orderCode}`,
+          emailMessage: `Your payment link for Order <strong>${orderCode}</strong> has been generated. Please click the button below to complete your payment of <strong>₹${totalAmount}</strong> before it expires.`,
+          detailsTable: {
+            title: 'Order Payment Details',
+            rows: [
+              { label: 'Order ID', value: orderCode },
+              { label: 'Payment Ref', value: paymentReference },
+              { label: 'Amount Due', value: `₹${totalAmount}`, isHighlight: true },
+              {
+                label: 'Payment Link',
+                value: paymentLink.short_url,
+                link: paymentLink.short_url,
+                linkText: 'Click here to pay →',
+              },
+            ],
+          },
+          highlight: {
+            title: 'Complete Your Payment',
+            text: 'This payment link is time-sensitive. Please complete your payment soon to confirm your order.',
+          },
+          additionalContentHtml: `
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 8px;">
+              <tr>
+                <td align="center">
+                  <a href="${paymentLink.short_url}"
+                     target="_blank"
+                     rel="noopener noreferrer"
+                     style="
+                       display: inline-block;
+                       background: linear-gradient(135deg, #FF6200 0%, #D32F2F 100%);
+                       color: #ffffff;
+                       font-family: 'Outfit', Arial, sans-serif;
+                       font-size: 16px;
+                       font-weight: 700;
+                       text-decoration: none;
+                       padding: 14px 40px;
+                       border-radius: 50px;
+                       letter-spacing: 0.5px;
+                       box-shadow: 0 4px 14px rgba(255, 98, 0, 0.35);
+                     ">
+                    💳 Pay ₹${totalAmount} Now
+                  </a>
+                </td>
+              </tr>
+            </table>
+          `,
+        });
+
+        await this.emailService.sendMail({
+          to: user.email,
+          subject: `Payment Link Ready - Poojawala | Order ${orderCode}`,
+          html,
+        });
+      }
+
+    } catch (notifyErr: any) {
+      this.logger.warn(
+        `[OrderPaymentRetry] Failed to send initiation notifications for Order ${order.id}: ${notifyErr?.message}`,
+      );
+    }
+
+    return {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      customerId: order.customerId,
+      paymentId: savedPayment.id,
+      paymentUrl: paymentLink.short_url,
+      amount: totalAmount,
+      amountInPaise,
+      currency: 'INR',
+      paymentMethod: order.paymentMethod,
+      paymentStatus: order.paymentStatus,
+      orderStatus: order.orderStatus,
+      expiredAt: order.expiredAt ?? null,
+      status: savedPayment.status,
+    };
   }
 }

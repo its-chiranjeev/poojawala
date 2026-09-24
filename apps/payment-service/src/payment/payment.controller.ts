@@ -118,6 +118,23 @@ export class PaymentController {
     res.status(HttpStatus.OK).send(buffer);
   }
 
+  @Get('order/:orderId/invoice')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER)
+  async downloadOrderInvoice(
+    @Req() req: AuthenticatedRequest,
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { buffer, filename } =
+      await this.paymentService.generateOrderInvoicePdf(req.user, orderId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', buffer.length.toString());
+    res.status(HttpStatus.OK).send(buffer);
+  }
+
   @Get('booking/:bookingId')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
@@ -236,5 +253,37 @@ export class PaymentController {
       data,
     };
   }
+
+  /**
+   * Retries/initiates payment for an existing unpaid order.
+   * Customer can click "Pay Now" on any active unpaid order in My Orders.
+   * POST /api/payments/orders/:id/pay or POST /api/payments/order/:id/pay
+   */
+  @Post('order/:id/pay')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER)
+  @HttpCode(HttpStatus.OK)
+  async retryOrderPayment(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const result = await this.paymentService.createOrderPaymentRetry(req.user, id);
+    return {
+      success: true,
+      message: 'Order payment attempt initiated successfully',
+      data: result,
+    };
+  }
+
+  // @Post('order/:id/pay')
+  // @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  // @Roles(USER_ROLE.CUSTOMER)
+  // @HttpCode(HttpStatus.OK)
+  // async retryOrderPaymentSingular(
+  //   @Req() req: AuthenticatedRequest,
+  //   @Param('id', ParseIntPipe) id: number,
+  // ) {
+  //   return this.retryOrderPayment(req, id);
+  // }
 }
 

@@ -33,6 +33,9 @@ import {
   CustomerAddress,
   VENUE_TYPE,
   NOTIFICATION_TYPE,
+  Order,
+  ORDER_STATUS,
+  ORDER_PAYMENT_STATUS,
 } from '@poojawala/entities';
 import { NotificationService } from '@poojawala/notification';
 import {
@@ -47,6 +50,7 @@ import {
   PurohitServiceAreaRepository,
   PurohitServiceRepository,
   UserRepository,
+  OrderRepository,
 } from '@poojawala/repositories';
 import { S3Service } from '@poojawala/s3';
 import { SmsService } from '@poojawala/sms-services';
@@ -90,7 +94,8 @@ export class UserService {
     private readonly purohitServiceRepository: PurohitServiceRepository,
     private readonly auditLogService: AuditLogService,
     @Optional() private readonly notificationService?: NotificationService,
-  ) {}
+    @Optional() private readonly orderRepository?: OrderRepository,
+  ) { }
 
   async deleteExpiredOtps(): Promise<number> {
     const result = await this.dataSource
@@ -744,7 +749,7 @@ export class UserService {
                     iconDownloadurl = await this.s3Service.getDownloadUrl(
                       ps.service.iconUrl,
                     );
-                  } catch (e) {}
+                  } catch (e) { }
                 }
                 return {
                   ...ps,
@@ -930,19 +935,19 @@ export class UserService {
         if (profileImage) {
           try {
             profileImage = await this.s3Service.getDownloadUrl(profileImage);
-          } catch (e) {}
+          } catch (e) { }
         }
 
         const purohitService = user.services
           ? user.services.map((ps: any) => {
-              return {
-                serviceName: ps.service?.name,
-                isOnlinePrice: ps.onlinePrice,
-                isOfflinePrice: ps.offlinePrice,
-                isOnlineAvailable: ps.isOnline,
-                isOfflineAvailable: ps.isOffline,
-              };
-            })
+            return {
+              serviceName: ps.service?.name,
+              isOnlinePrice: ps.onlinePrice,
+              isOfflinePrice: ps.offlinePrice,
+              isOnlineAvailable: ps.isOnline,
+              isOfflineAvailable: ps.isOffline,
+            };
+          })
           : [];
 
         const isOnline = Boolean(
@@ -958,6 +963,7 @@ export class UserService {
 
         return {
           userId: user.id,
+          purohitProfileId: user.profile?.id ?? null,
           purohitFirstName: user.firstName,
           lastName: user.lastName,
           username: user.username,
@@ -1039,14 +1045,14 @@ export class UserService {
 
     const purohitService = profile?.purohitServices
       ? profile.purohitServices.map((ps) => {
-          return {
-            serviceName: ps.service?.name,
-            isOnlinePrice: ps.onlinePrice,
-            isOfflinePrice: ps.offlinePrice,
-            isOnlineAvailable: ps.isOnline,
-            isOfflineAvailable: ps.isOffline,
-          };
-        })
+        return {
+          serviceName: ps.service?.name,
+          isOnlinePrice: ps.onlinePrice,
+          isOfflinePrice: ps.offlinePrice,
+          isOnlineAvailable: ps.isOnline,
+          isOfflineAvailable: ps.isOffline,
+        };
+      })
       : [];
 
     return {
@@ -1054,6 +1060,7 @@ export class UserService {
       message: 'Purohit fetched successfully',
       data: {
         id: user.id,
+        purohitProfileId: profile?.id ?? null,
         profileImage,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -1158,7 +1165,7 @@ export class UserService {
                   iconDownloadurl = await this.s3Service.getDownloadUrl(
                     ps.service.iconUrl,
                   );
-                } catch (e) {}
+                } catch (e) { }
               }
               return {
                 ...ps,
@@ -2737,42 +2744,42 @@ export class UserService {
 
         const aadhaarDocUrl = files.aadhaarDoc?.length
           ? await this.s3Service.uploadFileHelper(
-              saved.id,
-              'aadhaarDoc',
-              files.aadhaarDoc,
-            )
+            saved.id,
+            'aadhaarDoc',
+            files.aadhaarDoc,
+          )
           : dto.aadhaarDoc;
 
         const panDocUrl = files.panDoc?.length
           ? await this.s3Service.uploadFileHelper(
-              saved.id,
-              'panDoc',
-              files.panDoc,
-            )
+            saved.id,
+            'panDoc',
+            files.panDoc,
+          )
           : dto.panDoc;
 
         const certificateUrl = files.certificate?.length
           ? await this.s3Service.uploadFileHelper(
-              saved.id,
-              'certificate',
-              files.certificate,
-            )
+            saved.id,
+            'certificate',
+            files.certificate,
+          )
           : dto.certificate;
 
         const templeAffiliationProofUrl = files.templeAffiliationProof?.length
           ? await this.s3Service.uploadFileHelper(
-              saved.id,
-              'templeAffiliationProof',
-              files.templeAffiliationProof,
-            )
+            saved.id,
+            'templeAffiliationProof',
+            files.templeAffiliationProof,
+          )
           : dto.templeAffiliationProof;
 
         const profileImageUrl = files.profileImage?.length
           ? await this.s3Service.uploadFileHelper(
-              saved.id,
-              'profileImage',
-              files.profileImage,
-            )
+            saved.id,
+            'profileImage',
+            files.profileImage,
+          )
           : undefined;
 
         if (profileImageUrl) {
@@ -2985,8 +2992,8 @@ export class UserService {
               dto.latitude !== undefined
                 ? dto.latitude
                 : typeof addressData === 'object' &&
-                    addressData !== null &&
-                    addressData.latitude !== undefined
+                  addressData !== null &&
+                  addressData.latitude !== undefined
                   ? Number(addressData.latitude)
                   : undefined;
 
@@ -2994,8 +3001,8 @@ export class UserService {
               dto.longitude !== undefined
                 ? dto.longitude
                 : typeof addressData === 'object' &&
-                    addressData !== null &&
-                    addressData.longitude !== undefined
+                  addressData !== null &&
+                  addressData.longitude !== undefined
                   ? Number(addressData.longitude)
                   : undefined;
 
@@ -3003,8 +3010,8 @@ export class UserService {
               dto.isDefault !== undefined
                 ? dto.isDefault
                 : typeof addressData === 'object' &&
-                    addressData !== null &&
-                    addressData.isDefault !== undefined
+                  addressData !== null &&
+                  addressData.isDefault !== undefined
                   ? addressData.isDefault === true || addressData.isDefault === 'true'
                   : true;
 
@@ -3295,12 +3302,12 @@ export class UserService {
       phones && phones.length > 0
         ? phones
         : [
-            '8468801711',
-            '9358081535',
-            '7082354083',
-            '7668697182',
-            '9354678205',
-          ];
+          '8468801711',
+          '9358081535',
+          '7082354083',
+          '7668697182',
+          '9354678205',
+        ];
 
     for (const originalPhone of targetPhones) {
       const user = await this.userRepository.findOne({
@@ -3380,11 +3387,62 @@ export class UserService {
       throw new ForbiddenException('Only customers can access dashboard stats');
     }
 
-    const bookingStats = await this.bookingRepository.getCustomerDashboardStats(
-      user.id,
-    );
+    const [bookingStats, orderStats] = await Promise.all([
+      this.bookingRepository.getCustomerDashboardStats(user.id),
+      this.getCustomerOrderDashboardStats(user.id),
+    ]);
 
-    return bookingStats;
+    return {
+      ...bookingStats,
+      totalOrderCount: orderStats.totalOrders,
+      totalDeliveredOrders: orderStats.deliveredOrders,
+      totalPendingOrders: orderStats.pendingOrders,
+    };
+  }
+
+  private async getCustomerOrderDashboardStats(customerId: number): Promise<{
+    totalOrders: number;
+    pendingOrders: number;
+    deliveredOrders: number;
+  }> {
+    if (this.orderRepository) {
+      return this.orderRepository.getCustomerDashboardOrderStats(customerId);
+    }
+
+    const pendingStatuses = [
+      ORDER_STATUS.PENDING_PAYMENT,
+      ORDER_STATUS.CONFIRMED,
+      ORDER_STATUS.PROCESSING,
+      ORDER_STATUS.SHIPPED,
+      ORDER_STATUS.OUT_FOR_DELIVERY,
+    ];
+
+    const query = this.dataSource
+      .getRepository(Order)
+      .createQueryBuilder('ord')
+      .select('COUNT(*)', 'totalOrders')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN ord."orderStatus" IN (:...pendingStatuses) THEN 1 ELSE 0 END), 0)`,
+        'pendingOrders',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN ord."orderStatus" = :delivered THEN 1 ELSE 0 END), 0)`,
+        'deliveredOrders',
+      )
+      .where('ord.customerId = :customerId', { customerId });
+
+    const result = await query
+      .setParameters({
+        pendingStatuses,
+        delivered: ORDER_STATUS.DELIVERED,
+      })
+      .getRawOne();
+
+    return {
+      totalOrders: Number(result?.totalOrders) || 0,
+      pendingOrders: Number(result?.pendingOrders) || 0,
+      deliveredOrders: Number(result?.deliveredOrders) || 0,
+    };
   }
 
   async getAdminDashboardStats(user: User) {
@@ -3392,27 +3450,74 @@ export class UserService {
       throw new ForbiddenException('Only admins can access dashboard stats');
     }
 
-    const [bookingStats, activePurohits, activeCustomers] = await Promise.all([
-      this.bookingRepository.getAdminDashboardStats(),
-      this.userRepository.count({
-        where: {
-          role: USER_ROLE.PUROHIT,
-          status: USER_STATUS.ACTIVE,
-        },
-      }),
-      this.userRepository.count({
-        where: {
-          role: USER_ROLE.CUSTOMER,
-          status: USER_STATUS.ACTIVE,
-        },
-      }),
-    ]);
+    const [bookingStats, orderStats, activePurohits, activeCustomers] =
+      await Promise.all([
+        this.bookingRepository.getAdminDashboardStats(),
+        this.getOrderDashboardStats(),
+        this.userRepository.count({
+          where: {
+            role: USER_ROLE.PUROHIT,
+            status: USER_STATUS.ACTIVE,
+          },
+        }),
+        this.userRepository.count({
+          where: {
+            role: USER_ROLE.CUSTOMER,
+            status: USER_STATUS.ACTIVE,
+          },
+        }),
+      ]);
+
+    const totalBookingRevenue = Number(bookingStats.totalRevenue) || 0;
+    const totalOrderRevenue = Number(orderStats.totalOrderRevenue) || 0;
+    const totalRevenue = Number(
+      (totalBookingRevenue + totalOrderRevenue).toFixed(2),
+    );
+    const totalOrderCount = Number(orderStats.totalOrderCount) || 0;
 
     return {
-      totalRevenue: bookingStats.totalRevenue,
-      totalBookings: bookingStats.totalBookings,
+      totalRevenue,
+      totalBookingRevenue,
+      totalOrderRevenue,
+      totalBookingCount: bookingStats.totalBookings,
+      totalOrderCount,
       activePurohits,
       activeCustomers,
+    };
+  }
+
+  private async getOrderDashboardStats(): Promise<{
+    totalOrderCount: number;
+    totalOrderRevenue: number;
+  }> {
+    if (this.orderRepository) {
+      return this.orderRepository.getAdminDashboardOrderStats();
+    }
+
+    const query = this.dataSource
+      .getRepository(Order)
+      .createQueryBuilder('ord')
+      .select(
+        `COUNT(CASE WHEN ord."orderStatus" != :pendingPayment THEN 1 END)`,
+        'totalOrderCount',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN ord."paymentStatus" = :paid THEN ord."totalAmount" ELSE 0 END), 0)`,
+        'totalOrderRevenue',
+      );
+
+    const result = await query
+      .setParameters({
+        pendingPayment: ORDER_STATUS.PENDING_PAYMENT,
+        paid: ORDER_PAYMENT_STATUS.PAID,
+      })
+      .getRawOne();
+
+    return {
+      totalOrderCount: Number(result?.totalOrderCount) || 0,
+      totalOrderRevenue: Number(
+        Number(result?.totalOrderRevenue || 0).toFixed(2),
+      ),
     };
   }
 }

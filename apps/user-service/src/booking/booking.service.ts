@@ -2009,11 +2009,14 @@ export class BookingService {
 
       /*
        * Load the selected Purohit and user account.
+       * Support dto.purohitId being either:
+       *   - PurohitProfile.id  (preferred)
+       *   - User.id            (sent by admin panel via the users list API)
        */
       const purohit = await purohitProfileRepository
         .createQueryBuilder('purohit')
         .innerJoinAndSelect('purohit.user', 'user')
-        .where('purohit.id = :purohitId', {
+        .where('purohit.id = :purohitId OR purohit.userId = :purohitId', {
           purohitId: dto.purohitId,
         })
         .getOne();

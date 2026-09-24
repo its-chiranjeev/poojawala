@@ -8,6 +8,7 @@ import { NotificationModule } from '@poojawala/notification';
 import { EmailServicesModule } from '@poojawala/email-services';
 import { OrderController } from './order.controller';
 import { OrderService } from './order.service';
+import { CartModule } from '../cart/cart.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { OrderService } from './order.service';
     CommonModule,
     NotificationModule,
     EmailServicesModule,
+    CartModule,
   ],
   controllers: [OrderController],
   providers: [OrderService],

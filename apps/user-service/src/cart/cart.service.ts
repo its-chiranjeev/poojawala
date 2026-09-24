@@ -8,6 +8,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { PaymentService } from '../../../payment-service/src/payment/payment.service';
 import {
@@ -103,6 +104,7 @@ export interface CheckoutResponse {
   }[];
   createdAt: Date;
   updatedAt: Date;
+  expiredAt?: Date | null;
   status?: PAYMENT_STATUS;
   bookingId?: number | null;
 }
@@ -126,7 +128,32 @@ export class CartService {
     @Optional() private readonly auditLogService?: AuditLogService,
     @Optional() private readonly notificationService?: NotificationService,
     @Optional() private readonly emailService?: EmailService,
+    @Optional() private readonly configService?: ConfigService,
   ) { }
+
+  getPaymentExpiryMinutes(): number {
+    const val = this.configService?.get<string | number>(
+      'ORDER_PAYMENT_EXPIRY_MINUTES',
+    );
+    const parsed = Number(val || process.env.ORDER_PAYMENT_EXPIRY_MINUTES || 30);
+    return isNaN(parsed) || parsed <= 0 ? 30 : parsed;
+  }
+
+  isOrderPaymentExpired(order: Order): boolean {
+    if (order.paymentStatus === ORDER_PAYMENT_STATUS.PAID) {
+      return false;
+    }
+    if (order.orderStatus === ORDER_STATUS.EXPIRED) {
+      return true;
+    }
+    if (order.paymentMethod !== ORDER_PAYMENT_METHOD.ONLINE) {
+      return false;
+    }
+    if (order.expiredAt) {
+      return new Date(order.expiredAt).getTime() <= Date.now();
+    }
+    return false;
+  }
 
   /**
    * Helper to format cart items with dynamic, DB-sourced prices.
@@ -431,6 +458,26 @@ export class CartService {
         );
       }
 
+      if (
+        existingOrder.orderStatus === ORDER_STATUS.EXPIRED ||
+        this.isOrderPaymentExpired(existingOrder)
+      ) {
+        if (existingOrder.orderStatus !== ORDER_STATUS.EXPIRED) {
+          existingOrder.orderStatus = ORDER_STATUS.EXPIRED;
+          if (!existingOrder.expiredAt) {
+            existingOrder.expiredAt = new Date();
+          }
+          await this.orderRepository.save(existingOrder);
+        }
+        throw new BadRequestException(
+          'This order has expired. Please place a new order.',
+        );
+      }
+
+      if (existingOrder.orderStatus !== ORDER_STATUS.PENDING_PAYMENT) {
+        throw new BadRequestException('This order is not eligible for payment');
+      }
+
       const totalAmount = Number(existingOrder.totalAmount);
       const amountInPaise = Math.round(totalAmount * 100);
 
@@ -459,6 +506,35 @@ export class CartService {
           return newPayment;
         },
       );
+
+      // Audit log: ORDER_PAYMENT_RETRY_INITIATED
+      if (this.auditLogService) {
+        try {
+          await this.auditLogService.createAuditLog({
+            actorId: user.id,
+            actorType: ACTOR_TYPE.USER,
+            actorRole: user.role,
+            module: AUDIT_MODULE.PAYMENT,
+            entity: 'Order',
+            entityId: String(existingOrder.id),
+            action: 'ORDER_PAYMENT_RETRY_INITIATED',
+            message: `Customer initiated payment retry for Order #${existingOrder.orderNumber}.`,
+            newValue: {
+              paymentId: savedPayment.id,
+              amount: totalAmount,
+              status: savedPayment.status,
+            },
+            metadata: {
+              orderId: existingOrder.id,
+              orderNumber: existingOrder.orderNumber,
+              paymentId: savedPayment.id,
+              amount: totalAmount,
+            },
+          });
+        } catch (err: any) {
+          this.logger.warn(`Failed to create payment retry audit: ${err?.message}`);
+        }
+      }
 
       const customerName =
         [user.firstName, user.lastName].filter(Boolean).join(' ') ||
@@ -525,6 +601,7 @@ export class CartService {
           ),
           createdAt: existingOrder.createdAt,
           updatedAt: existingOrder.updatedAt,
+          expiredAt: existingOrder.expiredAt ?? null,
           status: savedPayment.status,
         };
       } catch (error: unknown) {
@@ -655,14 +732,84 @@ export class CartService {
     const paymentMethod = dto.paymentMethod || ORDER_PAYMENT_METHOD.ONLINE;
     const isCod = paymentMethod === ORDER_PAYMENT_METHOD.COD;
 
-    // Inside DB transaction: Create Payment, Order, OrderItems (and clear cart if COD)
-    const { savedPayment, savedOrder } = await this.dataSource.transaction(
-      async (manager) => {
+    // Inside DB transaction: Check existing active pending order or create Payment, Order, OrderItems
+    const { savedPayment, savedOrder, isReusedOrder } =
+      await this.dataSource.transaction<{
+        savedPayment: Payment;
+        savedOrder: Order;
+        isReusedOrder: boolean;
+      }>(async (manager) => {
         const paymentRepo = manager.getRepository(Payment);
         const orderRepo = manager.getRepository(Order);
         const orderItemRepo = manager.getRepository(OrderItem);
         const cartItemRepo = manager.getRepository(CartItem);
 
+        // Lock customer's cart row to protect against concurrent checkout race conditions
+        await manager
+          .getRepository(Cart)
+          .createQueryBuilder('cart')
+          .setLock('pessimistic_write')
+          .where('cart.customerId = :customerId', { customerId: user.id })
+          .getOne();
+
+        // For ONLINE payment: check if customer already has an active unpaid pending order that has not expired
+        if (!isCod) {
+          const now = new Date();
+          const existingPendingOrder = await manager
+            .getRepository(Order)
+            .createQueryBuilder('order')
+            .leftJoinAndSelect('order.items', 'items')
+            .leftJoinAndSelect('items.product', 'product')
+            .leftJoinAndSelect('order.payment', 'payment')
+            .where('order.customerId = :customerId', { customerId: user.id })
+            .andWhere('order.paymentMethod = :paymentMethod', {
+              paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
+            })
+            .andWhere('order.paymentStatus = :paymentStatus', {
+              paymentStatus: ORDER_PAYMENT_STATUS.PENDING,
+            })
+            .andWhere('order.orderStatus = :orderStatus', {
+              orderStatus: ORDER_STATUS.PENDING_PAYMENT,
+            })
+            .andWhere(
+              'order.expiredAt IS NOT NULL AND order.expiredAt > :now',
+              { now },
+            )
+            .orderBy('order.createdAt', 'DESC')
+            .getOne();
+
+          if (existingPendingOrder) {
+            // Reusing existing active order: do not create another order!
+            // Note: existingPendingOrder.expiredAt MUST REMAIN UNCHANGED
+            const orderTotal = Number(existingPendingOrder.totalAmount);
+            const payment = paymentRepo.create({
+              paymentType: PAYMENT_TYPE.PRODUCT_PAYMENT,
+              createdById: user.id,
+              payerId: user.id,
+              amount: orderTotal,
+              currency: 'INR',
+              customerPaymentMethod: CUSTOMER_PAYMENT_METHOD.ONLINE,
+              status: PAYMENT_STATUS.CREATED,
+              remark: `Payment attempt for Order #${existingPendingOrder.orderNumber}`,
+            });
+
+            const newPayment = await paymentRepo.save(payment);
+            existingPendingOrder.paymentId = newPayment.id;
+            existingPendingOrder.paymentStatus = ORDER_PAYMENT_STATUS.PENDING;
+            if (resolvedAddress) {
+              existingPendingOrder.shippingAddressSnapshot = resolvedAddress;
+            }
+            await orderRepo.save(existingPendingOrder);
+
+            return {
+              savedPayment: newPayment,
+              savedOrder: existingPendingOrder,
+              isReusedOrder: true,
+            };
+          }
+        }
+
+        // Normal flow: create new Payment, Order, and OrderItems
         const payment = paymentRepo.create({
           paymentType: PAYMENT_TYPE.PRODUCT_PAYMENT,
           createdById: user.id,
@@ -682,6 +829,11 @@ export class CartService {
         const randomPart = Math.floor(1000 + Math.random() * 9000);
         const orderNumber = `PW-ORD-${timestamp}-${randomPart}`;
 
+        const expiryMinutes = this.getPaymentExpiryMinutes();
+        const expiredAt = isCod
+          ? null
+          : new Date(Date.now() + expiryMinutes * 60 * 1000);
+
         const order = orderRepo.create({
           orderNumber,
           customerId: user.id,
@@ -697,6 +849,7 @@ export class CartService {
             ? ORDER_STATUS.CONFIRMED
             : ORDER_STATUS.PENDING_PAYMENT,
           shippingAddressSnapshot: resolvedAddress,
+          expiredAt,
         });
 
         const newOrder = await orderRepo.save(order);
@@ -732,11 +885,15 @@ export class CartService {
           await cartItemRepo.delete({ cartId: cart.id });
         }
 
-        return { savedPayment: newPayment, savedOrder: newOrder };
-      },
-    );
+        return {
+          savedPayment: newPayment,
+          savedOrder: newOrder,
+          isReusedOrder: false,
+        };
+      });
 
-    const amountInPaise = Math.round(totalAmount * 100);
+    const finalTotalAmount = Number(savedOrder.totalAmount);
+    const amountInPaise = Math.round(finalTotalAmount * 100);
 
     // COD Checkout: No Razorpay call
     if (isCod) {
@@ -798,42 +955,46 @@ export class CartService {
         },
       );
 
-      await this.notifyAndEmailOrderPlaced(
-        user,
-        savedOrder,
-        false,
-        paymentLink.short_url,
-      );
+        // Only notify and email if this is a newly placed order (not reused retry)
+        if (!isReusedOrder) {
+          await this.notifyAndEmailOrderPlaced(
+            user,
+            savedOrder,
+            false,
+            paymentLink.short_url,
+          );
+        }
 
-      return {
-        orderId: savedOrder.id,
-        orderNumber: savedOrder.orderNumber,
-        customerId: savedOrder.customerId,
-        paymentId: savedPayment.id,
-        paymentUrl: paymentLink.short_url,
-        amount: totalAmount,
-        amountInPaise,
-        currency: 'INR',
-        subtotal: Number(savedOrder.subtotal),
-        discountAmount: Number(savedOrder.discountAmount),
-        totalAmount,
-        paymentMethod: savedOrder.paymentMethod,
-        paymentStatus: savedOrder.paymentStatus,
-        orderStatus: savedOrder.orderStatus,
-        shippingAddressSnapshot: savedOrder.shippingAddressSnapshot,
-        items: (savedOrder.items || []).map((item) => ({
-          id: item.id,
-          productId: item.productId ?? null,
-          productName: item.productNameSnapshot,
-          productImage: item.productImageSnapshot ?? null,
-          unitPrice: Number(item.unitPriceSnapshot),
-          quantity: item.quantity,
-          total: Number(item.totalAmount),
-        })),
-        createdAt: savedOrder.createdAt,
-        updatedAt: savedOrder.updatedAt,
-        status: savedPayment.status,
-      };
+        return {
+          orderId: savedOrder.id,
+          orderNumber: savedOrder.orderNumber,
+          customerId: savedOrder.customerId,
+          paymentId: savedPayment.id,
+          paymentUrl: paymentLink.short_url,
+          amount: finalTotalAmount,
+          amountInPaise,
+          currency: 'INR',
+          subtotal: Number(savedOrder.subtotal),
+          discountAmount: Number(savedOrder.discountAmount),
+          totalAmount: finalTotalAmount,
+          paymentMethod: savedOrder.paymentMethod,
+          paymentStatus: savedOrder.paymentStatus,
+          orderStatus: savedOrder.orderStatus,
+          shippingAddressSnapshot: savedOrder.shippingAddressSnapshot,
+          items: (savedOrder.items || []).map((item) => ({
+            id: item.id,
+            productId: item.productId ?? null,
+            productName: item.productNameSnapshot,
+            productImage: item.productImageSnapshot ?? null,
+            unitPrice: Number(item.unitPriceSnapshot),
+            quantity: item.quantity,
+            total: Number(item.totalAmount),
+          })),
+          createdAt: savedOrder.createdAt,
+          updatedAt: savedOrder.updatedAt,
+          expiredAt: savedOrder.expiredAt ?? null,
+          status: savedPayment.status,
+        };
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
@@ -862,7 +1023,7 @@ export class CartService {
             entity: 'Payment',
             entityId: String(savedPayment.id),
             action: 'PAYMENT_FAILED',
-            message: `Razorpay payment link creation failed for Order #${savedOrder.orderNumber}: ${errorMessage}`,
+            message: `Razorpay payment link creation failed for Order ORD${savedOrder.id}: ${errorMessage}`,
             oldValue: { status: PAYMENT_STATUS.PENDING },
             newValue: { status: PAYMENT_STATUS.FAILED, failureReason: errorMessage },
             metadata: { orderId: savedOrder.id, orderNumber: savedOrder.orderNumber },
@@ -945,8 +1106,8 @@ export class CartService {
       try {
         const title = isCod ? 'Order Placed (COD)' : 'Order Placed - Payment Pending';
         const message = isCod
-          ? `Your order #${order.orderNumber} for ₹${order.totalAmount} has been placed successfully via Cash on Delivery.`
-          : `Your order #${order.orderNumber} for ₹${order.totalAmount} has been created. Please complete payment to confirm.`;
+          ? `Your order ORD-${order.id} for ₹${order.totalAmount} has been placed successfully via Cash on Delivery.`
+          : `Your order ORD-${order.id} for ₹${order.totalAmount} has been created. Please complete payment to confirm.`;
 
         await this.notificationService.createNotification(
           user.id,
@@ -961,10 +1122,13 @@ export class CartService {
         const customerName =
           [user.firstName, user.lastName].filter(Boolean).join(' ') ||
           'Customer';
+        const orderCode = `ORD-${order.id}`;
         const adminTitle = isCod
           ? 'New Order Placed (COD)'
-          : 'New Order Created';
-        const adminMessage = `New order #${order.orderNumber} for ₹${order.totalAmount} placed by ${customerName} (${isCod ? 'Cash on Delivery' : 'Online Payment'}).`;
+          : 'New Order Placed (Payment Pending)';
+        const adminMessage = isCod
+          ? `New order ${orderCode} placed by ${customerName} (Customer ID: CM-${user.id}) via Cash on Delivery.`
+          : `New order ${orderCode} placed by ${customerName} (Customer ID: CM-${user.id}). Payment is pending.`;
 
         await this.notificationService.notifyAdmins(
           adminTitle,
@@ -974,6 +1138,7 @@ export class CartService {
           'ORDER',
           {
             orderId: order.id,
+            orderCode,
             orderNumber: order.orderNumber,
             customerId: user.id,
             customerName,
@@ -1000,18 +1165,18 @@ export class CartService {
           ? 'Order Confirmed (COD)'
           : 'Order Created (Pending Payment)';
         const emailMessage = isCod
-          ? `Thank you for your order! Your order <strong>#${order.orderNumber}</strong> has been placed under <strong>Cash on Delivery</strong>.`
-          : `Thank you for your order! Your order <strong>#${order.orderNumber}</strong> has been created. Please complete your payment using the link below to confirm.`;
+          ? `Thank you for your order! Your order <strong>ORD-${order.id}</strong> has been placed under <strong>Cash on Delivery</strong>.`
+          : `Thank you for your order! Your order <strong>ORD-${order.id}</strong> has been created. Please complete your payment using the link below to confirm.`;
 
         const html = renderPoojawalaEmail({
           statusBadge,
           userName: customerName,
-          preheaderText: `Order #${order.orderNumber} created!`,
+          preheaderText: `Order ${order.id} created!`,
           emailMessage,
           detailsTable: {
             title: 'Order Details',
             rows: [
-              { label: 'Order Number', value: `#${order.orderNumber}` },
+              { label: 'Order Number', value: `${order.orderNumber}` },
               {
                 label: 'Payment Method',
                 value: isCod ? 'Cash on Delivery (COD)' : 'Online Payment',
@@ -1027,6 +1192,16 @@ export class CartService {
                   ? `${order.shippingAddressSnapshot.addressLine1}, ${order.shippingAddressSnapshot.city} - ${order.shippingAddressSnapshot.pincode}`
                   : 'Saved Address',
               },
+              ...(!isCod && paymentUrl
+                ? [
+                    {
+                      label: 'Payment Link',
+                      value: paymentUrl,
+                      link: paymentUrl,
+                      linkText: 'Click here to pay →',
+                    },
+                  ]
+                : []),
             ],
             totalRow: {
               label: 'Total Amount',
@@ -1035,22 +1210,55 @@ export class CartService {
           },
           highlight: isCod
             ? {
-                title: 'Cash on Delivery',
-                text: `Please keep ₹${order.totalAmount} ready in cash at the time of delivery.`,
-              }
-            : paymentUrl
-            ? {
-                title: 'Complete Your Payment',
-                text: `Click the payment link or copy to browser: ${paymentUrl}`,
-              }
+              title: 'Cash on Delivery',
+              text: `Please keep ₹${order.totalAmount} ready in cash at the time of delivery.`,
+            }
             : undefined,
+          additionalContentHtml:
+            !isCod && paymentUrl
+              ? `
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 8px;">
+              <tr>
+                <td align="center">
+                  <a href="${paymentUrl}"
+                     target="_blank"
+                     rel="noopener noreferrer"
+                     style="
+                       display: inline-block;
+                       background: linear-gradient(135deg, #FF6200 0%, #D32F2F 100%);
+                       color: #ffffff;
+                       font-family: 'Outfit', Arial, sans-serif;
+                       font-size: 16px;
+                       font-weight: 700;
+                       text-decoration: none;
+                       padding: 14px 40px;
+                       border-radius: 50px;
+                       letter-spacing: 0.5px;
+                       box-shadow: 0 4px 14px rgba(255, 98, 0, 0.35);
+                     ">
+                    💳 Pay ₹${order.totalAmount} Now
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td align="center" style="padding-top: 10px;">
+                  <p style="margin: 0; font-size: 12px; color: #999999;">
+                    Or copy this link to your browser:<br/>
+                    <span style="color: #FF6200; word-break: break-all; font-size: 11px;">${paymentUrl}</span>
+                  </p>
+                </td>
+              </tr>
+            </table>
+          `
+              : undefined,
         });
+
 
         await this.emailService.sendMail({
           to: user.email,
           subject: isCod
-            ? `Order Confirmed - Poojawala | Order #${order.orderNumber}`
-            : `Complete Payment for Order #${order.orderNumber} - Poojawala`,
+            ? `Order Confirmed - Poojawala | Order ORD-${order.id}`
+            : `Complete Payment for Order ORD-${order.id} - Poojawala`,
           html,
         });
       } catch (err: any) {

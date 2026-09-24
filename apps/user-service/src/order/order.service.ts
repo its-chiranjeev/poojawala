@@ -7,6 +7,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { Cron } from '@nestjs/schedule';
 import {
   ACTOR_TYPE,
   AUDIT_MODULE,
@@ -14,6 +15,7 @@ import {
   Order,
   ORDER_PAYMENT_METHOD,
   ORDER_PAYMENT_STATUS,
+  ORDER_STATUS,
   Payment,
   PAYMENT_STATUS,
   User,
@@ -29,6 +31,7 @@ import { S3Service } from '@poojawala/s3';
 import { AuditLogService } from '@poojawala/common';
 import { NotificationService } from '@poojawala/notification';
 import { EmailService, renderPoojawalaEmail } from '@poojawala/email-services';
+import { CartService } from '../cart/cart.service';
 
 @Injectable()
 export class OrderService {
@@ -41,7 +44,83 @@ export class OrderService {
     @Optional() private readonly auditLogService?: AuditLogService,
     @Optional() private readonly notificationService?: NotificationService,
     @Optional() private readonly emailService?: EmailService,
+    @Optional() private readonly cartService?: CartService,
   ) { }
+
+  /**
+   * Helper to check if an order's payment window has expired.
+   * Checks order.expiredAt or 30 minutes from order.createdAt for ONLINE orders.
+   */
+  isOrderPaymentExpired(order: Order): boolean {
+    if (order.paymentStatus === ORDER_PAYMENT_STATUS.PAID) {
+      return false;
+    }
+    if (order.orderStatus === ORDER_STATUS.EXPIRED) {
+      return true;
+    }
+    if (order.paymentMethod !== ORDER_PAYMENT_METHOD.ONLINE) {
+      return false;
+    }
+    if (order.expiredAt) {
+      return new Date(order.expiredAt).getTime() <= Date.now();
+    }
+    if (order.createdAt) {
+      return new Date(order.createdAt).getTime() + 30 * 60 * 1000 <= Date.now();
+    }
+    return false;
+  }
+
+  /**
+   * Cron job running every minute to materialize expired unpaid pending orders as EXPIRED in DB.
+   * Expires orders created more than 30 minutes ago whose payment status is PENDING and payment mode is not COD.
+   */
+  @Cron('0 * * * * *', {
+    name: 'materialize-expired-orders',
+  })
+  async materializeExpiredOrders(): Promise<number> {
+    const startedAt = new Date().toISOString();
+    this.logger.log(`[materialize-expired-orders] Cron started at ${startedAt}`);
+
+    const now = new Date();
+    const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
+
+    try {
+      const result = await this.dataSource
+        .getRepository(Order)
+        .createQueryBuilder()
+        .update(Order)
+        .set({
+          orderStatus: ORDER_STATUS.EXPIRED,
+          expiredAt: () => 'COALESCE("expiredAt", NOW())',
+        })
+        .where('orderStatus = :pendingStatus', {
+          pendingStatus: ORDER_STATUS.PENDING_PAYMENT,
+        })
+        .andWhere('paymentStatus = :paymentPendingStatus', {
+          paymentPendingStatus: ORDER_PAYMENT_STATUS.PENDING,
+        })
+        .andWhere('paymentMethod = :onlineMethod', {
+          onlineMethod: ORDER_PAYMENT_METHOD.ONLINE,
+        })
+        .andWhere(
+          '(createdAt <= :thirtyMinutesAgo OR (expiredAt IS NOT NULL AND expiredAt <= :now))',
+          { thirtyMinutesAgo, now },
+        )
+        .execute();
+
+      const affected = result.affected || 0;
+      this.logger.log(
+        `[materialize-expired-orders] Completed. Expired orders: ${affected}`,
+      );
+      return affected;
+    } catch (error: any) {
+      this.logger.error(
+        `[materialize-expired-orders] Failed: ${error?.message}`,
+        error?.stack,
+      );
+      return 0;
+    }
+  }
 
   /**
    * Helper to ensure productImageSnapshot has a fresh S3 presigned downloadUrl
@@ -78,6 +157,35 @@ export class OrderService {
         user.id,
         query,
       );
+
+      // Lazily materialize ONLINE expiry in the list — mirrors getOrderById.
+      // COD orders are implicitly excluded because isOrderPaymentExpired()
+      // returns false for any order where paymentMethod !== ONLINE.
+      const expiredToSave: Order[] = [];
+      for (const o of orders) {
+        if (
+          o.orderStatus === ORDER_STATUS.PENDING_PAYMENT &&
+          this.isOrderPaymentExpired(o)
+        ) {
+          o.orderStatus = ORDER_STATUS.EXPIRED;
+          if (!o.expiredAt) {
+            o.expiredAt = new Date();
+          }
+          expiredToSave.push(o);
+        }
+      }
+      if (expiredToSave.length > 0) {
+        // Fire-and-forget batch save — don't let persistence failures block the response
+        this.dataSource
+          .getRepository(Order)
+          .save(expiredToSave)
+          .catch((err: Error) =>
+            this.logger.warn(
+              `Failed to persist expired order statuses in getOrders: ${err?.message}`,
+            ),
+          );
+      }
+
       const formattedOrders = await Promise.all(
         orders.map((o) => this.formatOrder(o)),
       );
@@ -134,6 +242,18 @@ export class OrderService {
       throw new NotFoundException(`Order #${orderId} not found`);
     }
 
+    if (
+      user.role === USER_ROLE.CUSTOMER &&
+      order.orderStatus === ORDER_STATUS.PENDING_PAYMENT &&
+      this.isOrderPaymentExpired(order)
+    ) {
+      order.orderStatus = ORDER_STATUS.EXPIRED;
+      if (!order.expiredAt) {
+        order.expiredAt = new Date();
+      }
+      await this.orderRepository.save(order);
+    }
+
     return this.formatOrder(order);
   }
 
@@ -152,7 +272,7 @@ export class OrderService {
     const order = await this.orderRepository.findOrderByIdWithDetails(orderId);
 
     if (!order) {
-      throw new NotFoundException(`Order #${orderId} not found`);
+      throw new NotFoundException(`Order ORD-${orderId} not found`);
     }
 
     if (order.orderStatus === dto.status) {
@@ -174,7 +294,7 @@ export class OrderService {
           entity: 'Order',
           entityId: String(order.id),
           action: 'ORDER_STATUS_CHANGED',
-          message: `Admin updated Order #${order.orderNumber} status from ${previousStatus} to ${dto.status}.`,
+          message: `Admin updated Order ORD-${order.id} status from ${previousStatus} to ${dto.status}.`,
           oldValue: { orderStatus: previousStatus },
           newValue: { orderStatus: dto.status },
           metadata: {
@@ -197,7 +317,7 @@ export class OrderService {
         await this.notificationService.createNotification(
           order.customerId,
           'Order Status Updated',
-          `Your order #${order.orderNumber} status has been updated to ${dto.status}.`,
+          `Your order ORD-${order.id} status has been updated to ${dto.status}.`,
           NOTIFICATION_TYPE.SYSTEM,
           order.id,
           'ORDER',
@@ -224,14 +344,28 @@ export class OrderService {
           const html = renderPoojawalaEmail({
             statusBadge: `Order ${dto.status}`,
             userName: customerName,
-            preheaderText: `Order #${order.orderNumber} is now ${dto.status}`,
-            emailMessage: `Your order <strong>#${order.orderNumber}</strong> has been updated to <strong>${dto.status}</strong>.`,
+            preheaderText: `Order ORD-${order.id} is now ${dto.status}`,
+            emailMessage: `Your order <strong>ORD-${order.id}</strong> has been updated to <strong>${dto.status}</strong>.`,
             detailsTable: {
               title: 'Order Status Update',
               rows: [
-                { label: 'Order Number', value: `#${order.orderNumber}` },
+                { label: 'Order Number', value: `ORD-${order.id}` },
                 { label: 'New Status', value: dto.status, isHighlight: true },
                 { label: 'Previous Status', value: previousStatus },
+                {
+                  label: 'Payment Status',
+                  value:
+                    order.paymentStatus === ORDER_PAYMENT_STATUS.COD_PENDING
+                      ? 'COD Pending'
+                      : order.paymentStatus || 'PENDING',
+                },
+                {
+                  label: 'Payment Method',
+                  value:
+                    order.paymentMethod === ORDER_PAYMENT_METHOD.COD
+                      ? 'Cash on Delivery (COD)'
+                      : 'Online Payment',
+                },
                 { label: 'Total Amount', value: `₹${order.totalAmount}` },
               ],
             },
@@ -268,18 +402,18 @@ export class OrderService {
     const order = await this.orderRepository.findOrderByIdWithDetails(orderId);
 
     if (!order) {
-      throw new NotFoundException(`Order #${orderId} not found`);
+      throw new NotFoundException(`Order ORD-${orderId} not found`);
     }
 
     if (order.paymentMethod !== ORDER_PAYMENT_METHOD.COD) {
       throw new BadRequestException(
-        `Order #${order.orderNumber} is not a Cash on Delivery (COD) order`,
+        `Order ORD-${order.id} is not a Cash on Delivery (COD) order`,
       );
     }
 
     if (order.paymentStatus === ORDER_PAYMENT_STATUS.PAID) {
       throw new BadRequestException(
-        `Order #${order.orderNumber} has already been marked as paid`,
+        `Order ORD-${order.id} has already been marked as paid`,
       );
     }
 
@@ -323,7 +457,7 @@ export class OrderService {
           entity: 'Order',
           entityId: String(savedOrder.id),
           action: 'COD_PAYMENT_COLLECTED',
-          message: `COD payment of ₹${collectedAmount} collected for Order #${savedOrder.orderNumber}.`,
+          message: `COD payment of ₹${collectedAmount} collected for Order ${savedOrder.id}.`,
           oldValue: { paymentStatus: ORDER_PAYMENT_STATUS.PENDING },
           newValue: {
             paymentStatus: ORDER_PAYMENT_STATUS.PAID,
@@ -347,10 +481,44 @@ export class OrderService {
         await this.notificationService.createNotification(
           savedOrder.customerId,
           'COD Payment Collected',
-          `Your Cash on Delivery payment of ₹${collectedAmount} for Order #${savedOrder.orderNumber} has been received.`,
+          `Your Cash on Delivery payment of ₹${collectedAmount} for Order ORD-${savedOrder.id} has been received.`,
           NOTIFICATION_TYPE.PAYMENT,
           savedOrder.id,
           'ORDER',
+        );
+
+        const customer =
+          order.customer ||
+          (await this.dataSource
+            .getRepository(User)
+            .findOne({ where: { id: savedOrder.customerId } }));
+        const customerName =
+          [customer?.firstName, customer?.lastName].filter(Boolean).join(' ') ||
+          'Customer';
+        const orderCode = `ORD-${savedOrder.id}`;
+        const paymentReference = order.paymentId
+          ? `PAY-${order.paymentId}`
+          : `PAY-COD-${savedOrder.id}`;
+
+        await this.notificationService.notifyAdmins(
+          'Order Payment Received (COD)',
+          `Order Payment Successful (COD) — Order ORD-${order.id} has been successfully paid by ${customerName}. Payment ID: ${paymentReference}. Amount collected: ₹${collectedAmount}.`,
+          NOTIFICATION_TYPE.PAYMENT,
+          savedOrder.id,
+          'ORDER',
+          {
+            orderId: savedOrder.id,
+            orderCode,
+            orderNumber: savedOrder.orderNumber,
+            customerId: savedOrder.customerId,
+            customerName,
+            paymentId: order.paymentId || savedOrder.id,
+            paymentReference,
+            collectedAmount,
+            amount: collectedAmount,
+            status: 'PAID',
+            paymentStatus: ORDER_PAYMENT_STATUS.PAID,
+          },
         );
       } catch (err: any) {
         this.logger.warn(
@@ -374,12 +542,12 @@ export class OrderService {
           const html = renderPoojawalaEmail({
             statusBadge: 'Payment Received',
             userName: customerName,
-            preheaderText: `Payment received for Order #${savedOrder.orderNumber}`,
-            emailMessage: `We have received your Cash on Delivery payment of <strong>₹${collectedAmount}</strong> for Order <strong>#${savedOrder.orderNumber}</strong>. Thank you for choosing Poojawala!`,
+            preheaderText: `Payment received for Order ORD-${savedOrder.id}`,
+            emailMessage: `We have received your Cash on Delivery payment of <strong>₹${collectedAmount}</strong> for Order <strong>#${savedOrder.id}</strong>. Thank you for choosing Poojawala!`,
             detailsTable: {
               title: 'Payment Details',
               rows: [
-                { label: 'Order Number', value: `#${savedOrder.orderNumber}` },
+                { label: 'Order Number', value: `ORD-${savedOrder.id}` },
                 { label: 'Payment Method', value: 'Cash on Delivery (COD)' },
                 {
                   label: 'Amount Collected',
