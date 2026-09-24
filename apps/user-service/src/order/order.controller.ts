@@ -20,9 +20,7 @@ import {
 } from '@poojawala/dtos';
 import { OrderService } from './order.service';
 
-interface AuthenticatedRequest {
-  user: User;
-}
+interface AuthenticatedRequest { user: User }
 
 @Controller('orders')
 @UseGuards(JwtAuthGuard, RolesGuard)
