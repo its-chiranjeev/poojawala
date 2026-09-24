@@ -1,13 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { NotificationRepository } from '@poojawala/repositories';
+import { NotificationRepository, UserRepository } from '@poojawala/repositories';
 import { NotificationQueryDto } from '@poojawala/dtos';
-import { NOTIFICATION_TYPE } from '@poojawala/entities';
+import { NOTIFICATION_TYPE, USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { BookingGateway } from '@poojawala/gateway';
 
 @Injectable()
 export class NotificationService {
   constructor(
     private readonly notificationRepository: NotificationRepository,
+    private readonly userRepository: UserRepository,
     private readonly bookingGateway: BookingGateway,
   ) {}
 
@@ -120,5 +121,77 @@ export class NotificationService {
     this.bookingGateway.notifyUser(userId, 'notification:unread-count', unreadCount);
 
     return { success: true };
+  }
+
+  async notifyAdmins(
+    title: string,
+    message: string,
+    type: NOTIFICATION_TYPE,
+    referenceId?: number,
+    referenceType?: string,
+    extraData?: any,
+  ) {
+    const admins = await this.userRepository.find({
+      where: {
+        role: USER_ROLE.ADMIN,
+        status: USER_STATUS.ACTIVE,
+      },
+    });
+
+    const savedNotifications: any[] = [];
+
+    for (const admin of admins) {
+      try {
+        const notif = await this.createNotification(
+          admin.id,
+          title,
+          message,
+          type,
+          referenceId,
+          referenceType,
+        );
+        savedNotifications.push(notif);
+
+        // Also emit event to admin's private room for direct listeners
+        if (referenceType === 'ORDER') {
+          this.bookingGateway.notifyUser(admin.id, 'order:new', {
+            orderId: referenceId,
+            title,
+            message,
+            notification: notif,
+            ...extraData,
+          });
+          this.bookingGateway.notifyUser(admin.id, 'admin:order_created', {
+            orderId: referenceId,
+            title,
+            message,
+            notification: notif,
+            ...extraData,
+          });
+        }
+      } catch (err: any) {
+        // Continue to other admins if one fails
+      }
+    }
+
+    // Broadcast to 'admin' room
+    const broadcastPayload = {
+      title,
+      message,
+      type,
+      referenceId,
+      referenceType,
+      createdAt: new Date(),
+      ...extraData,
+    };
+
+    this.bookingGateway.notifyAdmin('notification:new', broadcastPayload);
+
+    if (referenceType === 'ORDER') {
+      this.bookingGateway.notifyAdmin('order:new', broadcastPayload);
+      this.bookingGateway.notifyAdmin('admin:order_created', broadcastPayload);
+    }
+
+    return savedNotifications;
   }
 }

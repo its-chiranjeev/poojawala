@@ -2,7 +2,8 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { ContactUsRepository } from '@poojawala/repositories';
 import { CreateContactUsDto, GetAllContactUsDto, UpdateContactUsStatusDto } from '@poojawala/dtos';
 import { EmailService } from '@poojawala/email-services';
-import { CONTACT_US_STATUS } from '@poojawala/entities';
+import { CONTACT_US_STATUS, ACTOR_TYPE, AUDIT_MODULE, USER_ROLE } from '@poojawala/entities';
+import { AuditLogService } from '@poojawala/common';
 
 @Injectable()
 export class ContactUsService {
@@ -11,6 +12,7 @@ export class ContactUsService {
   constructor(
     private readonly contactUsRepo: ContactUsRepository,
     private readonly emailService: EmailService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async create(dto: CreateContactUsDto) {
@@ -47,7 +49,7 @@ export class ContactUsService {
     };
   }
 
-  async updateStatus(id: number, dto: UpdateContactUsStatusDto) {
+  async updateStatus(id: number, dto: UpdateContactUsStatusDto, admin?: any) {
     const contactUs = await this.contactUsRepo.getById(id);
 
     if (!contactUs) {
@@ -61,6 +63,19 @@ export class ContactUsService {
     }
 
     const updated = await this.contactUsRepo.updateStatus(id, dto.status);
+
+    await this.auditLogService.createAuditLog({
+      actorId: admin?.id ?? null,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: admin?.role ?? USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.CONTACT_US,
+      entity: 'ContactUs',
+      entityId: String(id),
+      action: 'CONTACT_US_STATUS_UPDATED',
+      message: `Admin #${admin?.id || 'Unknown'} updated ContactUs #${id} status to ${dto.status}.`,
+      oldValue: { status: contactUs.status },
+      newValue: { status: dto.status },
+    });
 
     if (contactUs.email) {
       try {
@@ -88,7 +103,7 @@ export class ContactUsService {
     };
   }
 
-  async softDelete(id: number) {
+  async softDelete(id: number, admin?: any) {
     const contactUs = await this.contactUsRepo.getById(id);
 
     if (!contactUs) {
@@ -96,6 +111,19 @@ export class ContactUsService {
     }
 
     await this.contactUsRepo.softDelete(id);
+
+    await this.auditLogService.createAuditLog({
+      actorId: admin?.id ?? null,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: admin?.role ?? USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.CONTACT_US,
+      entity: 'ContactUs',
+      entityId: String(id),
+      action: 'CONTACT_US_DELETED',
+      message: `Admin #${admin?.id || 'Unknown'} soft deleted ContactUs #${id}.`,
+      oldValue: { id: contactUs.id, status: contactUs.status },
+      newValue: undefined,
+    });
 
     return {
       success: true,

@@ -373,8 +373,22 @@ export class ServiceService {
       throw new NotFoundException('Service not found');
     }
 
+    const oldStatus = service.isActive;
     service.isActive = isActive;
     const updatedService = await this.serviceRepository.save(service);
+
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.SERVICE,
+      entity: 'Service',
+      entityId: String(id),
+      action: 'SERVICE_STATUS_UPDATED',
+      message: `Admin updated service #${id} (${service.name}) status to ${isActive}.`,
+      oldValue: { isActive: oldStatus },
+      newValue: { isActive },
+    });
 
     return {
       success: true,

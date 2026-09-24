@@ -32,7 +32,9 @@ import {
   USER_STATUS,
   CustomerAddress,
   VENUE_TYPE,
+  NOTIFICATION_TYPE,
 } from '@poojawala/entities';
+import { NotificationService } from '@poojawala/notification';
 import {
   BookingRepository,
   CustomerAddressRepository,
@@ -56,6 +58,7 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
@@ -86,6 +89,7 @@ export class UserService {
     private readonly bookingRepository: BookingRepository,
     private readonly purohitServiceRepository: PurohitServiceRepository,
     private readonly auditLogService: AuditLogService,
+    @Optional() private readonly notificationService?: NotificationService,
   ) {}
 
   async deleteExpiredOtps(): Promise<number> {
@@ -2247,6 +2251,27 @@ export class UserService {
     const isApproved =
       result.verificationStatus === PUROHIT_VERIFICATION_STATUS.APPROVED;
 
+    if (this.notificationService) {
+      try {
+        await this.notificationService.createNotification(
+          result.userId,
+          isApproved
+            ? 'Purohit Profile Approved'
+            : 'Purohit Profile Verification Update',
+          isApproved
+            ? 'Congratulations! Your Purohit profile has been verified and approved.'
+            : `Your Purohit profile verification was rejected: ${dto.rejectionReason || ''}`,
+          NOTIFICATION_TYPE.SYSTEM,
+          result.profileId,
+          'PUROHIT_PROFILE',
+        );
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to send purohit verification notification: ${err?.message}`,
+        );
+      }
+    }
+
     return {
       success: true,
       message: isApproved
@@ -2974,12 +2999,23 @@ export class UserService {
                   ? Number(addressData.longitude)
                   : undefined;
 
-            // Clear any existing default address for this customer just in case
-            await manager.update(
-              CustomerAddress,
-              { customerId: saved.id, isDefault: true },
-              { isDefault: false },
-            );
+            const isDefault =
+              dto.isDefault !== undefined
+                ? dto.isDefault
+                : typeof addressData === 'object' &&
+                    addressData !== null &&
+                    addressData.isDefault !== undefined
+                  ? addressData.isDefault === true || addressData.isDefault === 'true'
+                  : true;
+
+            if (isDefault) {
+              // Clear any existing default address for this customer just in case
+              await manager.update(
+                CustomerAddress,
+                { customerId: saved.id, isDefault: true },
+                { isDefault: false },
+              );
+            }
 
             const newAddress = manager.create(CustomerAddress, {
               customerId: saved.id,
@@ -2991,7 +3027,7 @@ export class UserService {
               venueType,
               latitude,
               longitude,
-              isDefault: true,
+              isDefault,
             });
 
             savedCustomerAddress = await manager.save(
@@ -3008,11 +3044,11 @@ export class UserService {
                 entity: 'CustomerAddress',
                 entityId: String(savedCustomerAddress.id),
                 action: 'CUSTOMER_ADDRESS_CREATED',
-                message: `Customer #${saved.id} registered with default address #${savedCustomerAddress.id}.`,
+                message: `Customer #${saved.id} registered with ${isDefault ? 'default ' : ''}address #${savedCustomerAddress.id}.`,
                 newValue: {
                   addressId: savedCustomerAddress.id,
                   fullAddress: savedCustomerAddress.fullAddress,
-                  isDefault: true,
+                  isDefault,
                 },
               },
               manager,

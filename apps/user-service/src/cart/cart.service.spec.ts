@@ -272,6 +272,7 @@ describe('CartService', () => {
 
     notificationService = {
       createNotification: jest.fn().mockResolvedValue({}),
+      notifyAdmins: jest.fn().mockResolvedValue([]),
     };
 
     emailService = {

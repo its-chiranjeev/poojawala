@@ -956,6 +956,35 @@ export class CartService {
           order.id,
           'ORDER',
         );
+
+        // Real-time Socket.IO and DB notification for Admin(s)
+        const customerName =
+          [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+          'Customer';
+        const adminTitle = isCod
+          ? 'New Order Placed (COD)'
+          : 'New Order Created';
+        const adminMessage = `New order #${order.orderNumber} for ₹${order.totalAmount} placed by ${customerName} (${isCod ? 'Cash on Delivery' : 'Online Payment'}).`;
+
+        await this.notificationService.notifyAdmins(
+          adminTitle,
+          adminMessage,
+          NOTIFICATION_TYPE.SYSTEM,
+          order.id,
+          'ORDER',
+          {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            customerId: user.id,
+            customerName,
+            totalAmount: order.totalAmount,
+            paymentMethod: order.paymentMethod,
+            paymentStatus: order.paymentStatus,
+            orderStatus: order.orderStatus,
+            isCod,
+            createdAt: order.createdAt,
+          },
+        );
       } catch (err: any) {
         this.logger.warn(`Failed to send order notification: ${err?.message}`);
       }
