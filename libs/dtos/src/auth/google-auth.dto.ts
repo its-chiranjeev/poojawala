@@ -12,5 +12,5 @@ export class GoogleAuthDto {
 
   @IsOptional()
   @IsEnum(USER_ROLE)
-  intent?: USER_ROLE;
+  role?: USER_ROLE;
 }
