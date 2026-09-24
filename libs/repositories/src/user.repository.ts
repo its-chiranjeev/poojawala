@@ -24,6 +24,12 @@ export class UserRepository extends BaseRepository<User> {
     });
   }
 
+  async findByGoogleId(googleId: string): Promise<User | null> {
+    return this.repo.findOne({
+      where: { googleId },
+    });
+  }
+
   async findByEmailOrUsername(identifier: string) {
     const normalized = identifier.trim().toLowerCase();
     return this.repo.findOne({

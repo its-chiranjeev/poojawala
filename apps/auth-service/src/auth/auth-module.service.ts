@@ -9,9 +9,17 @@ import {
 } from '@nestjs/common';
 import { UserRepository, OtpRepository } from '@poojawala/repositories';
 import * as bcrypt from 'bcryptjs';
-import { User, USER_STATUS, USER_ROLE, Otp } from '@poojawala/entities';
+import axios from 'axios';
+import {
+  User,
+  USER_STATUS,
+  USER_ROLE,
+  Otp,
+  PurohitProfile,
+  PUROHIT_VERIFICATION_STATUS,
+} from '@poojawala/entities';
 import { ConfigService } from '@nestjs/config';
-import { createHmac } from 'crypto';
+import { createHmac, randomBytes, randomUUID } from 'crypto';
 import {
   LoginDto,
   RegisterSuperAdminDto,
@@ -22,6 +30,7 @@ import {
   resetPasswordDto,
   forgotPasswordDto,
   ResendOtpDto,
+  SwitchIntentDto,
 } from '@poojawala/dtos';
 import { DataSource } from 'typeorm';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
@@ -30,6 +39,16 @@ import { EmailService } from '@poojawala/email-services';
 import { SmsService } from '@poojawala/sms-services';
 import { MoreThan } from 'typeorm';
 import { OTP_TYPE } from '@poojawala/entities';
+
+export interface GoogleIdentity {
+  sub: string;
+  email: string;
+  emailVerified: boolean;
+  name?: string;
+  givenName?: string;
+  familyName?: string;
+  picture?: string;
+}
 
 @Injectable()
 export class AuthModuleService {
@@ -83,6 +102,7 @@ export class AuthModuleService {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        status: user.status,
         profileImage: user.profileImage,
         isAdminCreated: user.isAdminCreated,
       },
@@ -228,6 +248,12 @@ export class AuthModuleService {
     const user = await this.userRepository.findByEmailOrUsername(dto.email);
     if (!user) {
       throw new NotFoundException('User not found');
+    }
+
+    if (!user.hashedPassword) {
+      throw new UnauthorizedException(
+        'Please log in with Google or reset your password to create one',
+      );
     }
 
     const passwordMatch = await bcrypt.compare(
@@ -589,15 +615,17 @@ export class AuthModuleService {
     throw new BadRequestException('OTP has expired');
   }*/
 
-    const isSamePassword = await bcrypt.compare(
-      dto.password,
-      user.hashedPassword,
-    );
-
-    if (isSamePassword) {
-      throw new BadRequestException(
-        'New password cannot be same as old password',
+    if (user.hashedPassword) {
+      const isSamePassword = await bcrypt.compare(
+        dto.password,
+        user.hashedPassword,
       );
+
+      if (isSamePassword) {
+        throw new BadRequestException(
+          'New password cannot be same as old password',
+        );
+      }
     }
 
     // 6. Hash new password
@@ -693,5 +721,434 @@ export class AuthModuleService {
     const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } =
       user;
     return safeUser;
+  }
+
+  async verifyGoogleToken(idToken: string): Promise<GoogleIdentity> {
+    if (!idToken || typeof idToken !== 'string') {
+      throw new BadRequestException('Google ID token is required');
+    }
+
+    try {
+      const res = await axios.get(
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken.trim())}`,
+        { timeout: 10000 },
+      );
+      const data = res.data;
+
+      const configuredClientId = this.configService.get<string>('GOOGLE_CLIENT_ID')?.trim();
+      if (configuredClientId && data.aud !== configuredClientId) {
+        throw new UnauthorizedException('Google token audience does not match configured client ID');
+      }
+
+      const isVerified = data.email_verified === true || data.email_verified === 'true';
+      if (!isVerified) {
+        throw new UnauthorizedException('Google email is not verified');
+      }
+
+      if (!data.sub || !data.email) {
+        throw new UnauthorizedException('Invalid Google token payload');
+      }
+
+      return {
+        sub: String(data.sub).trim(),
+        email: String(data.email).trim().toLowerCase(),
+        emailVerified: true,
+        name: data.name,
+        givenName: data.given_name,
+        familyName: data.family_name,
+        picture: data.picture,
+      };
+    } catch (error: any) {
+      if (error instanceof UnauthorizedException || error instanceof BadRequestException) {
+        throw error;
+      }
+      const message =
+        error.response?.data?.error_description ||
+        error.response?.data?.error ||
+        error.message ||
+        'Google token verification failed';
+      throw new UnauthorizedException(`Google token verification failed: ${message}`);
+    }
+  }
+
+  getGoogleCallbackUrl(): string {
+    const configured =
+      this.configService.get<string>('GOOGLE_CALLBACK_URL')?.trim() ||
+      process.env['GOOGLE_CALLBACK_URL']?.trim();
+    if (!configured) {
+      throw new InternalServerErrorException(
+        'GOOGLE_CALLBACK_URL is not configured in environment variables',
+      );
+    }
+    return configured;
+  }
+
+  getFrontendUrl(): string {
+    const configured =
+      this.configService.get<string>('FRONTEND_URL')?.trim() ||
+      process.env['FRONTEND_URL']?.trim();
+    if (!configured) {
+      throw new InternalServerErrorException(
+        'FRONTEND_URL is not configured in environment variables',
+      );
+    }
+    return configured.replace(/\/+$/, '');
+  }
+
+  getGoogleOAuthRedirect(intentParam?: string): { url: string; state: string } {
+    const intent =
+      intentParam?.toUpperCase() === USER_ROLE.PUROHIT
+        ? USER_ROLE.PUROHIT
+        : USER_ROLE.CUSTOMER;
+
+    const clientId =
+      this.configService.get<string>('GOOGLE_CLIENT_ID')?.trim() ||
+      process.env['GOOGLE_CLIENT_ID']?.trim();
+
+    if (!clientId) {
+      throw new BadRequestException('Google Client ID is not configured');
+    }
+
+    const callbackUrl = this.getGoogleCallbackUrl();
+    const nonce = randomBytes(16).toString('hex');
+    const statePayload = JSON.stringify({ intent, nonce });
+    const encodedState = Buffer.from(statePayload).toString('base64url');
+
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&scope=openid%20email%20profile&state=${encodeURIComponent(encodedState)}&access_type=offline&prompt=select_account`;
+
+    return { url, state: encodedState };
+  }
+
+  async processGoogleOAuthCallback(code: string, state: string) {
+    let intent = USER_ROLE.CUSTOMER;
+    try {
+      const parsed = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
+      if (parsed.intent === USER_ROLE.PUROHIT) {
+        intent = USER_ROLE.PUROHIT;
+      }
+    } catch {
+      // default to CUSTOMER
+    }
+
+    const callbackUrl = this.getGoogleCallbackUrl();
+    const identity = await this.exchangeGoogleCode(code, callbackUrl);
+    const result = await this.handleGoogleAuth(identity, intent);
+
+    const csrfToken = randomUUID();
+    const frontendUrl = this.getFrontendUrl();
+
+    let redirectUrl: string;
+    if (result.isNewUser && result.user.role === USER_ROLE.PUROHIT) {
+      redirectUrl = `${frontendUrl}/purohit/onboarding?csrfToken=${encodeURIComponent(csrfToken)}`;
+    } else {
+      redirectUrl = `${frontendUrl}/auth/callback?role=${result.user.role}&status=${result.user.status}&csrfToken=${encodeURIComponent(csrfToken)}`;
+    }
+
+    return {
+      result,
+      redirectUrl,
+      csrfToken,
+    };
+  }
+
+  async exchangeGoogleCode(code: string, callbackUrl?: string): Promise<GoogleIdentity> {
+    if (!code || typeof code !== 'string') {
+      throw new BadRequestException('Google authorization code is required');
+    }
+
+    const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID')?.trim();
+    const clientSecret = this.configService.get<string>('GOOGLE_CLIENT_SECRET')?.trim();
+
+    if (!clientId || !clientSecret) {
+      throw new InternalServerErrorException('Google OAuth client credentials not configured');
+    }
+
+    const redirectUri = callbackUrl || this.getGoogleCallbackUrl();
+
+    try {
+      const params = new URLSearchParams();
+      params.append('code', code.trim());
+      params.append('client_id', clientId);
+      params.append('client_secret', clientSecret);
+      params.append('redirect_uri', redirectUri);
+      params.append('grant_type', 'authorization_code');
+
+      const res = await axios.post(
+        'https://oauth2.googleapis.com/token',
+        params.toString(),
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          timeout: 10000,
+        },
+      );
+
+      const idToken = res.data?.id_token;
+      if (!idToken) {
+        throw new UnauthorizedException('No ID token received from Google');
+      }
+
+      return await this.verifyGoogleToken(idToken);
+    } catch (error: any) {
+      if (
+        error instanceof UnauthorizedException ||
+        error instanceof BadRequestException ||
+        error instanceof InternalServerErrorException
+      ) {
+        throw error;
+      }
+      const message =
+        error.response?.data?.error_description ||
+        error.response?.data?.error ||
+        error.message ||
+        'Google code exchange failed';
+      throw new UnauthorizedException(`Google code exchange failed: ${message}`);
+    }
+  }
+
+  async handleGoogleAuth(identity: GoogleIdentity, requestedIntent?: USER_ROLE) {
+    if (!identity.emailVerified) {
+      throw new UnauthorizedException('Google email must be verified');
+    }
+
+    if (!identity.sub) {
+      throw new UnauthorizedException('Google sub identity is required');
+    }
+
+    const normalizedEmail = identity.email.trim().toLowerCase();
+
+    // Never allow ADMIN intent via Google auth
+    const safeIntent =
+      requestedIntent === USER_ROLE.PUROHIT
+        ? USER_ROLE.PUROHIT
+        : USER_ROLE.CUSTOMER;
+
+    // Step 1 — Search by Google ID (sub)
+    let user = await this.userRepository.findByGoogleId(identity.sub);
+
+    if (user) {
+      if (user.status === USER_STATUS.BLOCKED) {
+        throw new ForbiddenException('Your profile is blocked');
+      }
+      if (user.status === USER_STATUS.REJECTED) {
+        throw new ForbiddenException('Your profile is rejected by admin');
+      }
+
+      const tokenData = await this.issueAuthTokens(user);
+
+      await this.auditLogService.createAuditLog({
+        actorId: user.id,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: user.role,
+        module: AUDIT_MODULE.AUTH,
+        entity: 'Auth',
+        entityId: String(user.id),
+        action: 'USER_LOGIN',
+        message: `User #${user.id} logged in via Google.`,
+      });
+
+      return {
+        message: 'Login successful',
+        isNewUser: false,
+        ...tokenData,
+      };
+    }
+
+    // Step 2 — Search by normalized verified email (Collision Protection & Safe Account Linking)
+    user = await this.userRepository.findByEmail(normalizedEmail);
+
+    if (user) {
+      // Email collision protection:
+      // If user's googleId belongs to a DIFFERENT Google sub, reject!
+      if (user.googleId && user.googleId !== identity.sub) {
+        throw new ConflictException(
+          'This email is already associated with another Google account',
+        );
+      }
+
+      // Safe linking: user's googleId is null
+      if (!user.googleId) {
+        user.googleId = identity.sub;
+        if (!user.authProvider || user.authProvider === 'LOCAL') {
+          user.authProvider = 'GOOGLE';
+        }
+        if (!user.profileImage && identity.picture) {
+          user.profileImage = identity.picture;
+        }
+        await this.userRepository.save(user);
+
+        await this.auditLogService.createAuditLog({
+          actorId: user.id,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: user.role,
+          module: AUDIT_MODULE.AUTH,
+          entity: 'Auth',
+          entityId: String(user.id),
+          action: 'ACCOUNT_LINKED_GOOGLE',
+          message: `User #${user.id} linked Google account.`,
+        });
+      }
+
+      if (user.status === USER_STATUS.BLOCKED) {
+        throw new ForbiddenException('Your profile is blocked');
+      }
+      if (user.status === USER_STATUS.REJECTED) {
+        throw new ForbiddenException('Your profile is rejected by admin');
+      }
+
+      const tokenData = await this.issueAuthTokens(user);
+      return {
+        message: 'Google account linked and login successful',
+        isNewUser: false,
+        ...tokenData,
+      };
+    }
+
+    // Step 3 — New account creation (with collision & concurrency protection)
+    const baseName =
+      (identity.name || identity.email.split('@')[0])
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+        .slice(0, 20) || 'user';
+    let candidateUsername = `${baseName}_${identity.sub.slice(-6)}`;
+    const existingUsername = await this.userRepository.findOne({
+      where: { username: candidateUsername },
+    });
+    if (existingUsername) {
+      candidateUsername = `${baseName}_${Date.now().toString().slice(-6)}`;
+    }
+
+    const isPurohit = safeIntent === USER_ROLE.PUROHIT;
+
+    try {
+      const savedUser = await this.dataSource.transaction(async (manager) => {
+        const userRepo = manager.getRepository(User);
+        const profileRepo = manager.getRepository(PurohitProfile);
+
+        const newUser = userRepo.create({
+          email: normalizedEmail,
+          username: candidateUsername,
+          firstName: identity.givenName || identity.name?.split(' ')[0] || '',
+          lastName: identity.familyName || identity.name?.split(' ').slice(1).join(' ') || '',
+          profileImage: identity.picture || undefined,
+          googleId: identity.sub,
+          authProvider: 'GOOGLE',
+          role: isPurohit ? USER_ROLE.PUROHIT : USER_ROLE.CUSTOMER,
+          status: isPurohit ? USER_STATUS.PENDING : USER_STATUS.ACTIVE,
+          tokenVersion: 1,
+        });
+
+        const createdUser = await userRepo.save(newUser);
+
+        if (isPurohit) {
+          const profile = profileRepo.create({
+            userId: createdUser.id,
+            verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+          });
+          await profileRepo.save(profile);
+        }
+
+        return createdUser;
+      });
+
+      const tokenData = await this.issueAuthTokens(savedUser);
+
+      await this.auditLogService.createAuditLog({
+        actorId: savedUser.id,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: savedUser.role,
+        module: AUDIT_MODULE.AUTH,
+        entity: 'Auth',
+        entityId: String(savedUser.id),
+        action: isPurohit ? 'PUROHIT_REGISTER_GOOGLE' : 'CUSTOMER_REGISTER_GOOGLE',
+        message: `User #${savedUser.id} registered via Google (${savedUser.role}).`,
+      });
+
+      return {
+        message: isPurohit
+          ? 'Purohit registration successful. Profile pending verification.'
+          : 'Customer registration successful',
+        isNewUser: true,
+        ...tokenData,
+      };
+    } catch (err: any) {
+      // Handle concurrent signup collisions (PostgreSQL unique constraint 23505)
+      if (
+        err.code === '23505' ||
+        err.message?.includes('duplicate key') ||
+        err.message?.includes('unique constraint')
+      ) {
+        const existing =
+          (await this.userRepository.findByGoogleId(identity.sub)) ||
+          (await this.userRepository.findByEmail(normalizedEmail));
+
+        if (existing) {
+          if (existing.googleId && existing.googleId !== identity.sub) {
+            throw new ConflictException(
+              'This email is already associated with another Google account',
+            );
+          }
+          if (!existing.googleId) {
+            existing.googleId = identity.sub;
+            await this.userRepository.save(existing);
+          }
+          const tokenData = await this.issueAuthTokens(existing);
+          return {
+            message: 'Login successful',
+            isNewUser: false,
+            ...tokenData,
+          };
+        }
+      }
+      throw err;
+    }
+  }
+
+  async switchIntentService(userId: number, dto: SwitchIntentDto) {
+    if (dto.intent !== USER_ROLE.PUROHIT) {
+      throw new BadRequestException('Only switching to PUROHIT is supported');
+    }
+
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (user.role === USER_ROLE.PUROHIT) {
+      const tokenData = await this.issueAuthTokens(user);
+      return {
+        message: 'Account is already a Purohit',
+        ...tokenData,
+      };
+    }
+
+    if (user.role === USER_ROLE.ADMIN) {
+      throw new ForbiddenException('Admin cannot switch role to Purohit');
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      const userRepo = manager.getRepository(User);
+      const profileRepo = manager.getRepository(PurohitProfile);
+
+      user.role = USER_ROLE.PUROHIT;
+      user.status = USER_STATUS.PENDING;
+      await userRepo.save(user);
+
+      let profile = await profileRepo.findOne({ where: { userId: user.id } });
+      if (!profile) {
+        profile = profileRepo.create({
+          userId: user.id,
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+        });
+        await profileRepo.save(profile);
+      }
+    });
+
+    const tokenData = await this.issueAuthTokens(user);
+    return {
+      message: 'Purohit onboarding initiated. Profile pending admin verification.',
+      ...tokenData,
+    };
   }
 }

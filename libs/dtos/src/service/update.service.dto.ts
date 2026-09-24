@@ -1,4 +1,4 @@
-import { Transform } from 'class-transformer';
+import { Transform, Type, plainToInstance } from 'class-transformer';
 import {
   IsBoolean,
   IsNumber,
@@ -10,7 +10,18 @@ import {
   IsDateString,
   ValidateIf,
   IsNotEmpty,
+  IsArray,
+  ValidateNested,
 } from 'class-validator';
+import {
+  ServiceCityDto,
+  ServiceLanguageDto,
+  ServiceBenefitDto,
+  parseJsonArray,
+  deduplicateCities,
+  deduplicateLanguages,
+  deduplicateBenefits,
+} from './create.service.dto';
 
 export class UpdateServiceDto {
   @IsOptional()
@@ -26,26 +37,63 @@ export class UpdateServiceDto {
   description?: string;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    const deduped = deduplicateCities(parseJsonArray(value));
+    return deduped ? plainToInstance(ServiceCityDto, deduped) : undefined;
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ServiceCityDto)
+  cities?: ServiceCityDto[];
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    const deduped = deduplicateLanguages(parseJsonArray(value));
+    return deduped ? plainToInstance(ServiceLanguageDto, deduped) : undefined;
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ServiceLanguageDto)
+  languages?: ServiceLanguageDto[];
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    const deduped = deduplicateBenefits(parseJsonArray(value));
+    return deduped ? plainToInstance(ServiceBenefitDto, deduped) : undefined;
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ServiceBenefitDto)
+  benefits?: ServiceBenefitDto[];
+
+  @IsOptional()
   @IsString()
   iconUrl?: string;
 
   @IsOptional()
+  icon?: any;
+
+  @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   minPrice?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   maxPrice?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   @Max(100)
   commissionPercentage?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(1)
   durationMinutes?: number;

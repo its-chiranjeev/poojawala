@@ -15,4 +15,7 @@ export class PurohitServiceRepository extends BaseRepository<PurohitService> {
   async softDelete(criteria: any) {
     return this.repo.softDelete(criteria);
   }
+  async restore(criteria: any) {
+    return this.repo.restore(criteria);
+  }
 }

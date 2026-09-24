@@ -1,4 +1,14 @@
-import { CreatePurohitBankAccountDto, CreatePurohitByAdminDto, CreateCustomerByAdminDto, CustomerFavoriteDto, GenerateOtpDto, RegisterNormalUserDto, UpdatePurohitBankAccountDto, UpdateUserDto, VerifyPurohitDto } from '@poojawala/dtos';
+import {
+  CreatePurohitBankAccountDto,
+  CreatePurohitByAdminDto,
+  CreateCustomerByAdminDto,
+  CustomerFavoriteDto,
+  GenerateOtpDto,
+  RegisterNormalUserDto,
+  UpdatePurohitBankAccountDto,
+  UpdateUserDto,
+  VerifyPurohitDto,
+} from '@poojawala/dtos';
 import { UpsertPlatformSettingDto } from '@poojawala/dtos/Platform setting/Platform.dto';
 import { CreateCustomerAddressDto } from '@poojawala/dtos/user/add-customer-address.dto';
 import { UpdateCustomerAddressDto } from '@poojawala/dtos/user/update-customer-address.dto';
@@ -6,11 +16,47 @@ import { CreatePurohitServiceAreaDto } from '@poojawala/dtos/user/add-purohit-ad
 import { GetAllUsersDto } from '@poojawala/dtos/user/get-all-users.dto';
 import { UpdatePurohitServiceAreaDto } from '@poojawala/dtos/user/update-purohit-address.dto';
 import { EmailService } from '@poojawala/email-services';
-import { BANK_VERIFICATION_STATUS, Otp, OTP_TYPE, PUROHIT_MEDIA_TYPE, PUROHIT_MEDIA_VERIFICATION_STATUS, PUROHIT_PAYMENT_METHOD, PUROHIT_VERIFICATION_STATUS, PurohitBankAccount, PurohitMedia, PurohitProfile, User, USER_ROLE, USER_STATUS, CustomerAddress } from '@poojawala/entities';
-import { BookingRepository, CustomerAddressRepository, CustomerFavoriteRepository, OtpRepository, PlatformSettingRepository, PurohitBankAccountRepository, PurohitMediaRepository, PurohitProfileRepository, PurohitServiceAreaRepository, PurohitServiceRepository, UserRepository, } from '@poojawala/repositories';
+import {
+  BANK_VERIFICATION_STATUS,
+  Otp,
+  OTP_TYPE,
+  PUROHIT_MEDIA_TYPE,
+  PUROHIT_MEDIA_VERIFICATION_STATUS,
+  PUROHIT_PAYMENT_METHOD,
+  PUROHIT_VERIFICATION_STATUS,
+  PurohitBankAccount,
+  PurohitMedia,
+  PurohitProfile,
+  User,
+  USER_ROLE,
+  USER_STATUS,
+  CustomerAddress,
+  VENUE_TYPE,
+} from '@poojawala/entities';
+import {
+  BookingRepository,
+  CustomerAddressRepository,
+  CustomerFavoriteRepository,
+  OtpRepository,
+  PlatformSettingRepository,
+  PurohitBankAccountRepository,
+  PurohitMediaRepository,
+  PurohitProfileRepository,
+  PurohitServiceAreaRepository,
+  PurohitServiceRepository,
+  UserRepository,
+} from '@poojawala/repositories';
 import { S3Service } from '@poojawala/s3';
 import { SmsService } from '@poojawala/sms-services';
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, InternalServerErrorException, Logger, NotFoundException, } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { createHmac } from 'crypto';
@@ -40,7 +86,7 @@ export class UserService {
     private readonly bookingRepository: BookingRepository,
     private readonly purohitServiceRepository: PurohitServiceRepository,
     private readonly auditLogService: AuditLogService,
-  ) { }
+  ) {}
 
   async deleteExpiredOtps(): Promise<number> {
     const result = await this.dataSource
@@ -102,6 +148,8 @@ export class UserService {
       // phone: dto.phone,
       profileImage: dto.profileImage,
       birthPlace: dto.birthPlace,
+      ...(dto.rashi !== undefined && { rashi: dto.rashi }),
+      ...(dto.gotra !== undefined && { gotra: dto.gotra }),
     };
 
     if (dto.dob) {
@@ -232,6 +280,8 @@ export class UserService {
       lastName: dto.lastName,
       profileImage: dto.profileImage,
       birthPlace: dto.birthPlace,
+      ...(dto.rashi !== undefined && { rashi: dto.rashi }),
+      ...(dto.gotra !== undefined && { gotra: dto.gotra }),
     };
 
     if (dto.dob) {
@@ -244,22 +294,39 @@ export class UserService {
       const profilePayload: any = {};
       if (dto.languages !== undefined) profilePayload.languages = dto.languages;
       if (dto.city !== undefined) profilePayload.city = dto.city;
-      if (dto.specializations !== undefined) profilePayload.specializations = dto.specializations;
+      if (dto.specializations !== undefined)
+        profilePayload.specializations = dto.specializations;
       if (dto.bio !== undefined) profilePayload.bio = dto.bio;
-      if (dto.experienceYears !== undefined) profilePayload.experienceYears = dto.experienceYears;
-      if (dto.qualification !== undefined) profilePayload.qualification = dto.qualification;
-      if (dto.isOnlineAvailable !== undefined) profilePayload.isOnlineAvailable = dto.isOnlineAvailable === 'true' || dto.isOnlineAvailable === true as any;
-      if (dto.isOfflineAvailable !== undefined) profilePayload.isOfflineAvailable = dto.isOfflineAvailable === 'true' || dto.isOfflineAvailable === true as any;
+      if (dto.experienceYears !== undefined)
+        profilePayload.experienceYears = dto.experienceYears;
+      if (dto.qualification !== undefined)
+        profilePayload.qualification = dto.qualification;
+      if (dto.isOnlineAvailable !== undefined)
+        profilePayload.isOnlineAvailable =
+          dto.isOnlineAvailable === 'true' ||
+          dto.isOnlineAvailable === (true as any);
+      if (dto.isOfflineAvailable !== undefined)
+        profilePayload.isOfflineAvailable =
+          dto.isOfflineAvailable === 'true' ||
+          dto.isOfflineAvailable === (true as any);
 
       if (Object.keys(profilePayload).length > 0) {
-        const profile = await this.purohitProfileRepository.findOne({ where: { userId: Number(id) } });
+        const profile = await this.purohitProfileRepository.findOne({
+          where: { userId: Number(id) },
+        });
         if (profile) {
-          await this.purohitProfileRepository.update(profile.id, profilePayload);
+          await this.purohitProfileRepository.update(
+            profile.id,
+            profilePayload,
+          );
         }
       }
     }
 
-    const updatedUser = await this.userRepository.getFullProfile(Number(id), user.role);
+    const updatedUser = await this.userRepository.getFullProfile(
+      Number(id),
+      user.role,
+    );
 
     if (user.role === USER_ROLE.PUROHIT) {
       const profile = await this.purohitProfileRepository.findByUserId(
@@ -311,18 +378,36 @@ export class UserService {
     // Also generate pre-signed URLs for documents if present in the profile
     if (safeUser.profile) {
       try {
-        if (safeUser.profile.aadhaarDocUrl) safeUser.profile.aadhaarDocUrl = await this.s3Service.getDownloadUrl(safeUser.profile.aadhaarDocUrl);
-        if (safeUser.profile.panDocUrl) safeUser.profile.panDocUrl = await this.s3Service.getDownloadUrl(safeUser.profile.panDocUrl);
-        if (safeUser.profile.certificateUrl) safeUser.profile.certificateUrl = await this.s3Service.getDownloadUrl(safeUser.profile.certificateUrl);
-        if (safeUser.profile.templeAffiliationProofUrl) safeUser.profile.templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(safeUser.profile.templeAffiliationProofUrl);
+        if (safeUser.profile.aadhaarDocUrl)
+          safeUser.profile.aadhaarDocUrl = await this.s3Service.getDownloadUrl(
+            safeUser.profile.aadhaarDocUrl,
+          );
+        if (safeUser.profile.panDocUrl)
+          safeUser.profile.panDocUrl = await this.s3Service.getDownloadUrl(
+            safeUser.profile.panDocUrl,
+          );
+        if (safeUser.profile.certificateUrl)
+          safeUser.profile.certificateUrl = await this.s3Service.getDownloadUrl(
+            safeUser.profile.certificateUrl,
+          );
+        if (safeUser.profile.templeAffiliationProofUrl)
+          safeUser.profile.templeAffiliationProofUrl =
+            await this.s3Service.getDownloadUrl(
+              safeUser.profile.templeAffiliationProofUrl,
+            );
 
         // Attach serviceRadiusKm from the default service area
         if (safeUser.serviceAreas && safeUser.serviceAreas.length > 0) {
-          const defaultArea = safeUser.serviceAreas.find((a: any) => a.isDefault) || safeUser.serviceAreas[0];
+          const defaultArea =
+            safeUser.serviceAreas.find((a: any) => a.isDefault) ||
+            safeUser.serviceAreas[0];
           safeUser.profile.serviceRadiusKm = defaultArea.serviceRadiusKm;
         }
       } catch (e) {
-        console.error('Failed to generate pre-signed URL for profile documents:', e);
+        console.error(
+          'Failed to generate pre-signed URL for profile documents:',
+          e,
+        );
       }
     }
 
@@ -612,37 +697,60 @@ export class UserService {
         if ((safeUser as any).profile) {
           const profile = { ...(safeUser as any).profile };
           if (profile.aadhaarDocUrl) {
-            profile.aadhaarDocDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.aadhaarDocUrl);
-            profile.aadhaarDocUrl = await this.s3Service.getDownloadUrl(profile.aadhaarDocUrl);
+            profile.aadhaarDocDownloadUrl =
+              await this.s3Service.getAttachmentDownloadUrl(
+                profile.aadhaarDocUrl,
+              );
+            profile.aadhaarDocUrl = await this.s3Service.getDownloadUrl(
+              profile.aadhaarDocUrl,
+            );
           }
           if (profile.panDocUrl) {
-            profile.panDocDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.panDocUrl);
-            profile.panDocUrl = await this.s3Service.getDownloadUrl(profile.panDocUrl);
+            profile.panDocDownloadUrl =
+              await this.s3Service.getAttachmentDownloadUrl(profile.panDocUrl);
+            profile.panDocUrl = await this.s3Service.getDownloadUrl(
+              profile.panDocUrl,
+            );
           }
           if (profile.certificateUrl) {
-            profile.certificateDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.certificateUrl);
-            profile.certificateUrl = await this.s3Service.getDownloadUrl(profile.certificateUrl);
+            profile.certificateDownloadUrl =
+              await this.s3Service.getAttachmentDownloadUrl(
+                profile.certificateUrl,
+              );
+            profile.certificateUrl = await this.s3Service.getDownloadUrl(
+              profile.certificateUrl,
+            );
           }
           if (profile.templeAffiliationProofUrl) {
-            profile.templeAffiliationProofDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.templeAffiliationProofUrl);
-            profile.templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(profile.templeAffiliationProofUrl);
+            profile.templeAffiliationProofDownloadUrl =
+              await this.s3Service.getAttachmentDownloadUrl(
+                profile.templeAffiliationProofUrl,
+              );
+            profile.templeAffiliationProofUrl =
+              await this.s3Service.getDownloadUrl(
+                profile.templeAffiliationProofUrl,
+              );
           }
           if ((safeUser as any).purohitServices) {
-            profile.purohitServices = await Promise.all((safeUser as any).purohitServices.map(async (ps: any) => {
-              let iconDownloadurl: string | null = null;
-              if (ps.service?.iconUrl) {
-                try {
-                  iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
-                } catch (e) { }
-              }
-              return {
-                ...ps,
-                service: {
-                  ...ps.service,
-                  iconDownloadurl
+            profile.purohitServices = await Promise.all(
+              (safeUser as any).purohitServices.map(async (ps: any) => {
+                let iconDownloadurl: string | null = null;
+                if (ps.service?.iconUrl) {
+                  try {
+                    iconDownloadurl = await this.s3Service.getDownloadUrl(
+                      ps.service.iconUrl,
+                    );
+                  } catch (e) {}
                 }
-              };
-            }));
+                return {
+                  ...ps,
+                  service: {
+                    ...ps.service,
+                    iconDownloadurl,
+                  },
+                };
+              }),
+            );
             delete (safeUser as any).purohitServices;
           }
           (safeUser as any).profile = profile;
@@ -696,6 +804,9 @@ export class UserService {
     }
 
     otpRecord.isVerified = true;
+    const verifiedExpiresAt = new Date();
+    verifiedExpiresAt.setMinutes(verifiedExpiresAt.getMinutes() + 30);
+    otpRecord.expiresAt = verifiedExpiresAt;
 
     await this.otpRepository.save(otpRecord);
 
@@ -809,56 +920,60 @@ export class UserService {
       isOfflineAvailable,
     );
 
-    const dataWithServicesUrls = await Promise.all(result.data.map(async (user: any) => {
-      let profileImage = user.profileImage;
-      if (profileImage) {
-        try {
-          profileImage = await this.s3Service.getDownloadUrl(profileImage);
-        } catch (e) { }
-      }
-
-      const purohitService = user.services ? user.services.map((ps: any) => {
-        return {
-          serviceName: ps.service?.name,
-          isOnlinePrice: ps.onlinePrice,
-          isOfflinePrice: ps.offlinePrice,
-          isOnlineAvailable: ps.isOnline,
-          isOfflineAvailable: ps.isOffline
+    const dataWithServicesUrls = await Promise.all(
+      result.data.map(async (user: any) => {
+        let profileImage = user.profileImage;
+        if (profileImage) {
+          try {
+            profileImage = await this.s3Service.getDownloadUrl(profileImage);
+          } catch (e) {}
         }
-      }) : [];
 
-      const isOnline = Boolean(
-        user.profile?.isOnlineAvailable ??
-        user.profile?.isonlineAvailable ??
-        false,
-      );
-      const isOffline = Boolean(
-        user.profile?.isOfflineAvailable ??
-        user.profile?.isofflineAvailable ??
-        false,
-      );
+        const purohitService = user.services
+          ? user.services.map((ps: any) => {
+              return {
+                serviceName: ps.service?.name,
+                isOnlinePrice: ps.onlinePrice,
+                isOfflinePrice: ps.offlinePrice,
+                isOnlineAvailable: ps.isOnline,
+                isOfflineAvailable: ps.isOffline,
+              };
+            })
+          : [];
 
-      return {
-        userId: user.id,
-        purohitFirstName: user.firstName,
-        lastName: user.lastName,
-        username: user.username,
-        profileImage,
-        userRole: user.role,
-        status: user.status,
-        isActive: user.status === USER_STATUS.ACTIVE,
-        isOnlineAvailable: isOnline,
-        isOfflineAvailable: isOffline,
-        bio: user.profile?.bio,
-        qualification: user.profile?.qualification,
-        averageRating: user.profile?.avgRating,
-        experienceYears: user.profile?.experienceYears,
-        languages: user.profile?.languages,
-        specialization: user.profile?.specializations,
-        city: user.profile?.city,
-        purohitService,
-      };
-    }));
+        const isOnline = Boolean(
+          user.profile?.isOnlineAvailable ??
+          user.profile?.isonlineAvailable ??
+          false,
+        );
+        const isOffline = Boolean(
+          user.profile?.isOfflineAvailable ??
+          user.profile?.isofflineAvailable ??
+          false,
+        );
+
+        return {
+          userId: user.id,
+          purohitFirstName: user.firstName,
+          lastName: user.lastName,
+          username: user.username,
+          profileImage,
+          userRole: user.role,
+          status: user.status,
+          isActive: user.status === USER_STATUS.ACTIVE,
+          isOnlineAvailable: isOnline,
+          isOfflineAvailable: isOffline,
+          bio: user.profile?.bio,
+          qualification: user.profile?.qualification,
+          averageRating: user.profile?.avgRating,
+          experienceYears: user.profile?.experienceYears,
+          languages: user.profile?.languages,
+          specialization: user.profile?.specializations,
+          city: user.profile?.city,
+          purohitService,
+        };
+      }),
+    );
 
     return {
       success: true,
@@ -885,40 +1000,50 @@ export class UserService {
     let aadhaarDocUrl = profile?.aadhaarDocUrl;
     let aadhaarDocDownloadUrl;
     if (aadhaarDocUrl) {
-      aadhaarDocDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(aadhaarDocUrl);
+      aadhaarDocDownloadUrl =
+        await this.s3Service.getAttachmentDownloadUrl(aadhaarDocUrl);
       aadhaarDocUrl = await this.s3Service.getDownloadUrl(aadhaarDocUrl);
     }
 
     let panDocUrl = profile?.panDocUrl;
     let panDocDownloadUrl;
     if (panDocUrl) {
-      panDocDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(panDocUrl);
+      panDocDownloadUrl =
+        await this.s3Service.getAttachmentDownloadUrl(panDocUrl);
       panDocUrl = await this.s3Service.getDownloadUrl(panDocUrl);
     }
 
     let certificateUrl = profile?.certificateUrl;
     let certificateDownloadUrl;
     if (certificateUrl) {
-      certificateDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(certificateUrl);
+      certificateDownloadUrl =
+        await this.s3Service.getAttachmentDownloadUrl(certificateUrl);
       certificateUrl = await this.s3Service.getDownloadUrl(certificateUrl);
     }
 
     let templeAffiliationProofUrl = profile?.templeAffiliationProofUrl;
     let templeAffiliationProofDownloadUrl;
     if (templeAffiliationProofUrl) {
-      templeAffiliationProofDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(templeAffiliationProofUrl);
-      templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(templeAffiliationProofUrl);
+      templeAffiliationProofDownloadUrl =
+        await this.s3Service.getAttachmentDownloadUrl(
+          templeAffiliationProofUrl,
+        );
+      templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(
+        templeAffiliationProofUrl,
+      );
     }
 
-    const purohitService = profile?.purohitServices ? profile.purohitServices.map((ps) => {
-      return {
-        serviceName: ps.service?.name,
-        isOnlinePrice: ps.onlinePrice,
-        isOfflinePrice: ps.offlinePrice,
-        isOnlineAvailable: ps.isOnline,
-        isOfflineAvailable: ps.isOffline
-      }
-    }) : [];
+    const purohitService = profile?.purohitServices
+      ? profile.purohitServices.map((ps) => {
+          return {
+            serviceName: ps.service?.name,
+            isOnlinePrice: ps.onlinePrice,
+            isOfflinePrice: ps.offlinePrice,
+            isOnlineAvailable: ps.isOnline,
+            isOfflineAvailable: ps.isOffline,
+          };
+        })
+      : [];
 
     return {
       success: true,
@@ -971,8 +1096,12 @@ export class UserService {
       if (!user) {
         throw new NotFoundException('User not found');
       }
-      const fullUser = await this.userRepository.getFullProfile(Number(id), user.role);
-      const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } = fullUser!;
+      const fullUser = await this.userRepository.getFullProfile(
+        Number(id),
+        user.role,
+      );
+      const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } =
+        fullUser!;
 
       if (safeUser.profileImage) {
         safeUser.profileImage = await this.s3Service.getDownloadUrl(
@@ -982,37 +1111,60 @@ export class UserService {
       if ((safeUser as any).profile) {
         const profile = { ...(safeUser as any).profile };
         if (profile.aadhaarDocUrl) {
-          profile.aadhaarDocDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.aadhaarDocUrl);
-          profile.aadhaarDocUrl = await this.s3Service.getDownloadUrl(profile.aadhaarDocUrl);
+          profile.aadhaarDocDownloadUrl =
+            await this.s3Service.getAttachmentDownloadUrl(
+              profile.aadhaarDocUrl,
+            );
+          profile.aadhaarDocUrl = await this.s3Service.getDownloadUrl(
+            profile.aadhaarDocUrl,
+          );
         }
         if (profile.panDocUrl) {
-          profile.panDocDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.panDocUrl);
-          profile.panDocUrl = await this.s3Service.getDownloadUrl(profile.panDocUrl);
+          profile.panDocDownloadUrl =
+            await this.s3Service.getAttachmentDownloadUrl(profile.panDocUrl);
+          profile.panDocUrl = await this.s3Service.getDownloadUrl(
+            profile.panDocUrl,
+          );
         }
         if (profile.certificateUrl) {
-          profile.certificateDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.certificateUrl);
-          profile.certificateUrl = await this.s3Service.getDownloadUrl(profile.certificateUrl);
+          profile.certificateDownloadUrl =
+            await this.s3Service.getAttachmentDownloadUrl(
+              profile.certificateUrl,
+            );
+          profile.certificateUrl = await this.s3Service.getDownloadUrl(
+            profile.certificateUrl,
+          );
         }
         if (profile.templeAffiliationProofUrl) {
-          profile.templeAffiliationProofDownloadUrl = await this.s3Service.getAttachmentDownloadUrl(profile.templeAffiliationProofUrl);
-          profile.templeAffiliationProofUrl = await this.s3Service.getDownloadUrl(profile.templeAffiliationProofUrl);
+          profile.templeAffiliationProofDownloadUrl =
+            await this.s3Service.getAttachmentDownloadUrl(
+              profile.templeAffiliationProofUrl,
+            );
+          profile.templeAffiliationProofUrl =
+            await this.s3Service.getDownloadUrl(
+              profile.templeAffiliationProofUrl,
+            );
         }
         if ((safeUser as any).purohitServices) {
-          profile.purohitServices = await Promise.all((safeUser as any).purohitServices.map(async (ps: any) => {
-            let iconDownloadurl: string | null = null;
-            if (ps.service?.iconUrl) {
-              try {
-                iconDownloadurl = await this.s3Service.getDownloadUrl(ps.service.iconUrl);
-              } catch (e) { }
-            }
-            return {
-              ...ps,
-              service: {
-                ...ps.service,
-                iconDownloadurl
+          profile.purohitServices = await Promise.all(
+            (safeUser as any).purohitServices.map(async (ps: any) => {
+              let iconDownloadurl: string | null = null;
+              if (ps.service?.iconUrl) {
+                try {
+                  iconDownloadurl = await this.s3Service.getDownloadUrl(
+                    ps.service.iconUrl,
+                  );
+                } catch (e) {}
               }
-            };
-          }));
+              return {
+                ...ps,
+                service: {
+                  ...ps.service,
+                  iconDownloadurl,
+                },
+              };
+            }),
+          );
           delete (safeUser as any).purohitServices;
         }
         (safeUser as any).profile = profile;
@@ -1132,7 +1284,11 @@ export class UserService {
     };
   }
 
-  async updateAddress(userId: number, id: number, dto: UpdateCustomerAddressDto) {
+  async updateAddress(
+    userId: number,
+    id: number,
+    dto: UpdateCustomerAddressDto,
+  ) {
     const address = await this.customerAddressRepository.findById(id);
 
     if (!address) {
@@ -1285,6 +1441,7 @@ export class UserService {
     page: number = 1,
     limit: number = 10,
     search?: string,
+    state?: string,
   ) {
     const { data, total } =
       await this.purohitServiceAreaRepository.findServiceAreas(
@@ -1292,6 +1449,7 @@ export class UserService {
         page,
         limit,
         search,
+        state,
       );
 
     return {
@@ -1320,17 +1478,24 @@ export class UserService {
 
     if (area.isDefault) {
       // Unset isDefault from the one being deleted
-      await this.purohitServiceAreaRepository.updateArea(id, { isDefault: false });
+      await this.purohitServiceAreaRepository.updateArea(id, {
+        isDefault: false,
+      });
     }
 
     await this.purohitServiceAreaRepository.deleteArea(id);
 
     // If the deleted area was the default one, make the next most recent one the default
     if (area.isDefault) {
-      const remainingAreas = await this.purohitServiceAreaRepository.findByPurohitId(userId);
+      const remainingAreas =
+        await this.purohitServiceAreaRepository.findByPurohitId(userId);
       if (remainingAreas.length > 0) {
-        const nextDefaultArea = remainingAreas.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-        await this.purohitServiceAreaRepository.updateArea(nextDefaultArea.id, { isDefault: true });
+        const nextDefaultArea = remainingAreas.sort(
+          (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+        )[0];
+        await this.purohitServiceAreaRepository.updateArea(nextDefaultArea.id, {
+          isDefault: true,
+        });
       }
     }
 
@@ -1340,7 +1505,10 @@ export class UserService {
     };
   }
 
-  async addPurohitBankAccount(userId: number, dto: CreatePurohitBankAccountDto) {
+  async addPurohitBankAccount(
+    userId: number,
+    dto: CreatePurohitBankAccountDto,
+  ) {
     const profile = await this.purohitProfileRepository.findOne({
       where: { userId },
     });
@@ -1364,18 +1532,18 @@ export class UserService {
     }
 
     if (dto.accountNumber) {
-      const existingAccount = await this.purohitBankAccountRepository.findByAccountNumber(
-        dto.accountNumber,
-      );
+      const existingAccount =
+        await this.purohitBankAccountRepository.findByAccountNumber(
+          dto.accountNumber,
+        );
 
       if (existingAccount) {
         throw new ConflictException('Bank account number already in use');
       }
     }
 
-    const existingAccounts = await this.purohitBankAccountRepository.findByPurohitId(
-      profile.id,
-    );
+    const existingAccounts =
+      await this.purohitBankAccountRepository.findByPurohitId(profile.id);
 
     let isPrimary = false;
     if (dto.isPrimary !== undefined && dto.isPrimary !== null) {
@@ -1446,12 +1614,13 @@ export class UserService {
       throw new NotFoundException('Purohit profile not found');
     }
 
-    const { data, total } = await this.purohitBankAccountRepository.findBankAccounts(
-      profile.id,
-      page,
-      limit,
-      search,
-    );
+    const { data, total } =
+      await this.purohitBankAccountRepository.findBankAccounts(
+        profile.id,
+        page,
+        limit,
+        search,
+      );
 
     return {
       success: true,
@@ -1483,7 +1652,9 @@ export class UserService {
       }
 
       if (account.purohitId !== profile.id) {
-        throw new ForbiddenException('You can access only your own bank account');
+        throw new ForbiddenException(
+          'You can access only your own bank account',
+        );
       }
     }
 
@@ -1518,9 +1689,10 @@ export class UserService {
     }
 
     if (dto.accountNumber && dto.accountNumber !== account.accountNumber) {
-      const existingAccount = await this.purohitBankAccountRepository.findByAccountNumber(
-        dto.accountNumber,
-      );
+      const existingAccount =
+        await this.purohitBankAccountRepository.findByAccountNumber(
+          dto.accountNumber,
+        );
 
       if (existingAccount && existingAccount.id !== id) {
         throw new ConflictException('Bank account number already in use');
@@ -1536,9 +1708,8 @@ export class UserService {
     if (isPrimary === true) {
       await this.purohitBankAccountRepository.clearPrimaryAccount(profile.id);
     } else if (isPrimary === false && account.isPrimary) {
-      const allAccounts = await this.purohitBankAccountRepository.findByPurohitId(
-        profile.id,
-      );
+      const allAccounts =
+        await this.purohitBankAccountRepository.findByPurohitId(profile.id);
       const otherAccounts = allAccounts.filter((acc) => acc.id !== id);
 
       if (otherAccounts.length === 0) {
@@ -1547,9 +1718,12 @@ export class UserService {
         );
       }
 
-      await this.purohitBankAccountRepository.updateAccount(otherAccounts[0].id, {
-        isPrimary: true,
-      });
+      await this.purohitBankAccountRepository.updateAccount(
+        otherAccounts[0].id,
+        {
+          isPrimary: true,
+        },
+      );
     }
 
     const updatedData: Partial<PurohitBankAccount> = {
@@ -1558,12 +1732,10 @@ export class UserService {
       verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
     };
 
-    await this.purohitBankAccountRepository.updateAccount(
-      id,
-      updatedData,
-    );
+    await this.purohitBankAccountRepository.updateAccount(id, updatedData);
 
-    const freshUpdatedAccount = await this.purohitBankAccountRepository.findById(id);
+    const freshUpdatedAccount =
+      await this.purohitBankAccountRepository.findById(id);
 
     await this.auditLogService.createAuditLog({
       actorId: userId,
@@ -1609,9 +1781,8 @@ export class UserService {
     await this.purohitBankAccountRepository.deleteAccount(id);
 
     if (wasPrimary) {
-      const remainingAccounts = await this.purohitBankAccountRepository.findByPurohitId(
-        profile.id,
-      );
+      const remainingAccounts =
+        await this.purohitBankAccountRepository.findByPurohitId(profile.id);
 
       if (remainingAccounts.length > 0) {
         await this.purohitBankAccountRepository.updateAccount(
@@ -2062,7 +2233,13 @@ export class UserService {
       action: 'USER_STATUS_CHANGED',
       message: `Admin verified Purohit #${purohitUserId}. Status changed to ${dto.status}.`,
       oldValue: undefined,
-      newValue: { status: dto.status, rejectionReason: dto.status === PUROHIT_VERIFICATION_STATUS.REJECTED ? rejectionReason : null },
+      newValue: {
+        status: dto.status,
+        rejectionReason:
+          dto.status === PUROHIT_VERIFICATION_STATUS.REJECTED
+            ? rejectionReason
+            : null,
+      },
     });
 
     const emailSent = await this.sendPurohitVerificationEmail(result);
@@ -2091,19 +2268,25 @@ export class UserService {
 
   async createCustomerByAdmin(dto: CreateCustomerByAdminDto) {
     if (!dto.email && !dto.phone) {
-      throw new BadRequestException('At least email or phone number must be provided');
+      throw new BadRequestException(
+        'At least email or phone number must be provided',
+      );
     }
 
     if (dto.phone) {
       const existingUserByPhone = await this.userRepository.findOne({
         where: { phone: dto.phone },
       });
-      if (existingUserByPhone) throw new ConflictException('Phone number already in use');
+      if (existingUserByPhone)
+        throw new ConflictException('Phone number already in use');
     }
 
     if (dto.email) {
-      const existingUserByEmail = await this.userRepository.findByEmail(dto.email);
-      if (existingUserByEmail) throw new ConflictException('Email already in use');
+      const existingUserByEmail = await this.userRepository.findByEmail(
+        dto.email,
+      );
+      if (existingUserByEmail)
+        throw new ConflictException('Email already in use');
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -2112,7 +2295,8 @@ export class UserService {
       const userRepository = manager.getRepository(User);
       const addressRepository = manager.getRepository(CustomerAddress);
 
-      const username = dto.firstName.replace(/\s+/g, '') + Math.floor(Math.random() * 1000);
+      const username =
+        dto.firstName.replace(/\s+/g, '') + Math.floor(Math.random() * 1000);
 
       const user = userRepository.create({
         username,
@@ -2128,11 +2312,12 @@ export class UserService {
 
       const savedUser = await userRepository.save(user);
 
-      if (dto.address || dto.city) {
+      if (dto.address || dto.city || dto.state) {
         const address = addressRepository.create({
           customer: savedUser,
           fullAddress: dto.address || 'N/A',
           city: dto.city || 'N/A',
+          state: dto.state || undefined,
           pincode: '000000',
           addressLabel: 'HOME',
           isDefault: true,
@@ -2150,7 +2335,7 @@ export class UserService {
         dto.phone ?? 'N/A',
         dto.address ?? 'N/A',
         dto.city ?? 'N/A',
-        dto.password
+        dto.password,
       );
     }
 
@@ -2225,7 +2410,7 @@ export class UserService {
         `${dto.firstName} ${dto.lastName || ''}`.trim(),
         result.user.username,
         dto.phone ?? 'N/A',
-        dto.password
+        dto.password,
       );
     }
 
@@ -2259,7 +2444,9 @@ export class UserService {
     let existingAdminCreatedUser: User | null = null;
 
     if (dto.id) {
-      existingAdminCreatedUser = await this.userRepository.findOne({ where: { id: dto.id } });
+      existingAdminCreatedUser = await this.userRepository.findOne({
+        where: { id: dto.id },
+      });
       if (!existingAdminCreatedUser) {
         throw new NotFoundException('Purohit not found');
       }
@@ -2268,21 +2455,24 @@ export class UserService {
       }
       otpRecord = { role: USER_ROLE.PUROHIT }; // Mock for the rest of the flow
     } else {
-      if (dto.phone) {
-        otpRecord = await this.otpRepository.findOne({
-          where: {
-            phone: dto.phone,
-            isVerified: true,
-          },
-        });
-      } else if (dto.email) {
-        otpRecord = await this.otpRepository.findOne({
-          where: {
-            email: dto.email,
-            isVerified: true,
-          },
+      const otpConditions: any[] = [];
+      if (dto.email) {
+        otpConditions.push({
+          email: dto.email.trim().toLowerCase(),
+          isVerified: true,
         });
       }
+      if (dto.phone) {
+        otpConditions.push({
+          phone: dto.phone.trim(),
+          isVerified: true,
+        });
+      }
+
+      otpRecord = await this.otpRepository.findOne({
+        where: otpConditions.length > 1 ? otpConditions : otpConditions[0],
+        order: { id: 'DESC' },
+      });
 
       if (!otpRecord) {
         throw new BadRequestException('Please verify your OTP first');
@@ -2312,11 +2502,6 @@ export class UserService {
       if (dto.aadhaarNumber)
         throw new BadRequestException(
           'aadhaarNumber is not allowed for CUSTOMER registration',
-        );
-
-      if (dto.city)
-        throw new BadRequestException(
-          'city is not allowed for CUSTOMER registration',
         );
 
       if (dto.languages?.length)
@@ -2487,256 +2672,417 @@ export class UserService {
     }
 
     // Run database writes inside a transaction
-    const savedUser = await this.dataSource.transaction(async (manager) => {
-      let saved: User;
+    const { saved: savedUser, savedCustomerAddress } =
+      await this.dataSource.transaction(async (manager) => {
+        let saved: User;
 
-      if (dto.id) {
-        saved = existingAdminCreatedUser!;
-        saved.isAdminCreated = false;
-        await manager.save(User, saved);
-      } else {
-        // 5. Hash password and save user
-        const hashedPassword = await bcrypt.hash(dto.password, 10);
-
-        const username =
-          dto.username ?? `user${Date.now()}${Math.floor(Math.random() * 1000)}`;
-
-        const newUser = manager.create(User, {
-          dob: dto.dob,
-          birthPlace: dto.birthPlace,
-          ...(dto.email && { email: dto.email.toLowerCase() }),
-          username,
-          ...(dto.phone && { phone: dto.phone }),
-          ...(dto.countryCode && { countryCode: dto.countryCode }),
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          hashedPassword: hashedPassword,
-          role: otpRecord.role || USER_ROLE.CUSTOMER,
-          status:
-            otpRecord.role === USER_ROLE.PUROHIT
-              ? USER_STATUS.PENDING
-              : USER_STATUS.ACTIVE,
-        });
-
-        saved = await manager.save(User, newUser);
-      }
-
-      const aadhaarDocUrl = files.aadhaarDoc?.length
-        ? await this.s3Service.uploadFileHelper(
-          saved.id,
-          'aadhaarDoc',
-          files.aadhaarDoc,
-        )
-        : dto.aadhaarDoc;
-
-      const panDocUrl = files.panDoc?.length
-        ? await this.s3Service.uploadFileHelper(
-          saved.id,
-          'panDoc',
-          files.panDoc,
-        )
-        : dto.panDoc;
-
-      const certificateUrl = files.certificate?.length
-        ? await this.s3Service.uploadFileHelper(
-          saved.id,
-          'certificate',
-          files.certificate,
-        )
-        : dto.certificate;
-
-      const templeAffiliationProofUrl = files.templeAffiliationProof?.length
-        ? await this.s3Service.uploadFileHelper(
-          saved.id,
-          'templeAffiliationProof',
-          files.templeAffiliationProof,
-        )
-        : dto.templeAffiliationProof;
-
-      const profileImageUrl = files.profileImage?.length
-        ? await this.s3Service.uploadFileHelper(
-          saved.id,
-          'profileImage',
-          files.profileImage,
-        )
-        : undefined;
-
-      if (profileImageUrl) {
-        await manager.update(User, saved.id, { profileImage: profileImageUrl });
-        saved.profileImage = profileImageUrl;
-      }
-
-      if (otpRecord.role === USER_ROLE.PUROHIT) {
-        const missingDocs: string[] = [];
-        if (!aadhaarDocUrl && !panDocUrl)
-          missingDocs.push('Aadhaar or PAN document');
-        if (!certificateUrl) missingDocs.push('Certificate');
-        if (!templeAffiliationProofUrl)
-          missingDocs.push('Temple affiliation proof');
-
-        if (missingDocs.length > 0) {
-          throw new BadRequestException(
-            `Please provide all required images. Missing: ${missingDocs.join(', ')}`,
-          );
-        }
-
-        const isOnlineAvailable = dto.isOnlineAvailable === 'true';
-
-        const isOfflineAvailable = dto.isOfflineAvailable === 'true';
-
-        let profile = await manager.findOne(PurohitProfile, { where: { userId: saved.id } });
-
-        if (profile) {
-          Object.assign(profile, {
-            bio: dto.bio ?? profile.bio,
-            qualification: dto.qualification ?? profile.qualification,
-            experienceYears: dto.experienceYears ?? profile.experienceYears,
-            aadhaarNumber: dto.aadhaarNumber ?? profile.aadhaarNumber,
-            aadhaarDocUrl: aadhaarDocUrl || profile.aadhaarDocUrl,
-            panDocUrl: panDocUrl || profile.panDocUrl,
-            certificateUrl: certificateUrl || profile.certificateUrl,
-            templeAffiliationProofUrl: templeAffiliationProofUrl || profile.templeAffiliationProofUrl,
-            city: dto.city ?? profile.city,
-            languages: dto.languages ?? profile.languages,
-            specializations: dto.specializations ?? profile.specializations,
-            isOnlineAvailable: dto.isOnlineAvailable !== undefined ? isOnlineAvailable : profile.isOnlineAvailable,
-            isOfflineAvailable: dto.isOfflineAvailable !== undefined ? isOfflineAvailable : profile.isOfflineAvailable,
-          });
-          await manager.save(profile);
+        if (dto.id) {
+          saved = existingAdminCreatedUser!;
+          saved.isAdminCreated = false;
+          await manager.save(User, saved);
         } else {
-          profile = manager.create(PurohitProfile, {
-            userId: saved.id,
-            bio: dto.bio,
-            qualification: dto.qualification,
-            experienceYears: dto.experienceYears,
-            aadhaarNumber: dto.aadhaarNumber,
-            aadhaarDocUrl,
-            panDocUrl,
-            certificateUrl,
-            templeAffiliationProofUrl,
-            city: dto.city,
-            languages: dto.languages,
-            specializations: dto.specializations,
-            isOnlineAvailable,
-            isOfflineAvailable,
+          // 5. Hash password and save user
+          const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+          const username =
+            dto.username ??
+            `user${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+          const newUser = manager.create(User, {
+            dob: dto.dob,
+            birthPlace: dto.birthPlace,
+            rashi: dto.rashi,
+            gotra: dto.gotra,
+            ...(dto.email && { email: dto.email.toLowerCase() }),
+            username,
+            ...(dto.phone && { phone: dto.phone }),
+            ...(dto.countryCode && { countryCode: dto.countryCode }),
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            hashedPassword: hashedPassword,
+            role: otpRecord.role || USER_ROLE.CUSTOMER,
+            status:
+              otpRecord.role === USER_ROLE.PUROHIT
+                ? USER_STATUS.PENDING
+                : USER_STATUS.ACTIVE,
           });
-          await manager.save(profile);
+
+          saved = await manager.save(User, newUser);
         }
 
-        const bankAccountData: any = {
-          purohitId: profile.id,
-          paymentMethod: dto.paymentMethod,
-          isPrimary: true,
-          verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
-        };
+        const aadhaarDocUrl = files.aadhaarDoc?.length
+          ? await this.s3Service.uploadFileHelper(
+              saved.id,
+              'aadhaarDoc',
+              files.aadhaarDoc,
+            )
+          : dto.aadhaarDoc;
 
-        if (dto.paymentMethod === 'BANK') {
-          bankAccountData.accountHolderName = dto.accountHolderName;
-          bankAccountData.accountNumber = dto.accountNumber;
-          bankAccountData.ifscCode = dto.ifscCode;
-          bankAccountData.bankName = dto.bankName;
-        } else if (dto.paymentMethod === 'UPI') {
-          bankAccountData.upiId = dto.upiId;
+        const panDocUrl = files.panDoc?.length
+          ? await this.s3Service.uploadFileHelper(
+              saved.id,
+              'panDoc',
+              files.panDoc,
+            )
+          : dto.panDoc;
+
+        const certificateUrl = files.certificate?.length
+          ? await this.s3Service.uploadFileHelper(
+              saved.id,
+              'certificate',
+              files.certificate,
+            )
+          : dto.certificate;
+
+        const templeAffiliationProofUrl = files.templeAffiliationProof?.length
+          ? await this.s3Service.uploadFileHelper(
+              saved.id,
+              'templeAffiliationProof',
+              files.templeAffiliationProof,
+            )
+          : dto.templeAffiliationProof;
+
+        const profileImageUrl = files.profileImage?.length
+          ? await this.s3Service.uploadFileHelper(
+              saved.id,
+              'profileImage',
+              files.profileImage,
+            )
+          : undefined;
+
+        if (profileImageUrl) {
+          await manager.update(User, saved.id, { profileImage: profileImageUrl });
+          saved.profileImage = profileImageUrl;
         }
 
-        await manager.save(manager.create(PurohitBankAccount, bankAccountData));
+        if (otpRecord.role === USER_ROLE.PUROHIT) {
+          const missingDocs: string[] = [];
+          if (!aadhaarDocUrl && !panDocUrl)
+            missingDocs.push('Aadhaar or PAN document');
+          if (!certificateUrl) missingDocs.push('Certificate');
+          if (!templeAffiliationProofUrl)
+            missingDocs.push('Temple affiliation proof');
 
-        const mediaEntries: PurohitMedia[] = [];
-        if (aadhaarDocUrl) {
-          mediaEntries.push(
-            manager.create(PurohitMedia, {
-              purohitId: profile.id,
-              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-              documentType: 'AADHAAR',
-              mediaUrl: aadhaarDocUrl,
-            }),
-          );
+          if (missingDocs.length > 0) {
+            throw new BadRequestException(
+              `Please provide all required images. Missing: ${missingDocs.join(', ')}`,
+            );
+          }
+
+          const isOnlineAvailable = dto.isOnlineAvailable === 'true';
+
+          const isOfflineAvailable = dto.isOfflineAvailable === 'true';
+
+          let profile = await manager.findOne(PurohitProfile, {
+            where: { userId: saved.id },
+          });
+
+          if (profile) {
+            Object.assign(profile, {
+              bio: dto.bio ?? profile.bio,
+              qualification: dto.qualification ?? profile.qualification,
+              experienceYears: dto.experienceYears ?? profile.experienceYears,
+              aadhaarNumber: dto.aadhaarNumber ?? profile.aadhaarNumber,
+              aadhaarDocUrl: aadhaarDocUrl || profile.aadhaarDocUrl,
+              panDocUrl: panDocUrl || profile.panDocUrl,
+              certificateUrl: certificateUrl || profile.certificateUrl,
+              templeAffiliationProofUrl:
+                templeAffiliationProofUrl || profile.templeAffiliationProofUrl,
+              city: dto.city ?? profile.city,
+              languages: dto.languages ?? profile.languages,
+              specializations: dto.specializations ?? profile.specializations,
+              isOnlineAvailable:
+                dto.isOnlineAvailable !== undefined
+                  ? isOnlineAvailable
+                  : profile.isOnlineAvailable,
+              isOfflineAvailable:
+                dto.isOfflineAvailable !== undefined
+                  ? isOfflineAvailable
+                  : profile.isOfflineAvailable,
+            });
+            await manager.save(profile);
+          } else {
+            profile = manager.create(PurohitProfile, {
+              userId: saved.id,
+              bio: dto.bio,
+              qualification: dto.qualification,
+              experienceYears: dto.experienceYears,
+              aadhaarNumber: dto.aadhaarNumber,
+              aadhaarDocUrl,
+              panDocUrl,
+              certificateUrl,
+              templeAffiliationProofUrl,
+              city: dto.city,
+              languages: dto.languages,
+              specializations: dto.specializations,
+              isOnlineAvailable,
+              isOfflineAvailable,
+            });
+            await manager.save(profile);
+          }
+
+          const bankAccountData: any = {
+            purohitId: profile.id,
+            paymentMethod: dto.paymentMethod,
+            isPrimary: true,
+            verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
+          };
+
+          if (dto.paymentMethod === 'BANK') {
+            bankAccountData.accountHolderName = dto.accountHolderName;
+            bankAccountData.accountNumber = dto.accountNumber;
+            bankAccountData.ifscCode = dto.ifscCode;
+            bankAccountData.bankName = dto.bankName;
+          } else if (dto.paymentMethod === 'UPI') {
+            bankAccountData.upiId = dto.upiId;
+          }
+
+          await manager.save(manager.create(PurohitBankAccount, bankAccountData));
+
+          const mediaEntries: PurohitMedia[] = [];
+          if (aadhaarDocUrl) {
+            mediaEntries.push(
+              manager.create(PurohitMedia, {
+                purohitId: profile.id,
+                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                documentType: 'AADHAAR',
+                mediaUrl: aadhaarDocUrl,
+              }),
+            );
+          }
+
+          if (panDocUrl) {
+            mediaEntries.push(
+              manager.create(PurohitMedia, {
+                purohitId: profile.id,
+                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                documentType: 'PAN',
+                mediaUrl: panDocUrl,
+              }),
+            );
+          }
+
+          if (certificateUrl) {
+            mediaEntries.push(
+              manager.create(PurohitMedia, {
+                purohitId: profile.id,
+                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                documentType: 'CERTIFICATE',
+                mediaUrl: certificateUrl,
+              }),
+            );
+          }
+
+          if (templeAffiliationProofUrl) {
+            mediaEntries.push(
+              manager.create(PurohitMedia, {
+                purohitId: profile.id,
+                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                documentType: 'TEMPLE_PROOF',
+                mediaUrl: templeAffiliationProofUrl,
+              }),
+            );
+          }
+
+          if (mediaEntries.length > 0) {
+            await manager.save(PurohitMedia, mediaEntries);
+          }
         }
 
-        if (panDocUrl) {
-          mediaEntries.push(
-            manager.create(PurohitMedia, {
-              purohitId: profile.id,
-              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-              documentType: 'PAN',
-              mediaUrl: panDocUrl,
-            }),
-          );
+        let savedCustomerAddress: CustomerAddress | null = null;
+        if (saved.role === USER_ROLE.CUSTOMER) {
+          let addressData = dto.address;
+          if (typeof addressData === 'string') {
+            try {
+              addressData = JSON.parse(addressData);
+            } catch {
+              // ignore json parse error
+            }
+          }
+
+          const fullAddress =
+            dto.fullAddress ||
+            (typeof addressData === 'object' && addressData !== null
+              ? addressData.fullAddress
+              : undefined);
+
+          if (
+            fullAddress &&
+            typeof fullAddress === 'string' &&
+            fullAddress.trim() !== ''
+          ) {
+            const addressLabel =
+              dto.addressLabel ||
+              (typeof addressData === 'object' && addressData !== null
+                ? addressData.addressLabel
+                : undefined) ||
+              'HOME';
+
+            let city =
+              (typeof addressData === 'object' && addressData !== null
+                ? addressData.city
+                : undefined) ||
+              dto.city ||
+              '';
+
+            let pincode =
+              dto.pincode ||
+              (typeof addressData === 'object' && addressData !== null
+                ? addressData.pincode
+                : undefined) ||
+              '';
+
+            if (!pincode || pincode.trim() === '') {
+              const pinMatch = fullAddress.match(/\b\d{6}\b/);
+              if (pinMatch) pincode = pinMatch[0];
+              else pincode = '000000';
+            }
+
+            if (!city || city.trim() === '') {
+              city = 'N/A';
+            }
+
+            const state =
+              dto.state ||
+              (typeof addressData === 'object' && addressData !== null
+                ? addressData.state
+                : undefined) ||
+              undefined;
+
+            const venueType =
+              dto.venueType ||
+              (typeof addressData === 'object' && addressData !== null
+                ? addressData.venueType
+                : undefined) ||
+              VENUE_TYPE.HOME;
+
+            const latitude =
+              dto.latitude !== undefined
+                ? dto.latitude
+                : typeof addressData === 'object' &&
+                    addressData !== null &&
+                    addressData.latitude !== undefined
+                  ? Number(addressData.latitude)
+                  : undefined;
+
+            const longitude =
+              dto.longitude !== undefined
+                ? dto.longitude
+                : typeof addressData === 'object' &&
+                    addressData !== null &&
+                    addressData.longitude !== undefined
+                  ? Number(addressData.longitude)
+                  : undefined;
+
+            // Clear any existing default address for this customer just in case
+            await manager.update(
+              CustomerAddress,
+              { customerId: saved.id, isDefault: true },
+              { isDefault: false },
+            );
+
+            const newAddress = manager.create(CustomerAddress, {
+              customerId: saved.id,
+              addressLabel: addressLabel.trim(),
+              fullAddress: fullAddress.trim(),
+              city: city.trim(),
+              state: state ? state.trim() : undefined,
+              pincode: pincode.trim(),
+              venueType,
+              latitude,
+              longitude,
+              isDefault: true,
+            });
+
+            savedCustomerAddress = await manager.save(
+              CustomerAddress,
+              newAddress,
+            );
+
+            await this.auditLogService.createAuditLog(
+              {
+                actorId: saved.id,
+                actorType: ACTOR_TYPE.USER,
+                actorRole: saved.role,
+                module: AUDIT_MODULE.USER,
+                entity: 'CustomerAddress',
+                entityId: String(savedCustomerAddress.id),
+                action: 'CUSTOMER_ADDRESS_CREATED',
+                message: `Customer #${saved.id} registered with default address #${savedCustomerAddress.id}.`,
+                newValue: {
+                  addressId: savedCustomerAddress.id,
+                  fullAddress: savedCustomerAddress.fullAddress,
+                  isDefault: true,
+                },
+              },
+              manager,
+            );
+          }
         }
 
-        if (certificateUrl) {
-          mediaEntries.push(
-            manager.create(PurohitMedia, {
-              purohitId: profile.id,
-              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-              documentType: 'CERTIFICATE',
-              mediaUrl: certificateUrl,
-            }),
-          );
+        // 6. Delete OTP record after verification (skip if bypassed via purohitId)
+        if (otpRecord.id) {
+          await manager.delete(Otp, { id: otpRecord.id });
         }
 
-        if (templeAffiliationProofUrl) {
-          mediaEntries.push(
-            manager.create(PurohitMedia, {
-              purohitId: profile.id,
-              mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-              documentType: 'TEMPLE_PROOF',
-              mediaUrl: templeAffiliationProofUrl,
-            }),
-          );
-        }
+        await this.auditLogService.createAuditLog(
+          {
+            actorId: saved.id,
+            actorType: ACTOR_TYPE.USER,
+            actorRole: saved.role,
+            module: AUDIT_MODULE.USER,
+            entity: 'User',
+            entityId: String(saved.id),
+            action: 'USER_REGISTERED',
+            message: `User ${saved.username || saved.email || saved.phone} registered as ${saved.role}.`,
+            oldValue: undefined,
+            newValue: {
+              role: saved.role,
+              email: saved.email,
+              phone: saved.phone,
+            },
+          },
+          manager,
+        );
 
-        if (mediaEntries.length > 0) {
-          await manager.save(PurohitMedia, mediaEntries);
-        }
-      }
-
-      // 6. Delete OTP record after verification (skip if bypassed via purohitId)
-      if (otpRecord.id) {
-        await manager.delete(Otp, { id: otpRecord.id });
-      }
-
-      await this.auditLogService.createAuditLog({
-        actorId: saved.id,
-        actorType: ACTOR_TYPE.USER,
-        actorRole: saved.role,
-        module: AUDIT_MODULE.USER,
-        entity: 'User',
-        entityId: String(saved.id),
-        action: 'USER_REGISTERED',
-        message: `User ${saved.username || saved.email || saved.phone} registered as ${saved.role}.`,
-        oldValue: undefined,
-        newValue: { role: saved.role, email: saved.email, phone: saved.phone },
-      }, manager);
-
-      return saved;
-    });
+        return { saved, savedCustomerAddress };
+      });
 
     // 7. Send Registration Email to Customer or Purohit
     if (savedUser.email) {
       try {
         const fullName = savedUser.firstName
           ? `${savedUser.firstName} ${savedUser.lastName || ''}`.trim()
-          : (savedUser.role === USER_ROLE.PUROHIT ? 'Purohit' : 'Devotee');
+          : savedUser.role === USER_ROLE.PUROHIT
+            ? 'Purohit'
+            : 'Devotee';
 
         if (savedUser.role === USER_ROLE.PUROHIT) {
-          this.logger.log(`[UserRegistration] Sending registration email to Purohit ${savedUser.email}...`);
+          this.logger.log(
+            `[UserRegistration] Sending registration email to Purohit ${savedUser.email}...`,
+          );
           await this.emailService.sendPurohitRegistrationEmail({
             email: savedUser.email,
             name: fullName,
             username: savedUser.username,
             phone: savedUser.phone,
           });
-          this.logger.log(`[UserRegistration] Purohit registration email sent successfully to ${savedUser.email}.`);
+          this.logger.log(
+            `[UserRegistration] Purohit registration email sent successfully to ${savedUser.email}.`,
+          );
         } else {
-          this.logger.log(`[UserRegistration] Sending welcome registration email to customer ${savedUser.email}...`);
+          this.logger.log(
+            `[UserRegistration] Sending welcome registration email to customer ${savedUser.email}...`,
+          );
           await this.emailService.sendCustomerRegistrationEmail({
             email: savedUser.email,
             name: fullName,
             username: savedUser.username,
             phone: savedUser.phone,
           });
-          this.logger.log(`[UserRegistration] Customer registration email sent successfully to ${savedUser.email}.`);
+          this.logger.log(
+            `[UserRegistration] Customer registration email sent successfully to ${savedUser.email}.`,
+          );
         }
       } catch (emailErr) {
         this.logger.error(
@@ -2752,6 +3098,7 @@ export class UserService {
     return {
       message: 'User registration successful',
       ...data,
+      ...(savedCustomerAddress && { address: savedCustomerAddress }),
     };
   }
 
@@ -2902,21 +3249,26 @@ export class UserService {
 
   async scramblePhoneNumbers(phones?: string[]) {
     if (process.env['NODE_ENV'] === 'production') {
-      this.logger.warn('Scramble phone cron skipped because environment is production');
+      this.logger.warn(
+        'Scramble phone cron skipped because environment is production',
+      );
       return;
     }
 
-    const targetPhones = phones && phones.length > 0 ? phones : [
-      '8468801711',
-      '9358081535',
-      '7082354083',
-      '7668697182',
-      '9354678205',
-    ];
+    const targetPhones =
+      phones && phones.length > 0
+        ? phones
+        : [
+            '8468801711',
+            '9358081535',
+            '7082354083',
+            '7668697182',
+            '9354678205',
+          ];
 
     for (const originalPhone of targetPhones) {
       const user = await this.userRepository.findOne({
-        where: { phone: originalPhone }
+        where: { phone: originalPhone },
       });
 
       if (user) {
@@ -2926,7 +3278,7 @@ export class UserService {
         while (isAlreadyUsed) {
           newPhone = this.generateRandomPhoneNumber();
           const existing = await this.userRepository.findOne({
-            where: { phone: newPhone }
+            where: { phone: newPhone },
           });
           if (!existing) {
             isAlreadyUsed = false;
@@ -2939,7 +3291,9 @@ export class UserService {
         }
 
         await this.userRepository.save(user);
-        this.logger.log(`Successfully scrambled phone ${originalPhone} -> ${newPhone} for user ID ${user.id}`);
+        this.logger.log(
+          `Successfully scrambled phone ${originalPhone} -> ${newPhone} for user ID ${user.id}`,
+        );
       }
     }
   }
@@ -2967,7 +3321,9 @@ export class UserService {
       throw new NotFoundException('Purohit profile not found');
     }
 
-    const bookingStats = await this.bookingRepository.getPurohitDashboardStats(purohitProfile.id);
+    const bookingStats = await this.bookingRepository.getPurohitDashboardStats(
+      purohitProfile.id,
+    );
 
     // Get total active services
     const totalActiveServices = await this.purohitServiceRepository.count({
@@ -2988,7 +3344,9 @@ export class UserService {
       throw new ForbiddenException('Only customers can access dashboard stats');
     }
 
-    const bookingStats = await this.bookingRepository.getCustomerDashboardStats(user.id);
+    const bookingStats = await this.bookingRepository.getCustomerDashboardStats(
+      user.id,
+    );
 
     return bookingStats;
   }

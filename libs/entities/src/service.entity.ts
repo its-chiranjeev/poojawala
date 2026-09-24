@@ -11,6 +11,21 @@ import {
 import { PurohitService } from './purohit-service.entity';
 import { Booking } from './booking.entity';
 
+export interface ServiceCity {
+  name: string;
+  state?: string;
+}
+
+export interface ServiceLanguage {
+  name: string;
+  code?: string;
+}
+
+export interface ServiceBenefit {
+  title: string;
+  description?: string;
+}
+
 @Entity('services')
 export class Service {
   @PrimaryGeneratedColumn()
@@ -25,6 +40,27 @@ export class Service {
 
   @Column({ type: 'text', nullable: true })
   description?: string;
+
+  @Column({
+    type: 'jsonb',
+    nullable: false,
+    default: () => "'[]'",
+  })
+  cities!: ServiceCity[];
+
+  @Column({
+    type: 'jsonb',
+    nullable: false,
+    default: () => "'[]'",
+  })
+  languages!: ServiceLanguage[];
+
+  @Column({
+    type: 'jsonb',
+    nullable: false,
+    default: () => "'[]'",
+  })
+  benefits!: ServiceBenefit[];
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   iconUrl?: string;

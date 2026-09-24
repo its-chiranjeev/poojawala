@@ -35,9 +35,17 @@ import {
   NotificationQueryDto,
   CreateCustomerByAdminDto,
 } from '@poojawala/dtos';
-import { AuthGuard } from "@nestjs/passport";
-import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from "@poojawala/common";
-import { UpdateUserDto, UpdateUserStatusDto, RegisterNormalUserDto, GenerateOtpDto, CustomerFavoriteDto, VerifyPurohitDto, CreatePurohitByAdminDto } from "@poojawala/dtos";
+import { AuthGuard } from '@nestjs/passport';
+import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@poojawala/common';
+import {
+  UpdateUserDto,
+  UpdateUserStatusDto,
+  RegisterNormalUserDto,
+  GenerateOtpDto,
+  CustomerFavoriteDto,
+  VerifyPurohitDto,
+  CreatePurohitByAdminDto,
+} from '@poojawala/dtos';
 import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { filter } from 'rxjs';
 import { UpsertPlatformSettingDto } from '@poojawala/dtos/Platform setting/Platform.dto';
@@ -56,7 +64,7 @@ export class UserController {
   constructor(
     private readonly userService: UserService,
     private readonly notificationService: NotificationService,
-  ) { }
+  ) {}
 
   @Cron('0 0 */6 * * *', {
     name: 'delete-expired-otps',
@@ -262,6 +270,7 @@ export class UserController {
       message: result.message,
       csrfToken,
       user: result.user,
+      ...(result.address && { address: result.address }),
     };
   }
 
@@ -365,9 +374,15 @@ export class UserController {
     const isProd = process.env.NODE_ENV === 'production';
     const req = (res as any).req;
     const origin = req?.headers?.origin;
-    const isCrossSite = origin && (origin.includes('192.168.') || origin.includes('10.') || origin.includes('172.') || origin.includes('localhost') || origin.includes('127.0.0.1'));
+    const isCrossSite =
+      origin &&
+      (origin.includes('192.168.') ||
+        origin.includes('10.') ||
+        origin.includes('172.') ||
+        origin.includes('localhost') ||
+        origin.includes('127.0.0.1'));
 
-    const sameSite = (isCrossSite || !isProd) ? 'none' : 'lax';
+    const sameSite = isCrossSite || !isProd ? 'none' : 'lax';
     const secure = true;
 
     const cookieOptions: any = {
@@ -520,12 +535,14 @@ export class UserController {
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '10',
     @Query('search') search?: string,
+    @Query('state') state?: string,
   ) {
     return this.userService.getMyServiceAreas(
       req.user.id,
       Number(page),
       Number(limit),
       search,
+      state,
     );
   }
 
@@ -632,7 +649,7 @@ export class UserController {
     @Req() req: any,
     @Query() query: NotificationQueryDto,
   ) {
-    const user = (req as any).user;
+    const user = req.user;
     return this.notificationService.getUserNotifications(user.id, query);
   }
 
@@ -640,7 +657,7 @@ export class UserController {
   @Get('notifications/unread-count')
   @HttpCode(HttpStatus.OK)
   async getUnreadCount(@Req() req: any) {
-    const user = (req as any).user;
+    const user = req.user;
     return this.notificationService.getUnreadCount(user.id);
   }
 
@@ -648,18 +665,15 @@ export class UserController {
   @Patch('notifications/read-all')
   @HttpCode(HttpStatus.OK)
   async markAllAsRead(@Req() req: any) {
-    const user = (req as any).user;
+    const user = req.user;
     return this.notificationService.markAllAsRead(user.id);
   }
 
   @UseGuards(JwtAuthGuard)
   @Patch('notifications/:id/read')
   @HttpCode(HttpStatus.OK)
-  async markAsRead(
-    @Req() req: any,
-    @Param('id', ParseIntPipe) id: number,
-  ) {
-    const user = (req as any).user;
+  async markAsRead(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
+    const user = req.user;
     return this.notificationService.markAsRead(user.id, id);
   }
 
@@ -670,7 +684,7 @@ export class UserController {
     @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
   ) {
-    const user = (req as any).user;
+    const user = req.user;
     return this.notificationService.deleteNotification(user.id, id);
   }
 }

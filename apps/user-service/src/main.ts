@@ -75,9 +75,27 @@ async function bootstrap() {
         enableImplicitConversion: true,
       },
       exceptionFactory: (errors) => {
+        // TODO: Previous errorMessages flatMap kept for reference:
+        /*
         const errorMessages = errors.flatMap((err) =>
           Object.values(err.constraints || {}),
         );
+        */
+        const extractErrors = (errs: any[]): string[] => {
+          const messages: string[] = [];
+          for (const err of errs) {
+            if (err.constraints) {
+              messages.push(...Object.values(err.constraints as Record<string, string>));
+            }
+            if (err.children && err.children.length > 0) {
+              messages.push(...extractErrors(err.children));
+            }
+          }
+          return messages;
+        };
+
+        const errorMessages = extractErrors(errors);
+        Logger.error(`Validation failed errors: ${JSON.stringify(errorMessages)}`);
 
         return new UnprocessableEntityException({
           success: false,

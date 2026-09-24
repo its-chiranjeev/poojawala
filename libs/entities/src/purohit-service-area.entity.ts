@@ -5,11 +5,9 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
-  Unique,
   UpdateDateColumn,
   DeleteDateColumn,
 } from 'typeorm';
-import { PurohitProfile } from './purohit-profile.entity';
 import { User } from './user.entity';
 
 @Entity('purohit_service_areas')
@@ -38,6 +36,9 @@ export class PurohitServiceArea {
   @Column({ type: 'varchar', length: 100 })
   city!: string;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  state?: string;
+
   @Column({ type: 'varchar', length: 10 })
   pincode!: string;
 
@@ -45,12 +46,12 @@ export class PurohitServiceArea {
   isDefault!: boolean;
 
   @Column({
-  type: 'decimal',
-  precision: 10,
-  scale: 7,
-  nullable: true,
-})
-latitude?: number;
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+  })
+  latitude?: number;
 
   @Column({
     type: 'decimal',
@@ -77,7 +78,6 @@ latitude?: number;
   @DeleteDateColumn()
   deletedAt?: Date;
 }
-
 
 // import {
 //   Entity,

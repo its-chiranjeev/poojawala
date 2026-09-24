@@ -56,4 +56,8 @@ export class BaseRepository<T extends ObjectLiteral> {
   async softDelete(id: string | number) {
     return this.repo.softDelete(id);
   }
+
+  async restore(id: string | number | any) {
+    return this.repo.restore(id);
+  }
 }

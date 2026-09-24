@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
-import { Booking, BOOKING_STATUS, PurohitProfile, PurohitServiceArea, PUROHIT_VERIFICATION_STATUS, USER_ROLE, USER_STATUS, } from '@poojawala/entities';
+import { Booking, BOOKING_STATUS, PurohitProfile, PurohitServiceArea, PUROHIT_VERIFICATION_STATUS, USER_ROLE, USER_STATUS, CustomerAddress } from '@poojawala/entities';
 
 @Injectable()
 export class AssignmentService {
@@ -20,6 +20,20 @@ export class AssignmentService {
         `Booking ${booking.id || 'new'} does not contain valid customer coordinates`,
       );
       return [];
+    }
+
+    let bookingCity = (
+      booking.customerAddress?.city ||
+      (booking.addressSnapshot as any)?.city ||
+      ''
+    ).trim();
+
+    if (!bookingCity && booking.customerAddressId) {
+      const address = await manager.getRepository(CustomerAddress).findOne({
+        where: { id: booking.customerAddressId },
+        select: ['city'],
+      });
+      bookingCity = address?.city?.trim() || '';
     }
 
     const { latitude: customerLatitude, longitude: customerLongitude } = customerLocation;
@@ -69,6 +83,13 @@ export class AssignmentService {
       .andWhere('service_area.latitude IS NOT NULL')
       .andWhere('service_area.longitude IS NOT NULL')
       .andWhere('service_area.deletedAt IS NULL');
+
+    if (bookingCity) {
+      candidateQueryBuilder.andWhere(
+        'LOWER(TRIM(service_area.city)) = LOWER(TRIM(:bookingCity))',
+        { bookingCity },
+      );
+    }
 
     // Haversine filtering in SQL
     candidateQueryBuilder.andWhere(

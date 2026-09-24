@@ -65,15 +65,22 @@ export class PurohitServiceAreaRepository extends BaseRepository<PurohitServiceA
     page: number = 1,
     limit: number = 10,
     search?: string,
+    state?: string,
   ) {
     const query = this.repo
       .createQueryBuilder('area')
       .where('area.purohitId = :purohitId', { purohitId });
 
-    if (search) {
+    if (state && state.trim() !== '') {
+      query.andWhere('area.state ILIKE :state', {
+        state: `%${state.trim()}%`,
+      });
+    }
+
+    if (search && search.trim() !== '') {
       query.andWhere(
-        '(area.addressLabel ILIKE :search OR area.streetName ILIKE :search OR area.fullAddress ILIKE :search OR area.city ILIKE :search OR area.pincode ILIKE :search)',
-        { search: `%${search}%` },
+        '(area.addressLabel ILIKE :search OR area.streetName ILIKE :search OR area.fullAddress ILIKE :search OR area.city ILIKE :search OR area.state ILIKE :search OR area.pincode ILIKE :search)',
+        { search: `%${search.trim()}%` },
       );
     }
 

@@ -26,4 +26,16 @@ export class GetServicesQueryDto {
   @IsOptional()
   @IsString()
   isUpcomingFestival?: string;
+
+  @IsOptional()
+  @IsString()
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  state?: string;
+
+  @IsOptional()
+  @IsString()
+  language?: string;
 }

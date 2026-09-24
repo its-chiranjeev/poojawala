@@ -18,6 +18,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -117,8 +118,21 @@ export class ServiceService {
         }
       }
 
+      // TODO: Original createService instantiation kept for reference:
+      /*
       const service = this.serviceRepository.create({
         ...dto,
+        iconUrl,
+        isActive: dto.isActive ?? true,
+        isUpcomingFestival: dto.isUpcomingFestival ?? false,
+      });
+      */
+
+      const service = this.serviceRepository.create({
+        ...dto,
+        cities: dto.cities ?? [],
+        languages: dto.languages ?? [],
+        benefits: dto.benefits ?? [],
         iconUrl,
         isActive: dto.isActive ?? true,
         isUpcomingFestival: dto.isUpcomingFestival ?? false,
@@ -155,6 +169,9 @@ export class ServiceService {
         data: savedService,
       };
     } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
       console.error('Error in createService:', error);
       const errorMsg =
         error instanceof Error ? error.stack : JSON.stringify(error);
@@ -209,7 +226,25 @@ export class ServiceService {
       );
     }
 
+    // TODO: Previous Object.assign(service, dto) kept for reference:
+    /*
     Object.assign(service, dto);
+    */
+    const oldCities = service.cities;
+    const oldLanguages = service.languages;
+    const oldBenefits = service.benefits;
+
+    Object.assign(service, dto);
+
+    if (dto.cities !== undefined) {
+      service.cities = dto.cities ?? [];
+    }
+    if (dto.languages !== undefined) {
+      service.languages = dto.languages ?? [];
+    }
+    if (dto.benefits !== undefined) {
+      service.benefits = dto.benefits ?? [];
+    }
 
     if (service.isUpcomingFestival) {
       if (!service.festivalStartDate || !service.festivalEndDate) {
@@ -234,6 +269,11 @@ export class ServiceService {
 
     const updated = await this.serviceRepository.save(service);
 
+    const updatedFields: Record<string, unknown> = { name: updated.name };
+    if (dto.cities !== undefined) updatedFields.cities = updated.cities;
+    if (dto.languages !== undefined) updatedFields.languages = updated.languages;
+    if (dto.benefits !== undefined) updatedFields.benefits = updated.benefits;
+
     await this.auditLogService.createAuditLog({
       actorId: adminId,
       actorType: ACTOR_TYPE.USER,
@@ -243,8 +283,12 @@ export class ServiceService {
       entityId: String(updated.id),
       action: 'SERVICE_UPDATED',
       message: `Admin updated service ${updated.name}.`,
-      oldValue: undefined,
-      newValue: { name: updated.name },
+      oldValue: {
+        cities: oldCities,
+        languages: oldLanguages,
+        benefits: oldBenefits,
+      },
+      newValue: updatedFields,
     });
 
     return {
@@ -399,30 +443,81 @@ export class ServiceService {
         continue;
       }
 
-      // Check duplicate
+      // Check duplicate (including soft-deleted records)
       const existing = await this.PurohitServiceRepository.findOne({
         where: {
           purohitId: purohitProfile.id,
           serviceId: serviceDto.serviceId,
         },
+        withDeleted: true,
       });
 
       if (existing) {
-        failed.push({
-          serviceId: serviceDto.serviceId,
-          reason: ['Service already added'],
+        if (!existing.deletedAt) {
+          failed.push({
+            serviceId: serviceDto.serviceId,
+            reason: ['Service already added'],
+          });
+          continue;
+        }
+
+        // Service was previously soft-deleted: restore and update with new settings
+        await this.PurohitServiceRepository.restore(existing.id);
+        await this.PurohitServiceRepository.update(existing.id, {
+          deletedAt: null as any,
+          isOnline: serviceDto.isOnline ?? existing.isOnline,
+          isOffline: serviceDto.isOffline ?? existing.isOffline,
+          onlinePrice: serviceDto.onlinePrice ?? existing.onlinePrice,
+          offlinePrice: serviceDto.offlinePrice ?? existing.offlinePrice,
+          durationMinutes: serviceDto.durationMinutes ?? existing.durationMinutes,
+          isActive: serviceDto.isActive ?? true,
         });
+
+        const restored = await this.PurohitServiceRepository.findById(existing.id);
+        if (restored) added.push(restored);
         continue;
       }
 
-      // Save
+      // Save new
       const entity = this.PurohitServiceRepository.create({
         ...serviceDto,
         purohitId: purohitProfile.id,
       });
 
-      const saved = await this.PurohitServiceRepository.save(entity);
-      added.push(saved);
+      try {
+        const saved = await this.PurohitServiceRepository.save(entity);
+        added.push(saved);
+      } catch (err: any) {
+        if (
+          err.code === '23505' ||
+          err.message?.includes('duplicate key') ||
+          err.message?.includes('unique constraint')
+        ) {
+          const softDeleted = await this.PurohitServiceRepository.findOne({
+            where: {
+              purohitId: purohitProfile.id,
+              serviceId: serviceDto.serviceId,
+            },
+            withDeleted: true,
+          });
+          if (softDeleted) {
+            await this.PurohitServiceRepository.restore(softDeleted.id);
+            await this.PurohitServiceRepository.update(softDeleted.id, {
+              deletedAt: null as any,
+              isOnline: serviceDto.isOnline ?? softDeleted.isOnline,
+              isOffline: serviceDto.isOffline ?? softDeleted.isOffline,
+              onlinePrice: serviceDto.onlinePrice ?? softDeleted.onlinePrice,
+              offlinePrice: serviceDto.offlinePrice ?? softDeleted.offlinePrice,
+              durationMinutes: serviceDto.durationMinutes ?? softDeleted.durationMinutes,
+              isActive: serviceDto.isActive ?? true,
+            });
+            const restored = await this.PurohitServiceRepository.findById(softDeleted.id);
+            if (restored) added.push(restored);
+            continue;
+          }
+        }
+        throw err;
+      }
     }
 
     return {

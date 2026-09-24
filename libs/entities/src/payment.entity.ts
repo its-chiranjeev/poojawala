@@ -19,6 +19,7 @@ export enum PAYMENT_TYPE {
   PUROHIT_PAYOUT = 'PUROHIT_PAYOUT',
   CUSTOMER_REFUND = 'CUSTOMER_REFUND',
   DONATION = 'DONATION',
+  PRODUCT_PAYMENT = 'PRODUCT_PAYMENT',
 }
 
 export enum CUSTOMER_PAYMENT_METHOD {
@@ -87,6 +88,14 @@ export class Payment {
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount!: number;
 
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
+  customerPaidAmount?: number;
+
   @Column({ type: 'varchar', length: 5, default: 'INR' })
   currency!: string;
 
@@ -115,6 +124,12 @@ export class Payment {
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   razorpayRefundId?: string;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  razorpayFee?: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  razorpayTax?: number;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   bankTransferReference?: string;
