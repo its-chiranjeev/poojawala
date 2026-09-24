@@ -69,7 +69,7 @@ export class OrderController {
     };
   }
 
-  /**
+  /*
    * Updates fulfillment status (ADMIN ONLY)
    * PATCH /api/orders/:id/status
    */

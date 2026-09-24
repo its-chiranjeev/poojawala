@@ -104,7 +104,18 @@ describe('AuthModuleController - Google OAuth & Intent Flow', () => {
       const res: any = { cookie: jest.fn() };
 
       await expect(
-        controller.googleAuthDirect({ intent: USER_ROLE.CUSTOMER } as any, res),
+        controller.googleAuthDirect({ role: USER_ROLE.CUSTOMER } as any, res),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException if role is ADMIN', async () => {
+      const res: any = { cookie: jest.fn() };
+
+      await expect(
+        controller.googleAuthDirect(
+          { credential: 'valid_id_token', role: USER_ROLE.ADMIN },
+          res,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -125,7 +136,7 @@ describe('AuthModuleController - Google OAuth & Intent Flow', () => {
       });
 
       const result = await controller.googleAuthDirect(
-        { credential: 'valid_id_token', intent: USER_ROLE.CUSTOMER },
+        { credential: 'valid_id_token', role: USER_ROLE.CUSTOMER },
         res,
       );
 
@@ -151,7 +162,7 @@ describe('AuthModuleController - Google OAuth & Intent Flow', () => {
       });
 
       const result = await controller.googleAuthDirect(
-        { code: 'valid_auth_code', intent: USER_ROLE.CUSTOMER },
+        { code: 'valid_auth_code', role: USER_ROLE.CUSTOMER },
         res,
       );
 

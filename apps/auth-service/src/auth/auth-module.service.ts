@@ -795,11 +795,27 @@ export class AuthModuleService {
     return configured.replace(/\/+$/, '');
   }
 
-  getGoogleOAuthRedirect(intentParam?: string): { url: string; state: string } {
-    const intent =
-      intentParam?.toUpperCase() === USER_ROLE.PUROHIT
-        ? USER_ROLE.PUROHIT
-        : USER_ROLE.CUSTOMER;
+  getGoogleOAuthRedirect(roleParam?: string): { url: string; state: string } {
+    if (!roleParam || typeof roleParam !== 'string' || !roleParam.trim()) {
+      throw new BadRequestException('Role is required for Google authentication');
+    }
+
+    const normalizedRole = roleParam.trim().toUpperCase();
+
+    if (normalizedRole === USER_ROLE.ADMIN) {
+      throw new BadRequestException('ADMIN role is not allowed for Google authentication');
+    }
+
+    if (
+      normalizedRole !== USER_ROLE.CUSTOMER &&
+      normalizedRole !== USER_ROLE.PUROHIT
+    ) {
+      throw new BadRequestException(
+        `Invalid role: ${roleParam}. Only CUSTOMER and PUROHIT are allowed for Google authentication`,
+      );
+    }
+
+    const role = normalizedRole as USER_ROLE.CUSTOMER | USER_ROLE.PUROHIT;
 
     const clientId =
       this.configService.get<string>('GOOGLE_CLIENT_ID')?.trim() ||
@@ -811,7 +827,7 @@ export class AuthModuleService {
 
     const callbackUrl = this.getGoogleCallbackUrl();
     const nonce = randomBytes(16).toString('hex');
-    const statePayload = JSON.stringify({ intent, nonce });
+    const statePayload = JSON.stringify({ role, nonce });
     const encodedState = Buffer.from(statePayload).toString('base64url');
 
     const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&scope=openid%20email%20profile&state=${encodeURIComponent(encodedState)}&access_type=offline&prompt=select_account`;
@@ -820,11 +836,11 @@ export class AuthModuleService {
   }
 
   async processGoogleOAuthCallback(code: string, state: string) {
-    let intent = USER_ROLE.CUSTOMER;
+    let role = USER_ROLE.CUSTOMER;
     try {
       const parsed = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
-      if (parsed.intent === USER_ROLE.PUROHIT) {
-        intent = USER_ROLE.PUROHIT;
+      if (parsed.role === USER_ROLE.PUROHIT) {
+        role = USER_ROLE.PUROHIT;
       }
     } catch {
       // default to CUSTOMER
@@ -832,7 +848,7 @@ export class AuthModuleService {
 
     const callbackUrl = this.getGoogleCallbackUrl();
     const identity = await this.exchangeGoogleCode(code, callbackUrl);
-    const result = await this.handleGoogleAuth(identity, intent);
+    const result = await this.handleGoogleAuth(identity, role);
 
     const csrfToken = randomUUID();
     const frontendUrl = this.getFrontendUrl();
@@ -907,7 +923,7 @@ export class AuthModuleService {
     }
   }
 
-  async handleGoogleAuth(identity: GoogleIdentity, requestedIntent?: USER_ROLE) {
+  async handleGoogleAuth(identity: GoogleIdentity, requestedRole?: USER_ROLE) {
     if (!identity.emailVerified) {
       throw new UnauthorizedException('Google email must be verified');
     }
@@ -918,9 +934,9 @@ export class AuthModuleService {
 
     const normalizedEmail = identity.email.trim().toLowerCase();
 
-    // Never allow ADMIN intent via Google auth
-    const safeIntent =
-      requestedIntent === USER_ROLE.PUROHIT
+    // Never allow ADMIN role via Google auth
+    const safeRole =
+      requestedRole === USER_ROLE.PUROHIT
         ? USER_ROLE.PUROHIT
         : USER_ROLE.CUSTOMER;
 
@@ -1019,7 +1035,7 @@ export class AuthModuleService {
       candidateUsername = `${baseName}_${Date.now().toString().slice(-6)}`;
     }
 
-    const isPurohit = safeIntent === USER_ROLE.PUROHIT;
+    const isPurohit = safeRole === USER_ROLE.PUROHIT;
 
     try {
       const savedUser = await this.dataSource.transaction(async (manager) => {
@@ -1105,50 +1121,50 @@ export class AuthModuleService {
     }
   }
 
-  async switchIntentService(userId: number, dto: SwitchIntentDto) {
-    if (dto.intent !== USER_ROLE.PUROHIT) {
-      throw new BadRequestException('Only switching to PUROHIT is supported');
-    }
+  // async switchIntentService(userId: number, dto: SwitchIntentDto) {
+  //   if (dto.intent !== USER_ROLE.PUROHIT) {
+  //     throw new BadRequestException('Only switching to PUROHIT is supported');
+  //   }
 
-    const user = await this.userRepository.findOne({ where: { id: userId } });
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
+  //   const user = await this.userRepository.findOne({ where: { id: userId } });
+  //   if (!user) {
+  //     throw new NotFoundException('User not found');
+  //   }
 
-    if (user.role === USER_ROLE.PUROHIT) {
-      const tokenData = await this.issueAuthTokens(user);
-      return {
-        message: 'Account is already a Purohit',
-        ...tokenData,
-      };
-    }
+  //   if (user.role === USER_ROLE.PUROHIT) {
+  //     const tokenData = await this.issueAuthTokens(user);
+  //     return {
+  //       message: 'Account is already a Purohit',
+  //       ...tokenData,
+  //     };
+  //   }
 
-    if (user.role === USER_ROLE.ADMIN) {
-      throw new ForbiddenException('Admin cannot switch role to Purohit');
-    }
+  //   if (user.role === USER_ROLE.ADMIN) {
+  //     throw new ForbiddenException('Admin cannot switch role to Purohit');
+  //   }
 
-    await this.dataSource.transaction(async (manager) => {
-      const userRepo = manager.getRepository(User);
-      const profileRepo = manager.getRepository(PurohitProfile);
+  //   await this.dataSource.transaction(async (manager) => {
+  //     const userRepo = manager.getRepository(User);
+  //     const profileRepo = manager.getRepository(PurohitProfile);
 
-      user.role = USER_ROLE.PUROHIT;
-      user.status = USER_STATUS.PENDING;
-      await userRepo.save(user);
+  //     user.role = USER_ROLE.PUROHIT;
+  //     user.status = USER_STATUS.PENDING;
+  //     await userRepo.save(user);
 
-      let profile = await profileRepo.findOne({ where: { userId: user.id } });
-      if (!profile) {
-        profile = profileRepo.create({
-          userId: user.id,
-          verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
-        });
-        await profileRepo.save(profile);
-      }
-    });
+  //     let profile = await profileRepo.findOne({ where: { userId: user.id } });
+  //     if (!profile) {
+  //       profile = profileRepo.create({
+  //         userId: user.id,
+  //         verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+  //       });
+  //       await profileRepo.save(profile);
+  //     }
+  //   });
 
-    const tokenData = await this.issueAuthTokens(user);
-    return {
-      message: 'Purohit onboarding initiated. Profile pending admin verification.',
-      ...tokenData,
-    };
-  }
+  //   const tokenData = await this.issueAuthTokens(user);
+  //   return {
+  //     message: 'Purohit onboarding initiated. Profile pending admin verification.',
+  //     ...tokenData,
+  //   };
+  // }
 }

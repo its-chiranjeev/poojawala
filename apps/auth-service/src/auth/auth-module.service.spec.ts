@@ -166,7 +166,7 @@ describe('AuthModuleService - Google Authentication', () => {
       expect(createdProfile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
     });
 
-    it('should never escalate to ADMIN even if ADMIN intent is requested', async () => {
+    it('should never escalate to ADMIN even if ADMIN role is requested', async () => {
       userRepository.findByGoogleId!.mockResolvedValue(null);
       userRepository.findByEmail!.mockResolvedValue(null);
       userRepository.findOne!.mockResolvedValue(null);
@@ -414,8 +414,40 @@ describe('AuthModuleService - Google Authentication', () => {
       expect(state).toBeDefined();
 
       const parsedState = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
-      expect(parsedState.intent).toBe(USER_ROLE.PUROHIT);
+      expect(parsedState.role).toBe(USER_ROLE.PUROHIT);
       expect(parsedState.nonce).toBeDefined();
+    });
+
+    it('should throw BadRequestException in getGoogleOAuthRedirect if role is missing', () => {
+      configService.get = jest.fn((key: string) => {
+        if (key === 'GOOGLE_CLIENT_ID') return 'mock-client-id';
+        if (key === 'GOOGLE_CALLBACK_URL') return 'http://localhost:8010/api/auth/google/callback';
+        return null;
+      });
+
+      expect(() => service.getGoogleOAuthRedirect()).toThrow(BadRequestException);
+      expect(() => service.getGoogleOAuthRedirect('')).toThrow(BadRequestException);
+      expect(() => service.getGoogleOAuthRedirect('   ')).toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException in getGoogleOAuthRedirect if role is ADMIN', () => {
+      configService.get = jest.fn((key: string) => {
+        if (key === 'GOOGLE_CLIENT_ID') return 'mock-client-id';
+        if (key === 'GOOGLE_CALLBACK_URL') return 'http://localhost:8010/api/auth/google/callback';
+        return null;
+      });
+
+      expect(() => service.getGoogleOAuthRedirect('ADMIN')).toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException in getGoogleOAuthRedirect if role is unsupported', () => {
+      configService.get = jest.fn((key: string) => {
+        if (key === 'GOOGLE_CLIENT_ID') return 'mock-client-id';
+        if (key === 'GOOGLE_CALLBACK_URL') return 'http://localhost:8010/api/auth/google/callback';
+        return null;
+      });
+
+      expect(() => service.getGoogleOAuthRedirect('TEST')).toThrow(BadRequestException);
     });
 
     it('should throw BadRequestException in getGoogleOAuthRedirect if GOOGLE_CLIENT_ID is missing', () => {

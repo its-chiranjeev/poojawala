@@ -1,6 +1,6 @@
 import { USER_ROLE, QUALIFICATION, PUROHIT_PAYMENT_METHOD, VENUE_TYPE } from '@poojawala/entities';
 import { Transform, Type } from 'class-transformer';
-import { IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, ValidateIf, IsNumber, Min, Max } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, ValidateIf, IsNumber, Min, Max } from 'class-validator';
 
 export class OtpDto {
   @IsOptional()
@@ -223,6 +223,15 @@ export class RegisterNormalUserDto {
   @Min(-180)
   @Max(180)
   longitude?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => {
+    if (value === true || value === 'true') return true;
+    if (value === false || value === 'false') return false;
+    return value;
+  })
+  isDefault?: boolean;
 
   @IsOptional()
   address?: any;

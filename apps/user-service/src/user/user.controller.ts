@@ -56,6 +56,21 @@ import { CreatePurohitServiceAreaDto } from '@poojawala/dtos/user/add-purohit-ad
 import { UpdatePurohitServiceAreaDto } from '@poojawala/dtos/user/update-purohit-address.dto';
 import { Cron } from '@nestjs/schedule';
 import { NotificationService } from '@poojawala/notification';
+import { IsArray, IsOptional, IsString } from 'class-validator';
+
+export class InternalEmitNotificationDto {
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  rooms?: string[];
+
+  @IsOptional()
+  @IsString()
+  event?: string;
+
+  @IsOptional()
+  payload?: any;
+}
 
 @Controller('users')
 export class UserController {
@@ -64,7 +79,7 @@ export class UserController {
   constructor(
     private readonly userService: UserService,
     private readonly notificationService: NotificationService,
-  ) {}
+  ) { }
 
   @Cron('0 0 */6 * * *', {
     name: 'delete-expired-otps',

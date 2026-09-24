@@ -358,10 +358,10 @@ export class AuthModuleController {
 
   @Get('google')
   async googleAuth(
-    @Query('intent') intentParam: string,
+    @Query('role') roleParam: string,
     @Res() res: Response,
   ) {
-    const { url, state } = this.authModuleService.getGoogleOAuthRedirect(intentParam);
+    const { url, state } = this.authModuleService.getGoogleOAuthRedirect(roleParam);
 
     const isProd = process.env.NODE_ENV === 'production';
     res.cookie('google_oauth_state', state, {
@@ -424,6 +424,10 @@ export class AuthModuleController {
     @Body(new ValidationPipe({ whitelist: true, transform: true })) dto: GoogleAuthDto,
     @Res({ passthrough: true }) res: Response,
   ) {
+    if (dto.role === USER_ROLE.ADMIN) {
+      throw new BadRequestException('ADMIN role is not allowed for Google authentication');
+    }
+
     let identity;
     if (dto.credential) {
       identity = await this.authModuleService.verifyGoogleToken(dto.credential);
@@ -433,7 +437,7 @@ export class AuthModuleController {
       throw new BadRequestException('Either credential (ID token) or code must be provided');
     }
 
-    const result = await this.authModuleService.handleGoogleAuth(identity, dto.intent);
+    const result = await this.authModuleService.handleGoogleAuth(identity, dto.role);
     const csrfToken = crypto.randomUUID();
     this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
 
@@ -455,32 +459,32 @@ export class AuthModuleController {
     };
   }
 
-  @UseGuards(JwtAuthGuard, CsrfGuard)
-  @Post('intent')
-  @HttpCode(HttpStatus.OK)
-  async switchIntent(
-    @Req() req: any,
-    @Body(new ValidationPipe({ whitelist: true, transform: true })) dto: SwitchIntentDto,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const result = await this.authModuleService.switchIntentService(req.user.id, dto);
-    const csrfToken = crypto.randomUUID();
-    this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
+  // @UseGuards(JwtAuthGuard, CsrfGuard)
+  // @Post('intent')
+  // @HttpCode(HttpStatus.OK)
+  // async switchIntent(
+  //   @Req() req: any,
+  //   @Body(new ValidationPipe({ whitelist: true, transform: true })) dto: SwitchIntentDto,
+  //   @Res({ passthrough: true }) res: Response,
+  // ) {
+  //   const result = await this.authModuleService.switchIntentService(req.user.id, dto);
+  //   const csrfToken = crypto.randomUUID();
+  //   this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
 
-    if (result.user && result.user.profileImage) {
-      try {
-        result.user.profileImage = await this.s3Service.getDownloadUrl(result.user.profileImage);
-      } catch (e) {
-        console.error('Failed to generate pre-signed URL for profileImage:', e);
-      }
-    }
+  //   if (result.user && result.user.profileImage) {
+  //     try {
+  //       result.user.profileImage = await this.s3Service.getDownloadUrl(result.user.profileImage);
+  //     } catch (e) {
+  //       console.error('Failed to generate pre-signed URL for profileImage:', e);
+  //     }
+  //   }
 
-    return {
-      success: true,
-      statusCode: HttpStatus.OK,
-      message: result.message,
-      csrfToken,
-      user: result.user,
-    };
-  }
+  //   return {
+  //     success: true,
+  //     statusCode: HttpStatus.OK,
+  //     message: result.message,
+  //     csrfToken,
+  //     user: result.user,
+  //   };
+  // }
 }

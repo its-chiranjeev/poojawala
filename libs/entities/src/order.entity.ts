@@ -23,6 +23,7 @@ export enum ORDER_STATUS {
   OUT_FOR_DELIVERY = 'OUT_FOR_DELIVERY',
   DELIVERED = 'DELIVERED',
   CANCELLED = 'CANCELLED',
+  EXPIRED = 'EXPIRED',
   RETURN_REQUESTED = 'RETURN_REQUESTED',
   RETURNED = 'RETURNED',
 }
@@ -118,6 +119,10 @@ export class Order {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @Index()
+  @Column({ type: 'timestamp', nullable: true })
+  expiredAt?: Date | null;
 
   @DeleteDateColumn()
   deletedAt?: Date;

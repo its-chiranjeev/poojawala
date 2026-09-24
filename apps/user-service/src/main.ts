@@ -9,6 +9,7 @@ import { ResponseInterceptor, GlobalExceptionFilter, requestContextMiddleware } 
 import { Request, Response, NextFunction } from 'express';
 
 async function bootstrap() {
+  process.env.CURRENT_SERVICE = 'user-service';
   const app = await NestFactory.create(UserManagementModule);
   app.getHttpAdapter().getInstance().set('trust proxy', true);
   app.use(requestContextMiddleware);

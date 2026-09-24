@@ -10,6 +10,8 @@ import {
   UseGuards,
   ValidationPipe,
   Patch,
+  Req,
+  Request,
 } from '@nestjs/common';
 import { ContactUsService } from './contact-us.service';
 import { CreateContactUsDto, GetAllContactUsDto, UpdateContactUsStatusDto } from '@poojawala/dtos';
@@ -50,17 +52,23 @@ export class ContactUsController {
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   updateStatus(
+    @Req() req: Request,
     @Param('id', ParseIntPipe) id: number,
     @Body(new ValidationPipe({ whitelist: true }))
     updateDto: UpdateContactUsStatusDto,
   ) {
-    return this.contactUsService.updateStatus(id, updateDto);
+    const user = (req as any)?.user;
+    return this.contactUsService.updateStatus(id, updateDto, user);
   }
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
-  softDelete(@Param('id', ParseIntPipe) id: number) {
-    return this.contactUsService.softDelete(id);
+  softDelete(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const user = (req as any)?.user;
+    return this.contactUsService.softDelete(id, user);
   }
 }

@@ -1,3 +1,12 @@
+export type InvoiceType = 'BOOKING' | 'ORDER';
+
+export interface InvoiceOrderItem {
+  productName: string;
+  quantity: number;
+  unitPrice: number | string;
+  totalAmount: number | string;
+}
+
 export interface PaymentInvoiceTemplateData {
   invoiceTitle: string;
   invoiceId: string;
@@ -14,14 +23,27 @@ export interface PaymentInvoiceTemplateData {
   customerPhone: string;
   billingAddress: string;
 
-  bookingId: number;
-  bookingNumber: string;
-  bookingStatus: string;
-  serviceName: string;
-  purohitName: string;
+  invoiceType?: InvoiceType;
+
+  // Booking-specific fields
+  bookingId?: number;
+  bookingNumber?: string;
+  bookingStatus?: string;
+  serviceName?: string;
+  purohitName?: string;
+  donationAmount?: string;
+
+  // Order-specific fields
+  orderNumber?: string;
+  orderStatus?: string;
+  orderItems?: InvoiceOrderItem[];
+  subtotal?: string | number;
+  feeAmount?: string | number;
+  taxAmount?: string | number;
 
   paymentId: string;
   orderId: string;
+  razorpayOrderId?: string;
   paymentStatus: string;
   paymentMethod: string;
   statusClass: string;
@@ -30,8 +52,7 @@ export interface PaymentInvoiceTemplateData {
   currency: string;
   amount: string;
   finalAmount: string;
-  donationAmount: string;
-  discountAmount: string;
+  discountAmount?: string;
 
   date: string;
 
@@ -72,12 +93,12 @@ const normalizeStatusClass = (statusClass: string): string => {
 };
 
 const formatBookingStatus = (
-  bookingStatus: string,
+  bookingStatus?: string,
 ): {
   label: string;
   className: string;
 } => {
-  const normalized = bookingStatus.trim().toUpperCase();
+  const normalized = (bookingStatus || '').trim().toUpperCase();
 
   switch (normalized) {
     case 'COMPLETED':
@@ -124,9 +145,72 @@ const formatBookingStatus = (
   }
 };
 
+const formatOrderStatus = (
+  orderStatus?: string,
+): {
+  label: string;
+  className: string;
+} => {
+  const normalized = (orderStatus || '').trim().toUpperCase();
+
+  switch (normalized) {
+    case 'DELIVERED':
+    case 'CONFIRMED':
+      return {
+        label: normalized === 'DELIVERED' ? 'Delivered' : 'Confirmed',
+        className: 'success',
+      };
+
+    case 'CANCELLED':
+    case 'EXPIRED':
+      return {
+        label: normalized === 'CANCELLED' ? 'Cancelled' : 'Expired',
+        className: 'failed',
+      };
+
+    case 'SHIPPED':
+      return {
+        label: 'Shipped',
+        className: 'info',
+      };
+
+    case 'OUT_FOR_DELIVERY':
+      return {
+        label: 'Out for Delivery',
+        className: 'info',
+      };
+
+    case 'PROCESSING':
+      return {
+        label: 'Processing',
+        className: 'info',
+      };
+
+    case 'RETURN_REQUESTED':
+    case 'RETURNED':
+      return {
+        label:
+          normalized === 'RETURN_REQUESTED'
+            ? 'Return Requested'
+            : 'Returned',
+        className: 'refunded',
+      };
+
+    default:
+      return {
+        label: normalized.replace(/_/g, ' ') || 'Pending',
+        className: 'pending',
+      };
+  }
+};
+
 export const paymentInvoiceTemplate = (
   data: PaymentInvoiceTemplateData,
 ): string => {
+  const isOrder =
+    data.invoiceType === 'ORDER' ||
+    Boolean(data.orderItems && data.orderItems.length > 0);
+
   const isProformaInvoice = data.invoiceTitle
     .toLowerCase()
     .includes('proforma');
@@ -142,14 +226,22 @@ export const paymentInvoiceTemplate = (
 
   const discountAmount = Number(data.discountAmount) || 0;
 
+  const feeAmount = Number(data.feeAmount) || 0;
+
+  const taxAmount = Number(data.taxAmount) || 0;
+
   const baseServiceAmount = Math.max(
     finalAmount - donationAmount + discountAmount,
     0,
   );
 
+  const subtotal =
+    data.subtotal != null ? Number(data.subtotal) || 0 : baseServiceAmount;
+
   const paymentStatusClass = normalizeStatusClass(data.statusClass);
 
   const bookingStatus = formatBookingStatus(data.bookingStatus);
+  const orderStatus = formatOrderStatus(data.orderStatus);
 
   const websiteUrl = data.websiteUrl?.trim() || 'https://poojawala.com';
 
@@ -799,7 +891,10 @@ export const paymentInvoiceTemplate = (
             </h2>
 
             <p>
-              Sacred ritual booking invoice
+              ${isOrder
+      ? 'Devotional products order invoice'
+      : 'Sacred ritual booking invoice'
+    }
             </p>
           </div>
         </div>
@@ -817,11 +912,11 @@ export const paymentInvoiceTemplate = (
 
           <div class="meta-row">
             <span class="meta-label">
-              Booking No.
+              ${isOrder ? 'Order No.' : 'Booking No.'}
             </span>
 
             <span class="meta-value">
-              ${displayValue(data.bookingNumber)}
+              ${displayValue(isOrder ? data.orderId : data.bookingId)}
             </span>
           </div>
 
@@ -945,55 +1040,100 @@ export const paymentInvoiceTemplate = (
         </section>
       </div>
 
-      <section class="section">
-        <div class="section-heading">
-          Booking Summary
-        </div>
+      ${isOrder
+      ? `
+            <section class="section">
+              <div class="section-heading">
+                Order Summary
+              </div>
 
-        <div class="booking-card">
-          <div class="booking-item">
-            <div class="booking-item-label">
-              Booking ID
-            </div>
+              <div class="booking-card">
+                <div class="booking-item">
+                  <div class="booking-item-label">
+                    Order ID
+                  </div>
 
-            <div class="booking-item-value">
-              ${displayValue(data.bookingId)}
-            </div>
-          </div>
+                  <div class="booking-item-value">
+                    ${displayValue(data.orderId)}
+                  </div>
+                </div>
 
-          <div class="booking-item">
-            <div class="booking-item-label">
-              Service
-            </div>
+                <div class="booking-item">
+                  <div class="booking-item-label">
+                    Order Date
+                  </div>
 
-            <div class="booking-item-value">
-              ${displayValue(data.serviceName)}
-            </div>
-          </div>
+                  <div class="booking-item-value">
+                    ${displayValue(data.date)}
+                  </div>
+                </div>
 
-          <div class="booking-item">
-            <div class="booking-item-label">
-              Assigned Purohit
-            </div>
+                <div class="booking-item">
+                  <div class="booking-item-label">
+                    Order Status
+                  </div>
 
-            <div class="booking-item-value">
-              ${displayValue(data.purohitName)}
-            </div>
-          </div>
+                  <div class="booking-item-value">
+                    <span class="pill ${orderStatus.className}">
+                      ${displayValue(orderStatus.label)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </section>
+          `
+      : `
+            <section class="section">
+              <div class="section-heading">
+                Booking Summary
+              </div>
 
-          <div class="booking-item">
-            <div class="booking-item-label">
-              Booking Status
-            </div>
+              <div class="booking-card">
+                <div class="booking-item">
+                  <div class="booking-item-label">
+                    Booking ID
+                  </div>
 
-            <div class="booking-item-value">
-              <span class="pill ${bookingStatus.className}">
-                ${displayValue(bookingStatus.label)}
-              </span>
-            </div>
-          </div>
-        </div>
-      </section>
+                  <div class="booking-item-value">
+                    ${displayValue(data.bookingId)}
+                  </div>
+                </div>
+
+                <div class="booking-item">
+                  <div class="booking-item-label">
+                    Service
+                  </div>
+
+                  <div class="booking-item-value">
+                    ${displayValue(data.serviceName)}
+                  </div>
+                </div>
+
+                <div class="booking-item">
+                  <div class="booking-item-label">
+                    Assigned Purohit
+                  </div>
+
+                  <div class="booking-item-value">
+                    ${displayValue(data.purohitName)}
+                  </div>
+                </div>
+
+                <div class="booking-item">
+                  <div class="booking-item-label">
+                    Booking Status
+                  </div>
+
+                  <div class="booking-item-value">
+                    <span class="pill ${bookingStatus.className}">
+                      ${displayValue(bookingStatus.label)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </section>
+          `
+    }
 
       <section class="section">
         <div class="section-heading">
@@ -1002,80 +1142,238 @@ export const paymentInvoiceTemplate = (
 
         <table>
           <thead>
-            <tr>
-              <th>
-                Description
-              </th>
+            ${isOrder
+      ? `
+                  <tr>
+                    <th>
+                      Product
+                    </th>
 
-              <th class="amount">
-                Amount
-              </th>
-            </tr>
+                    <th style="text-align: center; width: 60px;">
+                      Qty
+                    </th>
+
+                    <th class="amount" style="width: 100px;">
+                      Unit Price
+                    </th>
+
+                    <th class="amount" style="width: 110px;">
+                      Total
+                    </th>
+                  </tr>
+                `
+      : `
+                  <tr>
+                    <th>
+                      Description
+                    </th>
+
+                    <th class="amount">
+                      Amount
+                    </th>
+                  </tr>
+                `
+    }
           </thead>
 
           <tbody>
-            <tr>
-              <td>
-                ${displayValue(data.serviceName)}
-                service charge
-              </td>
+            ${isOrder
+      ? `
+                  ${(data.orderItems || [])
+        .map(
+          (item) => `
+                        <tr>
+                          <td>
+                            ${displayValue(item.productName)}
+                          </td>
 
-              <td class="amount">
-                ${currency}
-                ${baseServiceAmount.toFixed(2)}
-              </td>
-            </tr>
+                          <td style="text-align: center;">
+                            ${Number(item.quantity) || 1}
+                          </td>
 
-            ${
-              discountAmount > 0
-                ? `
+                          <td class="amount">
+                            ${currency}
+                            ${(Number(item.unitPrice) || 0).toFixed(2)}
+                          </td>
+
+                          <td class="amount">
+                            ${currency}
+                            ${(Number(item.totalAmount) || 0).toFixed(2)}
+                          </td>
+                        </tr>
+                      `,
+        )
+        .join('')}
+
                   <tr>
-                    <td>
-                      Coupon discount
-                      ${
-                        data.couponCode?.trim()
-                          ? `(${displayValue(data.couponCode)})`
-                          : ''
-                      }
+                    <td colspan="3" style="font-weight: 700; color: var(--text);">
+                      Subtotal
                     </td>
 
-                    <td class="amount negative">
-                      -
+                    <td class="amount" style="font-weight: 700; color: var(--text);">
                       ${currency}
-                      ${discountAmount.toFixed(2)}
+                      ${subtotal.toFixed(2)}
                     </td>
                   </tr>
-                `
-                : ''
-            }
 
-            ${
-              donationAmount > 0
-                ? `
-                  <tr>
-                    <td>
-                      Voluntary donation
+                  ${discountAmount > 0
+        ? `
+                        <tr>
+                          <td colspan="3">
+                            Discount
+                            ${data.couponCode?.trim()
+          ? `(${displayValue(data.couponCode)})`
+          : ''
+        }
+                          </td>
+
+                          <td class="amount negative">
+                            -
+                            ${currency}
+                            ${discountAmount.toFixed(2)}
+                          </td>
+                        </tr>
+                      `
+        : ''
+      }
+
+                  ${feeAmount > 0
+        ? `
+                        <tr>
+                          <td colspan="3">
+                            Delivery / Handling Fee
+                          </td>
+
+                          <td class="amount">
+                            ${currency}
+                            ${feeAmount.toFixed(2)}
+                          </td>
+                        </tr>
+                      `
+        : ''
+      }
+
+                  ${taxAmount > 0
+        ? `
+                        <tr>
+                          <td colspan="3">
+                            Tax (GST)
+                          </td>
+
+                          <td class="amount">
+                            ${currency}
+                            ${taxAmount.toFixed(2)}
+                          </td>
+                        </tr>
+                      `
+        : ''
+      }
+
+                  <tr class="total-row">
+                    <td colspan="3">
+                      Total Payable Amount
                     </td>
 
                     <td class="amount">
                       ${currency}
-                      ${donationAmount.toFixed(2)}
+                      ${finalAmount.toFixed(2)}
                     </td>
                   </tr>
                 `
-                : ''
-            }
+      : `
+                  <tr>
+                    <td>
+                      ${displayValue(data.serviceName)}
+                      service charge
+                    </td>
 
-            <tr class="total-row">
-              <td>
-                Total Payable Amount
-              </td>
+                    <td class="amount">
+                      ${currency}
+                      ${baseServiceAmount.toFixed(2)}
+                    </td>
+                  </tr>
 
-              <td class="amount">
-                ${currency}
-                ${finalAmount.toFixed(2)}
-              </td>
-            </tr>
+                  ${discountAmount > 0
+        ? `
+                        <tr>
+                          <td>
+                            Coupon discount
+                            ${data.couponCode?.trim()
+          ? `(${displayValue(data.couponCode)})`
+          : ''
+        }
+                          </td>
+
+                          <td class="amount negative">
+                            -
+                            ${currency}
+                            ${discountAmount.toFixed(2)}
+                          </td>
+                        </tr>
+                      `
+        : ''
+      }
+
+                  ${donationAmount > 0
+        ? `
+                        <tr>
+                          <td>
+                            Voluntary donation
+                          </td>
+
+                          <td class="amount">
+                            ${currency}
+                            ${donationAmount.toFixed(2)}
+                          </td>
+                        </tr>
+                      `
+        : ''
+      }
+
+                  ${feeAmount > 0
+        ? `
+                        <tr>
+                          <td>
+                            Platform / Convenience Fee
+                          </td>
+
+                          <td class="amount">
+                            ${currency}
+                            ${feeAmount.toFixed(2)}
+                          </td>
+                        </tr>
+                      `
+        : ''
+      }
+
+                  ${taxAmount > 0
+        ? `
+                        <tr>
+                          <td>
+                            Tax (GST)
+                          </td>
+
+                          <td class="amount">
+                            ${currency}
+                            ${taxAmount.toFixed(2)}
+                          </td>
+                        </tr>
+                      `
+        : ''
+      }
+
+                  <tr class="total-row">
+                    <td>
+                      Total Payable Amount
+                    </td>
+
+                    <td class="amount">
+                      ${currency}
+                      ${finalAmount.toFixed(2)}
+                    </td>
+                  </tr>
+                `
+    }
           </tbody>
         </table>
       </section>
@@ -1135,7 +1433,7 @@ export const paymentInvoiceTemplate = (
             </div>
 
             <div class="payment-value">
-              ${displayValue(data.orderId)}
+              ${displayValue(data.razorpayOrderId ?? (isOrder ? '-' : data.orderId))}
             </div>
           </div>
 
@@ -1158,11 +1456,10 @@ export const paymentInvoiceTemplate = (
           </div>
 
           <div class="amount-banner-note">
-            ${
-              isProformaInvoice
-                ? 'Payment confirmation is pending.'
-                : 'Payment received successfully.'
-            }
+            ${isProformaInvoice
+      ? 'Payment confirmation is pending.'
+      : 'Payment received successfully.'
+    }
           </div>
         </div>
 
@@ -1172,20 +1469,18 @@ export const paymentInvoiceTemplate = (
         </div>
       </div>
 
-      ${
-        hasError
-          ? `
+      ${hasError
+      ? `
             <div class="error-box">
               Payment issue:
               ${displayValue(data.errorMessage)}
             </div>
           `
-          : ''
-      }
+      : ''
+    }
 
-      ${
-        isProformaInvoice
-          ? `
+      ${isProformaInvoice
+      ? `
             <div class="notice">
               <strong>Proforma notice:</strong>
               This document is generated before successful
@@ -1194,14 +1489,14 @@ export const paymentInvoiceTemplate = (
               confirmation.
             </div>
           `
-          : `
+      : `
             <div class="notice">
               <strong>Payment confirmed:</strong>
               This is a system-generated tax invoice for the
-              successfully recorded booking payment.
+              successfully recorded ${isOrder ? 'order' : 'booking'} payment.
             </div>
           `
-      }
+    }
     </div>
 
     <footer class="footer">
@@ -1211,7 +1506,10 @@ export const paymentInvoiceTemplate = (
         </h3>
 
         <p>
-          Trusted Puja services for sacred moments.
+          ${isOrder
+      ? 'Devotional products and sacred items for your home and rituals.'
+      : 'Trusted Puja services for sacred moments.'
+    }
         </p>
 
         <p class="legal">

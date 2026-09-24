@@ -181,10 +181,16 @@ describe('CartService', () => {
         const mockManager = {
           getRepository: jest.fn().mockImplementation((entity) => {
             if (entity === Cart) {
+              const mockCartQb = {
+                setLock: jest.fn().mockReturnThis(),
+                where: jest.fn().mockReturnThis(),
+                getOne: jest.fn().mockResolvedValue(mockCart),
+              };
               return {
                 findOne: jest.fn().mockResolvedValue(mockCart),
                 create: jest.fn().mockReturnValue(mockCart),
                 save: jest.fn().mockResolvedValue(mockCart),
+                createQueryBuilder: jest.fn().mockReturnValue(mockCartQb),
               };
             }
             if (entity === CartItem) {
@@ -214,6 +220,13 @@ describe('CartService', () => {
               };
             }
             if (entity === Order) {
+              const mockOrderQb = {
+                leftJoinAndSelect: jest.fn().mockReturnThis(),
+                where: jest.fn().mockReturnThis(),
+                andWhere: jest.fn().mockReturnThis(),
+                orderBy: jest.fn().mockReturnThis(),
+                getOne: jest.fn().mockResolvedValue(null),
+              };
               return {
                 create: jest
                   .fn()
@@ -223,6 +236,7 @@ describe('CartService', () => {
                   .mockImplementation((item) =>
                     Promise.resolve({ id: 1001, ...item, createdAt: new Date(), updatedAt: new Date() }),
                   ),
+                createQueryBuilder: jest.fn().mockReturnValue(mockOrderQb),
               };
             }
             if (entity === OrderItem) {
@@ -272,6 +286,7 @@ describe('CartService', () => {
 
     notificationService = {
       createNotification: jest.fn().mockResolvedValue({}),
+      notifyAdmins: jest.fn().mockResolvedValue([]),
     };
 
     emailService = {
@@ -685,6 +700,142 @@ describe('CartService', () => {
       await expect(
         service.checkout(customerUser, { orderId: 56 }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException when retrying payment for an expired order', async () => {
+      const expiredOrder: Order = {
+        id: 57,
+        orderNumber: 'PW-ORD-100003',
+        customerId: customerUser.id,
+        subtotal: 998,
+        discountAmount: 0,
+        totalAmount: 998,
+        paymentId: 503,
+        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
+        paymentStatus: ORDER_PAYMENT_STATUS.PENDING,
+        orderStatus: ORDER_STATUS.PENDING_PAYMENT,
+        expiredAt: new Date(Date.now() - 60000), // expired 1 minute ago
+        shippingAddressSnapshot: {
+          name: 'Devotee Sharma',
+          phone: '9876543210',
+          addressLine1: '123 Temple Road',
+          city: 'Varanasi',
+          pincode: '221001',
+        },
+        items: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      orderRepository.findCustomerOrderById.mockResolvedValueOnce(expiredOrder);
+
+      await expect(
+        service.checkout(customerUser, { orderId: 57 }),
+      ).rejects.toThrow('This order has expired. Please place a new order.');
+    });
+
+    it('should reuse existing active pending order during checkout when expiredAt > now without creating duplicate order or duplicate notifications', async () => {
+      const existingFutureExpiry = new Date(Date.now() + 20 * 60 * 1000);
+      const activePendingOrder: Order = {
+        id: 20,
+        orderNumber: 'PW-ORD-20',
+        customerId: customerUser.id,
+        subtotal: 998,
+        discountAmount: 0,
+        totalAmount: 998,
+        paymentId: 500,
+        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
+        paymentStatus: ORDER_PAYMENT_STATUS.PENDING,
+        orderStatus: ORDER_STATUS.PENDING_PAYMENT,
+        expiredAt: existingFutureExpiry,
+        shippingAddressSnapshot: {
+          name: 'Devotee Sharma',
+          phone: '9876543210',
+          addressLine1: '123 Temple Road',
+          city: 'Varanasi',
+          pincode: '221001',
+        },
+        items: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const cartWithItem: Cart = {
+        ...mockCart,
+        items: [
+          {
+            id: 201,
+            cartId: mockCart.id,
+            cart: mockCart,
+            productId: activeProduct.id,
+            product: activeProduct,
+            quantity: 2,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      };
+      cartRepository.findCartWithItems.mockResolvedValueOnce(cartWithItem);
+
+      // Setup dataSource transaction to return activePendingOrder from getOne
+      (dataSource.transaction as jest.Mock).mockImplementationOnce(async (cb) => {
+        const mockManager = {
+          getRepository: jest.fn().mockImplementation((entity) => {
+            if (entity === Cart) {
+              return {
+                createQueryBuilder: jest.fn().mockReturnValue({
+                  setLock: jest.fn().mockReturnThis(),
+                  where: jest.fn().mockReturnThis(),
+                  getOne: jest.fn().mockResolvedValue(mockCart),
+                }),
+              };
+            }
+            if (entity === Payment) {
+              return {
+                create: jest.fn().mockImplementation((p) => ({ id: 501, ...p })),
+                save: jest.fn().mockImplementation((p) => Promise.resolve({ id: 501, ...p })),
+              };
+            }
+            if (entity === Order) {
+              return {
+                createQueryBuilder: jest.fn().mockReturnValue({
+                  leftJoinAndSelect: jest.fn().mockReturnThis(),
+                  where: jest.fn().mockReturnThis(),
+                  andWhere: jest.fn().mockReturnThis(),
+                  orderBy: jest.fn().mockReturnThis(),
+                  getOne: jest.fn().mockResolvedValue(activePendingOrder),
+                }),
+                save: jest.fn().mockImplementation((o) => Promise.resolve(o)),
+              };
+            }
+            return {};
+          }),
+        };
+        return cb(mockManager);
+      });
+
+      paymentService.createRazorpayPaymentLink.mockResolvedValueOnce({
+        id: 'plink_reuse_123',
+        short_url: 'https://rzp.io/i/reuse123',
+      });
+
+      auditLogService.createAuditLog.mockClear();
+      notificationService.createNotification.mockClear();
+      emailService.sendMail.mockClear();
+
+      const result = await service.checkout(customerUser, {
+        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
+      });
+
+      // Reused order ORD-20
+      expect(result.orderId).toBe(20);
+      expect(result.orderNumber).toBe('PW-ORD-20');
+      // expiredAt must remain unchanged (not extended!)
+      expect(result.expiredAt).toEqual(existingFutureExpiry);
+      // No duplicate notifications/emails/audit logs
+      expect(auditLogService.createAuditLog).not.toHaveBeenCalled();
+      expect(notificationService.createNotification).not.toHaveBeenCalled();
+      expect(emailService.sendMail).not.toHaveBeenCalled();
     });
   });
 });

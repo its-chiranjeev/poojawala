@@ -5,6 +5,7 @@ import { ResponseInterceptor, GlobalExceptionFilter, requestContextMiddleware } 
 import { PaymentManagementModule } from './payment-management.module';
 
 async function bootstrap(): Promise<void> {
+  process.env.CURRENT_SERVICE = 'payment-service';
   const app = await NestFactory.create(PaymentManagementModule, {
     /*
      * Required later if Razorpay webhook

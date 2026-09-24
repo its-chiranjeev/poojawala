@@ -2,12 +2,13 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
-import { Booking, COMPLAINT_STATUS, Payment, PurohitProfile, User, USER_ROLE, COMPLAINT_CATEGORY, } from '@poojawala/entities';
+import { Booking, COMPLAINT_STATUS, Payment, PurohitProfile, User, USER_ROLE, COMPLAINT_CATEGORY, NOTIFICATION_TYPE } from '@poojawala/entities';
 import { ComplaintRepository } from '@poojawala/repositories';
 import { CreateComplaintDto, ComplaintQueryDto, UpdateComplaintStatusDto, } from '@poojawala/dtos';
 import { S3Service } from '@poojawala/s3';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
+import { NotificationService } from '@poojawala/notification';
 
 @Injectable()
 export class ComplaintService {
@@ -19,6 +20,7 @@ export class ComplaintService {
     private readonly complaintRepository: ComplaintRepository,
     private readonly s3Service: S3Service,
     private readonly auditLogService: AuditLogService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async createComplaint(
@@ -344,6 +346,19 @@ export class ComplaintService {
       oldValue: undefined,
       newValue: { status: dto.status, resolutionNotes: dto.resolutionNotes },
     });
+
+    if (complaint.raisedById) {
+      await this.notificationService
+        .createNotification(
+          complaint.raisedById,
+          'Complaint Status Updated',
+          `Your complaint #${complaint.complaintNumber || complaint.id} status has been updated to ${dto.status}.`,
+          NOTIFICATION_TYPE.SYSTEM,
+          updatedComplaint.id,
+          'COMPLAINT',
+        )
+        .catch(() => {});
+    }
 
     return {
       message: 'Complaint status updated successfully',

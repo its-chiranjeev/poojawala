@@ -2,6 +2,10 @@ export interface EmailTableRow {
   label: string;
   value: string;
   isHighlight?: boolean;
+  /** When provided, the value cell is rendered as a clickable hyperlink */
+  link?: string;
+  /** Custom link text — defaults to value if not provided */
+  linkText?: string;
 }
 
 export interface EmailDetailsTable {
@@ -164,13 +168,16 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
       .map((row) => {
         const valColor = row.isHighlight ? '#FF6200' : '#1A1A1A';
         const valWeight = row.isHighlight ? '700' : '600';
+        const cellContent = row.link
+          ? `<a href="${row.link}" target="_blank" rel="noopener noreferrer" style="color: #FF6200; font-weight: 700; text-decoration: underline; word-break: break-all;">${escapeHtml(row.linkText || row.value)}</a>`
+          : escapeHtml(row.value);
         return `
           <tr>
             <td style="padding: 12px 20px; font-size: 14px; color: #777777; border-bottom: 1px dashed #FFEADB; width: 42%; vertical-align: top;">
               ${escapeHtml(row.label)}:
             </td>
             <td style="padding: 12px 20px; font-size: 14px; font-weight: ${valWeight}; color: ${valColor}; border-bottom: 1px dashed #FFEADB; text-align: right; vertical-align: top;">
-              ${escapeHtml(row.value)}
+              ${cellContent}
             </td>
           </tr>
         `;
