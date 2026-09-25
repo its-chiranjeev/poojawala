@@ -560,6 +560,39 @@ export class CartService {
           },
         );
 
+        // Notify Admins about the order repayment initiation via Socket.IO & DB
+        if (this.notificationService) {
+          try {
+            const orderCode = `ORD-${existingOrder.id}`;
+            const paymentReference = `PAY-${savedPayment.id}`;
+            await this.notificationService.notifyAdmins(
+              'Order Repayment Initiated',
+              `Customer ${customerName} (ID: CM-${user.id}) initiated payment retry for Order ${orderCode} (#${existingOrder.orderNumber}). Amount: ₹${totalAmount}. Ref: ${paymentReference}.`,
+              NOTIFICATION_TYPE.PAYMENT,
+              existingOrder.id,
+              'ORDER',
+              {
+                orderId: existingOrder.id,
+                orderCode,
+                orderNumber: existingOrder.orderNumber,
+                customerId: user.id,
+                customerName,
+                paymentId: savedPayment.id,
+                paymentReference,
+                amount: totalAmount,
+                totalAmount,
+                isRepay: true,
+                isRetry: true,
+                action: 'ORDER_REPAY_INITIATED',
+              },
+            );
+          } catch (err: any) {
+            this.logger.warn(
+              `Failed to notify admins of order payment retry: ${err?.message}`,
+            );
+          }
+        }
+
         return {
           orderId: existingOrder.id,
           orderNumber: existingOrder.orderNumber,

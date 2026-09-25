@@ -532,6 +532,50 @@ export class BookingService {
         );
       }
 
+      // Notify Admins about the new booking
+      if (this.notificationService) {
+        try {
+          const customerName =
+            [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+            user.phone ||
+            'Customer';
+          const serviceName =
+            transactionResult.service?.name || 'Pooja Service';
+          const scheduledDateStr = transactionResult.savedBooking.scheduledAt
+            ? new Date(
+              transactionResult.savedBooking.scheduledAt,
+            ).toLocaleString('en-IN', {
+              timeZone: 'Asia/Kolkata',
+            })
+            : 'Scheduled Date';
+          const bookingDisplayId =
+            transactionResult.savedBooking.bookingNumber ||
+            `B-${transactionResult.savedBooking.id}`;
+
+          await this.notificationService.notifyAdmins(
+            'New Booking Request',
+            `New booking ${bookingDisplayId} for ${serviceName} created by ${customerName}. Scheduled at: ${scheduledDateStr}. Total: ₹${transactionResult.savedBooking.finalAmount}.`,
+            NOTIFICATION_TYPE.BOOKING,
+            transactionResult.savedBooking.id,
+            'BOOKING',
+            {
+              bookingId: transactionResult.savedBooking.id,
+              bookingNumber: transactionResult.savedBooking.bookingNumber,
+              customerId: user.id,
+              customerName,
+              serviceName,
+              finalAmount: transactionResult.savedBooking.finalAmount,
+              status: transactionResult.savedBooking.status,
+              scheduledAt: transactionResult.savedBooking.scheduledAt,
+            },
+          );
+        } catch (err: any) {
+          this.logger.warn(
+            `Failed to notify admins for new booking: ${err?.message}`,
+          );
+        }
+      }
+
       return {
         ...transactionResult.savedBooking,
         minPrice: Number(transactionResult.service.minPrice),
