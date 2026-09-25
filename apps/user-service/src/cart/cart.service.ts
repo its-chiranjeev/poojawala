@@ -1191,7 +1191,7 @@ export class CartService {
           detailsTable: {
             title: 'Order Details',
             rows: [
-              { label: 'Order Number', value: `${order.orderNumber}` },
+              { label: 'Order ID', value: `${order.orderNumber}` },
               {
                 label: 'Payment Method',
                 value: isCod ? 'Cash on Delivery (COD)' : 'Online Payment',

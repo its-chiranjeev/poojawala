@@ -349,7 +349,7 @@ export class OrderService {
             detailsTable: {
               title: 'Order Status Update',
               rows: [
-                { label: 'Order Number', value: `ORD-${order.id}` },
+                { label: 'Order ID', value: `ORD-${order.id}` },
                 { label: 'New Status', value: dto.status, isHighlight: true },
                 { label: 'Previous Status', value: previousStatus },
                 {
@@ -547,7 +547,7 @@ export class OrderService {
             detailsTable: {
               title: 'Payment Details',
               rows: [
-                { label: 'Order Number', value: `ORD-${savedOrder.id}` },
+                { label: 'Order ID', value: `ORD-${savedOrder.id}` },
                 { label: 'Payment Method', value: 'Cash on Delivery (COD)' },
                 {
                   label: 'Amount Collected',

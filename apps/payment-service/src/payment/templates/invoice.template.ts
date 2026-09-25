@@ -65,6 +65,10 @@ export interface PaymentInvoiceTemplateData {
   websiteUrl?: string;
   supportHours?: string;
   logoUrl?: string;
+
+  customerPaidAmount?: string | number | null;
+  razorpayFee?: string | number | null;
+  razorpayTax?: string | number | null;
 }
 
 const escapeHtml = (value: string | number | null | undefined): string => {
@@ -230,6 +234,51 @@ export const paymentInvoiceTemplate = (
 
   const taxAmount = Number(data.taxAmount) || 0;
 
+  const rawCustomerPaid =
+    data.customerPaidAmount != null && !isNaN(Number(data.customerPaidAmount))
+      ? Number(data.customerPaidAmount)
+      : (paidAmount > 0 ? paidAmount : null);
+
+  const rawRazorpayFee =
+    data.razorpayFee != null && !isNaN(Number(data.razorpayFee))
+      ? Number(data.razorpayFee)
+      : null;
+
+  const rawRazorpayTax =
+    data.razorpayTax != null && !isNaN(Number(data.razorpayTax))
+      ? Number(data.razorpayTax)
+      : null;
+
+  const showRazorpayCharges =
+    rawCustomerPaid != null &&
+    rawCustomerPaid - finalAmount > 0.01 &&
+    ((rawRazorpayFee != null && rawRazorpayFee > 0) ||
+      (rawRazorpayTax != null && rawRazorpayTax > 0));
+
+  const isPaid =
+    data.paymentStatus?.toLowerCase() === 'paid' ||
+    data.paymentStatus?.toLowerCase() === 'success' ||
+    data.statusClass?.toLowerCase() === 'success';
+
+  const currency = displayValue(data.currency);
+
+  const customerPaidDisplay =
+    rawCustomerPaid != null
+      ? `${currency} ${rawCustomerPaid.toFixed(2)}`
+      : isPaid
+        ? `${currency} ${finalAmount.toFixed(2)}`
+        : '-';
+
+  const razorpayFeeDisplay =
+    rawRazorpayFee != null
+      ? `${currency} ${rawRazorpayFee.toFixed(2)}`
+      : '-';
+
+  const razorpayTaxDisplay =
+    rawRazorpayTax != null
+      ? `${currency} ${rawRazorpayTax.toFixed(2)}`
+      : '-';
+
   const baseServiceAmount = Math.max(
     finalAmount - donationAmount + discountAmount,
     0,
@@ -246,8 +295,6 @@ export const paymentInvoiceTemplate = (
   const websiteUrl = data.websiteUrl?.trim() || 'https://poojawala.com';
 
   const supportHours = data.supportHours?.trim() || 'Mon–Sat, 9:00 AM–7:00 PM';
-
-  const currency = displayValue(data.currency);
 
   const logoMarkup = data.logoUrl?.trim()
     ? `
@@ -1269,14 +1316,43 @@ export const paymentInvoiceTemplate = (
         : ''
       }
 
+                  ${showRazorpayCharges && rawRazorpayFee != null && rawRazorpayFee > 0
+                    ? `
+                        <tr>
+                          <td colspan="3">
+                            Razorpay Fee
+                          </td>
+                          <td class="amount">
+                            ${currency}
+                            ${rawRazorpayFee.toFixed(2)}
+                          </td>
+                        </tr>
+                      `
+                    : ''
+                  }
+                  ${showRazorpayCharges && rawRazorpayTax != null && rawRazorpayTax > 0
+                    ? `
+                        <tr>
+                          <td colspan="3">
+                            Razorpay Tax
+                          </td>
+                          <td class="amount">
+                            ${currency}
+                            ${rawRazorpayTax.toFixed(2)}
+                          </td>
+                        </tr>
+                      `
+                    : ''
+                  }
+
                   <tr class="total-row">
                     <td colspan="3">
-                      Total Payable Amount
+                      ${isPaid ? 'Total Paid Amount' : 'Total Payable Amount'}
                     </td>
 
                     <td class="amount">
                       ${currency}
-                      ${finalAmount.toFixed(2)}
+                      ${(showRazorpayCharges && rawCustomerPaid != null ? rawCustomerPaid : finalAmount).toFixed(2)}
                     </td>
                   </tr>
                 `
@@ -1362,14 +1438,43 @@ export const paymentInvoiceTemplate = (
         : ''
       }
 
+                  ${showRazorpayCharges && rawRazorpayFee != null && rawRazorpayFee > 0
+                    ? `
+                        <tr>
+                          <td>
+                            Razorpay Fee
+                          </td>
+                          <td class="amount">
+                            ${currency}
+                            ${rawRazorpayFee.toFixed(2)}
+                          </td>
+                        </tr>
+                      `
+                    : ''
+                  }
+                  ${showRazorpayCharges && rawRazorpayTax != null && rawRazorpayTax > 0
+                    ? `
+                        <tr>
+                          <td>
+                            Razorpay Tax
+                          </td>
+                          <td class="amount">
+                            ${currency}
+                            ${rawRazorpayTax.toFixed(2)}
+                          </td>
+                        </tr>
+                      `
+                    : ''
+                  }
+
                   <tr class="total-row">
                     <td>
-                      Total Payable Amount
+                      ${isPaid ? 'Total Paid Amount' : 'Total Payable Amount'}
                     </td>
 
                     <td class="amount">
                       ${currency}
-                      ${finalAmount.toFixed(2)}
+                      ${(showRazorpayCharges && rawCustomerPaid != null ? rawCustomerPaid : finalAmount).toFixed(2)}
                     </td>
                   </tr>
                 `
@@ -1408,12 +1513,11 @@ export const paymentInvoiceTemplate = (
 
           <div class="payment-cell">
             <div class="payment-label">
-              Recorded Payment
+              Customer Paid Amount
             </div>
 
-            <div class="payment-value">
-              ${currency}
-              ${paidAmount.toFixed(2)}
+            <div class="payment-value" style="font-weight: 800; color: var(--primary-dark);">
+              ${customerPaidDisplay}
             </div>
           </div>
 
@@ -1446,6 +1550,41 @@ export const paymentInvoiceTemplate = (
               ${isProformaInvoice ? 'Proforma Invoice' : 'Tax Invoice'}
             </div>
           </div>
+
+          ${showRazorpayCharges
+            ? `
+                <div class="payment-cell">
+                  <div class="payment-label">
+                    Razorpay Fee
+                  </div>
+
+                  <div class="payment-value">
+                    ${razorpayFeeDisplay}
+                  </div>
+                </div>
+
+                <div class="payment-cell">
+                  <div class="payment-label">
+                    Razorpay Tax
+                  </div>
+
+                  <div class="payment-value">
+                    ${razorpayTaxDisplay}
+                  </div>
+                </div>
+
+                <div class="payment-cell">
+                  <div class="payment-label">
+                    Recorded Amount
+                  </div>
+
+                  <div class="payment-value">
+                    ${currency} ${finalAmount.toFixed(2)}
+                  </div>
+                </div>
+              `
+            : ''
+          }
         </div>
       </section>
 
@@ -1457,15 +1596,16 @@ export const paymentInvoiceTemplate = (
 
           <div class="amount-banner-note">
             ${isProformaInvoice
-      ? 'Payment confirmation is pending.'
-      : 'Payment received successfully.'
-    }
+              ? 'Payment confirmation is pending.'
+              : showRazorpayCharges
+                ? `Customer payment received via Razorpay (Fee: ${currency} ${(rawRazorpayFee ?? 0).toFixed(2)}, Tax: ${currency} ${(rawRazorpayTax ?? 0).toFixed(2)})`
+                : 'Payment received successfully.'
+            }
           </div>
         </div>
 
         <div class="amount-banner-value">
-          ${currency}
-          ${finalAmount.toFixed(2)}
+          ${customerPaidDisplay !== '-' ? customerPaidDisplay : `${currency} ${finalAmount.toFixed(2)}`}
         </div>
       </div>
 
