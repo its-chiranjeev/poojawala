@@ -834,6 +834,9 @@ export class CartService {
             }
             await orderRepo.save(existingPendingOrder);
 
+            // Clear cart immediately upon reusing active order
+            await cartItemRepo.delete({ cartId: cart.id });
+
             return {
               savedPayment: newPayment,
               savedOrder: existingPendingOrder,
@@ -904,10 +907,8 @@ export class CartService {
         await orderItemRepo.save(createdItems);
         newOrder.items = createdItems;
 
-        // If COD: Clear cart immediately inside transaction
-        if (isCod) {
-          await cartItemRepo.delete({ cartId: cart.id });
-        }
+        // Clear cart immediately upon order creation for both ONLINE and COD
+        await cartItemRepo.delete({ cartId: cart.id });
 
         return {
           savedPayment: newPayment,

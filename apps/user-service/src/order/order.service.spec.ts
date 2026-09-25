@@ -353,7 +353,7 @@ describe('OrderService', () => {
   // ══════════════════════════════════════════════════════════════════════════
 
   describe('getOrders — lazy expiry materialization for CUSTOMER', () => {
-    it('expired ONLINE order is returned as EXPIRED (not stale PENDING_PAYMENT)', async () => {
+    it('expired ONLINE order is filtered out from customer view', async () => {
       const expiredOnline = makeOnlineOrder({
         expiredAt: new Date(Date.now() - 5000),
       });
@@ -365,7 +365,8 @@ describe('OrderService', () => {
       dataSource.getRepository = jest.fn().mockReturnValue({ save: saveMock });
 
       const result = await service.getOrders(customerUser, { page: 1, limit: 10 });
-      expect(result.orders[0].orderStatus).toBe(ORDER_STATUS.EXPIRED);
+      expect(result.orders).toHaveLength(0);
+      expect(saveMock).toHaveBeenCalled();
     });
 
     it('COD order is NEVER marked EXPIRED even with an old createdAt', async () => {
@@ -423,12 +424,13 @@ describe('OrderService', () => {
       expect(order.orderStatus).toBe(ORDER_STATUS.PENDING_PAYMENT);
     });
 
-    it('CUSTOMER: expired ONLINE order is materialized as EXPIRED on access', async () => {
+    it('CUSTOMER: expired ONLINE order is materialized as EXPIRED and hidden from customer', async () => {
       orderRepository.findCustomerOrderById.mockResolvedValueOnce(
         makeOnlineOrder({ expiredAt: new Date(Date.now() - 1000) }),
       );
-      const order = await service.getOrderById(customerUser, 101);
-      expect(order.orderStatus).toBe(ORDER_STATUS.EXPIRED);
+      await expect(service.getOrderById(customerUser, 101)).rejects.toThrow(
+        NotFoundException,
+      );
       expect(orderRepository.save).toHaveBeenCalled();
     });
 

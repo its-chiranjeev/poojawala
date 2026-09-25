@@ -158,20 +158,25 @@ export class OrderService {
         query,
       );
 
-      // Lazily materialize ONLINE expiry in the list — mirrors getOrderById.
-      // COD orders are implicitly excluded because isOrderPaymentExpired()
-      // returns false for any order where paymentMethod !== ONLINE.
+      // Lazily materialize ONLINE expiry in the list and filter out from customer view
       const expiredToSave: Order[] = [];
+      const visibleOrders: Order[] = [];
       for (const o of orders) {
         if (
-          o.orderStatus === ORDER_STATUS.PENDING_PAYMENT &&
-          this.isOrderPaymentExpired(o)
+          o.orderStatus === ORDER_STATUS.EXPIRED ||
+          (o.orderStatus === ORDER_STATUS.PENDING_PAYMENT &&
+            this.isOrderPaymentExpired(o))
         ) {
-          o.orderStatus = ORDER_STATUS.EXPIRED;
-          if (!o.expiredAt) {
-            o.expiredAt = new Date();
+          if (o.orderStatus !== ORDER_STATUS.EXPIRED) {
+            o.orderStatus = ORDER_STATUS.EXPIRED;
+            if (!o.expiredAt) {
+              o.expiredAt = new Date();
+            }
+            expiredToSave.push(o);
           }
-          expiredToSave.push(o);
+          // Do not include expired orders in customer view
+        } else {
+          visibleOrders.push(o);
         }
       }
       if (expiredToSave.length > 0) {
@@ -187,14 +192,14 @@ export class OrderService {
       }
 
       const formattedOrders = await Promise.all(
-        orders.map((o) => this.formatOrder(o)),
+        visibleOrders.map((o) => this.formatOrder(o)),
       );
       return {
         orders: formattedOrders,
-        total,
+        total: Math.max(0, total - expiredToSave.length),
         page,
         limit,
-        totalPages: Math.ceil(total / limit),
+        totalPages: Math.ceil(Math.max(0, total - expiredToSave.length) / limit),
       };
     }
 
@@ -244,14 +249,18 @@ export class OrderService {
 
     if (
       user.role === USER_ROLE.CUSTOMER &&
-      order.orderStatus === ORDER_STATUS.PENDING_PAYMENT &&
-      this.isOrderPaymentExpired(order)
+      (order.orderStatus === ORDER_STATUS.EXPIRED ||
+        (order.orderStatus === ORDER_STATUS.PENDING_PAYMENT &&
+          this.isOrderPaymentExpired(order)))
     ) {
-      order.orderStatus = ORDER_STATUS.EXPIRED;
-      if (!order.expiredAt) {
-        order.expiredAt = new Date();
+      if (order.orderStatus !== ORDER_STATUS.EXPIRED) {
+        order.orderStatus = ORDER_STATUS.EXPIRED;
+        if (!order.expiredAt) {
+          order.expiredAt = new Date();
+        }
+        await this.orderRepository.save(order);
       }
-      await this.orderRepository.save(order);
+      throw new NotFoundException(`Order #${orderId} not found`);
     }
 
     return this.formatOrder(order);

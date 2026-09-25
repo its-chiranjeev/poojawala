@@ -808,6 +808,11 @@ describe('CartService', () => {
                 save: jest.fn().mockImplementation((o) => Promise.resolve(o)),
               };
             }
+            if (entity === CartItem) {
+              return {
+                delete: jest.fn().mockResolvedValue({ affected: 1 }),
+              };
+            }
             return {};
           }),
         };
