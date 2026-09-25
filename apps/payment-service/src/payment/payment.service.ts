@@ -1685,6 +1685,23 @@ export class PaymentService {
       ? `INV-${booking.bookingNumber}`
       : `PROFORMA-${booking.bookingNumber}`;
 
+    const customerPaidAmount =
+      payment.customerPaidAmount != null
+        ? Number(payment.customerPaidAmount)
+        : (razorpayPayment?.amount != null
+          ? Number(razorpayPayment.amount) / 100
+          : (isPaid ? Number(payment.amount ?? booking.finalAmount) : null));
+
+    const razorpayFee =
+      payment.razorpayFee != null
+        ? Number(payment.razorpayFee)
+        : (razorpayPayment?.fee != null ? Number(razorpayPayment.fee) / 100 : null);
+
+    const razorpayTax =
+      payment.razorpayTax != null
+        ? Number(payment.razorpayTax)
+        : (razorpayPayment?.tax != null ? Number(razorpayPayment.tax) / 100 : null);
+
     const html = paymentInvoiceTemplate({
       invoiceType: 'BOOKING',
       companyName: process.env['POOJAWALA_COMPANY_NAME'] ?? 'Poojawala',
@@ -1721,6 +1738,10 @@ export class PaymentService {
       currency: String(razorpayPayment?.currency ?? payment.currency ?? 'INR'),
       amount: amount.toFixed(2),
       finalAmount: Number(booking.finalAmount).toFixed(2),
+      customerPaidAmount:
+        customerPaidAmount != null ? customerPaidAmount.toFixed(2) : null,
+      razorpayFee: razorpayFee != null ? razorpayFee.toFixed(2) : null,
+      razorpayTax: razorpayTax != null ? razorpayTax.toFixed(2) : null,
       donationAmount: Number(booking.donationAmount ?? 0).toFixed(2),
       discountAmount: Number(booking.discountAmount ?? 0).toFixed(2),
       date: new Date(payment.paidAt ?? payment.createdAt).toLocaleString(
@@ -1845,6 +1866,23 @@ export class PaymentService {
 
     const billingAddress = this.formatOrderAddress(order.shippingAddressSnapshot);
 
+    const customerPaidAmount =
+      payment?.customerPaidAmount != null
+        ? Number(payment.customerPaidAmount)
+        : (razorpayPayment?.amount != null
+          ? Number(razorpayPayment.amount) / 100
+          : (isPaid ? (payment?.amount != null ? Number(payment.amount) : totalAmount) : null));
+
+    const razorpayFee =
+      payment?.razorpayFee != null
+        ? Number(payment.razorpayFee)
+        : (razorpayPayment?.fee != null ? Number(razorpayPayment.fee) / 100 : null);
+
+    const razorpayTax =
+      payment?.razorpayTax != null
+        ? Number(payment.razorpayTax)
+        : (razorpayPayment?.tax != null ? Number(razorpayPayment.tax) / 100 : null);
+
     const html = paymentInvoiceTemplate({
       invoiceType: 'ORDER',
       companyName: process.env['POOJAWALA_COMPANY_NAME'] ?? 'Poojawala',
@@ -1885,6 +1923,10 @@ export class PaymentService {
       currency: String(razorpayPayment?.currency ?? payment?.currency ?? 'INR'),
       amount: paidAmount.toFixed(2),
       finalAmount: totalAmount.toFixed(2),
+      customerPaidAmount:
+        customerPaidAmount != null ? customerPaidAmount.toFixed(2) : null,
+      razorpayFee: razorpayFee != null ? razorpayFee.toFixed(2) : null,
+      razorpayTax: razorpayTax != null ? razorpayTax.toFixed(2) : null,
       date: new Date(payment?.paidAt ?? order.createdAt).toLocaleString('en-IN', {
         timeZone: 'Asia/Kolkata',
       }),

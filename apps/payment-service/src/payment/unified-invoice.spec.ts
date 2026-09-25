@@ -109,7 +109,7 @@ describe('Unified Invoice System', () => {
       // Totals
       expect(html).toContain('Subtotal');
       expect(html).toContain('1300.00');
-      expect(html).toContain('Total Payable Amount');
+      expect(html).toContain('Total Paid Amount');
     });
 
     describe('Conditional charges display rules', () => {
@@ -196,6 +196,7 @@ describe('Unified Invoice System', () => {
         expect(html).toContain('Amount Due');
         expect(html).toContain('Payment confirmation is pending.');
         expect(html).toContain('Proforma notice:');
+        expect(html).toContain('Total Payable Amount');
       });
 
       it('should render Tax Invoice for paid orders', () => {
@@ -211,6 +212,7 @@ describe('Unified Invoice System', () => {
         expect(html).toContain('Tax Invoice');
         expect(html).toContain('INV-PW-ORD-2026-001');
         expect(html).toContain('Amount Paid');
+        expect(html).toContain('Total Paid Amount');
         expect(html).toContain('Payment received successfully.');
         expect(html).toContain('This is a system-generated tax invoice for the\n              successfully recorded order payment.');
       });
@@ -515,6 +517,182 @@ describe('Unified Invoice System', () => {
       expect(renderedHtml).toContain('Booking Summary');
       expect(renderedHtml).toContain('PW-BK-9999');
       expect(renderedHtml).toContain('Ganesh Puja');
+    });
+
+    it('should display razorpayFee, razorpayTax, and customerPaidAmount in Order invoice PDF when customer paid more than order price', async () => {
+      const orderWithFees = {
+        id: 502,
+        orderNumber: 'PW-ORD-FEES-1234',
+        customerId: 10,
+        customer: mockCustomerUser,
+        totalAmount: 525,
+        subtotal: 525,
+        discountAmount: 0,
+        paymentStatus: ORDER_PAYMENT_STATUS.PAID,
+        orderStatus: ORDER_STATUS.CONFIRMED,
+        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
+        payment: {
+          id: 99,
+          amount: 540.71,
+          customerPaidAmount: 540.71,
+          razorpayFee: 13.63,
+          razorpayTax: 2.08,
+          paymentMethod: 'UPI',
+          status: PAYMENT_STATUS.SUCCESS,
+          paidAt: new Date(),
+        },
+        items: [
+          {
+            productNameSnapshot: 'Puja Samagri Kit',
+            quantity: 1,
+            unitPriceSnapshot: 525,
+            totalAmount: 525,
+          },
+        ],
+        shippingAddressSnapshot: {
+          name: 'Rahul Sharma',
+          phone: '9123456780',
+          addressLine1: 'Ganga Ghat',
+          city: 'Varanasi',
+          pincode: '221001',
+        },
+      };
+      mockOrderRepo.findOne.mockResolvedValue(orderWithFees);
+
+      const result = await service.generateOrderInvoicePdf(mockCustomerUser, 502);
+      const renderedHtml = result.buffer.toString();
+      expect(renderedHtml).toContain('Customer Paid Amount');
+      expect(renderedHtml).toContain('540.71');
+      expect(renderedHtml).toContain('Razorpay Fee');
+      expect(renderedHtml).toContain('13.63');
+      expect(renderedHtml).toContain('Razorpay Tax');
+      expect(renderedHtml).toContain('2.08');
+    });
+
+    it('should NOT display razorpayFee and razorpayTax when customer paid amount is equal to order price', async () => {
+      const orderEqualPrice = {
+        id: 503,
+        orderNumber: 'PW-ORD-EQUAL-1234',
+        customerId: 10,
+        customer: mockCustomerUser,
+        totalAmount: 525,
+        subtotal: 525,
+        discountAmount: 0,
+        paymentStatus: ORDER_PAYMENT_STATUS.PAID,
+        orderStatus: ORDER_STATUS.CONFIRMED,
+        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
+        payment: {
+          id: 100,
+          amount: 525,
+          customerPaidAmount: 525.0,
+          razorpayFee: 13.63,
+          razorpayTax: 2.08,
+          paymentMethod: 'UPI',
+          status: PAYMENT_STATUS.SUCCESS,
+          paidAt: new Date(),
+        },
+        items: [
+          {
+            productNameSnapshot: 'Puja Samagri Kit',
+            quantity: 1,
+            unitPriceSnapshot: 525,
+            totalAmount: 525,
+          },
+        ],
+        shippingAddressSnapshot: {
+          name: 'Rahul Sharma',
+          phone: '9123456780',
+          addressLine1: 'Ganga Ghat',
+          city: 'Varanasi',
+          pincode: '221001',
+        },
+      };
+      mockOrderRepo.findOne.mockResolvedValue(orderEqualPrice);
+
+      const result = await service.generateOrderInvoicePdf(mockCustomerUser, 503);
+      const renderedHtml = result.buffer.toString();
+      expect(renderedHtml).toContain('Customer Paid Amount');
+      expect(renderedHtml).toContain('525.00');
+      expect(renderedHtml).not.toContain('Razorpay Fee');
+      expect(renderedHtml).not.toContain('Razorpay Tax');
+    });
+
+    it('should display razorpayFee, razorpayTax, and customerPaidAmount in Booking invoice PDF when customer paid more than booking price', async () => {
+      const bookingWithFees: Booking = {
+        id: 202,
+        bookingNumber: 'PW-BK-FEES-5555',
+        customerId: 10,
+        customer: mockCustomerUser,
+        status: BOOKING_STATUS.COMPLETED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+        finalAmount: 525,
+        donationAmount: 0,
+        discountAmount: 0,
+        service: { name: 'Maha Aarti' } as any,
+        customerAddress: {
+          addressLine1: 'Assi Ghat',
+          city: 'Varanasi',
+        } as any,
+      } as any;
+
+      mockBookingRepo.findBookingById.mockResolvedValue(bookingWithFees);
+      mockPaymentRepo.findLatestByBookingId.mockResolvedValue({
+        id: 100,
+        amount: 540.71,
+        customerPaidAmount: 540.71,
+        razorpayFee: 13.63,
+        razorpayTax: 2.08,
+        paymentMethod: 'CARD',
+        status: PAYMENT_STATUS.SUCCESS,
+        paidAt: new Date(),
+      });
+
+      const result = await service.generateInvoicePdf(mockCustomerUser, 202);
+      const renderedHtml = result.buffer.toString();
+      expect(renderedHtml).toContain('Customer Paid Amount');
+      expect(renderedHtml).toContain('540.71');
+      expect(renderedHtml).toContain('Razorpay Fee');
+      expect(renderedHtml).toContain('13.63');
+      expect(renderedHtml).toContain('Razorpay Tax');
+      expect(renderedHtml).toContain('2.08');
+    });
+
+    it('should NOT display razorpayFee and razorpayTax in Booking invoice PDF when customer paid amount is equal to booking price', async () => {
+      const bookingEqualPrice: Booking = {
+        id: 203,
+        bookingNumber: 'PW-BK-EQUAL-5555',
+        customerId: 10,
+        customer: mockCustomerUser,
+        status: BOOKING_STATUS.COMPLETED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+        finalAmount: 525,
+        donationAmount: 0,
+        discountAmount: 0,
+        service: { name: 'Maha Aarti' } as any,
+        customerAddress: {
+          addressLine1: 'Assi Ghat',
+          city: 'Varanasi',
+        } as any,
+      } as any;
+
+      mockBookingRepo.findBookingById.mockResolvedValue(bookingEqualPrice);
+      mockPaymentRepo.findLatestByBookingId.mockResolvedValue({
+        id: 101,
+        amount: 525,
+        customerPaidAmount: 525.0,
+        razorpayFee: 13.63,
+        razorpayTax: 2.08,
+        paymentMethod: 'CARD',
+        status: PAYMENT_STATUS.SUCCESS,
+        paidAt: new Date(),
+      });
+
+      const result = await service.generateInvoicePdf(mockCustomerUser, 203);
+      const renderedHtml = result.buffer.toString();
+      expect(renderedHtml).toContain('Customer Paid Amount');
+      expect(renderedHtml).toContain('525.00');
+      expect(renderedHtml).not.toContain('Razorpay Fee');
+      expect(renderedHtml).not.toContain('Razorpay Tax');
     });
   });
 });
