@@ -565,8 +565,7 @@ describe('Unified Invoice System', () => {
       expect(renderedHtml).toContain('540.71');
       expect(renderedHtml).toContain('Razorpay Fee');
       expect(renderedHtml).toContain('13.63');
-      expect(renderedHtml).toContain('Razorpay Tax');
-      expect(renderedHtml).toContain('2.08');
+      expect(renderedHtml).not.toContain('Razorpay Tax');
     });
 
     it('should NOT display razorpayFee and razorpayTax when customer paid amount is equal to order price', async () => {
@@ -653,8 +652,7 @@ describe('Unified Invoice System', () => {
       expect(renderedHtml).toContain('540.71');
       expect(renderedHtml).toContain('Razorpay Fee');
       expect(renderedHtml).toContain('13.63');
-      expect(renderedHtml).toContain('Razorpay Tax');
-      expect(renderedHtml).toContain('2.08');
+      expect(renderedHtml).not.toContain('Razorpay Tax');
     });
 
     it('should NOT display razorpayFee and razorpayTax in Booking invoice PDF when customer paid amount is equal to booking price', async () => {

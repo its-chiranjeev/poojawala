@@ -28,10 +28,10 @@ export class NotificationService {
       return;
     }
 
+    const primaryPort = process.env.USER_MANAGEMENT_PORT || 8011;
     try {
-      const userPort = process.env.USER_MANAGEMENT_PORT || 8011;
       await axios.post(
-        `http://127.0.0.1:${userPort}/api/users/internal/emit-notification`,
+        `http://127.0.0.1:${primaryPort}/api/users/internal/emit-notification`,
         {
           rooms,
           event,
@@ -40,6 +40,18 @@ export class NotificationService {
         { timeout: 3000 },
       );
     } catch (err: any) {
+      if (err?.code === 'ECONNREFUSED' && Number(primaryPort) !== 5001) {
+        try {
+          await axios.post(
+            `http://127.0.0.1:5001/api/users/internal/emit-notification`,
+            { rooms, event, payload },
+            { timeout: 3000 },
+          );
+          return;
+        } catch {
+          // ignore fallback error
+        }
+      }
       this.logger.debug(
         `Cross-service socket bridge to user-service failed: ${err?.message}`,
       );

@@ -252,8 +252,8 @@ export const paymentInvoiceTemplate = (
   const showRazorpayCharges =
     rawCustomerPaid != null &&
     rawCustomerPaid - finalAmount > 0.01 &&
-    ((rawRazorpayFee != null && rawRazorpayFee > 0) ||
-      (rawRazorpayTax != null && rawRazorpayTax > 0));
+    rawRazorpayFee != null &&
+    rawRazorpayFee > 0;
 
   const isPaid =
     data.paymentStatus?.toLowerCase() === 'paid' ||
@@ -1330,20 +1330,6 @@ export const paymentInvoiceTemplate = (
                       `
                     : ''
                   }
-                  ${showRazorpayCharges && rawRazorpayTax != null && rawRazorpayTax > 0
-                    ? `
-                        <tr>
-                          <td colspan="3">
-                            Razorpay Tax
-                          </td>
-                          <td class="amount">
-                            ${currency}
-                            ${rawRazorpayTax.toFixed(2)}
-                          </td>
-                        </tr>
-                      `
-                    : ''
-                  }
 
                   <tr class="total-row">
                     <td colspan="3">
@@ -1452,20 +1438,6 @@ export const paymentInvoiceTemplate = (
                       `
                     : ''
                   }
-                  ${showRazorpayCharges && rawRazorpayTax != null && rawRazorpayTax > 0
-                    ? `
-                        <tr>
-                          <td>
-                            Razorpay Tax
-                          </td>
-                          <td class="amount">
-                            ${currency}
-                            ${rawRazorpayTax.toFixed(2)}
-                          </td>
-                        </tr>
-                      `
-                    : ''
-                  }
 
                   <tr class="total-row">
                     <td>
@@ -1565,16 +1537,6 @@ export const paymentInvoiceTemplate = (
 
                 <div class="payment-cell">
                   <div class="payment-label">
-                    Razorpay Tax
-                  </div>
-
-                  <div class="payment-value">
-                    ${razorpayTaxDisplay}
-                  </div>
-                </div>
-
-                <div class="payment-cell">
-                  <div class="payment-label">
                     Recorded Amount
                   </div>
 
@@ -1598,7 +1560,7 @@ export const paymentInvoiceTemplate = (
             ${isProformaInvoice
               ? 'Payment confirmation is pending.'
               : showRazorpayCharges
-                ? `Customer payment received via Razorpay (Fee: ${currency} ${(rawRazorpayFee ?? 0).toFixed(2)}, Tax: ${currency} ${(rawRazorpayTax ?? 0).toFixed(2)})`
+                ? `Customer payment received via Razorpay (Fee: ${currency} ${(rawRazorpayFee ?? 0).toFixed(2)})`
                 : 'Payment received successfully.'
             }
           </div>

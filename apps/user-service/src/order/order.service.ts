@@ -341,6 +341,13 @@ export class OrderService {
           const customerName =
             [customer.firstName, customer.lastName].filter(Boolean).join(' ') ||
             'Devotee';
+          const customerPaidAmount =
+            order.payment?.customerPaidAmount != null
+              ? Number(order.payment.customerPaidAmount).toFixed(2)
+              : order.payment?.amount != null
+                ? Number(order.payment.amount).toFixed(2)
+                : Number(order.totalAmount).toFixed(2);
+
           const html = renderPoojawalaEmail({
             statusBadge: `Order ${dto.status}`,
             userName: customerName,
@@ -366,7 +373,7 @@ export class OrderService {
                       ? 'Cash on Delivery (COD)'
                       : 'Online Payment',
                 },
-                { label: 'Total Amount', value: `₹${order.totalAmount}` },
+                { label: 'Customer Paid Amount', value: `₹${customerPaidAmount}` },
               ],
             },
           });

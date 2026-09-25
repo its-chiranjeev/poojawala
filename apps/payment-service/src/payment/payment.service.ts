@@ -3341,9 +3341,29 @@ export class PaymentService {
       // PRODUCT_PAYMENT: Update Order to PAID & CONFIRMED, and clear cart
       if (payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT) {
         const orderRepo = manager.getRepository(Order);
-        const order = await orderRepo.findOne({
+        let order = await orderRepo.findOne({
           where: { paymentId: payment.id },
         });
+
+        const paymentNotes = (payment as any).notes;
+        if (!order && paymentNotes?.orderId) {
+          const parsedOrderId = Number(paymentNotes.orderId);
+          if (!isNaN(parsedOrderId)) {
+            order = await orderRepo.findOne({ where: { id: parsedOrderId } });
+            if (order) {
+              order.paymentId = payment.id;
+            }
+          }
+        }
+
+        if (!order && paymentNotes?.orderNumber) {
+          order = await orderRepo.findOne({
+            where: { orderNumber: String(paymentNotes.orderNumber) },
+          });
+          if (order) {
+            order.paymentId = payment.id;
+          }
+        }
 
         if (order) {
           if (order.paymentStatus === ORDER_PAYMENT_STATUS.PAID) {
@@ -3361,9 +3381,10 @@ export class PaymentService {
         }
 
         // Safe, idempotent cart clearing upon payment confirmation
-        if (payment.payerId) {
+        const payerId = payment.payerId || order?.customerId;
+        if (payerId) {
           const customerCart = await cartRepo.findOne({
-            where: { customerId: payment.payerId },
+            where: { customerId: payerId },
           });
           if (customerCart) {
             await cartItemRepo.delete({ cartId: customerCart.id });
@@ -3374,38 +3395,65 @@ export class PaymentService {
 
     if (
       payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT &&
-      payment.payerId &&
       !wasOrderAlreadyPaid
     ) {
       try {
-        const order = await this.dataSource
-          .getRepository(Order)
-          .findOne({ where: { paymentId: payment.id } });
+        const orderRepo = this.dataSource.getRepository(Order);
+        let order = await orderRepo.findOne({
+          where: { paymentId: payment.id },
+        });
+
+        if (!order && (payment as any).notes?.['orderId']) {
+          const parsedOrderId = Number((payment as any).notes['orderId']);
+          if (!isNaN(parsedOrderId)) {
+            order = await orderRepo.findOne({ where: { id: parsedOrderId } });
+          }
+        }
+
+        if (!order && (payment as any).notes?.['orderNumber']) {
+          order = await orderRepo.findOne({
+            where: { orderNumber: String((payment as any).notes['orderNumber']) },
+          });
+        }
+
         const orderNumber = order?.orderNumber || String(payment.id);
         const orderCode = order?.id ? `ORD-${order.id}` : `#${orderNumber}`;
+        const payerId = payment.payerId || order?.customerId;
 
         const userRepo = this.dataSource.getRepository(User);
-        const payer = await userRepo.findOne({
-          where: { id: payment.payerId },
-        });
+        const payer = payerId
+          ? await userRepo.findOne({
+            where: { id: payerId },
+          })
+          : null;
         const customerName =
           [payer?.firstName, payer?.lastName].filter(Boolean).join(' ') ||
           'Customer';
         const paymentReference = payment.razorpayPaymentId || `PAY-${payment.id}`;
 
-        await this.notificationService.createNotification(
-          payment.payerId,
-          'Payment Successful',
-          `Your payment of ₹${payment.amount} for Order ${orderCode} was successful. Payment ID: ${paymentReference}.`,
-          NOTIFICATION_TYPE.PAYMENT,
-          order?.id || payment.id,
-          'ORDER',
-        );
+        if (payerId) {
+          await this.notificationService.createNotification(
+            payerId,
+            'Payment Successful',
+            `Your payment of ₹${payment.amount} for Order ${orderCode} was successful. Payment ID: ${paymentReference}.`,
+            NOTIFICATION_TYPE.PAYMENT,
+            order?.id || payment.id,
+            'ORDER',
+          );
+        }
 
-        // Real-time Socket.IO and DB notification for Admin on Payment Success
+        // Real-time Socket.IO and DB notification for Admin on Payment Success / Repayment Success
+        const isRepay = payment.remark?.toLowerCase().includes('retry') || false;
+        const adminTitle = isRepay
+          ? 'Order Repayment Received'
+          : 'Order Payment Received';
+        const adminMessage = isRepay
+          ? `Order Repayment Successful — Order ${orderCode} has been successfully repaid by ${customerName}. Payment ID: ${paymentReference}. Amount: ₹${payment.amount}.`
+          : `Order Payment Successful — Order ${orderCode} has been successfully paid by ${customerName}. Payment ID: ${paymentReference}. Amount: ₹${payment.amount}.`;
+
         await this.notificationService.notifyAdmins(
-          'Order Payment Received',
-          `Order Payment Successful — Order ${orderCode} has been successfully paid by ${customerName}. Payment ID: ${paymentReference}. Amount: ₹${payment.amount}.`,
+          adminTitle,
+          adminMessage,
           NOTIFICATION_TYPE.PAYMENT,
           order?.id || payment.id,
           'ORDER',
@@ -3413,7 +3461,7 @@ export class PaymentService {
             orderId: order?.id,
             orderCode,
             orderNumber: order?.orderNumber || orderCode,
-            customerId: payment.payerId,
+            customerId: payerId,
             customerName,
             paymentId: payment.id,
             razorpayPaymentId: payment.razorpayPaymentId,
@@ -3421,49 +3469,47 @@ export class PaymentService {
             amount: payment.amount,
             status: 'PAID',
             paymentStatus: ORDER_PAYMENT_STATUS.PAID,
+            isRepay,
+            isRetry: isRepay,
           },
         );
 
-        if (this.emailService) {
-          if (payer?.email) {
-            const customerEmailName =
-              [payer.firstName, payer.lastName].filter(Boolean).join(' ') ||
-              'Devotee';
-            const html = renderPoojawalaEmail({
-              statusBadge: 'Payment Successful',
-              userName: customerName,
-              preheaderText: `Payment confirmed for Order ORD-${orderCode}!`,
-              emailMessage: `We have received your payment of <strong>₹${payment.amount}</strong> for Order <strong>#${orderCode}</strong>. Your order is confirmed and will be processed soon.`,
-              detailsTable: {
-                title: 'Payment Receipt',
-                rows: [
-                  { label: 'Order ID', value: `${orderCode}` },
-                  { label: 'Payment ID', value: String(payment.id) },
-                  {
-                    label: 'Payment Method',
-                    value: payment.paymentMethod || 'ONLINE',
-                  },
-                  {
-                    label: 'Amount Paid',
-                    value: `₹${payment.amount}`,
-                    isHighlight: true,
-                  },
-                  { label: 'Payment Status', value: 'PAID' },
-                  { label: 'Order Status', value: 'CONFIRMED' },
-                ],
-                totalRow: {
-                  label: 'Total Paid',
-                  value: `₹${payment.amount}`,
+        if (this.emailService && payer?.email) {
+          const paidAmountVal = payment.customerPaidAmount ?? payment.amount;
+          const html = renderPoojawalaEmail({
+            statusBadge: 'Payment Successful',
+            userName: customerName,
+            preheaderText: `Payment confirmed for Order ORD-${orderCode}!`,
+            emailMessage: `We have received your payment of <strong>₹${paidAmountVal}</strong> for Order <strong>#${orderCode}</strong>. Your order is confirmed and will be processed soon.`,
+            detailsTable: {
+              title: 'Payment Receipt',
+              rows: [
+                { label: 'Order ID', value: `${orderCode}` },
+                { label: 'Payment ID', value: String(payment.id) },
+                {
+                  label: 'Payment Method',
+                  value: payment.paymentMethod || 'ONLINE',
                 },
+                {
+                  label: 'Amount Paid',
+                  value: `₹${paidAmountVal}`,
+                  isHighlight: true,
+                },
+                { label: 'Payment Status', value: 'PAID' },
+                { label: 'Order Status', value: 'CONFIRMED' },
+              ],
+              totalRow: {
+                label: 'Total Paid',
+                value: `₹${paidAmountVal}`,
               },
-            });
+            },
+          });
 
-            await this.emailService.sendMail({
-              to: payer.email,
-              subject: `Payment Successful - Poojawala | Order ${orderCode}`,
-              html,
-            });
-          }
+          await this.emailService.sendMail({
+            to: payer.email,
+            subject: `Payment Successful - Poojawala | Order ${orderCode}`,
+            html,
+          });
         }
       } catch (err: any) {
         this.logger.warn(`Could not send payment notification/email: ${err?.message}`);
@@ -3479,6 +3525,29 @@ export class PaymentService {
           NOTIFICATION_TYPE.PAYMENT,
           payment.id,
           'PAYMENT',
+        );
+
+        // Notify Admin on Booking Payment Success
+        const bookingCustomer = payment.booking.customer;
+        const bookingCustomerName =
+          [bookingCustomer?.firstName, bookingCustomer?.lastName].filter(Boolean).join(' ') ||
+          'Customer';
+        await this.notificationService.notifyAdmins(
+          'Booking Payment Received',
+          `Booking Payment Successful — Booking #${payment.booking.bookingNumber} has been successfully paid by ${bookingCustomerName}. Payment ID: ${payment.razorpayPaymentId || `PAY-${payment.id}`}. Amount: ₹${payment.amount}.`,
+          NOTIFICATION_TYPE.PAYMENT,
+          payment.booking.id,
+          'BOOKING',
+          {
+            bookingId: payment.booking.id,
+            bookingNumber: payment.booking.bookingNumber,
+            customerId: payment.booking.customerId,
+            customerName: bookingCustomerName,
+            paymentId: payment.id,
+            razorpayPaymentId: payment.razorpayPaymentId,
+            amount: payment.amount,
+            status: 'PAID',
+          },
         );
       }
 
@@ -3922,10 +3991,10 @@ export class PaymentService {
         'ORDER',
       );
 
-      // Admin: customer initiated a payment attempt
+      // Admin: customer initiated a payment retry / repay
       await this.notificationService.notifyAdmins(
-        'Order Payment Initiated',
-        `${customerName} has initiated payment for Order ${orderCode}. Amount: ₹${totalAmount}. Payment Ref: ${paymentReference}.`,
+        'Order Repayment Initiated',
+        `${customerName} has initiated payment retry for Order ${orderCode}. Amount: ₹${totalAmount}. Payment Ref: ${paymentReference}.`,
         NOTIFICATION_TYPE.PAYMENT,
         order.id,
         'ORDER',
@@ -3939,6 +4008,9 @@ export class PaymentService {
           paymentReference,
           amount: totalAmount,
           status: 'INITIATED',
+          isRepay: true,
+          isRetry: true,
+          action: 'ORDER_REPAY_INITIATED',
         },
       );
 

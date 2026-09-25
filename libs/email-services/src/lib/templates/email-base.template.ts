@@ -263,10 +263,19 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
         const cellContent = row.link
           ? `<a href="${row.link}" target="_blank" rel="noopener noreferrer" style="color: #FF6200; font-weight: 700; text-decoration: underline; word-break: break-all;">${escapeHtml(row.linkText || row.value)}</a>`
           : escapeHtml(row.value);
-        const labelText =
-          row.label && row.label.trim().toLowerCase().replace(/:$/, '') === 'order number'
-            ? 'Order ID'
-            : row.label;
+        const cleanLabel = row.label ? row.label.trim().toLowerCase().replace(/:$/, '') : '';
+        const isOrderContext =
+          options.detailsTable?.title?.toLowerCase().includes('order') ||
+          options.statusBadge?.toLowerCase().includes('order') ||
+          options.preheaderText?.toLowerCase().includes('order');
+
+        let labelText = row.label;
+        if (cleanLabel === 'order number') {
+          labelText = 'Order ID';
+        } else if (cleanLabel === 'total amount' && isOrderContext) {
+          labelText = 'Customer Paid Amount';
+        }
+
         return `
           <tr>
             <td style="padding: 12px 20px; font-size: 14px; color: #777777; border-bottom: 1px dashed #FFEADB; width: 42%; vertical-align: top;">
@@ -282,10 +291,23 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
 
     let totalRowHtml = '';
     if (options.detailsTable.totalRow) {
+      const cleanTotalLabel = options.detailsTable.totalRow.label
+        ? options.detailsTable.totalRow.label.trim().toLowerCase().replace(/:$/, '')
+        : '';
+      const isOrderContext =
+        options.detailsTable?.title?.toLowerCase().includes('order') ||
+        options.statusBadge?.toLowerCase().includes('order') ||
+        options.preheaderText?.toLowerCase().includes('order');
+
+      const totalLabel =
+        cleanTotalLabel === 'total amount' && isOrderContext
+          ? 'Customer Paid Amount'
+          : options.detailsTable.totalRow.label;
+
       totalRowHtml = `
         <tr>
           <td style="padding: 14px 20px; font-size: 15px; font-weight: 700; color: #1A1A1A; background-color: #FFFBF7;">
-            ${escapeHtml(options.detailsTable.totalRow.label)}
+            ${escapeHtml(totalLabel)}
           </td>
           <td style="padding: 14px 20px; font-size: 18px; font-weight: 800; color: #D32F2F; background-color: #FFFBF7; text-align: right;">
             ${escapeHtml(options.detailsTable.totalRow.value)}
