@@ -12,6 +12,11 @@ import { VENUE_TYPE } from '@poojawala/entities';
 import { Type } from 'class-transformer';
 
 export class CreateCustomerAddressDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  id?: number;
+
   @IsEnum(VENUE_TYPE)
   venueType!: VENUE_TYPE;
 
