@@ -1216,9 +1216,10 @@ export class UserService {
         await this.customerAddressRepository.clearDefaultAddress(userId);
       }
 
+      const { id: _ignoredId, ...addressPayload } = dto as any;
       const address = await this.customerAddressRepository.createAddress({
         customerId: userId,
-        ...dto,
+        ...addressPayload,
         isDefault,
       });
 
@@ -1314,7 +1315,8 @@ export class UserService {
       await this.customerAddressRepository.clearDefaultAddress(userId);
     }
 
-    const updated = await this.customerAddressRepository.update(id, dto);
+    const { id: _ignoredId, ...updatePayload } = dto as any;
+    const updated = await this.customerAddressRepository.update(id, updatePayload);
 
     await this.auditLogService.createAuditLog({
       actorId: userId,
@@ -1347,7 +1349,23 @@ export class UserService {
       throw new ForbiddenException('You can delete only your own address');
     }
 
+    if (address.isDefault) {
+      await this.customerAddressRepository.update(id, {
+        isDefault: false,
+      });
+    }
+
     await this.customerAddressRepository.softDelete(id);
+
+    const remainingAddresses = await this.customerAddressRepository.find({
+      where: { customerId: userId } as any,
+    });
+
+    if (remainingAddresses.length === 1) {
+      await this.customerAddressRepository.update(remainingAddresses[0].id, {
+        isDefault: true,
+      });
+    }
 
     await this.auditLogService.createAuditLog({
       actorId: userId,
@@ -1359,7 +1377,12 @@ export class UserService {
       action: 'CUSTOMER_ADDRESS_UPDATED',
       message: `Customer #${userId} deleted address #${id}.`,
       oldValue: undefined,
-      newValue: { addressId: id, deleted: true },
+      newValue: {
+        addressId: id,
+        deleted: true,
+        autoDefaultAddressId:
+          remainingAddresses.length === 1 ? remainingAddresses[0].id : undefined,
+      },
     });
 
     return {
@@ -1438,7 +1461,8 @@ export class UserService {
       await this.purohitServiceAreaRepository.clearDefaultAddress(userId);
     }
 
-    const updated = await this.purohitServiceAreaRepository.updateArea(id, dto);
+    const { id: _ignoredId, ...updatePayload } = dto as any;
+    const updated = await this.purohitServiceAreaRepository.updateArea(id, updatePayload);
 
     return {
       success: true,

@@ -856,20 +856,11 @@ export class CartService {
 
         const createdItems: OrderItem[] = [];
         for (const validItem of validItems) {
-          let imageUrl: string | null = validItem.product.imageUrl || null;
-          if (imageUrl && this.s3Service) {
-            try {
-              imageUrl = await this.s3Service.getDownloadUrl(imageUrl);
-            } catch {
-              // retain raw imageUrl if presigning fails
-            }
-          }
-
           const orderItem = orderItemRepo.create({
             orderId: newOrder.id,
             productId: validItem.product.id,
             productNameSnapshot: validItem.product.name,
-            productImageSnapshot: imageUrl,
+            productImageSnapshot: validItem.product.imageUrl || null,
             unitPriceSnapshot: validItem.unitPrice,
             quantity: validItem.quantity,
             totalAmount: validItem.subtotal,
@@ -915,15 +906,27 @@ export class CartService {
         paymentStatus: savedOrder.paymentStatus,
         orderStatus: savedOrder.orderStatus,
         shippingAddressSnapshot: savedOrder.shippingAddressSnapshot,
-        items: (savedOrder.items || []).map((item) => ({
-          id: item.id,
-          productId: item.productId ?? null,
-          productName: item.productNameSnapshot,
-          productImage: item.productImageSnapshot ?? null,
-          unitPrice: Number(item.unitPriceSnapshot),
-          quantity: item.quantity,
-          total: Number(item.totalAmount),
-        })),
+        items: await Promise.all(
+          (savedOrder.items || []).map(async (item) => {
+            let img = item.productImageSnapshot || null;
+            if (img && this.s3Service) {
+              try {
+                img = await this.s3Service.getDownloadUrl(img);
+              } catch {
+                // retain raw imageUrl if presigning fails
+              }
+            }
+            return {
+              id: item.id,
+              productId: item.productId ?? null,
+              productName: item.productNameSnapshot,
+              productImage: img,
+              unitPrice: Number(item.unitPriceSnapshot),
+              quantity: item.quantity,
+              total: Number(item.totalAmount),
+            };
+          }),
+        ),
         createdAt: savedOrder.createdAt,
         updatedAt: savedOrder.updatedAt,
         status: savedPayment.status,
@@ -981,15 +984,27 @@ export class CartService {
           paymentStatus: savedOrder.paymentStatus,
           orderStatus: savedOrder.orderStatus,
           shippingAddressSnapshot: savedOrder.shippingAddressSnapshot,
-          items: (savedOrder.items || []).map((item) => ({
-            id: item.id,
-            productId: item.productId ?? null,
-            productName: item.productNameSnapshot,
-            productImage: item.productImageSnapshot ?? null,
-            unitPrice: Number(item.unitPriceSnapshot),
-            quantity: item.quantity,
-            total: Number(item.totalAmount),
-          })),
+          items: await Promise.all(
+            (savedOrder.items || []).map(async (item) => {
+              let img = item.productImageSnapshot || null;
+              if (img && this.s3Service) {
+                try {
+                  img = await this.s3Service.getDownloadUrl(img);
+                } catch {
+                  // retain raw imageUrl if presigning fails
+                }
+              }
+              return {
+                id: item.id,
+                productId: item.productId ?? null,
+                productName: item.productNameSnapshot,
+                productImage: img,
+                unitPrice: Number(item.unitPriceSnapshot),
+                quantity: item.quantity,
+                total: Number(item.totalAmount),
+              };
+            }),
+          ),
           createdAt: savedOrder.createdAt,
           updatedAt: savedOrder.updatedAt,
           expiredAt: savedOrder.expiredAt ?? null,

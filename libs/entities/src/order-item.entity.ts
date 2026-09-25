@@ -35,7 +35,7 @@ export class OrderItem {
   @Column({ type: 'varchar', length: 255 })
   productNameSnapshot!: string;
 
-  @Column({ type: 'varchar', length: 255, nullable: true })
+  @Column({ type: 'text', nullable: true })
   productImageSnapshot?: string | null;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
