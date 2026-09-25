@@ -13,6 +13,11 @@ import { Type } from 'class-transformer';
 
 export class UpdateCustomerAddressDto {
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  id?: number;
+
+  @IsOptional()
   @IsEnum(VENUE_TYPE)
   venueType?: VENUE_TYPE;
 

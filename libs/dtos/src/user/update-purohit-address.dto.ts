@@ -11,6 +11,11 @@ import { Type } from 'class-transformer';
 
 export class UpdatePurohitServiceAreaDto {
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  id?: number;
+
+  @IsOptional()
   @IsString()
   @Length(2, 50)
   addressLabel?: string;
