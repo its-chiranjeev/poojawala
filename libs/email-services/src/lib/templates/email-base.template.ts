@@ -10,6 +10,8 @@ export interface EmailTableRow {
 
 export interface EmailDetailsTable {
   title: string;
+  paymentStatus?: string;
+  keepPaymentStatusInRows?: boolean;
   rows: EmailTableRow[];
   totalRow?: {
     label: string;
@@ -31,6 +33,7 @@ export interface PoojawalaEmailTemplateOptions {
   otpSubtitle?: string;
   highlight?: EmailHighlightBox;
   detailsTable?: EmailDetailsTable;
+  paymentStatus?: string;
   additionalContentHtml?: string;
   websiteUrl?: string;
 }
@@ -43,6 +46,77 @@ function escapeHtml(value: string | number | undefined | null): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+interface PaymentStatusBadgeConfig {
+  bg: string;
+  color: string;
+  border: string;
+  icon: string;
+  text: string;
+}
+
+function getPaymentStatusBadge(status: string): PaymentStatusBadgeConfig {
+  const clean = String(status || '').trim();
+  const s = clean.toUpperCase();
+
+  if (s === 'PAID' || s === 'SUCCESS' || s === 'COMPLETED' || s === 'SUCCESSFUL') {
+    return {
+      bg: '#E8F5E9',
+      color: '#2E7D32',
+      border: '#C8E6C9',
+      icon: '✓',
+      text: clean,
+    };
+  }
+
+  if (s.includes('COD') || s === 'COD_PENDING' || s === 'COD PENDING') {
+    return {
+      bg: '#FFF3E0',
+      color: '#D84315',
+      border: '#FFCC80',
+      icon: '⏳',
+      text: clean,
+    };
+  }
+
+  if (s === 'PENDING' || s.includes('PENDING')) {
+    return {
+      bg: '#FFF8E1',
+      color: '#E65100',
+      border: '#FFE082',
+      icon: '⏳',
+      text: clean,
+    };
+  }
+
+  if (s === 'FAILED' || s.includes('FAIL') || s === 'CANCELLED' || s === 'CANCELED') {
+    return {
+      bg: '#FFEBEE',
+      color: '#C62828',
+      border: '#FFCDD2',
+      icon: '✕',
+      text: clean,
+    };
+  }
+
+  if (s.includes('REFUND')) {
+    return {
+      bg: '#EDE7F6',
+      color: '#512DA8',
+      border: '#D1C4E9',
+      icon: '↺',
+      text: clean,
+    };
+  }
+
+  return {
+    bg: '#FFF2EB',
+    color: '#D32F2F',
+    border: '#FFE0D0',
+    icon: '●',
+    text: clean,
+  };
 }
 
 export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): string {
@@ -164,17 +238,39 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
   let detailsTableBlock = '';
   if (options.detailsTable && options.detailsTable.rows?.length > 0) {
     const tableTitle = escapeHtml(options.detailsTable.title);
-    const rowsHtml = options.detailsTable.rows
+
+    const isPaymentStatusLabel = (label: string | undefined | null) =>
+      label != null && label.trim().toLowerCase().replace(/:$/, '') === 'payment status';
+
+    const paymentStatusRow = options.detailsTable.rows.find((r) => isPaymentStatusLabel(r.label));
+
+    const rawPaymentStatus =
+      options.detailsTable.paymentStatus ||
+      options.paymentStatus ||
+      (paymentStatusRow ? paymentStatusRow.value : undefined);
+
+    const paymentBadge = rawPaymentStatus ? getPaymentStatusBadge(rawPaymentStatus) : null;
+
+    const displayRows =
+      paymentBadge && !options.detailsTable.keepPaymentStatusInRows
+        ? options.detailsTable.rows.filter((r) => !isPaymentStatusLabel(r.label))
+        : options.detailsTable.rows;
+
+    const rowsHtml = displayRows
       .map((row) => {
         const valColor = row.isHighlight ? '#FF6200' : '#1A1A1A';
         const valWeight = row.isHighlight ? '700' : '600';
         const cellContent = row.link
           ? `<a href="${row.link}" target="_blank" rel="noopener noreferrer" style="color: #FF6200; font-weight: 700; text-decoration: underline; word-break: break-all;">${escapeHtml(row.linkText || row.value)}</a>`
           : escapeHtml(row.value);
+        const labelText =
+          row.label && row.label.trim().toLowerCase().replace(/:$/, '') === 'order number'
+            ? 'Order ID'
+            : row.label;
         return `
           <tr>
             <td style="padding: 12px 20px; font-size: 14px; color: #777777; border-bottom: 1px dashed #FFEADB; width: 42%; vertical-align: top;">
-              ${escapeHtml(row.label)}:
+              ${escapeHtml(labelText)}:
             </td>
             <td style="padding: 12px 20px; font-size: 14px; font-weight: ${valWeight}; color: ${valColor}; border-bottom: 1px dashed #FFEADB; text-align: right; vertical-align: top;">
               ${cellContent}
@@ -204,10 +300,27 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
         <td style="padding: 0 40px 28px 40px;" class="mobile-padding">
           <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #FFFFFF; border: 1px solid #FFE0D0; border-radius: 16px; overflow: hidden;">
             <tr>
-              <td colspan="2" style="background-color: #FFF2EB; padding: 14px 20px; border-bottom: 1px solid #FFE0D0;">
-                <h3 style="margin: 0; font-size: 15px; font-weight: 700; color: #D32F2F; font-family: 'Outfit', -apple-system, sans-serif;">
-                  🪔 ${tableTitle}
-                </h3>
+              <td colspan="2" style="background-color: #FFF2EB; padding: 12px 20px; border-bottom: 1px solid #FFE0D0;">
+                <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                  <tr>
+                    <td style="vertical-align: middle;">
+                      <h3 style="margin: 0; font-size: 15px; font-weight: 700; color: #D32F2F; font-family: 'Outfit', -apple-system, sans-serif;">
+                        🪔 ${tableTitle}
+                      </h3>
+                    </td>
+                    ${
+                      paymentBadge
+                        ? `
+                    <td align="right" style="vertical-align: middle;">
+                      <span style="display: inline-block; background-color: ${paymentBadge.bg}; color: ${paymentBadge.color}; font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px; border: 1px solid ${paymentBadge.border}; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+                        ${paymentBadge.icon} ${escapeHtml(paymentBadge.text)}
+                      </span>
+                    </td>
+                    `
+                        : ''
+                    }
+                  </tr>
+                </table>
               </td>
             </tr>
             ${rowsHtml}
