@@ -13,7 +13,28 @@ export class AssignmentService {
     excludedPurohitProfileIds: number[] = [],
   ): Promise<number[]> {
     const purohitProfileRepository = manager.getRepository(PurohitProfile);
-    const customerLocation = this.getCustomerCoordinates(booking);
+    let customerLocation = this.getCustomerCoordinates(booking);
+
+    if (!customerLocation && booking.customerAddressId) {
+      const address = await manager.getRepository(CustomerAddress).findOne({
+        where: { id: booking.customerAddressId },
+        select: ['latitude', 'longitude', 'city'],
+      });
+      if (address && address.latitude != null && address.longitude != null) {
+        const lat = Number(address.latitude);
+        const lon = Number(address.longitude);
+        if (
+          Number.isFinite(lat) &&
+          Number.isFinite(lon) &&
+          lat >= -90 &&
+          lat <= 90 &&
+          lon >= -180 &&
+          lon <= 180
+        ) {
+          customerLocation = { latitude: lat, longitude: lon };
+        }
+      }
+    }
 
     if (!customerLocation) {
       this.logger.warn(
@@ -84,23 +105,34 @@ export class AssignmentService {
       .andWhere('service_area.longitude IS NOT NULL')
       .andWhere('service_area.deletedAt IS NULL');
 
-    if (bookingCity) {
-      candidateQueryBuilder.andWhere(
-        'LOWER(TRIM(service_area.city)) = LOWER(TRIM(:bookingCity))',
-        { bookingCity },
-      );
+    if (booking.bookingMode === 'ONLINE') {
+      candidateQueryBuilder
+        .andWhere('profile.isOnlineAvailable = :isOnlineAvailable', {
+          isOnlineAvailable: true,
+        })
+        .andWhere('purohit_service.isOnline = :isOnline', { isOnline: true });
+    } else {
+      candidateQueryBuilder
+        .andWhere('profile.isOfflineAvailable = :isOfflineAvailable', {
+          isOfflineAvailable: true,
+        })
+        .andWhere('purohit_service.isOffline = :isOffline', { isOffline: true });
     }
 
-    // Haversine filtering in SQL
+    // Haversine distance formula: calculates great-circle distance between customer address and purohit service area
+    // Purohit is eligible if distance is within their configured serviceRadiusKm
     candidateQueryBuilder.andWhere(
-      `(${earthRadiusKm} * ACOS(
-        LEAST(1.0, GREATEST(-1.0,
-          COS(RADIANS(:customerLat)) * COS(RADIANS(CAST(service_area.latitude AS float))) *
-          COS(RADIANS(CAST(service_area.longitude AS float)) - RADIANS(:customerLon)) +
-          SIN(RADIANS(:customerLat)) * SIN(RADIANS(CAST(service_area.latitude AS float)))
-        ))
-      )) <= service_area."serviceRadiusKm"`,
+      `(2 * :earthRadiusKm * ASIN(
+        SQRT(
+          LEAST(1.0, GREATEST(0.0,
+            POWER(SIN(RADIANS(CAST(service_area.latitude AS float) - :customerLat) / 2), 2) +
+            COS(RADIANS(:customerLat)) * COS(RADIANS(CAST(service_area.latitude AS float))) *
+            POWER(SIN(RADIANS(CAST(service_area.longitude AS float) - :customerLon) / 2), 2)
+          ))
+        )
+      )) <= CAST(COALESCE(service_area."serviceRadiusKm", 10) AS float)`,
       {
+        earthRadiusKm,
         customerLat: customerLatitude,
         customerLon: customerLongitude,
       },
@@ -140,7 +172,7 @@ export class AssignmentService {
       )`,
     );
     candidateQueryBuilder.setParameters(queryParams);
-    candidateQueryBuilder.select('profile.id', 'purohitProfileId');
+    candidateQueryBuilder.select('DISTINCT profile.id', 'purohitProfileId');
 
     const availablePurohits = await candidateQueryBuilder.getRawMany<{
       purohitProfileId: string;
@@ -199,8 +231,12 @@ export class AssignmentService {
     longitude: number;
   } | null {
     const snapshot = (booking.addressSnapshot ?? {}) as Record<string, unknown>;
-    const latitude = Number(snapshot['latitude']);
-    const longitude = Number(snapshot['longitude']);
+    const latitude = Number(
+      snapshot['latitude'] ?? (booking.customerAddress as any)?.latitude,
+    );
+    const longitude = Number(
+      snapshot['longitude'] ?? (booking.customerAddress as any)?.longitude,
+    );
 
     if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
       return null;
@@ -216,11 +252,12 @@ export class AssignmentService {
     };
   }
 
-  private isWithinServiceRadius(
+  public isWithinServiceRadius(
     purohitLatitude: number | string | null | undefined,
     purohitLongitude: number | string | null | undefined,
     customerLatitude: number,
     customerLongitude: number,
+    serviceRadiusKm: number = 10,
   ): boolean {
     const latitude = Number(purohitLatitude);
     const longitude = Number(purohitLongitude);
@@ -240,7 +277,7 @@ export class AssignmentService {
       customerLongitude,
     );
 
-    return false; // isWithinServiceRadius is deprecated/unused, returning false to satisfy compiler
+    return distanceKm <= serviceRadiusKm;
   }
 
   private calculateHaversineDistance(

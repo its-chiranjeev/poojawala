@@ -39,6 +39,7 @@ import {
   NOTIFICATION_TYPE,
   PAYMENT_TYPE,
   CUSTOMER_PAYMENT_METHOD,
+  PAYMENT_STATUS,
 } from '@poojawala/entities';
 import { BookingRepository } from '@poojawala/repositories';
 import {
@@ -668,14 +669,20 @@ export class BookingService {
       // ) || null;
       const payments = (booking.payments || []).filter(
         (p) =>
-          (user.role !== USER_ROLE.CUSTOMER || p.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT) &&
+          (user.role !== USER_ROLE.CUSTOMER ||
+            (p.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
+              p.status !== PAYMENT_STATUS.CREATED)) &&
           (p.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
             Boolean(p.razorpayPaymentLinkId?.trim()) ||
             p.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH),
       );
-      const bookingPayment = payments.find(
-        (p) => p.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
-      ) || null;
+      const bookingPayment =
+        payments.find(
+          (p) =>
+            p.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT &&
+            (user.role !== USER_ROLE.CUSTOMER ||
+              p.status !== PAYMENT_STATUS.CREATED),
+        ) || null;
       const purohitPayout =
         user.role === USER_ROLE.CUSTOMER
           ? null
@@ -774,9 +781,15 @@ export class BookingService {
         return {
           ...booking,
           payments: (booking.payments || []).filter(
-            (p) => p.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT,
+            (p) =>
+              p.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
+              p.status !== PAYMENT_STATUS.CREATED,
           ),
-          bookingPayment,
+          bookingPayment:
+            bookingPayment &&
+            bookingPayment.status !== PAYMENT_STATUS.CREATED
+              ? bookingPayment
+              : null,
           purohitPayout: null,
           purohitPayoutStatus: null,
           purohitPayoutAmount: null,

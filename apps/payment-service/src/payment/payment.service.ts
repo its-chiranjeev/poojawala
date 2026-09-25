@@ -1449,7 +1449,9 @@ export class PaymentService {
     if (
       !payment ||
       (payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT &&
-        !payment.razorpayPaymentLinkId?.trim())
+        !payment.razorpayPaymentLinkId?.trim()) ||
+      (user.role === USER_ROLE.CUSTOMER &&
+        payment.status === PAYMENT_STATUS.CREATED)
     ) {
       throw new NotFoundException('Payment not found');
     }
@@ -1474,7 +1476,8 @@ export class PaymentService {
 
     if (
       user.role === USER_ROLE.CUSTOMER &&
-      payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT
+      (payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT ||
+        payment.status === PAYMENT_STATUS.CREATED)
     ) {
       throw new ForbiddenException('You cannot access this payment');
     }
@@ -1522,11 +1525,13 @@ export class PaymentService {
     //     Boolean(payment.razorpayPaymentLinkId?.trim()),
     // );
     const filteredPayments = payments.filter((payment) => {
-      if (
-        user.role === USER_ROLE.CUSTOMER &&
-        payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT
-      ) {
-        return false;
+      if (user.role === USER_ROLE.CUSTOMER) {
+        if (payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) {
+          return false;
+        }
+        if (payment.status === PAYMENT_STATUS.CREATED) {
+          return false;
+        }
       }
       return (
         payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
@@ -1592,6 +1597,7 @@ export class PaymentService {
       user.role === USER_ROLE.CUSTOMER
         ? payments.filter(
           (payment) =>
+            payment.status !== PAYMENT_STATUS.CREATED &&
             payment.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
             (payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
               Boolean(payment.razorpayPaymentLinkId?.trim()) ||

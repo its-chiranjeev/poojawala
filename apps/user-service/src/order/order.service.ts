@@ -126,7 +126,7 @@ export class OrderService {
    * Helper to ensure productImageSnapshot has a fresh S3 presigned downloadUrl
    * and pricingUnit is populated on every order item.
    */
-  private async formatOrder(order: Order): Promise<Order> {
+  private async formatOrder(order: Order, isCustomer: boolean = false): Promise<Order> {
     if (order && order.items && Array.isArray(order.items)) {
       for (const item of order.items) {
         let img = item.productImageSnapshot || item.product?.imageUrl || null;
@@ -139,6 +139,9 @@ export class OrderService {
         }
         item.productImageSnapshot = img;
       }
+    }
+    if (isCustomer && order.payment && order.payment.status === PAYMENT_STATUS.CREATED) {
+      order.payment = null as any;
     }
     return order;
   }
@@ -192,7 +195,7 @@ export class OrderService {
       }
 
       const formattedOrders = await Promise.all(
-        visibleOrders.map((o) => this.formatOrder(o)),
+        visibleOrders.map((o) => this.formatOrder(o, true)),
       );
       return {
         orders: formattedOrders,
@@ -263,7 +266,7 @@ export class OrderService {
       throw new NotFoundException(`Order #${orderId} not found`);
     }
 
-    return this.formatOrder(order);
+    return this.formatOrder(order, true);
   }
 
   /**

@@ -300,6 +300,11 @@ export class PaymentRepository extends BaseRepository<Payment> {
         payoutType: PAYMENT_TYPE.PUROHIT_PAYOUT,
       });
 
+      // Do NOT show payments in CREATED status to customer (e.g. payment link generated but not paid)
+      query.andWhere('payment."status" != :createdStatus', {
+        createdStatus: PAYMENT_STATUS.CREATED,
+      });
+
       // TODO: Old filter requiring razorpayPaymentLinkId for all booking payments
       // query.andWhere(
       //   '(payment."paymentType" != :bookingPaymentType OR (payment."razorpayPaymentLinkId" IS NOT NULL AND payment."razorpayPaymentLinkId" != \'\'))',
