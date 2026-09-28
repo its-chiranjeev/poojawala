@@ -6,6 +6,7 @@ import {
   ConflictException,
   InternalServerErrorException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { randomInt } from 'crypto';
@@ -33,6 +34,7 @@ import {
   PurohitService,
   PurohitServiceArea,
   Service,
+  SERVICE_PLAN,
   User,
   USER_ROLE,
   USER_STATUS,
@@ -64,6 +66,7 @@ import { BookingGateway } from '@poojawala/gateway';
 import { NotificationService } from '@poojawala/notification';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
 import { AuditLogService, normalizeCityName } from '@poojawala/common';
+import { PaymentService } from '../../../payment-service/src/payment/payment.service';
 
 interface CouponCalculationResult {
   coupon: Coupon;
@@ -83,6 +86,7 @@ export class BookingService {
     private readonly bookingGateway: BookingGateway,
     private readonly notificationService: NotificationService,
     private readonly auditLogService: AuditLogService,
+    @Optional() private readonly paymentService?: PaymentService,
   ) { }
 
   private getIstDateParts(date: Date) {
@@ -301,23 +305,74 @@ export class BookingService {
         }
 
         /*
-         * Pricing validation.
+         * Pricing validation and resolution based on Basic / Standard plans.
+         * The backend resolves the price directly from service.plans[plan].price.
+         * Never trust price or amount from frontend.
          */
-        const minPrice = Number(service.minPrice);
-        const maxPrice = Number(service.maxPrice);
+        let bookingPrice: number;
+        let selectedPlan: SERVICE_PLAN;
+
+        if (!service.plans) {
+          throw new BadRequestException('Service plans are not configured for this service');
+        }
+
+        const rawPlan = dto.plan as string | undefined;
+        if (
+          !rawPlan ||
+          (rawPlan.toUpperCase() !== 'BASIC' && rawPlan.toUpperCase() !== 'STANDARD')
+        ) {
+          throw new BadRequestException('A valid plan (BASIC or STANDARD) must be selected');
+        }
+
+        const normalizedKey = rawPlan.toUpperCase() === 'STANDARD' ? 'standard' : 'basic';
+        const planObj =
+          (service.plans as any)[normalizedKey] ||
+          (service.plans as any)[rawPlan] ||
+          (service.plans as any)[rawPlan.toLowerCase()] ||
+          (service.plans as any)[rawPlan.toUpperCase()];
+
+        if (!planObj || !Number.isFinite(Number(planObj.price)) || Number(planObj.price) <= 0) {
+          throw new BadRequestException(`Price is not configured for the selected ${rawPlan} plan`);
+        }
+        bookingPrice = Number(planObj.price);
+        selectedPlan = rawPlan.toUpperCase() === 'STANDARD' ? SERVICE_PLAN.STANDARD : SERVICE_PLAN.BASIC;
+
+        // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+        /*
+        const samagriIncluded = typeof dto.samagriIncluded === 'boolean'
+          ? dto.samagriIncluded
+          : false;
+        if (samagriIncluded) {
+          const priceWithSamagri =
+            service.priceWithSamagri != null
+              ? Number(service.priceWithSamagri)
+              : NaN;
+          if (!Number.isFinite(priceWithSamagri) || priceWithSamagri <= 0) {
+            throw new BadRequestException(
+              'Samagri-inclusive pricing is not configured for this service',
+            );
+          }
+          bookingPrice = priceWithSamagri;
+        } else {
+          const priceWithoutSamagri =
+            service.priceWithoutSamagri != null
+              ? Number(service.priceWithoutSamagri)
+              : NaN;
+          if (!Number.isFinite(priceWithoutSamagri) || priceWithoutSamagri <= 0) {
+            throw new BadRequestException(
+              'Pricing without samagri is not configured for this service',
+            );
+          }
+          bookingPrice = priceWithoutSamagri;
+        }
+        */
+
+        // TODO: Legacy minPrice/maxPrice pricing logic.
+        // Retained for backward compatibility/reference with historical services.
+        const minPrice = service.minPrice != null ? Number(service.minPrice) : null;
+        const maxPrice = service.maxPrice != null ? Number(service.maxPrice) : null;
+
         const commissionPercentage = Number(service.commissionPercentage);
-
-        if (!Number.isFinite(minPrice) || minPrice <= 0) {
-          throw new BadRequestException(
-            'A valid minimum price is not configured for this service',
-          );
-        }
-
-        if (!Number.isFinite(maxPrice) || maxPrice < minPrice) {
-          throw new BadRequestException(
-            'A valid maximum price is not configured for this service',
-          );
-        }
 
         if (
           !Number.isFinite(commissionPercentage) ||
@@ -388,11 +443,6 @@ export class BookingService {
           );
         }
 
-        /*
-         * Pricing logic (platformCommission, purohitPayoutAmount, finalAmount)
-         * has been deferred to when a Purohit accepts the booking or is assigned by an admin.
-         */
-
         let appliedCoupon: Coupon | null = null;
         let discountAmount = 0;
 
@@ -402,12 +452,40 @@ export class BookingService {
             customer.id,
             service.id,
             couponCode,
-            minPrice, // Use minPrice for initial validation
+            bookingPrice, // Use resolved fixed service price
           );
 
           appliedCoupon = couponResult.coupon;
           discountAmount = couponResult.discountAmount;
         }
+
+        // Purohit payout and commission are calculated using base plan (basic)
+        const purohitBasePrice =
+          service.plans?.basic?.price != null && Number(service.plans.basic.price) > 0
+            ? Number(service.plans.basic.price)
+            : bookingPrice;
+
+        const platformCommission = Number(
+          (purohitBasePrice * (commissionPercentage / 100)).toFixed(2),
+        );
+        const purohitPayoutAmount = Number(
+          (purohitBasePrice - platformCommission).toFixed(2),
+        );
+        const finalAmount = Number(
+          (bookingPrice - discountAmount + donationAmount).toFixed(2),
+        );
+
+        // Effective Token Percentage: defaults to 30 if null or not set on service
+        const effectiveTokenPercentage =
+          service.tokenPercentage != null && Number(service.tokenPercentage) > 0
+            ? Number(service.tokenPercentage)
+            : 30;
+
+        const tokenAmount = Number(
+          ((finalAmount * effectiveTokenPercentage) / 100).toFixed(2),
+        );
+        const paidAmount = 0.0;
+        const remainingAmount = finalAmount;
 
         const bookingNumber =
           await this.generateUniqueBookingNumber(bookingRepository);
@@ -424,12 +502,20 @@ export class BookingService {
           specialInstructions: dto.specialInstructions?.trim() || undefined,
           customFields: dto.customFields ?? undefined,
           commissionPercentage,
-          platformCommission: null as any,
-          purohitPayoutAmount: null as any,
+          plan: selectedPlan,
+          // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+          // samagriIncluded: dto.samagriIncluded ?? false,
+          servicePrice: bookingPrice,
+          platformCommission,
+          purohitPayoutAmount,
           couponCode: appliedCoupon?.code ?? undefined,
           discountAmount,
           donationAmount,
-          finalAmount: null as any,
+          finalAmount,
+          tokenPercentage: effectiveTokenPercentage,
+          tokenAmount,
+          paidAmount,
+          remainingAmount,
           status: BOOKING_STATUS.PENDING,
           paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
           assignmentType: ASSIGNMENT_TYPE.AUTO,
@@ -577,11 +663,61 @@ export class BookingService {
         }
       }
 
-      return {
+      const bookingData = {
         ...transactionResult.savedBooking,
-        minPrice: Number(transactionResult.service.minPrice),
-        maxPrice: Number(transactionResult.service.maxPrice),
-        priceRange: `${Number(transactionResult.service.minPrice)} - ${Number(transactionResult.service.maxPrice)}`,
+        plan: transactionResult.savedBooking.plan ?? null,
+        servicePrice: transactionResult.savedBooking.servicePrice ? Number(transactionResult.savedBooking.servicePrice) : null,
+        discountAmount: Number(transactionResult.savedBooking.discountAmount ?? 0),
+        donationAmount: Number(transactionResult.savedBooking.donationAmount ?? 0),
+        finalAmount: Number(transactionResult.savedBooking.finalAmount ?? 0),
+        tokenPercentage: transactionResult.savedBooking.tokenPercentage != null ? Number(transactionResult.savedBooking.tokenPercentage) : null,
+        tokenAmount: transactionResult.savedBooking.tokenAmount != null ? Number(transactionResult.savedBooking.tokenAmount) : null,
+        paidAmount: Number(transactionResult.savedBooking.paidAmount ?? 0),
+        remainingAmount: transactionResult.savedBooking.remainingAmount != null ? Number(transactionResult.savedBooking.remainingAmount) : null,
+        paymentStatus: transactionResult.savedBooking.paymentStatus,
+        plans: transactionResult.service.plans ?? null,
+        // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+        // samagriIncluded: transactionResult.savedBooking.samagriIncluded,
+        // priceWithoutSamagri: transactionResult.service.priceWithoutSamagri ? Number(transactionResult.service.priceWithoutSamagri) : null,
+        // priceWithSamagri: transactionResult.service.priceWithSamagri ? Number(transactionResult.service.priceWithSamagri) : null,
+        minPrice: transactionResult.service.minPrice ? Number(transactionResult.service.minPrice) : null,
+        maxPrice: transactionResult.service.maxPrice ? Number(transactionResult.service.maxPrice) : null,
+        priceRange: transactionResult.service.minPrice && transactionResult.service.maxPrice
+          ? `${Number(transactionResult.service.minPrice)} - ${Number(transactionResult.service.maxPrice)}`
+          : null,
+      };
+
+      let paymentInfo: any = null;
+      if (this.paymentService) {
+        try {
+          const paymentOption = (dto.paymentOption as any) === 'FULL' ? 'FULL' : 'TOKEN';
+          const paymentLinkRes = await this.paymentService.createBookingPaymentLink(user, {
+            bookingId: transactionResult.savedBooking.id,
+            paymentOption,
+          });
+          paymentInfo = {
+            paymentId: paymentLinkRes.paymentId,
+            payableAmount: paymentLinkRes.amount,
+            amount: paymentLinkRes.amount,
+            amountInPaise: paymentLinkRes.amountInPaise,
+            currency: paymentLinkRes.currency,
+            paymentUrl: paymentLinkRes.paymentUrl,
+            razorpayPaymentLinkId: paymentLinkRes.razorpayPaymentLinkId,
+            razorpayOrderId: paymentLinkRes.razorpayOrderId,
+            status: paymentLinkRes.status,
+          };
+        } catch (err: any) {
+          this.logger.error(
+            `Failed to create payment link for booking ${transactionResult.savedBooking.id}: ${err?.message}`,
+          );
+          throw err;
+        }
+      }
+
+      return {
+        ...bookingData,
+        booking: bookingData,
+        payment: paymentInfo,
       } as any;
     } catch (error) {
       if (
@@ -972,7 +1108,26 @@ export class BookingService {
 
         booking.donationAmount = donationAmount;
 
-        if (booking.purohitPayoutAmount != null && booking.platformCommission != null) {
+        if (booking.servicePrice != null) {
+          booking.finalAmount = Number(
+            (
+              Number(booking.servicePrice) -
+              Number(booking.discountAmount ?? 0) +
+              donationAmount
+            ).toFixed(2),
+          );
+          const effectiveTokenPercentage =
+            booking.tokenPercentage != null && Number(booking.tokenPercentage) > 0
+              ? Number(booking.tokenPercentage)
+              : 30;
+          booking.tokenAmount = Number(
+            ((booking.finalAmount * effectiveTokenPercentage) / 100).toFixed(2),
+          );
+          booking.remainingAmount = Number(
+            (booking.finalAmount - Number(booking.paidAmount ?? 0)).toFixed(2),
+          );
+        } else if (booking.purohitPayoutAmount != null && booking.platformCommission != null) {
+          // Legacy fallback for historical bookings lacking servicePrice
           booking.finalAmount = Number(
             (
               Number(booking.purohitPayoutAmount) +
@@ -1832,17 +1987,6 @@ export class BookingService {
             );
           }
 
-          const exactPrice =
-            booking.bookingMode === BOOKING_MODE.ONLINE
-              ? Number(matchingPurohitService.onlinePrice)
-              : Number(matchingPurohitService.offlinePrice);
-
-          if (!exactPrice || exactPrice <= 0) {
-            throw new BadRequestException(
-              'Exact price is not configured for this mode',
-            );
-          }
-
           const isOverlapping = await this.assignmentService.hasOverlappingBooking(
             manager,
             purohitProfile.id,
@@ -1856,30 +2000,44 @@ export class BookingService {
             );
           }
 
+          if (booking.servicePrice != null) {
+            // Fixed pricing model: booking price and financial breakdown are snapshotted at booking creation.
+            // Do not recalculate or override with Purohit service pricing.
+            booking.purohitId = purohitProfile.id;
+            booking.status = BOOKING_STATUS.ACCEPTED;
+            booking.filteredPurohitIds = [];
+          } else {
+            // TODO: Legacy minPrice/maxPrice / Purohit custom pricing logic.
+            // Retained for backward compatibility with historical bookings that lack servicePrice.
+            const exactPrice =
+              booking.bookingMode === BOOKING_MODE.ONLINE
+                ? Number(matchingPurohitService.onlinePrice)
+                : Number(matchingPurohitService.offlinePrice);
 
-          booking.purohitPayoutAmount = exactPrice;
-          booking.platformCommission = Number(
-            (exactPrice * (Number(booking.commissionPercentage) / 100)).toFixed(
-              2,
-            ),
-          );
-          booking.finalAmount = Number(
-            (
-              exactPrice +
-              booking.platformCommission -
-              Number(booking.discountAmount ?? 0) +
-              Number(booking.donationAmount ?? 0)
-            ).toFixed(2),
-          );
-          booking.purohitId = purohitProfile.id;
+            if (!exactPrice || exactPrice <= 0) {
+              throw new BadRequestException(
+                'Exact price is not configured for this mode',
+              );
+            }
 
-          booking.status = BOOKING_STATUS.ACCEPTED;
-
-          /*
-           * Booking should disappear from the
-           * available list of all Purohits.
-           */
-          booking.filteredPurohitIds = [];
+            booking.purohitPayoutAmount = exactPrice;
+            booking.platformCommission = Number(
+              (exactPrice * (Number(booking.commissionPercentage) / 100)).toFixed(
+                2,
+              ),
+            );
+            booking.finalAmount = Number(
+              (
+                exactPrice +
+                booking.platformCommission -
+                Number(booking.discountAmount ?? 0) +
+                Number(booking.donationAmount ?? 0)
+              ).toFixed(2),
+            );
+            booking.purohitId = purohitProfile.id;
+            booking.status = BOOKING_STATUS.ACCEPTED;
+            booking.filteredPurohitIds = [];
+          }
 
           const savedBooking = await bookingRepository.save(booking);
 
@@ -2197,22 +2355,33 @@ export class BookingService {
           "Customer location is outside the selected Purohit's service area radius",
         );
       }
-      booking.purohitPayoutAmount = exactPrice;
-      booking.platformCommission = Number(
-        (exactPrice * (Number(booking.commissionPercentage) / 100)).toFixed(2),
-      );
-      booking.finalAmount = Number(
-        (
-          exactPrice +
-          booking.platformCommission -
-          Number(booking.discountAmount ?? 0) +
-          Number(booking.donationAmount ?? 0)
-        ).toFixed(2),
-      );
-      booking.purohitId = purohit.id;
-      booking.status = BOOKING_STATUS.ACCEPTED;
-      booking.assignmentType = ASSIGNMENT_TYPE.MANUAL;
-      booking.filteredPurohitIds = [];
+      if (booking.servicePrice != null) {
+        // Fixed pricing model: booking price and financial breakdown are snapshotted at booking creation.
+        // Do not recalculate or override with Purohit service pricing.
+        booking.purohitId = purohit.id;
+        booking.status = BOOKING_STATUS.ACCEPTED;
+        booking.assignmentType = ASSIGNMENT_TYPE.MANUAL;
+        booking.filteredPurohitIds = [];
+      } else {
+        // TODO: Legacy minPrice/maxPrice / Purohit custom pricing logic.
+        // Retained for backward compatibility with historical bookings that lack servicePrice.
+        booking.purohitPayoutAmount = exactPrice;
+        booking.platformCommission = Number(
+          (exactPrice * (Number(booking.commissionPercentage) / 100)).toFixed(2),
+        );
+        booking.finalAmount = Number(
+          (
+            exactPrice +
+            booking.platformCommission -
+            Number(booking.discountAmount ?? 0) +
+            Number(booking.donationAmount ?? 0)
+          ).toFixed(2),
+        );
+        booking.purohitId = purohit.id;
+        booking.status = BOOKING_STATUS.ACCEPTED;
+        booking.assignmentType = ASSIGNMENT_TYPE.MANUAL;
+        booking.filteredPurohitIds = [];
+      }
 
       const savedBooking = await bookingRepository.save(booking);
 
@@ -3123,6 +3292,12 @@ export class BookingService {
         },
 
         pricing: {
+          plan: booking.plan ?? null,
+          servicePrice: booking.servicePrice ? Number(booking.servicePrice) : null,
+          // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+          // samagriIncluded: booking.samagriIncluded ?? false,
+          // priceWithoutSamagri: booking.service?.priceWithoutSamagri ? Number(booking.service.priceWithoutSamagri) : null,
+          // priceWithSamagri: booking.service?.priceWithSamagri ? Number(booking.service.priceWithSamagri) : null,
           minPrice: booking.service?.minPrice ? Number(booking.service.minPrice) : null,
           maxPrice: booking.service?.maxPrice ? Number(booking.service.maxPrice) : null,
           priceRange: booking.service?.minPrice && booking.service?.maxPrice
@@ -3500,7 +3675,9 @@ export class BookingService {
         iconUrl: serviceIconUrl,
         iconDownloadUrl: serviceIconDownloadUrl,
         durationMinutes: booking.service?.durationMinutes ?? null,
+        plans: booking.service?.plans ?? null,
       },
+      plan: booking.plan ?? null,
 
       customer: {
         id: booking.customer?.id ?? booking.customerId,
@@ -3554,6 +3731,12 @@ export class BookingService {
       },
 
       pricing: {
+        plan: booking.plan ?? null,
+        servicePrice: booking.servicePrice ? Number(booking.servicePrice) : null,
+        // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+        // samagriIncluded: booking.samagriIncluded ?? false,
+        // priceWithoutSamagri: booking.service?.priceWithoutSamagri ? Number(booking.service.priceWithoutSamagri) : null,
+        // priceWithSamagri: booking.service?.priceWithSamagri ? Number(booking.service.priceWithSamagri) : null,
         minPrice: booking.service?.minPrice ? Number(booking.service.minPrice) : null,
         maxPrice: booking.service?.maxPrice ? Number(booking.service.maxPrice) : null,
         priceRange: booking.service?.minPrice && booking.service?.maxPrice
@@ -3564,8 +3747,20 @@ export class BookingService {
         discountAmount: Number(booking.discountAmount ?? 0),
         donationAmount: Number(booking.donationAmount ?? 0),
         finalAmount: Number(booking.finalAmount),
+        tokenPercentage: booking.tokenPercentage != null ? Number(booking.tokenPercentage) : null,
+        tokenAmount: booking.tokenAmount != null ? Number(booking.tokenAmount) : null,
+        paidAmount: Number(booking.paidAmount ?? 0),
+        remainingAmount: booking.remainingAmount != null
+          ? Number(booking.remainingAmount)
+          : Math.max(0, Number((Number(booking.finalAmount ?? 0) - Number(booking.paidAmount ?? 0)).toFixed(2))),
         couponCode: booking.couponCode ?? null,
       },
+      tokenPercentage: booking.tokenPercentage != null ? Number(booking.tokenPercentage) : null,
+      tokenAmount: booking.tokenAmount != null ? Number(booking.tokenAmount) : null,
+      paidAmount: Number(booking.paidAmount ?? 0),
+      remainingAmount: booking.remainingAmount != null
+        ? Number(booking.remainingAmount)
+        : Math.max(0, Number((Number(booking.finalAmount ?? 0) - Number(booking.paidAmount ?? 0)).toFixed(2))),
 
       specialInstructions: booking.specialInstructions ?? null,
       customFields: booking.customFields ?? null,
@@ -3678,6 +3873,9 @@ export class BookingService {
           ? Number(dto.donationAmount)
           : Number(originalBooking.donationAmount ?? 0),
       couponCode: dto.couponCode?.trim() || undefined,
+      plan: dto.plan !== undefined ? dto.plan : ((originalBooking.plan as SERVICE_PLAN) ?? SERVICE_PLAN.BASIC),
+      // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+      // samagriIncluded: dto.samagriIncluded !== undefined ? dto.samagriIncluded : (originalBooking as any).samagriIncluded,
     };
 
     const repeatedBooking = await this.createBooking(user, createBookingDto);
@@ -3840,19 +4038,95 @@ export class BookingService {
           throw new BadRequestException('Selected Purohit does not provide the service required for this booking');
         }
 
-        const exactPrice = dto.bookingMode === BOOKING_MODE.ONLINE
-          ? Number(matchingPurohitService.onlinePrice)
-          : Number(matchingPurohitService.offlinePrice);
-
-        if (!exactPrice || exactPrice <= 0) {
-          throw new BadRequestException('Exact price is not configured for this mode by the selected Purohit');
-        }
-
+        let bookingPrice: number;
+        let purohitPayoutAmount: number;
+        let platformCommission: number;
+        let selectedPlan: 'basic' | 'standard' | null = null;
         const commissionPercentage = Number(service.commissionPercentage);
-        const purohitPayoutAmount = exactPrice;
-        const platformCommission = Number(
-          (exactPrice * (commissionPercentage / 100)).toFixed(2),
+
+        if (!service.plans) {
+          throw new BadRequestException('Service plans are not configured for this service');
+        }
+        const planKey = (dto as any).plan || 'basic';
+        if (planKey !== 'basic' && planKey !== 'standard') {
+          throw new BadRequestException('A valid plan ("basic" or "standard") must be selected');
+        }
+        const planObj = service.plans[planKey];
+        if (!planObj || !Number.isFinite(Number(planObj.price)) || Number(planObj.price) <= 0) {
+          throw new BadRequestException(`Price is not configured for the selected ${planKey} plan`);
+        }
+        bookingPrice = Number(planObj.price);
+        selectedPlan = planKey;
+        const purohitBasePrice =
+          service.plans.basic?.price != null && Number(service.plans.basic.price) > 0
+            ? Number(service.plans.basic.price)
+            : bookingPrice;
+        platformCommission = Number(
+          (purohitBasePrice * (commissionPercentage / 100)).toFixed(2),
         );
+        purohitPayoutAmount = Number(
+          (purohitBasePrice - platformCommission).toFixed(2),
+        );
+
+        // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+        /*
+        else if (service.priceWithSamagri != null || service.priceWithoutSamagri != null) {
+          const samagriIncluded = Boolean(dto.samagriIncluded);
+          if (samagriIncluded) {
+            const priceWithSamagri =
+              service.priceWithSamagri != null
+                ? Number(service.priceWithSamagri)
+                : NaN;
+            if (!Number.isFinite(priceWithSamagri) || priceWithSamagri <= 0) {
+              throw new BadRequestException(
+                'Samagri-inclusive pricing is not configured for this service',
+              );
+            }
+            bookingPrice = priceWithSamagri;
+          } else {
+            const priceWithoutSamagri =
+              service.priceWithoutSamagri != null
+                ? Number(service.priceWithoutSamagri)
+                : NaN;
+            if (!Number.isFinite(priceWithoutSamagri) || priceWithoutSamagri <= 0) {
+              throw new BadRequestException(
+                'Pricing without samagri is not configured for this service',
+              );
+            }
+            bookingPrice = priceWithoutSamagri;
+          }
+
+          const purohitBasePrice =
+            service.priceWithoutSamagri != null && Number(service.priceWithoutSamagri) > 0
+              ? Number(service.priceWithoutSamagri)
+              : bookingPrice;
+
+          platformCommission = Number(
+            (purohitBasePrice * (commissionPercentage / 100)).toFixed(2),
+          );
+          purohitPayoutAmount = Number(
+            (purohitBasePrice - platformCommission).toFixed(2),
+          );
+        } else {
+          const exactPrice =
+            dto.bookingMode === BOOKING_MODE.ONLINE
+              ? Number(matchingPurohitService.onlinePrice)
+              : Number(matchingPurohitService.offlinePrice);
+
+          if (!exactPrice || exactPrice <= 0) {
+            throw new BadRequestException(
+              'Exact price is not configured for this mode by the selected Purohit',
+            );
+          }
+
+          bookingPrice = exactPrice;
+          purohitPayoutAmount = exactPrice;
+          platformCommission = Number(
+            (exactPrice * (commissionPercentage / 100)).toFixed(2),
+          );
+        }
+        */
+
         const donationAmount = Number(dto.donationAmount ?? 0);
 
         let appliedCoupon: Coupon | null = null;
@@ -3864,15 +4138,27 @@ export class BookingService {
             customer.id,
             service.id,
             dto.couponCode.trim().toUpperCase(),
-            exactPrice, // Or minPrice, but since exactPrice is known, we use it
+            bookingPrice, // Use resolved booking price
           );
           appliedCoupon = couponResult.coupon;
           discountAmount = couponResult.discountAmount;
         }
 
         const finalAmount = Number(
-          (purohitPayoutAmount + platformCommission - discountAmount + donationAmount).toFixed(2),
+          (bookingPrice - discountAmount + donationAmount).toFixed(2),
         );
+
+        // Effective Token Percentage: defaults to 30 if null or not set on service
+        const effectiveTokenPercentage =
+          service.tokenPercentage != null && Number(service.tokenPercentage) > 0
+            ? Number(service.tokenPercentage)
+            : 30;
+
+        const tokenAmount = Number(
+          ((finalAmount * effectiveTokenPercentage) / 100).toFixed(2),
+        );
+        const paidAmount = 0.0;
+        const remainingAmount = finalAmount;
 
         const bookingNumber =
           await this.generateUniqueBookingNumber(bookingRepository);
@@ -3889,12 +4175,20 @@ export class BookingService {
           specialInstructions: dto.specialInstructions?.trim() || undefined,
           customFields: dto.customFields ?? undefined,
           commissionPercentage,
+          plan: selectedPlan ?? undefined,
+          // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+          // samagriIncluded: (dto as any).samagriIncluded ?? false,
+          servicePrice: bookingPrice,
           platformCommission,
           purohitPayoutAmount,
           couponCode: appliedCoupon?.code ?? undefined,
           discountAmount,
           donationAmount,
           finalAmount,
+          tokenPercentage: effectiveTokenPercentage,
+          tokenAmount,
+          paidAmount,
+          remainingAmount,
           status: BOOKING_STATUS.ACCEPTED,
           paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
           assignmentType: ASSIGNMENT_TYPE.MANUAL,
@@ -3941,6 +4235,13 @@ export class BookingService {
           scheduledAtIst: this.toIstString(savedBooking.scheduledAt),
           createdAtIst: this.toIstString(savedBooking.createdAt),
           updatedAtIst: this.toIstString(savedBooking.updatedAt),
+          plan: savedBooking.plan ?? null,
+          servicePrice: savedBooking.servicePrice ? Number(savedBooking.servicePrice) : null,
+          plans: service.plans ?? null,
+          // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+          // samagriIncluded: savedBooking.samagriIncluded,
+          // priceWithoutSamagri: service.priceWithoutSamagri ? Number(service.priceWithoutSamagri) : null,
+          // priceWithSamagri: service.priceWithSamagri ? Number(service.priceWithSamagri) : null,
           minPrice: Number(service.minPrice),
           maxPrice: Number(service.maxPrice),
           priceRange: `${Number(service.minPrice)} - ${Number(service.maxPrice)}`,

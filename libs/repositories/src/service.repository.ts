@@ -255,6 +255,11 @@ export class ServiceRepository extends BaseRepository<Service> {
         iconUrl: true,
         minPrice: true,
         maxPrice: true,
+        // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+        // priceWithoutSamagri: true,
+        // priceWithSamagri: true,
+        plans: true,
+        tokenPercentage: true,
         commissionPercentage: true,
         durationMinutes: true,
         requiresVenue: true,

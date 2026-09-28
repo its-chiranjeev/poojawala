@@ -38,7 +38,7 @@ export class UserRepository extends BaseRepository<User> {
   }
 
   async updateUser(id: string | number, payload: Partial<User>) {
-    await this.repo.update(id, payload);
+    await this.repo.update(id, payload as any);
 
     return this.repo.findOne({
       where: { id } as any,
@@ -260,6 +260,74 @@ export class UserRepository extends BaseRepository<User> {
       qb.leftJoinAndSelect('user.addresses', 'addresses');
     }
 
-    return qb.getOne();
+    const user = await qb.getOne();
+    if (user && role === USER_ROLE.PUROHIT) {
+      this.enrichPurohitServicesPayout(user);
+    }
+    return user;
+  }
+
+  public enrichPurohitServicesPayout(user: any): void {
+    if (!user) return;
+    const purohitServices = user.purohitServices;
+    if (Array.isArray(purohitServices)) {
+      for (const ps of purohitServices) {
+        const service = ps.service;
+        if (service) {
+          let plans = service.plans;
+          if (typeof plans === 'string') {
+            try {
+              plans = JSON.parse(plans);
+            } catch {}
+          }
+
+          let basePrice = 0;
+          if (plans?.basic?.price != null && Number(plans.basic.price) > 0) {
+            basePrice = Number(plans.basic.price);
+          } else if (
+            service.priceWithoutSamagri != null &&
+            Number(service.priceWithoutSamagri) > 0
+          ) {
+            basePrice = Number(service.priceWithoutSamagri);
+          }
+
+          if (basePrice > 0) {
+            const commissionPercentage = Number(
+              service.commissionPercentage != null
+                ? service.commissionPercentage
+                : 10,
+            );
+            const platformCommission = Number(
+              ((basePrice * commissionPercentage) / 100).toFixed(2),
+            );
+            const payout = Number((basePrice - platformCommission).toFixed(2));
+            ps.purohitPayoutAmount = payout;
+            service.purohitPayoutAmount = payout;
+          } else {
+            ps.purohitPayoutAmount = null;
+            service.purohitPayoutAmount = null;
+          }
+
+          const effectiveToken =
+            service.tokenPercentage != null && Number(service.tokenPercentage) > 0
+              ? Number(service.tokenPercentage)
+              : 30;
+
+          if (plans && typeof plans === 'object') {
+            for (const [key, plan] of Object.entries(plans)) {
+              if (plan && (plan as any).price != null && Number((plan as any).price) > 0) {
+                const planPrice = Number((plan as any).price);
+                const tAmt = Number(((planPrice * effectiveToken) / 100).toFixed(2));
+                (plan as any).tokenAmount = tAmt;
+              }
+            }
+            service.plans = plans;
+          }
+        }
+      }
+    }
+    if (user.profile && !user.profile.purohitServices && user.purohitServices) {
+      user.profile.purohitServices = user.purohitServices;
+    }
   }
 }

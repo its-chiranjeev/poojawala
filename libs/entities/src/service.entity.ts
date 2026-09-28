@@ -26,6 +26,24 @@ export interface ServiceBenefit {
   description?: string;
 }
 
+export type JsonPrimitive = string | number | boolean | null;
+export type ServicePlanFeatureValue =
+  | JsonPrimitive
+  | Record<string, JsonPrimitive>
+  | JsonPrimitive[];
+
+export interface ServicePlanDetails {
+  price: number;
+  tokenAmount?: number;
+  [featureKey: string]: ServicePlanFeatureValue | undefined;
+}
+
+export interface ServicePlans {
+  BASIC?: ServicePlanDetails;
+  STANDARD?: ServicePlanDetails;
+  [key: string]: ServicePlanDetails | undefined;
+}
+
 @Entity('services')
 export class Service {
   @PrimaryGeneratedColumn()
@@ -65,11 +83,34 @@ export class Service {
   @Column({ type: 'varchar', length: 255, nullable: true })
   iconUrl?: string;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  // TODO: Legacy pricing fields.
+  // Retained for backward compatibility.
+  // New pricing logic must use priceWithoutSamagri / priceWithSamagri.
+  // Remove only after legacy data and consumers have been fully migrated.
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   minPrice!: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   maxPrice!: number;
+
+  // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+  // @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  // priceWithoutSamagri?: number | null;
+
+  // // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+  // @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  // priceWithSamagri?: number | null;
+
+  /**
+   * Configurable service plans: exactly 'basic' and 'standard'.
+   * Admin can configure independent key-value feature objects for each.
+   */
+  @Column({ type: 'jsonb', nullable: true })
+  plans?: ServicePlans | null;
+
+  // Service-level token configuration for booking payments (defaults to 30%).
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: 30 })
+  tokenPercentage!: number;
 
   @Column({ type: 'decimal', precision: 5, scale: 2, default: 10 })
   commissionPercentage!: number; // e.g. 15.00 means 15% — admin sets per service category

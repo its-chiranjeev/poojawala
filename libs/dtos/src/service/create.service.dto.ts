@@ -14,8 +14,11 @@ import {
   ArrayNotEmpty,
   IsArray,
   ValidateNested,
+  IsObject,
+  IsDefined,
 } from 'class-validator';
 import { Transform, Type, plainToInstance } from 'class-transformer';
+import type { ServicePlans } from '@poojawala/entities';
 
 export function normalizeKey(str?: string): string {
   return str ? str.trim().toLowerCase() : '';
@@ -207,21 +210,55 @@ export class CreateServiceDto {
   @IsOptional()
   icon?: any;
 
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  minPrice!: number;
+  /**
+   * Configurable service plans: exactly 'basic' and 'standard'.
+   */
+  @IsDefined({ message: 'plans is required' })
+  @IsObject({ message: 'plans must be an object' })
+  plans!: ServicePlans;
 
+  // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+  /*
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 })
+  @Min(1)
+  priceWithoutSamagri?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 })
+  @Min(1)
+  priceWithSamagri?: number;
+  */
+
+  // TODO: Legacy pricing fields.
+  // Retained for backward compatibility.
+  // New pricing logic must use priceWithoutSamagri / priceWithSamagri.
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  maxPrice!: number;
+  minPrice?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  maxPrice?: number;
 
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   @Max(100)
   commissionPercentage!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 })
+  @Min(1)
+  @Max(100)
+  tokenPercentage?: number;
 
   @Type(() => Number)
   @IsNumber()
@@ -268,21 +305,22 @@ export class PurohitServiceItemDto {
   @Min(1)
   serviceId!: number;
 
-  @IsBoolean()
-  isOnline!: boolean;
+  // TODO: Deprecated with fixed service pricing. Purohit no longer decides price; payout is calculated from service.priceWithoutSamagri.
+  // @IsBoolean()
+  // isOnline!: boolean;
 
-  @IsBoolean()
-  isOffline!: boolean;
+  // @IsBoolean()
+  // isOffline!: boolean;
 
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  onlinePrice?: number;
+  // @IsOptional()
+  // @IsNumber({ maxDecimalPlaces: 2 })
+  // @Min(0)
+  // onlinePrice?: number;
 
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  offlinePrice?: number;
+  // @IsOptional()
+  // @IsNumber({ maxDecimalPlaces: 2 })
+  // @Min(0)
+  // offlinePrice?: number;
 
   @IsOptional()
   @IsInt()

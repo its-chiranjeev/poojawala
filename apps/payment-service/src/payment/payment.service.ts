@@ -631,7 +631,7 @@ export class PaymentService {
 
     this.validatePaymentCreationAccess(user, booking);
 
-    const amount = this.getBookingAmount(booking);
+    const amount = this.getBookingAmount(booking, dto.paymentOption);
 
     // Add duplicate active payment check here
     const existingPayment =
@@ -642,9 +642,11 @@ export class PaymentService {
         throw new ConflictException('This booking is already paid');
       }
 
-      const isUsable = false;
-
-      if (existingPayment.razorpayPaymentLinkId) {
+      // Check if existing payment matches desired amount and is usable
+      if (
+        Number(existingPayment.amount) === Number(amount) &&
+        existingPayment.razorpayPaymentLinkId
+      ) {
         try {
           const paymentLink = await this.razorpay.paymentLink.fetch(
             existingPayment.razorpayPaymentLinkId,
@@ -676,7 +678,8 @@ export class PaymentService {
           }
         } catch (error) {
           this.logger.warn(
-            `Failed to verify payment link for payment ${existingPayment.id}: ${error instanceof Error ? error.message : 'Unknown error'
+            `Failed to verify payment link for payment ${existingPayment.id}: ${
+              error instanceof Error ? error.message : 'Unknown error'
             }`,
           );
           existingPayment.status = PAYMENT_STATUS.FAILED;
@@ -687,10 +690,19 @@ export class PaymentService {
       } else {
         existingPayment.status = PAYMENT_STATUS.FAILED;
         existingPayment.failureReason =
-          'Previous active payment was incomplete';
+          Number(existingPayment.amount) !== Number(amount)
+            ? 'Superseded by new payment request with different amount'
+            : 'Previous active payment was incomplete';
         await this.paymentRepository.savePayment(existingPayment);
       }
     }
+
+    const remark =
+      dto.paymentOption === 'TOKEN'
+        ? 'BOOKING_TOKEN_PAYMENT'
+        : Number(booking.paidAmount ?? 0) > 0
+        ? 'BOOKING_SETTLEMENT'
+        : 'BOOKING_FULL_PAYMENT';
 
     // Create the new payment only after the check passes
     const savedPayment = await this.dataSource.transaction(async (manager) => {
@@ -713,6 +725,7 @@ export class PaymentService {
         currency: 'INR',
         status: PAYMENT_STATUS.PENDING,
         customerPaymentMethod,
+        remark,
       });
 
       const createdPayment = await paymentRepository.save(payment);
@@ -787,14 +800,96 @@ export class PaymentService {
     }
   }
 
-  private getBookingAmount(booking: Booking): number {
-    const amount = Number(booking.finalAmount);
+  private getBookingAmount(
+    booking: Booking,
+    paymentOption?: 'TOKEN' | 'FULL',
+  ): number {
+    const finalAmount = Number(booking.finalAmount);
 
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (!Number.isFinite(finalAmount) || finalAmount <= 0) {
       throw new BadRequestException('Invalid booking amount');
     }
 
-    return amount;
+    const paidAmount = Number(booking.paidAmount ?? 0);
+    const effectiveTokenPercentage =
+      booking.tokenPercentage != null && Number(booking.tokenPercentage) > 0
+        ? Number(booking.tokenPercentage)
+        : 30;
+
+    const tokenAmount =
+      booking.tokenAmount != null
+        ? Number(booking.tokenAmount)
+        : Number(((finalAmount * effectiveTokenPercentage) / 100).toFixed(2));
+
+    const remainingAmount = Number((finalAmount - paidAmount).toFixed(2));
+
+    if (
+      remainingAmount <= 0 ||
+      booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID
+    ) {
+      throw new ConflictException('This booking is already fully paid');
+    }
+
+    if (paymentOption === 'TOKEN') {
+      if (paidAmount >= tokenAmount) {
+        throw new ConflictException(
+          'Token payment has already been completed for this booking. Please pay the remaining balance.',
+        );
+      }
+      const tokenDue = Number((tokenAmount - paidAmount).toFixed(2));
+      if (tokenDue <= 0) {
+        throw new ConflictException('Token amount already fulfilled');
+      }
+      return tokenDue;
+    }
+
+    // Default or FULL or SETTLEMENT: charge the remaining balance
+    return remainingAmount;
+  }
+
+  async settleBookingPayment(
+    user: User,
+    bookingId: number,
+  ): Promise<BookingPaymentLinkResponse> {
+    const booking = await this.bookingRepository.findBookingById(bookingId);
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    if (user.role === USER_ROLE.CUSTOMER && booking.customerId !== user.id) {
+      throw new ForbiddenException(
+        'You are not authorized to settle payment for this booking',
+      );
+    }
+
+    if (booking.status === BOOKING_STATUS.COMPLETED) {
+      throw new BadRequestException(
+        'Settlement is not allowed after booking is completed',
+      );
+    }
+
+    if (booking.status === BOOKING_STATUS.CANCELLED) {
+      throw new BadRequestException(
+        'Settlement is not allowed for cancelled bookings',
+      );
+    }
+
+    const finalAmount = Number(booking.finalAmount ?? 0);
+    const paidAmount = Number(booking.paidAmount ?? 0);
+    const remainingAmount = Number((finalAmount - paidAmount).toFixed(2));
+
+    if (
+      remainingAmount <= 0 ||
+      booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID
+    ) {
+      throw new ConflictException('This booking is already fully settled');
+    }
+
+    return this.createBookingPaymentLink(user, {
+      bookingId,
+      description: `Settlement payment for Booking #${booking.bookingNumber}`,
+      paymentOption: 'FULL',
+    });
   }
 
   private getPaymentCustomer(
@@ -853,6 +948,11 @@ export class PaymentService {
       extraNotes?.['isCartCheckout'] === 'true'
     ) {
       callbackUrl = `${cleanBase}/customer/orders`;
+    } else if (
+      payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT ||
+      booking != null
+    ) {
+      callbackUrl = `${cleanBase}/customer/bookings`;
     } else if (cleanBase) {
       callbackUrl = cleanBase;
     }
@@ -1748,6 +1848,8 @@ export class PaymentService {
         customerPaidAmount != null ? customerPaidAmount.toFixed(2) : null,
       razorpayFee: razorpayFee != null ? razorpayFee.toFixed(2) : null,
       razorpayTax: razorpayTax != null ? razorpayTax.toFixed(2) : null,
+      paidAmount: booking.paidAmount != null ? Number(booking.paidAmount).toFixed(2) : null,
+      remainingAmount: booking.remainingAmount != null ? Number(booking.remainingAmount).toFixed(2) : null,
       donationAmount: Number(booking.donationAmount ?? 0).toFixed(2),
       discountAmount: Number(booking.discountAmount ?? 0).toFixed(2),
       date: new Date(payment.paidAt ?? payment.createdAt).toLocaleString(
@@ -3281,15 +3383,66 @@ export class PaymentService {
     await this.dataSource.transaction(async (manager) => {
       await manager.save(Payment, payment);
 
-      if (payment.booking && payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT) {
-        payment.booking.paymentStatus = BOOKING_PAYMENT_STATUS.PAID;
-        payment.booking.bookingPaymentId = payment.id;
+      const bookingId = payment.bookingId ?? payment.booking?.id;
+      if (bookingId && payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT) {
+        const booking = await manager.getRepository(Booking).findOne({
+          where: { id: bookingId },
+          lock: { mode: 'pessimistic_write' },
+        });
 
-        if (!wasBookingCompleted) {
-          payment.booking.status = BOOKING_STATUS.COMPLETED;
+        if (booking) {
+          // Idempotent calculation: sum all successful payments for this booking
+          const successfulPayments = await manager.getRepository(Payment).find({
+            where: {
+              bookingId: booking.id,
+              paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+              status: PAYMENT_STATUS.SUCCESS,
+            },
+          });
+
+          const totalPaid = Number(
+            successfulPayments
+              .reduce((sum, p) => sum + Number(p.amount), 0)
+              .toFixed(2),
+          );
+
+          const finalAmount = Number(booking.finalAmount ?? 0);
+          const effectiveTokenPercentage =
+            booking.tokenPercentage != null && Number(booking.tokenPercentage) > 0
+              ? Number(booking.tokenPercentage)
+              : 30;
+
+          const tokenAmount =
+            booking.tokenAmount != null
+              ? Number(booking.tokenAmount)
+              : Number(
+                  ((finalAmount * effectiveTokenPercentage) / 100).toFixed(2),
+                );
+
+          booking.paidAmount = totalPaid;
+          booking.remainingAmount = Math.max(
+            0,
+            Number((finalAmount - totalPaid).toFixed(2)),
+          );
+          booking.bookingPaymentId = payment.id;
+
+          if (totalPaid >= finalAmount) {
+            booking.paymentStatus = BOOKING_PAYMENT_STATUS.PAID;
+            // TODO: In legacy flow, bookings were marked COMPLETED upon payment.
+            // In token payment flow, if booking was ONGOING, full settlement completes it.
+            if (booking.status === BOOKING_STATUS.ONGOING) {
+              booking.status = BOOKING_STATUS.COMPLETED;
+              booking.completionConfirmedAt = new Date();
+            }
+          } else if (totalPaid >= tokenAmount) {
+            booking.paymentStatus = BOOKING_PAYMENT_STATUS.PARTIAL;
+          } else {
+            booking.paymentStatus = BOOKING_PAYMENT_STATUS.PENDING;
+          }
+
+          await manager.save(Booking, booking);
+          payment.booking = booking;
         }
-
-        await manager.save(Booking, payment.booking);
       }
 
       // Safe, idempotent cart clearing and BookingProduct synchronization
@@ -3523,11 +3676,16 @@ export class PaymentService {
     }
 
     if (payment.booking && payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT) {
-      if (!wasPaymentPaid) {
+        const remaining = Number(payment.booking.remainingAmount ?? 0);
+        const notificationMsg =
+          remaining > 0
+            ? `Your payment for Booking #${payment.booking.bookingNumber} was successful. Paid: ₹${payment.amount}, Remaining: ₹${remaining}.`
+            : `Your payment for Booking #${payment.booking.bookingNumber} was successful. Paid: ₹${payment.amount}, Remaining: ₹0.`;
+
         await this.notificationService.createNotification(
           payment.booking.customerId,
           'Payment Successful',
-          `Your payment for Booking #${payment.booking.bookingNumber} was successful.`,
+          notificationMsg,
           NOTIFICATION_TYPE.PAYMENT,
           payment.id,
           'PAYMENT',
@@ -3555,7 +3713,6 @@ export class PaymentService {
             status: 'PAID',
           },
         );
-      }
 
       if (!wasBookingCompleted) {
         this.bookingGateway.notifyUser(

@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, IsUrl, MaxLength, Min, IsEnum } from 'class-validator';
+import { IsInt, IsOptional, IsString, IsUrl, MaxLength, Min, IsEnum, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CUSTOMER_PAYMENT_METHOD } from '@poojawala/entities';
 
@@ -23,4 +23,8 @@ export class CreatePaymentLinkDto {
   @IsOptional()
   @IsEnum(CUSTOMER_PAYMENT_METHOD)
   customerPaymentMethod?: CUSTOMER_PAYMENT_METHOD;
+
+  @IsOptional()
+  @IsIn(['TOKEN', 'FULL'])
+  paymentOption?: 'TOKEN' | 'FULL';
 }

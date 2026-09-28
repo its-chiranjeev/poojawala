@@ -320,6 +320,50 @@ export class AuthModuleController {
         console.error('Failed to generate pre-signed URL for profile documents:', e);
       }
     }
+
+    const purohitServices = (safeUser as any).purohitServices;
+    if (Array.isArray(purohitServices)) {
+      for (const ps of purohitServices) {
+        const service = ps.service;
+        if (service) {
+          let plans = service.plans;
+          if (typeof plans === 'string') {
+            try {
+              plans = JSON.parse(plans);
+            } catch {}
+          }
+          let basePrice = 0;
+          if (plans?.basic?.price != null && Number(plans.basic.price) > 0) {
+            basePrice = Number(plans.basic.price);
+          } else if (
+            service.priceWithoutSamagri != null &&
+            Number(service.priceWithoutSamagri) > 0
+          ) {
+            basePrice = Number(service.priceWithoutSamagri);
+          }
+
+          if (basePrice > 0) {
+            const commissionPercentage = Number(
+              service.commissionPercentage != null
+                ? service.commissionPercentage
+                : 10,
+            );
+            const platformCommission = Number(
+              ((basePrice * commissionPercentage) / 100).toFixed(2),
+            );
+            const payout = Number((basePrice - platformCommission).toFixed(2));
+            ps.purohitPayoutAmount = payout;
+            service.purohitPayoutAmount = payout;
+          } else {
+            ps.purohitPayoutAmount = null;
+            service.purohitPayoutAmount = null;
+          }
+        }
+      }
+      if ((safeUser as any).profile && !(safeUser as any).profile.purohitServices) {
+        (safeUser as any).profile.purohitServices = purohitServices;
+      }
+    }
     return {
       success: true,
       statusCode: HttpStatus.OK,

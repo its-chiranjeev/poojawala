@@ -66,6 +66,17 @@ export class PaymentController {
     return this.paymentService.createBookingPaymentLink(req.user, dto);
   }
 
+  @Post('bookings/:bookingId/settle')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER)
+  @HttpCode(HttpStatus.OK)
+  async settleBookingPayment(
+    @Req() req: AuthenticatedRequest,
+    @Param('bookingId', ParseIntPipe) bookingId: number,
+  ) {
+    return this.paymentService.settleBookingPayment(req.user, bookingId);
+  }
+
   @Post('webhook/razorpay')
   @HttpCode(HttpStatus.OK)
   async handleRazorpayWebhook(

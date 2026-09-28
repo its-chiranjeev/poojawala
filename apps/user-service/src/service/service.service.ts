@@ -26,7 +26,7 @@ import {
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { QueryFailedError, ILike } from 'typeorm';
-import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE, PUROHIT_VERIFICATION_STATUS } from '@poojawala/entities';
+import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE, PUROHIT_VERIFICATION_STATUS, ServicePlans, ServicePlanDetails } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
 
 // 177 87
@@ -58,6 +58,8 @@ export class ServiceService {
         }
 
         (service as any).iconDownloadurl = iconDownloadurl;
+        (service as any).purohitPayoutAmount = this.computePurohitPayoutAmount(service);
+        this.enrichServicePlansAndToken(service);
         return service;
       }),
     );
@@ -73,6 +75,166 @@ export class ServiceService {
         totalPages: result.totalPages,
       },
     };
+  }
+
+  private validatePlanItem(
+    planKey: 'basic' | 'standard',
+    plan: unknown,
+    isUpdate = false,
+  ): ServicePlanDetails {
+    if (!plan || typeof plan !== 'object' || Array.isArray(plan)) {
+      throw new BadRequestException(`${planKey} plan must be a valid object`);
+    }
+    const record = plan as Record<string, unknown>;
+
+    if (!isUpdate || record['price'] !== undefined) {
+      const rawPrice = record['price'];
+      if (rawPrice === null || rawPrice === undefined || rawPrice === '') {
+        throw new BadRequestException(`${planKey} plan price is required`);
+      }
+      const price = Number(rawPrice);
+      if (!Number.isFinite(price) || Number.isNaN(price) || price <= 0) {
+        throw new BadRequestException(
+          `${planKey} plan price must be a finite positive number greater than 0`,
+        );
+      }
+      const parts = price.toString().split('.');
+      if (parts.length > 1 && parts[1].length > 2) {
+        throw new BadRequestException(
+          `${planKey} plan price must have at most 2 decimal places`,
+        );
+      }
+    }
+
+    for (const [key, value] of Object.entries(record)) {
+      if (
+        typeof value === 'function' ||
+        typeof value === 'symbol' ||
+        typeof value === 'undefined'
+      ) {
+        throw new BadRequestException(
+          `Feature "${key}" in ${planKey} plan contains an unsupported non-JSON value`,
+        );
+      }
+    }
+
+    return record as ServicePlanDetails;
+  }
+
+  private computePurohitPayoutAmount(service: any): number | null {
+    if (!service) return null;
+    let plans = service.plans;
+    if (typeof plans === 'string') {
+      try {
+        plans = JSON.parse(plans);
+      } catch {}
+    }
+
+    let basePrice = 0;
+    if (plans?.basic?.price != null && Number(plans.basic.price) > 0) {
+      basePrice = Number(plans.basic.price);
+    } else if (
+      service.priceWithoutSamagri != null &&
+      Number(service.priceWithoutSamagri) > 0
+    ) {
+      basePrice = Number(service.priceWithoutSamagri);
+    }
+
+    if (basePrice <= 0) return null;
+
+    const commissionPercentage = Number(
+      service.commissionPercentage != null ? service.commissionPercentage : 10,
+    );
+    const platformCommission = Number(
+      ((basePrice * commissionPercentage) / 100).toFixed(2),
+    );
+    return Number((basePrice - platformCommission).toFixed(2));
+  }
+
+  private enrichServicePlansAndToken(service: any) {
+    if (!service) return service;
+
+    const effectiveTokenPercentage =
+      service.tokenPercentage != null && Number(service.tokenPercentage) > 0
+        ? Number(service.tokenPercentage)
+        : 30;
+
+    let plans = service.plans;
+    if (typeof plans === 'string') {
+      try {
+        plans = JSON.parse(plans);
+      } catch {}
+    }
+
+    if (plans && typeof plans === 'object' && !Array.isArray(plans)) {
+      const enrichedPlans: Record<string, any> = { ...plans };
+
+      for (const [key, plan] of Object.entries(plans)) {
+        if (plan && typeof plan === 'object' && !Array.isArray(plan)) {
+          const planRecord = { ...(plan as any) };
+          if (
+            planRecord.price != null &&
+            !isNaN(Number(planRecord.price)) &&
+            Number(planRecord.price) > 0
+          ) {
+            const planPrice = Number(planRecord.price);
+            const tokenAmount = Number(
+              ((planPrice * effectiveTokenPercentage) / 100).toFixed(2),
+            );
+            planRecord.tokenAmount = tokenAmount;
+          }
+          enrichedPlans[key] = planRecord;
+        }
+      }
+
+      service.plans = enrichedPlans;
+    }
+
+    return service;
+  }
+
+  private enrichPurohitServiceWithPayout(purohitService: any, serviceEntity?: any) {
+    if (!purohitService) return purohitService;
+    const service = serviceEntity || purohitService.service;
+    const payoutAmount = this.computePurohitPayoutAmount(service);
+
+    purohitService.purohitPayoutAmount = payoutAmount;
+    if (service) {
+      service.purohitPayoutAmount = payoutAmount;
+      this.enrichServicePlansAndToken(service);
+    }
+    return purohitService;
+  }
+
+  private validatePlans(plans: unknown): ServicePlans {
+    if (!plans || typeof plans !== 'object' || Array.isArray(plans)) {
+      throw new BadRequestException(
+        'plans must be an object containing basic and standard plans',
+      );
+    }
+
+    const allowedKeys = ['basic', 'standard'];
+    const keys = Object.keys(plans);
+    for (const key of keys) {
+      if (!allowedKeys.includes(key)) {
+        throw new BadRequestException(
+          `Invalid plan key "${key}". Only "basic" and "standard" are allowed`,
+        );
+      }
+    }
+
+    const plansObj = plans as Record<string, unknown>;
+    if (!plansObj['basic']) {
+      throw new BadRequestException('basic plan is required');
+    }
+    if (!plansObj['standard']) {
+      throw new BadRequestException('standard plan is required');
+    }
+
+    const basic = this.validatePlanItem('basic', plansObj['basic'], false);
+    const standard = this.validatePlanItem('standard', plansObj['standard'], false);
+
+    return { basic, standard };
   }
 
   async createService(
@@ -93,10 +255,59 @@ export class ServiceService {
         );
       }
 
-      if (dto.minPrice > dto.maxPrice) {
+      if (!dto.plans) {
         throw new BadRequestException(
-          'Minimum price cannot be greater than maximum price',
+          'plans must be an object containing basic and standard plans',
         );
+      }
+      const resolvedPlans = this.validatePlans(dto.plans);
+
+      // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+      /*
+      if (
+        dto.priceWithoutSamagri != null ||
+        dto.priceWithSamagri != null
+      ) {
+        if (
+          dto.priceWithoutSamagri == null ||
+          !Number.isFinite(Number(dto.priceWithoutSamagri)) ||
+          Number(dto.priceWithoutSamagri) <= 0
+        ) {
+          throw new BadRequestException(
+            'A valid price without samagri (minimum ₹1) is required',
+          );
+        }
+        if (
+          dto.priceWithSamagri == null ||
+          !Number.isFinite(Number(dto.priceWithSamagri)) ||
+          Number(dto.priceWithSamagri) <= 0
+        ) {
+          throw new BadRequestException(
+            'A valid price with samagri (minimum ₹1) is required',
+          );
+        }
+        resolvedPlans = {
+          basic: { price: Number(dto.priceWithoutSamagri) },
+          standard: { price: Number(dto.priceWithSamagri) },
+        };
+      }
+      */
+
+      if (dto.tokenPercentage !== undefined && dto.tokenPercentage !== null) {
+        const tp = Number(dto.tokenPercentage);
+        if (!Number.isFinite(tp) || tp < 1 || tp > 100) {
+          throw new BadRequestException('Token percentage must be a valid number between 1 and 100');
+        }
+      }
+
+      // TODO: Legacy minPrice/maxPrice pricing logic.
+      // Kept for backward compatibility if legacy callers provide both minPrice and maxPrice.
+      if (dto.minPrice !== undefined && dto.maxPrice !== undefined) {
+        if (dto.minPrice > dto.maxPrice) {
+          throw new BadRequestException(
+            'Minimum price cannot be greater than maximum price',
+          );
+        }
       }
 
       let iconUrl: string | undefined;
@@ -118,21 +329,16 @@ export class ServiceService {
         }
       }
 
-      // TODO: Original createService instantiation kept for reference:
-      /*
-      const service = this.serviceRepository.create({
-        ...dto,
-        iconUrl,
-        isActive: dto.isActive ?? true,
-        isUpcomingFestival: dto.isUpcomingFestival ?? false,
-      });
-      */
-
       const service = this.serviceRepository.create({
         ...dto,
         cities: dto.cities ?? [],
         languages: dto.languages ?? [],
         benefits: dto.benefits ?? [],
+        plans: resolvedPlans,
+        // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+        // priceWithoutSamagri: resolvedPlans.basic.price,
+        // priceWithSamagri: resolvedPlans.standard.price,
+        tokenPercentage: dto.tokenPercentage != null ? Number(dto.tokenPercentage) : 30,
         iconUrl,
         isActive: dto.isActive ?? true,
         isUpcomingFestival: dto.isUpcomingFestival ?? false,
@@ -162,6 +368,9 @@ export class ServiceService {
         oldValue: undefined,
         newValue: { name: savedService.name, slug: savedService.slug },
       });
+
+      (savedService as any).purohitPayoutAmount = this.computePurohitPayoutAmount(savedService);
+      this.enrichServicePlansAndToken(savedService);
 
       return {
         success: true,
@@ -217,13 +426,40 @@ export class ServiceService {
       }
     }
 
-    const minPrice = dto.minPrice ?? Number(service.minPrice);
-    const maxPrice = dto.maxPrice ?? Number(service.maxPrice);
+    // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+    /*
+    if (dto.priceWithoutSamagri !== undefined) {
+      if (
+        dto.priceWithoutSamagri === null ||
+        !Number.isFinite(Number(dto.priceWithoutSamagri)) ||
+        Number(dto.priceWithoutSamagri) < 1
+      ) {
+        throw new BadRequestException('Price without samagri must be a valid number greater than or equal to 1');
+      }
+    }
 
-    if (minPrice > maxPrice) {
-      throw new BadRequestException(
-        'Minimum price cannot be greater than maximum price',
-      );
+    if (dto.priceWithSamagri !== undefined) {
+      if (
+        dto.priceWithSamagri === null ||
+        !Number.isFinite(Number(dto.priceWithSamagri)) ||
+        Number(dto.priceWithSamagri) < 1
+      ) {
+        throw new BadRequestException('Price with samagri must be a valid number greater than or equal to 1');
+      }
+    }
+    */
+
+    // TODO: Legacy minPrice/maxPrice check.
+    // Retained for backward compatibility when updating legacy price fields.
+    if (dto.minPrice !== undefined || dto.maxPrice !== undefined) {
+      const minPrice = dto.minPrice ?? Number(service.minPrice);
+      const maxPrice = dto.maxPrice ?? Number(service.maxPrice);
+
+      if (Number.isFinite(minPrice) && Number.isFinite(maxPrice) && minPrice > maxPrice) {
+        throw new BadRequestException(
+          'Minimum price cannot be greater than maximum price',
+        );
+      }
     }
 
     // TODO: Previous Object.assign(service, dto) kept for reference:
@@ -233,8 +469,121 @@ export class ServiceService {
     const oldCities = service.cities;
     const oldLanguages = service.languages;
     const oldBenefits = service.benefits;
+    // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+    // const oldPriceWithoutSamagri = service.priceWithoutSamagri;
+    // const oldPriceWithSamagri = service.priceWithSamagri;
+    const oldTokenPercentage = service.tokenPercentage;
+    const oldPlans = service.plans;
+
+    if (dto.tokenPercentage !== undefined) {
+      if (dto.tokenPercentage !== null) {
+        const tp = Number(dto.tokenPercentage);
+        if (!Number.isFinite(tp) || tp < 1 || tp > 100) {
+          throw new BadRequestException('Token percentage must be a valid number between 1 and 100');
+        }
+        service.tokenPercentage = tp;
+      } else {
+        service.tokenPercentage = 30;
+      }
+    }
+
+    let mergedPlans: ServicePlans | undefined = undefined;
+    if (dto.plans !== undefined) {
+      if (!dto.plans || typeof dto.plans !== 'object' || Array.isArray(dto.plans)) {
+        throw new BadRequestException('plans must be a valid object');
+      }
+
+      const allowedKeys = ['basic', 'standard'];
+      const planKeys = Object.keys(dto.plans);
+      for (const key of planKeys) {
+        if (!allowedKeys.includes(key)) {
+          throw new BadRequestException(
+            `Invalid plan key "${key}". Only "basic" and "standard" are allowed`,
+          );
+        }
+      }
+
+      const currentPlans: ServicePlans = service.plans ?? {
+        basic: { price: 0 },
+        standard: { price: 0 },
+      };
+
+      let newBasic: ServicePlanDetails = currentPlans.basic
+        ? { ...currentPlans.basic }
+        : { price: 0 };
+      let newStandard: ServicePlanDetails = currentPlans.standard
+        ? { ...currentPlans.standard }
+        : { price: 0 };
+
+      if (dto.plans.basic !== undefined) {
+        const validatedBasic = this.validatePlanItem('basic', dto.plans.basic, true);
+        const resolvedPrice =
+          validatedBasic.price !== undefined
+            ? Number(validatedBasic.price)
+            : (currentPlans.basic?.price ?? 0);
+
+        // Filter out any keys explicitly set to null/undefined or replace with new plan features
+        const cleanBasicFeatures: Record<string, unknown> = {};
+        for (const [key, val] of Object.entries(validatedBasic)) {
+          if (val !== null && val !== undefined) {
+            cleanBasicFeatures[key] = val;
+          }
+        }
+
+        newBasic = {
+          ...cleanBasicFeatures,
+          price: resolvedPrice,
+        };
+      }
+
+      if (dto.plans.standard !== undefined) {
+        const validatedStandard = this.validatePlanItem('standard', dto.plans.standard, true);
+        const resolvedPrice =
+          validatedStandard.price !== undefined
+            ? Number(validatedStandard.price)
+            : (currentPlans.standard?.price ?? 0);
+
+        // Filter out any keys explicitly set to null/undefined or replace with new plan features
+        const cleanStandardFeatures: Record<string, unknown> = {};
+        for (const [key, val] of Object.entries(validatedStandard)) {
+          if (val !== null && val !== undefined) {
+            cleanStandardFeatures[key] = val;
+          }
+        }
+
+        newStandard = {
+          ...cleanStandardFeatures,
+          price: resolvedPrice,
+        };
+      }
+
+      mergedPlans = {
+        basic: newBasic,
+        standard: newStandard,
+      };
+    }
 
     Object.assign(service, dto);
+
+    // Safeguard plans and pricing fields against unintentional overwrites
+    if (mergedPlans !== undefined) {
+      service.plans = mergedPlans;
+    } else {
+      service.plans = oldPlans;
+    }
+
+    // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+    /*
+    if (dto.priceWithoutSamagri === undefined && !mergedPlans?.basic?.price) {
+      service.priceWithoutSamagri = oldPriceWithoutSamagri;
+    }
+    if (dto.priceWithSamagri === undefined && !mergedPlans?.standard?.price) {
+      service.priceWithSamagri = oldPriceWithSamagri;
+    }
+    */
+    if (dto.tokenPercentage === undefined) {
+      service.tokenPercentage = oldTokenPercentage;
+    }
 
     if (dto.cities !== undefined) {
       service.cities = dto.cities ?? [];
@@ -273,6 +622,7 @@ export class ServiceService {
     if (dto.cities !== undefined) updatedFields.cities = updated.cities;
     if (dto.languages !== undefined) updatedFields.languages = updated.languages;
     if (dto.benefits !== undefined) updatedFields.benefits = updated.benefits;
+    if (dto.plans !== undefined) updatedFields.plans = updated.plans;
 
     await this.auditLogService.createAuditLog({
       actorId: adminId,
@@ -287,9 +637,13 @@ export class ServiceService {
         cities: oldCities,
         languages: oldLanguages,
         benefits: oldBenefits,
+        plans: oldPlans,
       },
       newValue: updatedFields,
     });
+
+    (updated as any).purohitPayoutAmount = this.computePurohitPayoutAmount(updated);
+    this.enrichServicePlansAndToken(updated);
 
     return {
       success: true,
@@ -314,6 +668,8 @@ export class ServiceService {
       }
     }
     (service as any).iconDownloadurl = iconDownloadurl;
+    (service as any).purohitPayoutAmount = this.computePurohitPayoutAmount(service);
+    this.enrichServicePlansAndToken(service);
 
     return {
       success: true,
@@ -423,10 +779,11 @@ export class ServiceService {
       const serviceDto = new PurohitServiceItemDto();
 
       serviceDto.serviceId = Number(item.serviceId);
-      serviceDto.isOnline = Boolean(item.isOnline);
-      serviceDto.isOffline = Boolean(item.isOffline);
-      serviceDto.onlinePrice = item.onlinePrice ? Number(item.onlinePrice) : undefined;
-      serviceDto.offlinePrice = item.offlinePrice ? Number(item.offlinePrice) : undefined;
+      // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans. Payout is calculated from service.plans.basic.price.
+      // serviceDto.isOnline = Boolean(item.isOnline);
+      // serviceDto.isOffline = Boolean(item.isOffline);
+      // serviceDto.onlinePrice = item.onlinePrice ? Number(item.onlinePrice) : undefined;
+      // serviceDto.offlinePrice = item.offlinePrice ? Number(item.offlinePrice) : undefined;
       serviceDto.durationMinutes = item.durationMinutes
         ? Number(item.durationMinutes)
         : undefined;
@@ -479,10 +836,11 @@ export class ServiceService {
         await this.PurohitServiceRepository.restore(existing.id);
         await this.PurohitServiceRepository.update(existing.id, {
           deletedAt: null as any,
-          isOnline: serviceDto.isOnline ?? existing.isOnline,
-          isOffline: serviceDto.isOffline ?? existing.isOffline,
-          onlinePrice: serviceDto.onlinePrice ?? existing.onlinePrice,
-          offlinePrice: serviceDto.offlinePrice ?? existing.offlinePrice,
+          // TODO: Deprecated with fixed service pricing. Purohit no longer configures price or online/offline modes.
+          // isOnline: serviceDto.isOnline ?? existing.isOnline,
+          // isOffline: serviceDto.isOffline ?? existing.isOffline,
+          // onlinePrice: serviceDto.onlinePrice ?? existing.onlinePrice,
+          // offlinePrice: serviceDto.offlinePrice ?? existing.offlinePrice,
           durationMinutes: serviceDto.durationMinutes ?? existing.durationMinutes,
           isActive: serviceDto.isActive ?? true,
         });
@@ -500,6 +858,8 @@ export class ServiceService {
 
       try {
         const saved = await this.PurohitServiceRepository.save(entity);
+        (saved as any).service = service;
+        this.enrichPurohitServiceWithPayout(saved, service);
         added.push(saved);
       } catch (err: any) {
         if (
@@ -518,15 +878,20 @@ export class ServiceService {
             await this.PurohitServiceRepository.restore(softDeleted.id);
             await this.PurohitServiceRepository.update(softDeleted.id, {
               deletedAt: null as any,
-              isOnline: serviceDto.isOnline ?? softDeleted.isOnline,
-              isOffline: serviceDto.isOffline ?? softDeleted.isOffline,
-              onlinePrice: serviceDto.onlinePrice ?? softDeleted.onlinePrice,
-              offlinePrice: serviceDto.offlinePrice ?? softDeleted.offlinePrice,
+              // TODO: Deprecated with fixed service pricing. Purohit no longer configures price or online/offline modes.
+              // isOnline: serviceDto.isOnline ?? softDeleted.isOnline,
+              // isOffline: serviceDto.isOffline ?? softDeleted.isOffline,
+              // onlinePrice: serviceDto.onlinePrice ?? softDeleted.onlinePrice,
+              // offlinePrice: serviceDto.offlinePrice ?? softDeleted.offlinePrice,
               durationMinutes: serviceDto.durationMinutes ?? softDeleted.durationMinutes,
               isActive: serviceDto.isActive ?? true,
             });
             const restored = await this.PurohitServiceRepository.findById(softDeleted.id);
-            if (restored) added.push(restored);
+            if (restored) {
+              (restored as any).service = service;
+              this.enrichPurohitServiceWithPayout(restored, service);
+              added.push(restored);
+            }
             continue;
           }
         }
@@ -583,6 +948,8 @@ export class ServiceService {
             console.error('Failed to generate pre-signed URL for icon:', e);
           }
         }
+        // Service Plan Pricing: Purohit's payout is calculated based on service.plans.basic.price
+        this.enrichPurohitServiceWithPayout(purohitService);
         return purohitService;
       }),
     );
@@ -636,9 +1003,9 @@ export class ServiceService {
     dto: UpdatePurohitServiceDto,
     userId: number,
   ) {
-    console.log(dto);
     const purohitService = await this.PurohitServiceRepository.findOne({
       where: { id: Id },
+      relations: ['service'],
     });
 
     if (!purohitService) {
@@ -659,10 +1026,23 @@ export class ServiceService {
       );
     }
 
-    Object.assign(purohitService, dto);
+    // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+    // Price and payout are fixed based on master service plans (plans.basic.price).
+    if (dto.durationMinutes !== undefined) {
+      purohitService.durationMinutes = dto.durationMinutes;
+    }
+    if (dto.isActive !== undefined) {
+      purohitService.isActive = dto.isActive;
+    }
+    // Object.assign(purohitService, dto);
 
     const updatedService =
       await this.PurohitServiceRepository.save(purohitService);
+
+    if (!updatedService.service && purohitService.service) {
+      updatedService.service = purohitService.service;
+    }
+    this.enrichPurohitServiceWithPayout(updatedService);
 
     return {
       success: true,
@@ -701,6 +1081,8 @@ export class ServiceService {
         console.error('Failed to generate pre-signed URL for icon:', e);
       }
     }
+
+    this.enrichPurohitServiceWithPayout(purohitService);
 
     return {
       success: true,

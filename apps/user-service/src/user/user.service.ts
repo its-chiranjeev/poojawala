@@ -753,14 +753,16 @@ export class UserService {
                 }
                 return {
                   ...ps,
+                  purohitPayoutAmount: ps.purohitPayoutAmount ?? null,
                   service: {
                     ...ps.service,
+                    purohitPayoutAmount: ps.service?.purohitPayoutAmount ?? null,
                     iconDownloadurl,
                   },
                 };
               }),
             );
-            delete (safeUser as any).purohitServices;
+            (safeUser as any).purohitServices = profile.purohitServices;
           }
           (safeUser as any).profile = profile;
         }
@@ -942,10 +944,15 @@ export class UserService {
           ? user.services.map((ps: any) => {
             return {
               serviceName: ps.service?.name,
-              isOnlinePrice: ps.onlinePrice,
-              isOfflinePrice: ps.offlinePrice,
+              // TODO: Deprecated with fixed service pricing. Purohit no longer sets custom prices.
+              isOnlinePrice: ps.onlinePrice ?? ps.service?.plans?.basic?.price,
+              isOfflinePrice: ps.offlinePrice ?? ps.service?.plans?.basic?.price,
               isOnlineAvailable: ps.isOnline,
               isOfflineAvailable: ps.isOffline,
+              plans: ps.service?.plans ?? null,
+              // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+              // priceWithoutSamagri: ps.service?.priceWithoutSamagri,
+              // priceWithSamagri: ps.service?.priceWithSamagri,
             };
           })
           : [];
@@ -1047,10 +1054,15 @@ export class UserService {
       ? profile.purohitServices.map((ps) => {
         return {
           serviceName: ps.service?.name,
-          isOnlinePrice: ps.onlinePrice,
-          isOfflinePrice: ps.offlinePrice,
+          // TODO: Deprecated with fixed service pricing. Purohit no longer sets custom prices.
+          isOnlinePrice: ps.onlinePrice ?? ps.service?.plans?.basic?.price,
+          isOfflinePrice: ps.offlinePrice ?? ps.service?.plans?.basic?.price,
           isOnlineAvailable: ps.isOnline,
           isOfflineAvailable: ps.isOffline,
+          plans: ps.service?.plans ?? null,
+          // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+          // priceWithoutSamagri: ps.service?.priceWithoutSamagri,
+          // priceWithSamagri: ps.service?.priceWithSamagri,
         };
       })
       : [];
@@ -1169,14 +1181,16 @@ export class UserService {
               }
               return {
                 ...ps,
+                purohitPayoutAmount: ps.purohitPayoutAmount ?? null,
                 service: {
                   ...ps.service,
+                  purohitPayoutAmount: ps.service?.purohitPayoutAmount ?? null,
                   iconDownloadurl,
                 },
               };
             }),
           );
-          delete (safeUser as any).purohitServices;
+          (safeUser as any).purohitServices = profile.purohitServices;
         }
         (safeUser as any).profile = profile;
       }

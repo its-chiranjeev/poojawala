@@ -12,7 +12,9 @@ import {
   IsNotEmpty,
   IsArray,
   ValidateNested,
+  IsObject,
 } from 'class-validator';
+import type { ServicePlans } from '@poojawala/entities';
 import {
   ServiceCityDto,
   ServiceLanguageDto,
@@ -73,6 +75,31 @@ export class UpdateServiceDto {
   @IsOptional()
   icon?: any;
 
+  /**
+   * Configurable service plans: partial update of 'basic' and/or 'standard'.
+   */
+  @IsOptional()
+  @IsObject({ message: 'plans must be an object' })
+  plans?: Partial<ServicePlans>;
+
+  // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+  /*
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 })
+  @Min(1)
+  priceWithoutSamagri?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 })
+  @Min(1)
+  priceWithSamagri?: number;
+  */
+
+  // TODO: Legacy pricing fields.
+  // Retained for backward compatibility.
+  // New pricing logic must use priceWithoutSamagri / priceWithSamagri.
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -91,6 +118,13 @@ export class UpdateServiceDto {
   @Min(0)
   @Max(100)
   commissionPercentage?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 })
+  @Min(1)
+  @Max(100)
+  tokenPercentage?: number;
 
   @IsOptional()
   @Type(() => Number)
@@ -127,22 +161,24 @@ export class UpdateServiceDto {
 }
 
 export class UpdatePurohitServiceDto {
-  @IsOptional()
-  @IsBoolean()
-  isOnline!: boolean;
+  // TODO: Deprecated with fixed service pricing. Purohit no longer configures online/offline mode or custom prices.
+  // Payout is automatically calculated based on service.priceWithoutSamagri.
+  // @IsOptional()
+  // @IsBoolean()
+  // isOnline!: boolean;
 
-  @IsBoolean()
-  isOffline!: boolean;
+  // @IsBoolean()
+  // isOffline!: boolean;
 
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  onlinePrice?: number;
+  // @IsOptional()
+  // @IsNumber({ maxDecimalPlaces: 2 })
+  // @Min(0)
+  // onlinePrice?: number;
 
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  offlinePrice?: number;
+  // @IsOptional()
+  // @IsNumber({ maxDecimalPlaces: 2 })
+  // @Min(0)
+  // offlinePrice?: number;
 
   @IsOptional()
   @IsInt()

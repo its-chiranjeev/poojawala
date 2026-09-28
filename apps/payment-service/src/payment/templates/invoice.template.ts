@@ -69,6 +69,12 @@ export interface PaymentInvoiceTemplateData {
   customerPaidAmount?: string | number | null;
   razorpayFee?: string | number | null;
   razorpayTax?: string | number | null;
+
+  paidAmount?: string | number | null;
+  remainingAmount?: string | number | null;
+  tokenAmount?: string | number | null;
+
+  [key: string]: any;
 }
 
 const escapeHtml = (value: string | number | null | undefined): string => {
@@ -1449,6 +1455,25 @@ export const paymentInvoiceTemplate = (
                       ${(showRazorpayCharges && rawCustomerPaid != null ? rawCustomerPaid : finalAmount).toFixed(2)}
                     </td>
                   </tr>
+
+                  ${data.paidAmount != null
+                    ? `
+                        <tr>
+                          <td>Paid Amount</td>
+                          <td class="amount">${currency} ${(Number(data.paidAmount) || 0).toFixed(2)}</td>
+                        </tr>
+                      `
+                    : ''
+                  }
+                  ${data.remainingAmount != null
+                    ? `
+                        <tr>
+                          <td>Remaining Balance</td>
+                          <td class="amount">${currency} ${(Number(data.remainingAmount) || 0).toFixed(2)}</td>
+                        </tr>
+                      `
+                    : ''
+                  }
                 `
     }
           </tbody>

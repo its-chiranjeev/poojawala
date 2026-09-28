@@ -18,6 +18,11 @@ import { CustomerAddress } from './customer-address.entity';
 import { Payment } from './payment.entity';
 import { Complaint } from './complaint.entity';
 
+export enum SERVICE_PLAN {
+  BASIC = 'BASIC',
+  STANDARD = 'STANDARD',
+}
+
 export enum BOOKING_STATUS {
   PENDING = 'PENDING',
   ACCEPTED = 'ACCEPTED',
@@ -30,6 +35,7 @@ export enum BOOKING_STATUS {
 
 export enum BOOKING_PAYMENT_STATUS {
   PENDING = 'PENDING',
+  PARTIAL = 'PARTIAL',
   PAID = 'PAID',
   FAILED = 'FAILED',
   PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
@@ -138,8 +144,35 @@ export class Booking {
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0.0 })
   donationAmount!: number;
 
+  // Selected service plan: BASIC | STANDARD
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  plan?: SERVICE_PLAN | string | null;
+
+  // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
+  // @Column({ type: 'boolean', default: false })
+  // samagriIncluded!: boolean;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  servicePrice?: number | null;
+
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   finalAmount?: number;
+
+  // Snapshot of effective token percentage at booking creation (e.g. 30)
+  @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
+  tokenPercentage?: number | null;
+
+  // Snapshot of minimum token amount required to financially confirm booking
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  tokenAmount?: number | null;
+
+  // Cumulative amount successfully paid by customer
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0.0 })
+  paidAmount!: number;
+
+  // Remaining balance to fully settle booking (finalAmount - paidAmount)
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  remainingAmount?: number | null;
 
   @Column({
     type: 'enum',
