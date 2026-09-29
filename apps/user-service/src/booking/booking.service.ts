@@ -3028,14 +3028,38 @@ export class BookingService {
     const emailSent =
       Boolean(customerEmail) && emailResult.status === 'fulfilled';
 
-    if (!smsSent && !emailSent) {
-      booking.completionOtp = undefined;
-
-      await this.bookingRepository.saveBooking(booking);
-
-      throw new InternalServerErrorException(
-        'Unable to send start OTP. Please try again',
+    if (smsResult.status === 'rejected') {
+      this.logger.error(
+        `Failed to send start OTP SMS to ${customerPhone}: ${
+          (smsResult as PromiseRejectedResult).reason?.message ||
+          (smsResult as PromiseRejectedResult).reason
+        }`,
       );
+    }
+
+    if (emailResult.status === 'rejected') {
+      this.logger.error(
+        `Failed to send start OTP Email to ${customerEmail}: ${
+          (emailResult as PromiseRejectedResult).reason?.message ||
+          (emailResult as PromiseRejectedResult).reason
+        }`,
+      );
+    }
+
+    if (!smsSent && !emailSent) {
+      if (process.env['NODE_ENV'] !== 'production') {
+        this.logger.warn(
+          `[DEV MODE] Start OTP was generated (${otp}) but delivery via SMS and Email failed. Allowing flow to continue because NODE_ENV=${process.env['NODE_ENV']}.`,
+        );
+      } else {
+        booking.completionOtp = undefined;
+
+        await this.bookingRepository.saveBooking(booking);
+
+        throw new InternalServerErrorException(
+          'Unable to send start OTP. Please try again',
+        );
+      }
     }
 
     return {
