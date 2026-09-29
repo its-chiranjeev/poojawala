@@ -24,6 +24,7 @@ import {
   Booking,
   BOOKING_MODE,
   BOOKING_PAYMENT_STATUS,
+  BOOKING_PAYMENT_TYPE,
   BOOKING_STATUS,
   CANCELLED_BY,
   Coupon,
@@ -73,9 +74,22 @@ export interface CreateBookingResponse {
   bookingId: number;
   bookingNumber: string;
   status: BOOKING_STATUS;
+  paymentType: BOOKING_PAYMENT_TYPE;
   paymentStatus: BOOKING_PAYMENT_STATUS;
   paymentId: number | string | null;
   paymentUrl: string | null;
+}
+
+export interface CreateBookingByAdminResponse {
+  bookingId: number;
+  bookingNumber: string;
+  plan: SERVICE_PLAN | string | null;
+  status: BOOKING_STATUS;
+  paymentType: BOOKING_PAYMENT_TYPE;
+  paymentStatus: BOOKING_PAYMENT_STATUS;
+  paymentId: null;
+  paymentUrl: null;
+  purohitId?: number | null;
 }
 
 interface CouponCalculationResult {
@@ -530,46 +544,62 @@ export class BookingService {
           paidAmount,
           remainingAmount,
           status: BOOKING_STATUS.PENDING,
+          paymentType: BOOKING_PAYMENT_TYPE.TOKEN,
           paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
           assignmentType: ASSIGNMENT_TYPE.AUTO,
         });
 
-        /*
-         * AssignmentService handles:
-         * - approved Purohits
-         * - active Purohit users
-         * - service matching
-         * - location coordinates
-         * - Haversine radius
-         * - busy booking filtering
-         */
-        const eligiblePurohitIds = await this.assignmentService.findEligiblePurohitIds(
-          manager,
-          booking,
-        );
+        // TODO: Previous immediate assignment logic on booking creation before token payment gate:
+        // /*
+        //  * AssignmentService handles:
+        //  * - approved Purohits
+        //  * - active Purohit users
+        //  * - service matching
+        //  * - location coordinates
+        //  * - Haversine radius
+        //  * - busy booking filtering
+        //  */
+        // const eligiblePurohitIds = await this.assignmentService.findEligiblePurohitIds(
+        //   manager,
+        //   booking,
+        // );
+        //
+        // booking.filteredPurohitIds = eligiblePurohitIds;
+        //
+        // const savedBooking = await bookingRepository.save(booking);
+        //
+        // let eligiblePurohitUserIds: number[] = [];
+        // if (eligiblePurohitIds.length > 0) {
+        //   const purohitProfiles = await manager
+        //     .getRepository(PurohitProfile)
+        //     .createQueryBuilder('profile')
+        //     .select(['profile.id', 'profile.userId'])
+        //     .where('profile.id IN (:...purohitProfileIds)', {
+        //       purohitProfileIds: eligiblePurohitIds,
+        //     })
+        //     .getMany();
+        //
+        //   eligiblePurohitUserIds = purohitProfiles.map(
+        //     (profile) => profile.userId,
+        //   );
+        // }
+        //
+        // this.logger.log(
+        //   `Booking ${savedBooking.id} created with ${eligiblePurohitIds.length} eligible Purohits`,
+        // );
 
-        booking.filteredPurohitIds = eligiblePurohitIds;
+        // TOKEN PAYMENT GATE:
+        // Do NOT mark an unpaid booking as assignment-ready.
+        // Initially, the booking is created with paymentStatus = PENDING and no Purohits filtered/assigned.
+        // Purohit assignment begins only once token payment is confirmed.
+        booking.filteredPurohitIds = [];
 
         const savedBooking = await bookingRepository.save(booking);
 
-        let eligiblePurohitUserIds: number[] = [];
-        if (eligiblePurohitIds.length > 0) {
-          const purohitProfiles = await manager
-            .getRepository(PurohitProfile)
-            .createQueryBuilder('profile')
-            .select(['profile.id', 'profile.userId'])
-            .where('profile.id IN (:...purohitProfileIds)', {
-              purohitProfileIds: eligiblePurohitIds,
-            })
-            .getMany();
-
-          eligiblePurohitUserIds = purohitProfiles.map(
-            (profile) => profile.userId,
-          );
-        }
+        const eligiblePurohitUserIds: number[] = [];
 
         this.logger.log(
-          `Booking ${savedBooking.id} created with ${eligiblePurohitIds.length} eligible Purohits`,
+          `Booking ${savedBooking.id} created. Awaiting token payment before Purohit assignment.`,
         );
 
         /*
@@ -759,6 +789,7 @@ export class BookingService {
         bookingId: transactionResult.savedBooking.id,
         bookingNumber: transactionResult.savedBooking.bookingNumber,
         status: transactionResult.savedBooking.status,
+        paymentType: transactionResult.savedBooking.paymentType ?? BOOKING_PAYMENT_TYPE.TOKEN,
         paymentStatus: transactionResult.savedBooking.paymentStatus,
         paymentId: existingPaymentId,
         paymentUrl: existingPaymentUrl,
@@ -1988,6 +2019,29 @@ export class BookingService {
         throw new ConflictException('This booking is no longer available');
       }
 
+      // TODO: Deprecated.
+      // Payment is required for every booking.
+      // Admin-created bookings now use DEFERRED payment type instead of NOT_REQUIRED status.
+      // if (
+      //   booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID &&
+      //   booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PARTIAL &&
+      //   booking.paymentStatus !== BOOKING_PAYMENT_STATUS.NOT_REQUIRED
+      // ) {
+      //   throw new BadRequestException(
+      //     'Booking cannot be accepted until required payment has been confirmed',
+      //   );
+      // }
+      const isEligibleToAccept =
+        booking.paymentType === BOOKING_PAYMENT_TYPE.DEFERRED ||
+        booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
+        booking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL;
+
+      if (!isEligibleToAccept) {
+        throw new BadRequestException(
+          'Booking cannot be accepted until required payment has been confirmed',
+        );
+      }
+
       const filteredPurohitIds = booking.filteredPurohitIds ?? [];
 
       if (!filteredPurohitIds.includes(purohitProfile.id)) {
@@ -2261,6 +2315,29 @@ export class BookingService {
       if (!assignableStatuses.includes(booking.status)) {
         throw new BadRequestException(
           `Booking cannot be assigned when status is ${booking.status}`,
+        );
+      }
+
+      // TODO: Deprecated.
+      // Payment is required for every booking.
+      // Admin-created bookings now use DEFERRED payment type instead of NOT_REQUIRED status.
+      // if (
+      //   booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID &&
+      //   booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PARTIAL &&
+      //   booking.paymentStatus !== BOOKING_PAYMENT_STATUS.NOT_REQUIRED
+      // ) {
+      //   throw new BadRequestException(
+      //     'Booking cannot be assigned until required payment has been confirmed',
+      //   );
+      // }
+      const isEligibleToAssign =
+        booking.paymentType === BOOKING_PAYMENT_TYPE.DEFERRED ||
+        booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
+        booking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL;
+
+      if (!isEligibleToAssign) {
+        throw new BadRequestException(
+          'Booking cannot be assigned until required payment has been confirmed',
         );
       }
 
@@ -2719,7 +2796,7 @@ export class BookingService {
 
     if (
       paymentRequiredStatuses.includes(nextStatus) &&
-      booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID
+      (booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID || Number(booking.remainingAmount) > 0)
     ) {
       throw new BadRequestException(
         `Payment must be completed before changing booking status to ${nextStatus}`,
@@ -2973,6 +3050,29 @@ export class BookingService {
 
     await this.validateStartOtpGenerationAccess(user, booking);
 
+    // TODO: Deprecated.
+    // Payment is required for every booking.
+    // Admin-created bookings now use DEFERRED payment type instead of NOT_REQUIRED status.
+    // if (
+    //   booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID &&
+    //   booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PARTIAL &&
+    //   booking.paymentStatus !== BOOKING_PAYMENT_STATUS.NOT_REQUIRED
+    // ) {
+    //   throw new BadRequestException(
+    //     'Start OTP cannot be generated for an unpaid booking',
+    //   );
+    // }
+    const isEligibleForStartOtp =
+      booking.paymentType === BOOKING_PAYMENT_TYPE.DEFERRED ||
+      booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
+      booking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL;
+
+    if (!isEligibleForStartOtp) {
+      throw new BadRequestException(
+        'Start OTP cannot be generated for an unpaid booking',
+      );
+    }
+
     if (booking.status !== BOOKING_STATUS.ARRIVED) {
       throw new BadRequestException(
         'Start OTP can only be generated for an arrived booking',
@@ -3030,18 +3130,16 @@ export class BookingService {
 
     if (smsResult.status === 'rejected') {
       this.logger.error(
-        `Failed to send start OTP SMS to ${customerPhone}: ${
-          (smsResult as PromiseRejectedResult).reason?.message ||
-          (smsResult as PromiseRejectedResult).reason
+        `Failed to send start OTP SMS to ${customerPhone}: ${(smsResult as PromiseRejectedResult).reason?.message ||
+        (smsResult as PromiseRejectedResult).reason
         }`,
       );
     }
 
     if (emailResult.status === 'rejected') {
       this.logger.error(
-        `Failed to send start OTP Email to ${customerEmail}: ${
-          (emailResult as PromiseRejectedResult).reason?.message ||
-          (emailResult as PromiseRejectedResult).reason
+        `Failed to send start OTP Email to ${customerEmail}: ${(emailResult as PromiseRejectedResult).reason?.message ||
+        (emailResult as PromiseRejectedResult).reason
         }`,
       );
     }
@@ -3085,6 +3183,80 @@ export class BookingService {
       ...result,
       message: 'Booking start OTP resent successfully',
     };
+  }
+
+  async triggerAutoAssignment(bookingId: number): Promise<Booking> {
+    return this.dataSource.transaction(async (manager) => {
+      const bookingRepository = manager.getRepository(Booking);
+      const booking = await bookingRepository
+        .createQueryBuilder('booking')
+        .where('booking.id = :bookingId', { bookingId })
+        .setLock('pessimistic_write')
+        .getOne();
+
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
+
+      // TODO: Deprecated.
+      // Payment is required for every booking.
+      // Admin-created bookings now use DEFERRED payment type instead of NOT_REQUIRED status.
+      // if (
+      //   booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID &&
+      //   booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PARTIAL &&
+      //   booking.paymentStatus !== BOOKING_PAYMENT_STATUS.NOT_REQUIRED
+      // ) {
+      //   throw new BadRequestException(
+      //     'Booking cannot enter auto-assignment until required payment is confirmed',
+      //   );
+      // }
+      const isEligibleForAutoAssignment =
+        booking.paymentType === BOOKING_PAYMENT_TYPE.DEFERRED ||
+        booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
+        booking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL;
+
+      if (!isEligibleForAutoAssignment) {
+        throw new BadRequestException(
+          'Booking cannot enter auto-assignment until required payment is confirmed',
+        );
+      }
+
+      if (booking.status !== BOOKING_STATUS.PENDING || booking.purohitId) {
+        return booking;
+      }
+
+      const eligiblePurohitIds =
+        await this.assignmentService.findEligiblePurohitIds(manager, booking);
+
+      booking.filteredPurohitIds = eligiblePurohitIds;
+      booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
+
+      const savedBooking = await bookingRepository.save(booking);
+
+      if (eligiblePurohitIds.length > 0) {
+        const purohitProfiles = await manager
+          .getRepository(PurohitProfile)
+          .createQueryBuilder('profile')
+          .select(['profile.id', 'profile.userId'])
+          .where('profile.id IN (:...purohitProfileIds)', {
+            purohitProfileIds: eligiblePurohitIds,
+          })
+          .getMany();
+
+        for (const profile of purohitProfiles) {
+          await this.notificationService.createNotification(
+            profile.userId,
+            'New Booking',
+            `You have received a new booking request (Booking B-${savedBooking.id}).`,
+            NOTIFICATION_TYPE.BOOKING,
+            savedBooking.id,
+            'BOOKING',
+          );
+        }
+      }
+
+      return savedBooking;
+    });
   }
 
   private async validateStartOtpGenerationAccess(
@@ -4009,7 +4181,19 @@ export class BookingService {
   async createBookingByAdmin(
     adminUser: User,
     dto: CreateBookingByAdminDto,
-  ): Promise<Booking> {
+  ): Promise<CreateBookingByAdminResponse> {
+    // TODO: Previous manual assignment implementation when purohitId was required in admin booking creation:
+    // /*
+    // if (adminUser.role !== USER_ROLE.ADMIN) {
+    //   throw new ForbiddenException('Only admins can create bookings manually');
+    // }
+    // const scheduledAt = new Date(dto.scheduledAt);
+    // if (Number.isNaN(scheduledAt.getTime())) {
+    //   throw new BadRequestException('Invalid scheduled date and time');
+    // }
+    // ... (previous manual assignment logic)
+    // */
+
     if (adminUser.role !== USER_ROLE.ADMIN) {
       throw new ForbiddenException('Only admins can create bookings manually');
     }
@@ -4025,14 +4209,10 @@ export class BookingService {
         const serviceRepository = manager.getRepository(Service);
         const addressRepository = manager.getRepository(CustomerAddress);
         const bookingRepository = manager.getRepository(Booking);
-        const purohitProfileRepository = manager.getRepository(PurohitProfile);
 
-        const [customer, purohitProfile, service, customerAddress, purohitUser] = await Promise.all([
+        const [customer, service, customerAddress] = await Promise.all([
           userRepository.findOne({
             where: { id: dto.customerId, role: USER_ROLE.CUSTOMER },
-          }),
-          purohitProfileRepository.findOne({
-            where: { userId: dto.purohitId },
           }),
           serviceRepository.findOne({
             where: { id: dto.serviceId },
@@ -4040,17 +4220,10 @@ export class BookingService {
           addressRepository.findOne({
             where: { id: dto.customerAddressId, customerId: dto.customerId },
           }),
-          userRepository.findOne({
-            where: { id: dto.purohitId, role: USER_ROLE.PUROHIT },
-          }),
         ]);
 
         if (!customer) {
           throw new NotFoundException('Customer not found');
-        }
-
-        if (!purohitProfile) {
-          throw new NotFoundException('Purohit profile not found');
         }
 
         if (!service) {
@@ -4063,6 +4236,67 @@ export class BookingService {
 
         if (!customerAddress) {
           throw new NotFoundException('Customer address not found');
+        }
+
+        const purohitProfileRepository = manager.getRepository(PurohitProfile);
+        let assignedPurohitProfile: PurohitProfile | null = null;
+        let assignedPurohitUser: User | null = null;
+
+        if (dto.purohitId) {
+          assignedPurohitProfile = await purohitProfileRepository
+            .createQueryBuilder('purohit')
+            .innerJoinAndSelect('purohit.user', 'user')
+            .where('purohit.id = :purohitId OR purohit.userId = :purohitId', {
+              purohitId: dto.purohitId,
+            })
+            .getOne();
+
+          if (!assignedPurohitProfile) {
+            assignedPurohitProfile = await purohitProfileRepository.findOne({
+              where: [{ id: dto.purohitId }, { userId: dto.purohitId }],
+              relations: { user: true },
+            });
+          }
+
+          if (!assignedPurohitProfile) {
+            throw new NotFoundException('Purohit not found');
+          }
+
+          if (assignedPurohitProfile.user && assignedPurohitProfile.user.role !== USER_ROLE.PUROHIT) {
+            throw new BadRequestException('Selected user is not a Purohit');
+          }
+
+          if (assignedPurohitProfile.user && assignedPurohitProfile.user.status !== USER_STATUS.ACTIVE) {
+            throw new BadRequestException('Purohit account is not active');
+          }
+
+          if (
+            assignedPurohitProfile.verificationStatus &&
+            assignedPurohitProfile.verificationStatus !== PUROHIT_VERIFICATION_STATUS.APPROVED
+          ) {
+            throw new BadRequestException('Purohit is not approved');
+          }
+
+          const purohitServiceRepository = manager.getRepository(PurohitService);
+          const matchingPurohitService = await purohitServiceRepository.findOne({
+            where: {
+              purohitId: assignedPurohitProfile.id,
+              serviceId: service.id,
+              isActive: true,
+            },
+          });
+
+          if (!matchingPurohitService) {
+            throw new BadRequestException(
+              'Selected Purohit does not provide the service required for this booking',
+            );
+          }
+
+          assignedPurohitUser =
+            assignedPurohitProfile.user ??
+            (await userRepository.findOne({
+              where: { id: assignedPurohitProfile.userId },
+            }));
         }
 
         // Validate Service availability in the booking city
@@ -4085,22 +4319,7 @@ export class BookingService {
           );
         }
 
-        // Validate selected Purohit serves this booking city
-        const purohitServiceAreaRepo = manager.getRepository(PurohitServiceArea);
-        const purohitAreas = await purohitServiceAreaRepo.find({
-          where: { purohitId: dto.purohitId },
-        });
-
-        const servesCity = purohitAreas.some(
-          (area) => normalizeCityName(area.city) === normalizedBookingCity,
-        );
-
-        if (!servesCity) {
-          throw new BadRequestException(
-            'Selected Purohit does not serve the customer booking city',
-          );
-        }
-
+        // Prevent concurrent duplicate bookings
         const duplicateLockKey = [
           customer.id,
           service.id,
@@ -4111,109 +4330,80 @@ export class BookingService {
           duplicateLockKey,
         ]);
 
-        const purohitServiceRepository = manager.getRepository(PurohitService);
-        const matchingPurohitService = await purohitServiceRepository.findOne({
-          where: {
-            purohitId: purohitProfile.id,
-            serviceId: service.id,
-            isActive: true,
-          },
-        });
+        const activeBookingStatuses = [
+          BOOKING_STATUS.PENDING,
+          BOOKING_STATUS.ACCEPTED,
+          BOOKING_STATUS.ENROUTE,
+          BOOKING_STATUS.ARRIVED,
+          BOOKING_STATUS.ONGOING,
+        ];
 
-        if (!matchingPurohitService) {
-          throw new BadRequestException('Selected Purohit does not provide the service required for this booking');
+        const duplicateBookingExists = await bookingRepository
+          .createQueryBuilder('booking')
+          .where('booking.customerId = :customerId', {
+            customerId: customer.id,
+          })
+          .andWhere('booking.serviceId = :serviceId', {
+            serviceId: service.id,
+          })
+          .andWhere('booking.scheduledAt = :scheduledAt', {
+            scheduledAt,
+          })
+          .andWhere('booking.status IN (:...statuses)', {
+            statuses: activeBookingStatuses,
+          })
+          .getExists();
+
+        if (duplicateBookingExists) {
+          throw new ConflictException(
+            'An active booking for this service and scheduled time already exists',
+          );
         }
 
-        let bookingPrice: number;
-        let purohitPayoutAmount: number;
-        let platformCommission: number;
-        let selectedPlan: 'basic' | 'standard' | null = null;
-        const commissionPercentage = Number(service.commissionPercentage);
+        // Plan Validation & Derivation
+        const rawPlan = dto.plan as string | undefined;
+        if (
+          !rawPlan ||
+          (rawPlan.toUpperCase() !== 'BASIC' && rawPlan.toUpperCase() !== 'STANDARD')
+        ) {
+          throw new BadRequestException('A valid plan (BASIC or STANDARD) must be selected');
+        }
 
         if (!service.plans) {
           throw new BadRequestException('Service plans are not configured for this service');
         }
-        const planKey = (dto as any).plan || 'basic';
-        if (planKey !== 'basic' && planKey !== 'standard') {
-          throw new BadRequestException('A valid plan ("basic" or "standard") must be selected');
-        }
-        const planObj = service.plans[planKey];
+
+        const normalizedKey = rawPlan.toUpperCase() === 'STANDARD' ? 'standard' : 'basic';
+        const planObj =
+          (service.plans as any)[normalizedKey] ||
+          (service.plans as any)[rawPlan] ||
+          (service.plans as any)[rawPlan.toLowerCase()] ||
+          (service.plans as any)[rawPlan.toUpperCase()];
+
         if (!planObj || !Number.isFinite(Number(planObj.price)) || Number(planObj.price) <= 0) {
-          throw new BadRequestException(`Price is not configured for the selected ${planKey} plan`);
+          throw new BadRequestException(`Price is not configured for the selected ${rawPlan} plan`);
         }
-        bookingPrice = Number(planObj.price);
-        selectedPlan = planKey;
-        const purohitBasePrice =
-          service.plans.basic?.price != null && Number(service.plans.basic.price) > 0
-            ? Number(service.plans.basic.price)
-            : bookingPrice;
-        platformCommission = Number(
-          (purohitBasePrice * (commissionPercentage / 100)).toFixed(2),
-        );
-        purohitPayoutAmount = Number(
-          (purohitBasePrice - platformCommission).toFixed(2),
-        );
 
-        // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
-        /*
-        else if (service.priceWithSamagri != null || service.priceWithoutSamagri != null) {
-          const samagriIncluded = Boolean(dto.samagriIncluded);
-          if (samagriIncluded) {
-            const priceWithSamagri =
-              service.priceWithSamagri != null
-                ? Number(service.priceWithSamagri)
-                : NaN;
-            if (!Number.isFinite(priceWithSamagri) || priceWithSamagri <= 0) {
-              throw new BadRequestException(
-                'Samagri-inclusive pricing is not configured for this service',
-              );
-            }
-            bookingPrice = priceWithSamagri;
-          } else {
-            const priceWithoutSamagri =
-              service.priceWithoutSamagri != null
-                ? Number(service.priceWithoutSamagri)
-                : NaN;
-            if (!Number.isFinite(priceWithoutSamagri) || priceWithoutSamagri <= 0) {
-              throw new BadRequestException(
-                'Pricing without samagri is not configured for this service',
-              );
-            }
-            bookingPrice = priceWithoutSamagri;
-          }
+        const bookingPrice = Number(planObj.price);
+        const selectedPlan = rawPlan.toUpperCase() === 'STANDARD' ? SERVICE_PLAN.STANDARD : SERVICE_PLAN.BASIC;
 
-          const purohitBasePrice =
-            service.priceWithoutSamagri != null && Number(service.priceWithoutSamagri) > 0
-              ? Number(service.priceWithoutSamagri)
-              : bookingPrice;
-
-          platformCommission = Number(
-            (purohitBasePrice * (commissionPercentage / 100)).toFixed(2),
-          );
-          purohitPayoutAmount = Number(
-            (purohitBasePrice - platformCommission).toFixed(2),
-          );
-        } else {
-          const exactPrice =
-            dto.bookingMode === BOOKING_MODE.ONLINE
-              ? Number(matchingPurohitService.onlinePrice)
-              : Number(matchingPurohitService.offlinePrice);
-
-          if (!exactPrice || exactPrice <= 0) {
-            throw new BadRequestException(
-              'Exact price is not configured for this mode by the selected Purohit',
-            );
-          }
-
-          bookingPrice = exactPrice;
-          purohitPayoutAmount = exactPrice;
-          platformCommission = Number(
-            (exactPrice * (commissionPercentage / 100)).toFixed(2),
+        const commissionPercentage = Number(service.commissionPercentage);
+        if (
+          !Number.isFinite(commissionPercentage) ||
+          commissionPercentage < 0 ||
+          commissionPercentage > 100
+        ) {
+          throw new BadRequestException(
+            'A valid commission percentage is not configured for this service',
           );
         }
-        */
 
         const donationAmount = Number(dto.donationAmount ?? 0);
+        if (!Number.isFinite(donationAmount) || donationAmount < 0) {
+          throw new BadRequestException(
+            'Donation amount must be zero or greater',
+          );
+        }
 
         let appliedCoupon: Coupon | null = null;
         let discountAmount = 0;
@@ -4224,25 +4414,32 @@ export class BookingService {
             customer.id,
             service.id,
             dto.couponCode.trim().toUpperCase(),
-            bookingPrice, // Use resolved booking price
+            bookingPrice,
           );
           appliedCoupon = couponResult.coupon;
           discountAmount = couponResult.discountAmount;
         }
 
+        const purohitBasePrice =
+          service.plans?.basic?.price != null && Number(service.plans.basic.price) > 0
+            ? Number(service.plans.basic.price)
+            : bookingPrice;
+
+        const platformCommission = Number(
+          (purohitBasePrice * (commissionPercentage / 100)).toFixed(2),
+        );
+        const purohitPayoutAmount = Number(
+          (purohitBasePrice - platformCommission).toFixed(2),
+        );
+
         const finalAmount = Number(
           (bookingPrice - discountAmount + donationAmount).toFixed(2),
         );
 
-        // Effective Token Percentage: defaults to 30 if null or not set on service
-        const effectiveTokenPercentage =
-          service.tokenPercentage != null && Number(service.tokenPercentage) > 0
-            ? Number(service.tokenPercentage)
-            : 30;
-
-        const tokenAmount = Number(
-          ((finalAmount * effectiveTokenPercentage) / 100).toFixed(2),
-        );
+        // TOKEN PAYMENT BYPASS FOR ADMIN-CREATED BOOKINGS:
+        // No token payment required, no Razorpay URL created.
+        const tokenPercentage = null;
+        const tokenAmount = null;
         const paidAmount = 0.0;
         const remainingAmount = finalAmount;
 
@@ -4259,11 +4456,12 @@ export class BookingService {
           bookingMode: dto.bookingMode as BOOKING_MODE,
           scheduledAt,
           specialInstructions: dto.specialInstructions?.trim() || undefined,
-          customFields: dto.customFields ?? undefined,
+          customFields: {
+            ...(dto.customFields || {}),
+            createdByAdmin: true,
+          },
           commissionPercentage,
-          plan: selectedPlan ?? undefined,
-          // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
-          // samagriIncluded: (dto as any).samagriIncluded ?? false,
+          plan: selectedPlan,
           servicePrice: bookingPrice,
           platformCommission,
           purohitPayoutAmount,
@@ -4271,16 +4469,51 @@ export class BookingService {
           discountAmount,
           donationAmount,
           finalAmount,
-          tokenPercentage: effectiveTokenPercentage,
+          tokenPercentage,
           tokenAmount,
           paidAmount,
           remainingAmount,
-          status: BOOKING_STATUS.ACCEPTED,
+          // TODO: Deprecated. Admin-created bookings previously always required manual assignment and NOT_REQUIRED status:
+          // status: BOOKING_STATUS.CONFIRMED,
+          // paymentStatus: BOOKING_PAYMENT_STATUS.NOT_REQUIRED,
+          // assignmentType: ASSIGNMENT_TYPE.MANUAL,
+          // purohitId: dto.purohitId,
+          status: assignedPurohitProfile ? BOOKING_STATUS.ACCEPTED : BOOKING_STATUS.PENDING,
+          paymentType: BOOKING_PAYMENT_TYPE.DEFERRED,
           paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
-          assignmentType: ASSIGNMENT_TYPE.MANUAL,
-          purohitId: purohitProfile.id,
-          filteredPurohitIds: [purohitProfile.id],
+          assignmentType: assignedPurohitProfile ? ASSIGNMENT_TYPE.MANUAL : ASSIGNMENT_TYPE.AUTO,
+          purohitId: assignedPurohitProfile ? assignedPurohitProfile.id : undefined,
+          filteredPurohitIds: assignedPurohitProfile ? [assignedPurohitProfile.id] : [],
         });
+
+        let eligiblePurohitUserIds: number[] = [];
+
+        if (!assignedPurohitProfile) {
+          // IMMEDIATE ASSIGNMENT ELIGIBILITY (AUTO ASSIGNMENT):
+          // Admin-created bookings without a specified Purohit bypass token payment and immediately become eligible for AUTO assignment.
+          const eligiblePurohitIds =
+            await this.assignmentService.findEligiblePurohitIds(
+              manager,
+              booking,
+            );
+
+          booking.filteredPurohitIds = eligiblePurohitIds;
+
+          if (eligiblePurohitIds.length > 0) {
+            const purohitProfiles = await manager
+              .getRepository(PurohitProfile)
+              .createQueryBuilder('profile')
+              .select(['profile.id', 'profile.userId'])
+              .where('profile.id IN (:...purohitProfileIds)', {
+                purohitProfileIds: eligiblePurohitIds,
+              })
+              .getMany();
+
+            eligiblePurohitUserIds = purohitProfiles.map(
+              (profile) => profile.userId,
+            );
+          }
+        }
 
         const savedBooking = await bookingRepository.save(booking);
 
@@ -4309,91 +4542,96 @@ export class BookingService {
             oldValue: undefined,
             newValue: {
               status: savedBooking.status,
+              paymentStatus: savedBooking.paymentStatus,
+              plan: savedBooking.plan,
+              serviceId: savedBooking.serviceId,
+              scheduledAt: savedBooking.scheduledAt,
               purohitId: savedBooking.purohitId,
-              customerId: savedBooking.customerId,
             },
           },
           manager,
         );
 
-        const formattedSavedBooking = {
-          ...savedBooking,
-          scheduledAtIst: this.toIstString(savedBooking.scheduledAt),
-          createdAtIst: this.toIstString(savedBooking.createdAt),
-          updatedAtIst: this.toIstString(savedBooking.updatedAt),
-          plan: savedBooking.plan ?? null,
-          servicePrice: savedBooking.servicePrice ? Number(savedBooking.servicePrice) : null,
-          plans: service.plans ?? null,
-          // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
-          // samagriIncluded: savedBooking.samagriIncluded,
-          // priceWithoutSamagri: service.priceWithoutSamagri ? Number(service.priceWithoutSamagri) : null,
-          // priceWithSamagri: service.priceWithSamagri ? Number(service.priceWithSamagri) : null,
-          minPrice: Number(service.minPrice),
-          maxPrice: Number(service.maxPrice),
-          priceRange: `${Number(service.minPrice)} - ${Number(service.maxPrice)}`,
-        };
-
         return {
-          formattedSavedBooking,
-          notifyPurohitId: dto.purohitId,
-          notifyCustomerId: customer.id,
+          savedBooking,
+          assignedPurohitUser,
+          eligiblePurohitUserIds,
           customer,
-          purohitUser,
           service,
           customerAddress,
         };
       });
 
-      if (transactionResult.notifyPurohitId) {
-        // TODO: commented out to avoid duplicate notification
-        // this.bookingGateway.notifyUser(
-        //   transactionResult.notifyPurohitId,
-        //   'create_booking_by_admin',
-        //   transactionResult.formattedSavedBooking,
-        // );
-
-        await this.notificationService.createNotification(
-          transactionResult.notifyPurohitId,
-          'Booking Assigned',
-          `Booking B-${transactionResult.formattedSavedBooking.id} assigned to you by admin`,
-          NOTIFICATION_TYPE.BOOKING,
-          transactionResult.formattedSavedBooking.id,
-          'BOOKING',
-        );
+      if (transactionResult.assignedPurohitUser) {
+        try {
+          await this.notificationService.createNotification(
+            transactionResult.assignedPurohitUser.id,
+            'Booking Assigned',
+            `Booking B-${transactionResult.savedBooking.id} assigned to you by admin`,
+            NOTIFICATION_TYPE.BOOKING,
+            transactionResult.savedBooking.id,
+            'BOOKING',
+          );
+        } catch (err: any) {
+          this.logger.warn(
+            `Failed to notify assigned Purohit ${transactionResult.assignedPurohitUser.id}: ${err?.message}`,
+          );
+        }
+      } else {
+        // Dispatch notifications to eligible Purohits
+        for (const purohitUserId of transactionResult.eligiblePurohitUserIds) {
+          try {
+            await this.notificationService.createNotification(
+              purohitUserId,
+              'New Booking',
+              `You have received a new booking request (Booking B-${transactionResult.savedBooking.id}).`,
+              NOTIFICATION_TYPE.BOOKING,
+              transactionResult.savedBooking.id,
+              'BOOKING',
+            );
+          } catch (err: any) {
+            this.logger.warn(`Failed to notify Purohit ${purohitUserId}: ${err?.message}`);
+          }
+        }
       }
 
-      // TODO: commented out to avoid duplicate notification
-      // this.bookingGateway.notifyUser(
-      //   transactionResult.notifyCustomerId,
-      //   'create_booking_by_admin',
-      //   transactionResult.formattedSavedBooking,
-      // );
-
-      await this.notificationService.createNotification(
-        transactionResult.notifyCustomerId,
-        'Booking Created',
-        `Booking B-${transactionResult.formattedSavedBooking.id} created by admin for you`,
-        NOTIFICATION_TYPE.BOOKING,
-        transactionResult.formattedSavedBooking.id,
-        'BOOKING',
-      );
+      // Notify customer
+      try {
+        await this.notificationService.createNotification(
+          transactionResult.customer.id,
+          'Booking Created',
+          `Booking B-${transactionResult.savedBooking.id} created by admin for you`,
+          NOTIFICATION_TYPE.BOOKING,
+          transactionResult.savedBooking.id,
+          'BOOKING',
+        );
+      } catch (err: any) {
+        this.logger.warn(`Failed to notify customer: ${err?.message}`);
+      }
 
       // Email notifications
       const {
-        formattedSavedBooking: b,
+        savedBooking: b,
+        assignedPurohitUser,
         customer,
-        purohitUser,
         service,
         customerAddress,
       } = transactionResult;
 
       const customerName = customer.firstName || 'Customer';
-      const purohitName = purohitUser?.firstName || 'Purohit';
       const addressString = `${customerAddress.fullAddress}, ${customerAddress.city} - ${customerAddress.pincode}`;
+      const scheduledDateStr = b.scheduledAt
+        ? new Date(b.scheduledAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+        : 'Scheduled Date';
+      const splitDate = scheduledDateStr.split(', ');
+      const bookingDate = splitDate[0] || 'Scheduled Date';
+      const bookingTime = splitDate[1] || 'Scheduled Time';
 
-      const splitDateIst = b.scheduledAtIst ? b.scheduledAtIst.split(', ') : [];
-      const bookingDate = splitDateIst.length > 0 ? splitDateIst[0] : b.scheduledAt.toLocaleDateString();
-      const bookingTime = splitDateIst.length > 1 ? splitDateIst[1] : b.scheduledAt.toLocaleTimeString();
+      const purohitName = assignedPurohitUser
+        ? (assignedPurohitUser.firstName
+            ? `${assignedPurohitUser.firstName} ${assignedPurohitUser.lastName || ''}`.trim()
+            : 'Purohit')
+        : 'To be assigned';
 
       if (customer.email) {
         try {
@@ -4420,11 +4658,13 @@ export class BookingService {
         }
       }
 
-      if (purohitUser && purohitUser.email) {
+      if (assignedPurohitUser && assignedPurohitUser.email && this.emailService) {
         try {
-          this.logger.log(`[BookingEmail] Sending booking assignment email to Purohit for booking B-${b.id}...`);
+          this.logger.log(
+            `[BookingEmail] Sending booking assignment email to Purohit for booking B-${b.id}...`,
+          );
           await this.emailService.sendPurohitBookingAssignmentEmail({
-            email: purohitUser.email,
+            email: assignedPurohitUser.email,
             purohitName,
             bookingId: b.bookingNumber,
             customerName,
@@ -4439,13 +4679,34 @@ export class BookingService {
             bookingStatus: b.status,
             specialInstructions: b.specialInstructions,
           });
-          this.logger.log(`[BookingEmail] Purohit booking email sent successfully for booking B-${b.id}.`);
+          this.logger.log(
+            `[BookingEmail] Purohit booking email sent successfully for booking B-${b.id}.`,
+          );
         } catch (error) {
-          this.logger.error(`[BookingEmail] Failed to send Purohit booking email for booking B-${b.id}`, error instanceof Error ? error.stack : String(error));
+          this.logger.error(
+            `[BookingEmail] Failed to send Purohit booking email for booking B-${b.id}`,
+            error instanceof Error ? error.stack : String(error),
+          );
         }
       }
 
-      return transactionResult.formattedSavedBooking as any;
+      // TODO: Deprecated returning entire booking entity.
+      // Now returns refined CreateBookingByAdminResponse structure without internal fields.
+      // return transactionResult.formattedSavedBooking as any;
+
+      const responseData: CreateBookingByAdminResponse = {
+        bookingId: transactionResult.savedBooking.id,
+        bookingNumber: transactionResult.savedBooking.bookingNumber,
+        plan: transactionResult.savedBooking.plan ?? null,
+        status: transactionResult.savedBooking.status,
+        paymentType: transactionResult.savedBooking.paymentType ?? BOOKING_PAYMENT_TYPE.DEFERRED,
+        paymentStatus: transactionResult.savedBooking.paymentStatus,
+        paymentId: null,
+        paymentUrl: null,
+        purohitId: transactionResult.savedBooking.purohitId ?? null,
+      };
+
+      return responseData;
     } catch (error) {
       if (
         error instanceof QueryFailedError &&

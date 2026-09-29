@@ -17,6 +17,7 @@ import { NotificationModule } from '@poojawala/notification';
 import { GatewayModule } from '@poojawala/gateway';
 import { CommonModule } from '@poojawala/common';
 import { EmailServicesModule } from '@poojawala/email-services';
+import { AssignmentModule } from '../../../user-service/src/assignment/assignment.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { EmailServicesModule } from '@poojawala/email-services';
     GatewayModule,
     CommonModule,
     EmailServicesModule,
+    AssignmentModule,
   ],
   controllers: [PaymentController],
   providers: [PaymentService, BookingRepository, PaymentRepository],

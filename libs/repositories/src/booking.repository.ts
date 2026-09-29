@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
-import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, USER_ROLE, ASSIGNMENT_TYPE, PAYMENT_TYPE } from '@poojawala/entities';
+import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, BOOKING_PAYMENT_TYPE, USER_ROLE, ASSIGNMENT_TYPE, PAYMENT_TYPE } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 interface FindBookingsByRoleOptions {
@@ -321,6 +321,24 @@ export class BookingRepository extends BaseRepository<Booking> {
         assignmentType: ASSIGNMENT_TYPE.AUTO,
       })
       .andWhere('booking."purohitId" IS NULL')
+      // TODO: Deprecated. Admin-created bookings now use DEFERRED payment type instead of NOT_REQUIRED status.
+      // .andWhere('booking.paymentStatus IN (:...paidStatuses)', {
+      //   paidStatuses: [
+      //     BOOKING_PAYMENT_STATUS.PAID,
+      //     BOOKING_PAYMENT_STATUS.PARTIAL,
+      //     BOOKING_PAYMENT_STATUS.NOT_REQUIRED,
+      //   ],
+      // })
+      .andWhere(
+        '(booking.paymentStatus IN (:...paidStatuses) OR booking.paymentType = :deferredPaymentType)',
+        {
+          paidStatuses: [
+            BOOKING_PAYMENT_STATUS.PAID,
+            BOOKING_PAYMENT_STATUS.PARTIAL,
+          ],
+          deferredPaymentType: BOOKING_PAYMENT_TYPE.DEFERRED,
+        },
+      )
       .andWhere(
         `
         booking."filteredPurohitIds" IS NOT NULL
@@ -586,6 +604,24 @@ export class BookingRepository extends BaseRepository<Booking> {
         assignmentType: ASSIGNMENT_TYPE.AUTO,
       })
       .andWhere('"purohitId" IS NULL')
+      // TODO: Deprecated. Admin-created bookings now use DEFERRED payment type instead of NOT_REQUIRED status.
+      // .andWhere('"paymentStatus" IN (:...paidStatuses)', {
+      //   paidStatuses: [
+      //     BOOKING_PAYMENT_STATUS.PAID,
+      //     BOOKING_PAYMENT_STATUS.PARTIAL,
+      //     BOOKING_PAYMENT_STATUS.NOT_REQUIRED,
+      //   ],
+      // })
+      .andWhere(
+        '("paymentStatus" IN (:...paidStatuses) OR "paymentType" = :deferredPaymentType)',
+        {
+          paidStatuses: [
+            BOOKING_PAYMENT_STATUS.PAID,
+            BOOKING_PAYMENT_STATUS.PARTIAL,
+          ],
+          deferredPaymentType: BOOKING_PAYMENT_TYPE.DEFERRED,
+        },
+      )
       .andWhere(
         `"createdAt" <= CURRENT_TIMESTAMP - INTERVAL '24 hours'`,
       )

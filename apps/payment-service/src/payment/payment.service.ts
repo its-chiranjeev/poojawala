@@ -57,11 +57,14 @@ import {
   NOTIFICATION_TYPE,
   PurohitProfile,
   PurohitBankAccount,
+  ASSIGNMENT_TYPE,
+  BOOKING_PAYMENT_TYPE,
 } from '@poojawala/entities';
 import { BookingGateway } from '@poojawala/gateway';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
 import { EmailService, renderPoojawalaEmail } from '@poojawala/email-services';
+import { AssignmentService } from '../../../user-service/src/assignment/assignment.service';
 
 interface RazorpayError {
   error?: {
@@ -377,6 +380,7 @@ export class PaymentService {
     private readonly auditLogService: AuditLogService,
     @Optional() private readonly emailService?: EmailService,
     @Optional() private readonly configService?: ConfigService,
+    @Optional() private readonly assignmentService?: AssignmentService,
   ) {
     const keyId = process.env['RAZORPAY_KEY_ID'];
     const keySecret = process.env['RAZORPAY_KEY_SECRET'];
@@ -3381,6 +3385,7 @@ export class PaymentService {
     const wasPaymentPaid =
       payment.booking?.paymentStatus === BOOKING_PAYMENT_STATUS.PAID;
     let wasOrderAlreadyPaid = false;
+    let newlyAssignedPurohitUserIds: number[] = [];
 
     await this.dataSource.transaction(async (manager) => {
       await manager.save(Payment, payment);
@@ -3440,6 +3445,51 @@ export class PaymentService {
             booking.paymentStatus = BOOKING_PAYMENT_STATUS.PARTIAL;
           } else {
             booking.paymentStatus = BOOKING_PAYMENT_STATUS.PENDING;
+          }
+
+          // TOKEN PAYMENT GATE: Trigger AUTO assignment only when token (or full) payment is confirmed (or deferred for admin)
+          // TODO: Deprecated. Admin-created bookings now use DEFERRED payment type instead of NOT_REQUIRED status.
+          // const isEligibleForAssignment =
+          //   (booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
+          //     booking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL ||
+          //     booking.paymentStatus === BOOKING_PAYMENT_STATUS.NOT_REQUIRED) &&
+          //   booking.status === BOOKING_STATUS.PENDING &&
+          //   !booking.purohitId;
+          const isEligibleForAssignment =
+            (booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
+              booking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL ||
+              booking.paymentType === BOOKING_PAYMENT_TYPE.DEFERRED) &&
+            booking.status === BOOKING_STATUS.PENDING &&
+            !booking.purohitId;
+
+          if (
+            isEligibleForAssignment &&
+            (!booking.filteredPurohitIds || booking.filteredPurohitIds.length === 0)
+          ) {
+            if (this.assignmentService) {
+              const eligiblePurohitIds =
+                await this.assignmentService.findEligiblePurohitIds(
+                  manager,
+                  booking,
+                );
+              booking.filteredPurohitIds = eligiblePurohitIds;
+              booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
+
+              if (eligiblePurohitIds.length > 0) {
+                const purohitProfiles = await manager
+                  .getRepository(PurohitProfile)
+                  .createQueryBuilder('profile')
+                  .select(['profile.id', 'profile.userId'])
+                  .where('profile.id IN (:...purohitProfileIds)', {
+                    purohitProfileIds: eligiblePurohitIds,
+                  })
+                  .getMany();
+
+                newlyAssignedPurohitUserIds = purohitProfiles.map(
+                  (p) => p.userId,
+                );
+              }
+            }
           }
 
           await manager.save(Booking, booking);
@@ -3715,6 +3765,25 @@ export class PaymentService {
             status: 'PAID',
           },
         );
+
+        if (newlyAssignedPurohitUserIds.length > 0) {
+          for (const purohitUserId of newlyAssignedPurohitUserIds) {
+            try {
+              await this.notificationService.createNotification(
+                purohitUserId,
+                'New Booking',
+                `You have received a new booking request (Booking B-${payment.booking.id}).`,
+                NOTIFICATION_TYPE.BOOKING,
+                payment.booking.id,
+                'BOOKING',
+              );
+            } catch (notifyErr: any) {
+              this.logger.warn(
+                `Failed to notify Purohit ${purohitUserId}: ${notifyErr?.message}`,
+              );
+            }
+          }
+        }
 
       if (!wasBookingCompleted) {
         this.bookingGateway.notifyUser(

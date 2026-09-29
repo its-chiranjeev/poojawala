@@ -40,6 +40,17 @@ export enum BOOKING_PAYMENT_STATUS {
   FAILED = 'FAILED',
   PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
   REFUNDED = 'REFUNDED',
+  // TODO: Deprecated.
+  // Payment is required for every booking, including Admin-created bookings.
+  // Admin-created bookings only defer when the payment is collected.
+  // NOT_REQUIRED should no longer be used as a payment status.
+  // NOT_REQUIRED = 'NOT_REQUIRED',
+}
+
+export enum BOOKING_PAYMENT_TYPE {
+  TOKEN = 'TOKEN',
+  FULL = 'FULL',
+  DEFERRED = 'DEFERRED',
 }
 
 export enum ASSIGNMENT_TYPE {
@@ -187,6 +198,13 @@ export class Booking {
     default: BOOKING_PAYMENT_STATUS.PENDING,
   })
   paymentStatus!: BOOKING_PAYMENT_STATUS;
+
+  @Column({
+    type: 'enum',
+    enum: BOOKING_PAYMENT_TYPE,
+    default: BOOKING_PAYMENT_TYPE.TOKEN,
+  })
+  paymentType!: BOOKING_PAYMENT_TYPE;
 
   @Column({ type: 'int', nullable: true })
   bookingPaymentId?: number;
