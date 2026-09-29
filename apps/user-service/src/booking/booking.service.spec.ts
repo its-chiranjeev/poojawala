@@ -3,6 +3,7 @@ jest.mock('puppeteer', () => ({}));
 
 import { BadRequestException } from '@nestjs/common';
 import { BookingService } from './booking.service';
+import { BookingController } from './booking.controller';
 import { ServiceService } from '../service/service.service';
 import {
   Booking,
@@ -227,6 +228,11 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       mockAuditLogService as any,
     );
   });
+
+  const getLastSavedBooking = () => {
+    const calls = mockBookingRepo.save.mock.calls;
+    return calls[calls.length - 1][0];
+  };
 
   // ══════════════════════════════════════════════════════════════════════════════
   // Service Create (Scenarios 1 - 12)
@@ -675,14 +681,17 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         plan: 'basic',
       });
 
-      expect(res.plan).toBe(SERVICE_PLAN.BASIC);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.plan).toBe(SERVICE_PLAN.BASIC);
+      expect(res.bookingId).toBe(999);
+      expect(res.status).toBe(BOOKING_STATUS.PENDING);
     });
 
     it('20. Backend resolves plans.basic.price', async () => {
       const service = createPlanService();
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -690,10 +699,11 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         plan: 'basic',
       });
 
-      expect(res.servicePrice).toBe(4100);
-      expect(res.finalAmount).toBe(4100);
-      expect(res.platformCommission).toBe(410);
-      expect(res.purohitPayoutAmount).toBe(3690);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.servicePrice).toBe(4100);
+      expect(savedBooking.finalAmount).toBe(4100);
+      expect(savedBooking.platformCommission).toBe(410);
+      expect(savedBooking.purohitPayoutAmount).toBe(3690);
     });
 
     it('21. Book with plan=standard', async () => {
@@ -708,14 +718,16 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         plan: 'standard',
       });
 
-      expect(res.plan).toBe(SERVICE_PLAN.STANDARD);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.plan).toBe(SERVICE_PLAN.STANDARD);
+      expect(res.bookingId).toBe(999);
     });
 
     it('22. Backend resolves plans.standard.price', async () => {
       const service = createPlanService();
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -723,10 +735,11 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         plan: 'standard',
       });
 
-      expect(res.servicePrice).toBe(6100);
-      expect(res.finalAmount).toBe(6100);
-      expect(res.platformCommission).toBe(410);
-      expect(res.purohitPayoutAmount).toBe(3690);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.servicePrice).toBe(6100);
+      expect(savedBooking.finalAmount).toBe(6100);
+      expect(savedBooking.platformCommission).toBe(410);
+      expect(savedBooking.purohitPayoutAmount).toBe(3690);
     });
 
     it('23. Invalid plan rejected', async () => {
@@ -748,7 +761,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       const service = createPlanService();
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -757,15 +770,16 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         price: 1 as any, // Attacker attempts to book for ₹1
       } as any);
 
-      expect(res.servicePrice).toBe(4100);
-      expect(res.servicePrice).not.toBe(1);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.servicePrice).toBe(4100);
+      expect(savedBooking.servicePrice).not.toBe(1);
     });
 
     it('25. Frontend amount manipulation ignored/rejected', async () => {
       const service = createPlanService();
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -775,15 +789,16 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         finalAmount: 1 as any,
       } as any);
 
-      expect(res.finalAmount).toBe(4100);
-      expect(res.finalAmount).not.toBe(1);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.finalAmount).toBe(4100);
+      expect(savedBooking.finalAmount).not.toBe(1);
     });
 
     it('26. servicePrice snapshot is correct', async () => {
       const service = createPlanService();
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -791,15 +806,16 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         plan: 'basic',
       });
 
-      expect(res.servicePrice).toBe(4100);
-      expect(res.plan).toBe(SERVICE_PLAN.BASIC);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.servicePrice).toBe(4100);
+      expect(savedBooking.plan).toBe(SERVICE_PLAN.BASIC);
     });
 
     it('27. finalAmount is calculated correctly with donation and discount', async () => {
       const service = createPlanService();
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -809,9 +825,10 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       });
 
       // 4100 + 50 = 4150
-      expect(res.servicePrice).toBe(4100);
-      expect(res.donationAmount).toBe(50);
-      expect(res.finalAmount).toBe(4150);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.servicePrice).toBe(4100);
+      expect(savedBooking.donationAmount).toBe(50);
+      expect(savedBooking.finalAmount).toBe(4150);
     });
   });
 
@@ -837,7 +854,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       const service = createPlanService({ tokenPercentage: 20 });
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -846,10 +863,11 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       });
 
       // 20% of 4100 = 820
-      expect(res.finalAmount).toBe(4100);
-      expect(res.tokenPercentage).toBe(20);
-      expect(res.tokenAmount).toBe(820);
-      expect(res.remainingAmount).toBe(4100);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.finalAmount).toBe(4100);
+      expect(savedBooking.tokenPercentage).toBe(20);
+      expect(savedBooking.tokenAmount).toBe(820);
+      expect(savedBooking.remainingAmount).toBe(4100);
     });
 
     it('30. Full payment remains correct', () => {
@@ -971,16 +989,15 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
           paymentOption: 'TOKEN',
         }),
       );
-      expect(res.payment).toBeDefined();
-      expect(res.payment.paymentId).toBe(555);
-      expect(res.payment.status).toBe('CREATED');
+      expect(res.paymentId).toBe(555);
+      expect(res.paymentUrl).toBe('https://rzp.io/i/testlink');
     });
 
     it('2. Booking with FULL option creates payment link for full amount', async () => {
       const service = createPlanService();
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -996,14 +1013,15 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
           paymentOption: 'FULL',
         }),
       );
-      expect(res.booking.finalAmount).toBe(6100);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.finalAmount).toBe(6100);
     });
 
     it('3. Token percentage defaults to 30% when not configured on service', async () => {
       const service = createPlanService({ tokenPercentage: null as any });
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -1012,15 +1030,16 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       });
 
       // Default 30% of 4100 = 1230
-      expect(res.tokenPercentage).toBe(30);
-      expect(res.tokenAmount).toBe(1230);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.tokenPercentage).toBe(30);
+      expect(savedBooking.tokenAmount).toBe(1230);
     });
 
     it('4. Service-specific token percentage override is respected', async () => {
       const service = createPlanService({ tokenPercentage: 40 });
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -1029,8 +1048,9 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       });
 
       // 40% of 6100 = 2440
-      expect(res.tokenPercentage).toBe(40);
-      expect(res.tokenAmount).toBe(2440);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.tokenPercentage).toBe(40);
+      expect(savedBooking.tokenAmount).toBe(2440);
     });
 
     it('5. Token amount calculation rounds to 2 decimal places', async () => {
@@ -1044,7 +1064,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       });
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -1052,7 +1072,8 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         plan: 'basic',
       });
 
-      expect(res.tokenAmount).toBe(2699.73);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.tokenAmount).toBe(2699.73);
     });
 
     it('6. Donation included in final amount according to business rules', async () => {
@@ -1065,7 +1086,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       });
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -1074,9 +1095,10 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         donationAmount: 101,
       });
 
-      expect(res.finalAmount).toBe(8201);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.finalAmount).toBe(8201);
       // 30% of 8201 = 2460.30
-      expect(res.tokenAmount).toBe(2460.30);
+      expect(savedBooking.tokenAmount).toBe(2460.30);
     });
 
     it('7. Discount calculation is applied correctly before token calculation', async () => {
@@ -1095,7 +1117,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         discountAmount: 500,
       });
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -1104,10 +1126,11 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         couponCode: 'SAVE500',
       });
 
-      expect(res.discountAmount).toBe(500);
-      expect(res.finalAmount).toBe(4500);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.discountAmount).toBe(500);
+      expect(savedBooking.finalAmount).toBe(4500);
       // 30% of 4500 = 1350
-      expect(res.tokenAmount).toBe(1350);
+      expect(savedBooking.tokenAmount).toBe(1350);
     });
 
     it('8. Frontend cannot manipulate price', async () => {
@@ -1119,7 +1142,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       });
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -1128,14 +1151,15 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         servicePrice: 10,
       } as any);
 
-      expect(res.servicePrice).toBe(4100);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.servicePrice).toBe(4100);
     });
 
     it('9. Frontend cannot manipulate token percentage', async () => {
       const service = createPlanService({ tokenPercentage: 30 });
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -1144,14 +1168,15 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         tokenPercentage: 5,
       } as any);
 
-      expect(res.tokenPercentage).toBe(30);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.tokenPercentage).toBe(30);
     });
 
     it('10. Frontend cannot manipulate token amount', async () => {
       const service = createPlanService({ tokenPercentage: 30 });
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -1160,14 +1185,15 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         tokenAmount: 1,
       } as any);
 
-      expect(res.tokenAmount).toBe(1230);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.tokenAmount).toBe(1230);
     });
 
     it('11. Initial booking paidAmount = 0', async () => {
       const service = createPlanService();
       mockServiceRepo.findOne.mockResolvedValue(service);
 
-      const res = await bookingService.createBooking(mockCustomerUser, {
+      await bookingService.createBooking(mockCustomerUser, {
         serviceId: 5,
         customerAddressId: mockAddress.id,
         scheduledAt: new Date(Date.now() + 86400000).toISOString(),
@@ -1175,8 +1201,9 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         plan: 'basic',
       });
 
-      expect(res.paidAmount).toBe(0);
-      expect(res.remainingAmount).toBe(res.finalAmount);
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.paidAmount).toBe(0);
+      expect(savedBooking.remainingAmount).toBe(savedBooking.finalAmount);
     });
 
     it('12. Initial booking paymentStatus = PENDING', async () => {
@@ -1191,6 +1218,8 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         plan: 'basic',
       });
 
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.paymentStatus).toBe(BOOKING_PAYMENT_STATUS.PENDING);
       expect(res.paymentStatus).toBe(BOOKING_PAYMENT_STATUS.PENDING);
     });
 
@@ -1328,7 +1357,9 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         plan: 'basic',
       });
 
-      expect(res.bookingMode).toBe('OFFLINE');
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.bookingMode).toBe('OFFLINE');
+      expect(savedBooking.paymentStatus).toBe(BOOKING_PAYMENT_STATUS.PENDING);
       expect(res.paymentStatus).toBe(BOOKING_PAYMENT_STATUS.PENDING);
     });
 
@@ -1349,6 +1380,127 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
 
       expect(basicTokenAmount).toBe(500); // 25% of 2000
       expect(standardTokenAmount).toBe(1250); // 25% of 5000
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // Refined POST Create Booking API Response
+  // ══════════════════════════════════════════════════════════════════════════════
+  describe('Refined POST Create Booking API Response', () => {
+    it('1. Payment required: controller returns refined data with paymentId, paymentUrl, and standard 201 wrapper', async () => {
+      const service = createPlanService();
+      mockServiceRepo.findOne.mockResolvedValue(service);
+      const controller = new BookingController(bookingService);
+
+      const res = await controller.createBooking({ user: mockCustomerUser } as any, {
+        serviceId: 5,
+        customerAddressId: mockAddress.id,
+        scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+        bookingMode: 'OFFLINE',
+        plan: 'basic',
+      });
+
+      expect(res).toEqual({
+        bookingId: 999,
+        bookingNumber: expect.stringMatching(/^PW/),
+        status: BOOKING_STATUS.PENDING,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+        paymentId: 555,
+        paymentUrl: 'https://rzp.io/i/testlink',
+      });
+
+      // Explicitly assert that internal entity fields are NOT leaked in data
+      const leakedFields = [
+        'customerId',
+        'customerAddressId',
+        'addressSnapshot',
+        'customerPincode',
+        'scheduledAt',
+        'specialInstructions',
+        'customFields',
+        'agreedPrice',
+        'commissionPercentage',
+        'platformCommission',
+        'purohitPayoutAmount',
+        'couponCode',
+        'discountAmount',
+        'donationAmount',
+        'finalAmount',
+        'assignmentType',
+        'filteredPurohitIds',
+        'completionPhotoUrls',
+        'completionOtp',
+        'completionConfirmedAt',
+        'cancelledBy',
+        'cancellationReason',
+        'customerReview',
+        'customerRating',
+        'purohitReview',
+        'purohitRating',
+        'reviewStatus',
+        'createdAt',
+        'updatedAt',
+        'deletedAt',
+      ];
+      for (const field of leakedFields) {
+        expect(res).not.toHaveProperty(field);
+      }
+      expect(Object.keys(res).sort()).toEqual([
+        'bookingId',
+        'bookingNumber',
+        'paymentId',
+        'paymentStatus',
+        'paymentUrl',
+        'status',
+      ]);
+    });
+
+    it('2. Payment not required / absent: controller returns paymentId and paymentUrl as null', async () => {
+      const service = createPlanService();
+      mockServiceRepo.findOne.mockResolvedValue(service);
+
+      // Instantiate booking service without paymentService
+      const bookingServiceNoPayment = new BookingService(
+        mockBookingRepository,
+        mockDataSource,
+        mockS3Service,
+        mockSmsService,
+        mockEmailService,
+        mockAssignmentService,
+        mockBookingGateway,
+        mockNotificationService,
+        mockAuditLogService,
+        undefined, // no payment service
+      );
+      const controller = new BookingController(bookingServiceNoPayment);
+
+      const res = await controller.createBooking({ user: mockCustomerUser } as any, {
+        serviceId: 5,
+        customerAddressId: mockAddress.id,
+        scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+        bookingMode: 'OFFLINE',
+        plan: 'basic',
+      });
+
+      expect(res).toEqual({
+        bookingId: 999,
+        bookingNumber: expect.stringMatching(/^PW/),
+        status: BOOKING_STATUS.PENDING,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+        paymentId: null,
+        paymentUrl: null,
+      });
+
+      expect(res.paymentId).toBeNull();
+      expect(res.paymentUrl).toBeNull();
+      expect(Object.keys(res).sort()).toEqual([
+        'bookingId',
+        'bookingNumber',
+        'paymentId',
+        'paymentStatus',
+        'paymentUrl',
+        'status',
+      ]);
     });
   });
 });

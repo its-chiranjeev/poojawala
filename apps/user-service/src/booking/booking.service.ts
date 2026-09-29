@@ -7,6 +7,7 @@ import {
   InternalServerErrorException,
   Logger,
   Optional,
+  HttpStatus,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { randomInt } from 'crypto';
@@ -58,6 +59,15 @@ import {
   RepeatBookingDto,
   RescheduleBookingDto,
 } from '@poojawala/dtos';
+
+export interface CreateBookingResponse {
+  bookingId: number;
+  bookingNumber: string;
+  status: BOOKING_STATUS;
+  paymentStatus: BOOKING_PAYMENT_STATUS;
+  paymentId: number | string | null;
+  paymentUrl: string | null;
+}
 import { S3Service } from '@poojawala/s3';
 import { SmsService } from '@poojawala/sms-services';
 import { EmailService } from '@poojawala/email-services';
@@ -161,7 +171,10 @@ export class BookingService {
     }
   }
 
-  async createBooking(user: User, dto: CreateBookingDto): Promise<Booking> {
+  async createBooking(
+    user: User,
+    dto: CreateBookingDto,
+  ): Promise<CreateBookingResponse> {
     if (user.role !== USER_ROLE.CUSTOMER) {
       throw new ForbiddenException('Only customers can create bookings');
     }
@@ -663,6 +676,8 @@ export class BookingService {
         }
       }
 
+      // TODO: Previous implementation returned full booking entity with calculations and payment info:
+      /*
       const bookingData = {
         ...transactionResult.savedBooking,
         plan: transactionResult.savedBooking.plan ?? null,
@@ -709,8 +724,8 @@ export class BookingService {
         } catch (err: any) {
           this.logger.error(
             `Failed to create payment link for booking ${transactionResult.savedBooking.id}: ${err?.message}`,
+            err?.stack,
           );
-          throw err;
         }
       }
 
@@ -719,6 +734,37 @@ export class BookingService {
         booking: bookingData,
         payment: paymentInfo,
       } as any;
+      */
+
+      let paymentLinkRes: any = null;
+      if (this.paymentService) {
+        try {
+          const paymentOption = (dto.paymentOption as any) === 'FULL' ? 'FULL' : 'TOKEN';
+          paymentLinkRes = await this.paymentService.createBookingPaymentLink(user, {
+            bookingId: transactionResult.savedBooking.id,
+            paymentOption,
+          });
+        } catch (err: any) {
+          this.logger.error(
+            `Failed to create payment link for booking ${transactionResult.savedBooking.id}: ${err?.message}`,
+            err?.stack,
+          );
+        }
+      }
+
+      const existingPaymentId = paymentLinkRes?.paymentId ?? null;
+      const existingPaymentUrl = paymentLinkRes?.paymentUrl ?? null;
+
+      const bookingData: CreateBookingResponse = {
+        bookingId: transactionResult.savedBooking.id,
+        bookingNumber: transactionResult.savedBooking.bookingNumber,
+        status: transactionResult.savedBooking.status,
+        paymentStatus: transactionResult.savedBooking.paymentStatus,
+        paymentId: existingPaymentId,
+        paymentUrl: existingPaymentUrl,
+      };
+
+      return bookingData;
     } catch (error) {
       if (
         error instanceof QueryFailedError &&
@@ -923,7 +969,7 @@ export class BookingService {
           ),
           bookingPayment:
             bookingPayment &&
-            bookingPayment.status !== PAYMENT_STATUS.CREATED
+              bookingPayment.status !== PAYMENT_STATUS.CREATED
               ? bookingPayment
               : null,
           purohitPayout: null,
@@ -3878,7 +3924,23 @@ export class BookingService {
       // samagriIncluded: dto.samagriIncluded !== undefined ? dto.samagriIncluded : (originalBooking as any).samagriIncluded,
     };
 
-    const repeatedBooking = await this.createBooking(user, createBookingDto);
+    const createResult = await this.createBooking(user, createBookingDto);
+    const newBookingId = createResult.bookingId;
+    const repeatedBooking =
+      (await this.bookingRepository.findBookingById(newBookingId)) ??
+      ({
+        id: newBookingId,
+        bookingNumber: createResult.bookingNumber,
+        status: createResult.status,
+        paymentStatus: createResult.paymentStatus,
+        scheduledAt: createBookingDto.scheduledAt,
+        serviceId: createBookingDto.serviceId,
+        customerAddressId: createBookingDto.customerAddressId,
+        finalAmount: 0,
+        filteredPurohitIds: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
 
     await this.auditLogService.createAuditLog({
       actorId: user.id,
