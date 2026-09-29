@@ -15,7 +15,19 @@ export class ServiceRepository extends BaseRepository<Service> {
   }
 
   async findAllServices(query: GetServicesQueryDto) {
-    const { page = 1, limit = 10, search, isActive, isUpcomingFestival, city, language } = query;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      isActive,
+      isUpcomingFestival,
+      isGlobal,
+      categoryId,
+      category,
+      categories,
+      city,
+      language,
+    } = query;
     console.log("=== API REQUEST RECEIVED ===");
     console.log("Original query object:", query);
 
@@ -31,45 +43,14 @@ export class ServiceRepository extends BaseRepository<Service> {
       parsedIsUpcomingFestival = String(isUpcomingFestival) === 'true';
     }
 
-    // TODO: Original findAndCount implementation kept for reference:
-    /*
-    const where: any = {
-      ...(parsedIsActive !== undefined && { isActive: parsedIsActive }),
-      ...(parsedIsUpcomingFestival !== undefined && { isUpcomingFestival: parsedIsUpcomingFestival }),
-      ...(search && {
-        name: ILike(`%${search}%`),
-      }),
-    };
+    let parsedIsGlobal: boolean | undefined = undefined;
+    if (isGlobal !== undefined) {
+      parsedIsGlobal = String(isGlobal) === 'true';
+    }
 
-    const [services, total] = await this.repo.findAndCount({
-      where,
-      order: {
-        createdAt: 'DESC',
-      },
-      skip: (page - 1) * limit,
-      take: limit,
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        description: true,
-        iconUrl: true,
-        minPrice: true,
-        maxPrice: true,
-        commissionPercentage: true,
-        durationMinutes: true,
-        requiresVenue: true,
-        isActive: true,
-        isUpcomingFestival: true,
-        festivalStartDate: true,
-        festivalEndDate: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-    */
-
-    const qb = this.repo.createQueryBuilder('service');
+    const qb = this.repo
+      .createQueryBuilder('service')
+      .leftJoinAndSelect('service.category', 'category');
 
     if (parsedIsActive !== undefined) {
       qb.andWhere('service.isActive = :isActive', { isActive: parsedIsActive });
@@ -81,13 +62,55 @@ export class ServiceRepository extends BaseRepository<Service> {
       });
     }
 
+    // TODO: Deprecated standalone isGlobal filter applied regardless of city.
+    // Previously, isGlobal was checked independently, which could conflict with city-based inclusive filtering.
+    // Retained for backward reference.
+    /*
+    // Filter: isGlobal (true = no city restriction, false = city-specific)
+    if (parsedIsGlobal !== undefined) {
+      qb.andWhere('service.isGlobal = :isGlobal', { isGlobal: parsedIsGlobal });
+    }
+    */
+    // Standalone isGlobal filter applies only when city is NOT provided.
+    // When city IS provided, global services are automatically included via inclusive OR logic.
+    if (parsedIsGlobal !== undefined && (!city || city.trim() === '')) {
+      qb.andWhere('service.isGlobal = :isGlobal', { isGlobal: parsedIsGlobal });
+    }
+
+    // Filter: category / categoryId / categories
+    if (categoryId !== undefined) {
+      qb.andWhere('service.categoryId = :categoryId', { categoryId });
+    } else if (category && String(category).trim() !== '') {
+      const catVal = String(category).trim();
+      const num = Number(catVal);
+      if (!isNaN(num)) {
+        qb.andWhere('service.categoryId = :catId', { catId: num });
+      } else {
+        qb.andWhere('LOWER(category.name) = LOWER(:catName)', { catName: catVal });
+      }
+    }
+
+    if (categories && String(categories).trim() !== '') {
+      const catIds = String(categories)
+        .split(',')
+        .map((s) => Number(s.trim()))
+        .filter((n) => !isNaN(n));
+      if (catIds.length > 0) {
+        qb.andWhere('service.categoryId IN (:...catIds)', { catIds });
+      }
+    }
+
     if (search) {
       qb.andWhere(
-        '(service.name ILIKE :search OR service.description ILIKE :search)',
+        '(service.name ILIKE :search OR service.description ILIKE :search OR category.name ILIKE :search)',
         { search: `%${search.trim()}%` },
       );
     }
 
+    // TODO: Deprecated city-only filtering.
+    // Global services were previously excluded when a city was provided.
+    // Retained for backward reference.
+    /*
     if (city) {
       qb.andWhere(
         `EXISTS (
@@ -95,6 +118,32 @@ export class ServiceRepository extends BaseRepository<Service> {
           WHERE LOWER(TRIM(c->>'name')) = LOWER(TRIM(:city))
         )`,
         { city: city.trim() },
+      );
+    }
+    */
+    // Production inclusive city filter:
+    // When a city is provided, returns BOTH:
+    // 1. Services specifically available in requested city (using JSONB containment @> and case-insensitive check)
+    // 2. Services marked as GLOBAL (isGlobal = true, available everywhere)
+    const normalizedCity = city ? city.trim() : undefined;
+    if (normalizedCity && normalizedCity !== '') {
+      const cityFilterJson = JSON.stringify([{ name: normalizedCity }]);
+      qb.andWhere(
+        `(
+          service.isGlobal = true
+          OR service.cities @> :cityFilter::jsonb
+          OR (
+            jsonb_typeof(service.cities) = 'array'
+            AND EXISTS (
+              SELECT 1 FROM jsonb_array_elements(service.cities) AS c
+              WHERE LOWER(TRIM(c->>'name')) = LOWER(TRIM(:city))
+            )
+          )
+        )`,
+        {
+          city: normalizedCity,
+          cityFilter: cityFilterJson,
+        },
       );
     }
 
@@ -244,6 +293,7 @@ export class ServiceRepository extends BaseRepository<Service> {
         id,
         // isActive: true,
       },
+      relations: ['category'],
       select: {
         id: true,
         name: true,

@@ -19,7 +19,7 @@ import {
 import { ServiceService } from './service.service';
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@poojawala/common';
 import { USER_ROLE } from '@poojawala/entities';
-import { CreateServiceDto, CreatePurohitServiceDto } from '@poojawala/dtos/service/create.service.dto';
+import { CreateServiceDto, CreatePurohitServiceDto, CreateServiceCategoryDto, UpdateServiceCategoryDto } from '@poojawala/dtos/service/create.service.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
 import { UpdateServiceDto, UpdatePurohitServiceDto, UpdateServiceStatusDto } from '@poojawala/dtos/service/update.service.dto';
@@ -162,6 +162,68 @@ export class ServiceController {
     const user = (req as any).user;
     return this.serviceService.updateService(id, dto, files, user.id);
   }
+
+  // ─── Service Categories ──────────────────────────────────────────────────────
+  // NOTE: These routes must appear before @Get(':id') to avoid NestJS
+  // matching 'categories' as the :id parameter.
+
+  @Get('categories')
+  @HttpCode(HttpStatus.OK)
+  async findAllCategories(@Req() req: Request, @Query() query: GetServicesQueryDto) {
+    if (query.isActive === undefined && (req as any).query?.isActive !== undefined) {
+      query.isActive = (req as any).query.isActive;
+    }
+    return this.serviceService.findAllCategories(query);
+  }
+
+  @Get('categories/:id')
+  @HttpCode(HttpStatus.OK)
+  async findCategoryById(@Param('id', ParseIntPipe) id: number) {
+    return this.serviceService.findCategoryById(id);
+  }
+
+  @Post('categories')
+  @Roles(USER_ROLE.ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseInterceptors(FileFieldsInterceptor([{ name: 'icon', maxCount: 1 }]))
+  @HttpCode(HttpStatus.CREATED)
+  async createCategory(
+    @Req() req: Request,
+    @Body() dto: CreateServiceCategoryDto,
+    @UploadedFiles() files: { icon?: Express.Multer.File[] },
+  ) {
+    const user = (req as any).user;
+    return this.serviceService.createCategory(dto, files, user.id);
+  }
+
+  @Patch('categories/:id')
+  @Roles(USER_ROLE.ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseInterceptors(FileFieldsInterceptor([{ name: 'icon', maxCount: 1 }]))
+  @HttpCode(HttpStatus.OK)
+  async updateCategory(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateServiceCategoryDto,
+    @UploadedFiles() files: { icon?: Express.Multer.File[] },
+  ) {
+    const user = (req as any).user;
+    return this.serviceService.updateCategory(id, dto, files, user.id);
+  }
+
+  @Delete('categories/:id')
+  @Roles(USER_ROLE.ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @HttpCode(HttpStatus.OK)
+  async deleteCategory(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const user = (req as any).user;
+    return this.serviceService.deleteCategory(id, user.id);
+  }
+
+  // ─── Service by ID / Delete ──────────────────────────────────────────────────
 
   @Get(':id')
   @HttpCode(HttpStatus.OK)

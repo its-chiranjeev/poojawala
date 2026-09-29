@@ -140,6 +140,9 @@ export class UpdateServiceDto {
   @IsBoolean()
   isActive?: boolean;
 
+  // NOTE: isGlobal is NOT exposed in the DTO.
+  // Always auto-derived from cities in the service layer.
+
   @IsOptional()
   @Transform(({ obj, value }) => {
     const raw = obj?.isUpcomingFestival !== undefined ? obj.isUpcomingFestival : value;
@@ -158,7 +161,15 @@ export class UpdateServiceDto {
   @Transform(({ value }) => (value === '' ? undefined : value))
   @IsDateString()
   festivalEndDate?: Date | null;
+
+  /** Optional: assign or re-assign this service to a category. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  categoryId?: number | null;
 }
+
 
 export class UpdatePurohitServiceDto {
   // TODO: Deprecated with fixed service pricing. Purohit no longer configures online/offline mode or custom prices.

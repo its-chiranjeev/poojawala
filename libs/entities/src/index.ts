@@ -7,6 +7,7 @@ export * from './purohit-bank-account.entity';
 export * from './purohit-service-area.entity';
 export * from './purohit-media.entity';
 export * from './service.entity';
+export * from './service-category.entity';
 export * from './purohit-service.entity';
 export * from './customer-address.entity';
 export * from './customer-favorite.entity';

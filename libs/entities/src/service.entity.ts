@@ -6,10 +6,13 @@ import {
   UpdateDateColumn,
   Index,
   OneToMany,
+  ManyToOne,
+  JoinColumn,
   DeleteDateColumn,
 } from 'typeorm';
 import { PurohitService } from './purohit-service.entity';
 import { Booking } from './booking.entity';
+import { ServiceCategory } from './service-category.entity';
 
 export interface ServiceCity {
   name: string;
@@ -124,6 +127,14 @@ export class Service {
   @Column({ type: 'boolean', default: true })
   isActive!: boolean;
 
+  /**
+   * isGlobal = true  → service is available in all cities (no city restriction).
+   * isGlobal = false → service is city-specific; see the `cities` array.
+   * Automatically set to true when cities array is empty, false when cities are present.
+   */
+  @Column({ type: 'boolean', default: true })
+  isGlobal!: boolean;
+
   @Column({ type: 'boolean', default: false })
   isUpcomingFestival!: boolean;
 
@@ -132,6 +143,18 @@ export class Service {
 
   @Column({ type: 'timestamp', nullable: true, default: null })
   festivalEndDate?: Date | null;
+
+  // Optional category grouping for the service.
+  @Column({ type: 'int', nullable: true })
+  categoryId?: number | null;
+
+  @ManyToOne(() => ServiceCategory, (category) => category.services, {
+    nullable: true,
+    onDelete: 'SET NULL',
+    eager: false,
+  })
+  @JoinColumn({ name: 'categoryId' })
+  category?: ServiceCategory | null;
 
   @OneToMany(() => PurohitService, (purohitService) => purohitService.service)
   purohitServices!: PurohitService[];

@@ -281,6 +281,11 @@ export class CreateServiceDto {
   @IsBoolean()
   isActive?: boolean;
 
+  // NOTE: isGlobal is NOT exposed in the DTO.
+  // It is always auto-derived in the service:
+  //   isGlobal = true  → cities array is empty (available everywhere)
+  //   isGlobal = false → cities array has entries (city-specific service)
+
   @IsOptional()
   @Transform(({ obj, value }) => {
     const raw = obj?.isUpcomingFestival !== undefined ? obj.isUpcomingFestival : value;
@@ -299,6 +304,13 @@ export class CreateServiceDto {
   @Transform(({ value }) => (value === '' ? undefined : value))
   @IsDateString()
   festivalEndDate?: Date | null;
+
+  /** Optional: assign this service to a category. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  categoryId?: number;
 }
 export class PurohitServiceItemDto {
   @IsInt()
@@ -336,3 +348,61 @@ export class CreatePurohitServiceDto {
   @ArrayNotEmpty()
   services!: any[];
 }
+
+export class CreateServiceCategoryDto {
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  iconUrl?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  sortOrder?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return true;
+    return value === 'true' || value === true;
+  })
+  @IsBoolean()
+  isActive?: boolean;
+}
+
+export class UpdateServiceCategoryDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  iconUrl?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  sortOrder?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return undefined;
+    return value === 'true' || value === true;
+  })
+  @IsBoolean()
+  isActive?: boolean;
+}
+

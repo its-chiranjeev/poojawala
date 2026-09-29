@@ -2,6 +2,8 @@ import {
   CreateServiceDto,
   CreatePurohitServiceDto,
   PurohitServiceItemDto,
+  CreateServiceCategoryDto,
+  UpdateServiceCategoryDto,
 } from '@poojawala/dtos/service/create.service.dto';
 import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
 import {
@@ -10,6 +12,7 @@ import {
 } from '@poojawala/dtos/service/update.service.dto';
 import {
   ServiceRepository,
+  ServiceCategoryRepository,
   PurohitServiceRepository,
   PurohitProfileRepository,
 } from '@poojawala/repositories';
@@ -35,6 +38,7 @@ import { AuditLogService } from '@poojawala/common';
 export class ServiceService {
   constructor(
     private readonly serviceRepository: ServiceRepository,
+    private readonly categoryRepository: ServiceCategoryRepository,
     private readonly s3Service: S3Service,
     private readonly PurohitServiceRepository: PurohitServiceRepository,
     private readonly PurohitProfileRepository: PurohitProfileRepository,
@@ -329,9 +333,13 @@ export class ServiceService {
         }
       }
 
+      const resolvedCities = dto.cities ?? [];
+      // isGlobal is always auto-derived: true when no cities, false when city-specific
+      const resolvedIsGlobal = resolvedCities.length === 0;
+
       const service = this.serviceRepository.create({
         ...dto,
-        cities: dto.cities ?? [],
+        cities: resolvedCities,
         languages: dto.languages ?? [],
         benefits: dto.benefits ?? [],
         plans: resolvedPlans,
@@ -341,6 +349,7 @@ export class ServiceService {
         tokenPercentage: dto.tokenPercentage != null ? Number(dto.tokenPercentage) : 30,
         iconUrl,
         isActive: dto.isActive ?? true,
+        isGlobal: resolvedIsGlobal,
         isUpcomingFestival: dto.isUpcomingFestival ?? false,
       });
 
@@ -594,6 +603,10 @@ export class ServiceService {
     if (dto.benefits !== undefined) {
       service.benefits = dto.benefits ?? [];
     }
+
+    // isGlobal is always auto-derived from the current cities array (never from admin input)
+    // This also handles: admin removes all cities → isGlobal becomes true automatically
+    service.isGlobal = !service.cities || service.cities.length === 0;
 
     if (service.isUpcomingFestival) {
       if (!service.festivalStartDate || !service.festivalEndDate) {
@@ -1090,4 +1103,197 @@ export class ServiceService {
       data: purohitService,
     };
   }
+
+  // ─── Service Categories ────────────────────────────────────────────────────
+
+  async findAllCategories(query: GetServicesQueryDto) {
+    const result = await this.categoryRepository.findAllCategories(query);
+
+    const dataWithUrls = await Promise.all(
+      result.data.map(async (cat: any) => {
+        let iconDownloadurl: string | null = null;
+        if (cat.iconUrl) {
+          try {
+            iconDownloadurl = await this.s3Service.getDownloadUrl(cat.iconUrl);
+          } catch (e) {
+            console.error('Failed to generate pre-signed URL for category icon:', e);
+          }
+        }
+        return { ...cat, iconDownloadurl };
+      }),
+    );
+
+    return {
+      success: true,
+      message: 'Service categories fetched successfully',
+      data: dataWithUrls,
+      pagination: {
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: result.totalPages,
+      },
+    };
+  }
+
+  async findCategoryById(id: number) {
+    const category = await this.categoryRepository.findOne({ where: { id } });
+
+    if (!category || category.deletedAt) {
+      throw new NotFoundException(`Service category with id ${id} not found`);
+    }
+
+    let iconDownloadurl: string | null = null;
+    if (category.iconUrl) {
+      try {
+        iconDownloadurl = await this.s3Service.getDownloadUrl(category.iconUrl);
+      } catch (e) {
+        console.error('Failed to generate pre-signed URL for category icon:', e);
+      }
+    }
+
+    return {
+      success: true,
+      message: 'Service category fetched successfully',
+      data: { ...category, iconDownloadurl },
+    };
+  }
+
+  async createCategory(
+    dto: CreateServiceCategoryDto,
+    files: { icon?: Express.Multer.File[] },
+    adminId: number,
+  ) {
+    const existing = await this.categoryRepository.findByName(dto.name);
+    if (existing) {
+      throw new ConflictException(
+        `A service category with name "${dto.name}" already exists`,
+      );
+    }
+
+    let iconKey: string | undefined = undefined;
+    if (files?.icon?.length) {
+      iconKey = await this.s3Service.uploadFileHelper(
+        `service-categories`,
+        'icon',
+        files.icon,
+      );
+    }
+
+    const category = this.categoryRepository.create({
+      name: dto.name.trim(),
+      description: dto.description?.trim(),
+      iconUrl: iconKey ?? dto.iconUrl,
+      sortOrder: dto.sortOrder ?? 0,
+      isActive: dto.isActive !== undefined ? dto.isActive : true,
+    });
+
+    const saved = await this.categoryRepository.save(category);
+
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.SERVICE,
+      entity: 'ServiceCategory',
+      entityId: String(saved.id),
+      action: 'CATEGORY_CREATED',
+      message: `Admin created service category "${saved.name}"`,
+      newValue: { id: saved.id, name: saved.name },
+    });
+
+    return {
+      success: true,
+      message: 'Service category created successfully',
+      data: saved,
+    };
+  }
+
+  async updateCategory(
+    id: number,
+    dto: UpdateServiceCategoryDto,
+    files: { icon?: Express.Multer.File[] },
+    adminId: number,
+  ) {
+    const category = await this.categoryRepository.findOne({ where: { id } });
+
+    if (!category || category.deletedAt) {
+      throw new NotFoundException(`Service category with id ${id} not found`);
+    }
+
+    if (dto.name && dto.name !== category.name) {
+      const existing = await this.categoryRepository.findByName(dto.name);
+      if (existing && existing.id !== id) {
+        throw new ConflictException(
+          `A service category with name "${dto.name}" already exists`,
+        );
+      }
+    }
+
+    const oldSnapshot = { name: category.name, isActive: category.isActive, sortOrder: category.sortOrder };
+
+    if (files?.icon?.length) {
+      category.iconUrl = await this.s3Service.uploadFileHelper(
+        `service-categories`,
+        'icon',
+        files.icon,
+      );
+    } else if (dto.iconUrl !== undefined) {
+      category.iconUrl = dto.iconUrl;
+    }
+
+    if (dto.name !== undefined) category.name = dto.name.trim();
+    if (dto.description !== undefined) category.description = dto.description?.trim();
+    if (dto.sortOrder !== undefined) category.sortOrder = dto.sortOrder;
+    if (dto.isActive !== undefined) category.isActive = dto.isActive;
+
+    const updated = await this.categoryRepository.save(category);
+
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.SERVICE,
+      entity: 'ServiceCategory',
+      entityId: String(id),
+      action: 'CATEGORY_UPDATED',
+      message: `Admin updated service category id ${id}`,
+      oldValue: oldSnapshot,
+      newValue: { name: updated.name, isActive: updated.isActive, sortOrder: updated.sortOrder },
+    });
+
+    return {
+      success: true,
+      message: 'Service category updated successfully',
+      data: updated,
+    };
+  }
+
+  async deleteCategory(id: number, adminId: number) {
+    const category = await this.categoryRepository.findOne({ where: { id } });
+
+    if (!category || category.deletedAt) {
+      throw new NotFoundException(`Service category with id ${id} not found`);
+    }
+
+    await this.categoryRepository.softDelete(id);
+
+    await this.auditLogService.createAuditLog({
+      actorId: adminId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.SERVICE,
+      entity: 'ServiceCategory',
+      entityId: String(id),
+      action: 'CATEGORY_DELETED',
+      message: `Admin soft-deleted service category "${category.name}" (id: ${id})`,
+      oldValue: { name: category.name },
+    });
+
+    return {
+      success: true,
+      message: 'Service category deleted successfully',
+    };
+  }
 }
+

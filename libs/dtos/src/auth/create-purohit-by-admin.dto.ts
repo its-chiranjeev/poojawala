@@ -28,10 +28,10 @@ export class CreatePurohitByAdminDto {
   @Transform(({ value }) => value?.trim())
   lastName!: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @Transform(({ value }) => value?.trim())
-  username!: string;
+  username?: string;
 
   @IsString()
   @IsNotEmpty()
