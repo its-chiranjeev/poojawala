@@ -317,13 +317,74 @@ export class PaymentRepository extends BaseRepository<Payment> {
         },
       );
     } else if (userRole === USER_ROLE.PUROHIT) {
+      // TODO: Deprecated.
+      // Pending Purohit payout is a booking-level obligation.
+      // Customer can have multiple BOOKING_PAYMENT records for one booking,
+      // but these must not create multiple payout entries.
+      //
+      // query.andWhere(
+      //   `(
+      //   payment."createdById" = :userId
+      //   OR (payment."paymentType" = 'PUROHIT_PAYOUT' AND payment."payeeId" = :userId)
+      //   OR (payment."paymentType" = 'BOOKING_PAYMENT' AND purohitUser.id = :userId AND "booking"."paymentStatus" = 'PAID' AND "booking"."purohitPayoutStatus" = 'PENDING')
+      // )`,
+      //   {
+      //     userId,
+      //   },
+      // );
+      // TODO: Deprecated synthetic payout mapping.
+      // Purohit payouts are now represented by an actual
+      // PAYMENT_TYPE.PUROHIT_PAYOUT payment record created
+      // after the booking is fully paid.
+      // query.andWhere(
+      //   `(
+      //     (
+      //       payment."paymentType" = 'PUROHIT_PAYOUT'
+      //       AND payment."payeeId" = :userId
+      //       AND (
+      //         "booking".id IS NULL
+      //         OR (
+      //           "booking"."paymentStatus" = 'PAID'
+      //           AND ("booking"."remainingAmount" <= 0 OR "booking"."remainingAmount" IS NULL)
+      //           AND payment.id = (
+      //             SELECT MAX(p_payout.id)
+      //             FROM payments p_payout
+      //             WHERE (p_payout."bookingId" = "booking".id OR p_payout.id = payment.id)
+      //               AND p_payout."paymentType" = 'PUROHIT_PAYOUT'
+      //               AND p_payout."payeeId" = :userId
+      //           )
+      //         )
+      //       )
+      //     )
+      //     OR (
+      //       payment."paymentType" = 'BOOKING_PAYMENT'
+      //       AND purohitUser.id = :userId
+      //       AND "booking"."paymentStatus" = 'PAID'
+      //       AND ("booking"."remainingAmount" <= 0 OR "booking"."remainingAmount" IS NULL)
+      //       AND "booking"."purohitPayoutStatus" = 'PENDING'
+      //       AND "booking"."purohitPaymentId" IS NULL
+      //       AND NOT EXISTS (
+      //         SELECT 1 FROM payments p_payout_check
+      //         WHERE p_payout_check."bookingId" = "booking".id
+      //           AND p_payout_check."paymentType" = 'PUROHIT_PAYOUT'
+      //       )
+      //       AND payment.id = (
+      //         SELECT MAX(p_sub.id)
+      //         FROM payments p_sub
+      //         WHERE p_sub."bookingId" = "booking".id
+      //           AND p_sub."paymentType" = 'BOOKING_PAYMENT'
+      //           AND p_sub.status = 'SUCCESS'
+      //       )
+      //     )
+      //   )`,
+      //   {
+      //     userId,
+      //   },
+      // );
       query.andWhere(
-        `(
-        payment."createdById" = :userId
-        OR (payment."paymentType" = 'PUROHIT_PAYOUT' AND payment."payeeId" = :userId)
-        OR (payment."paymentType" = 'BOOKING_PAYMENT' AND purohitUser.id = :userId AND "booking"."paymentStatus" = 'PAID' AND "booking"."purohitPayoutStatus" = 'PENDING')
-      )`,
+        'payment."paymentType" = :payoutType AND payment."payeeId" = :userId',
         {
+          payoutType: PAYMENT_TYPE.PUROHIT_PAYOUT,
           userId,
         },
       );
@@ -332,10 +393,32 @@ export class PaymentRepository extends BaseRepository<Payment> {
     }
 
     if (status) {
-      if (Array.isArray(status)) {
-        query.andWhere('payment.status IN (:...status)', { status });
+      if (userRole === USER_ROLE.PUROHIT) {
+        // TODO: Deprecated synthetic payout status filter mapping.
+        // For Purohits, pending and completed payouts are actual PUROHIT_PAYOUT records.
+        // if (hasPending && !hasSuccess) { ... }
+        const statuses = (Array.isArray(status) ? status : [status]).map((s) =>
+          String(s).toUpperCase(),
+        );
+        const mappedStatuses: string[] = [];
+        for (const s of statuses) {
+          if (s === 'PAID' || s === 'SUCCESS') {
+            mappedStatuses.push(PAYMENT_STATUS.SUCCESS);
+          } else if (s === 'PENDING') {
+            mappedStatuses.push(PAYMENT_STATUS.PENDING);
+          } else {
+            mappedStatuses.push(s);
+          }
+        }
+        query.andWhere('payment.status IN (:...payoutStatuses)', {
+          payoutStatuses: mappedStatuses,
+        });
       } else {
-        query.andWhere('payment.status = :status', { status });
+        if (Array.isArray(status)) {
+          query.andWhere('payment.status IN (:...status)', { status });
+        } else {
+          query.andWhere('payment.status = :status', { status });
+        }
       }
     }
 

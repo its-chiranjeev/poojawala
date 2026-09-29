@@ -13,7 +13,7 @@ import { ConfigService } from '@nestjs/config';
 import Razorpay from 'razorpay';
 import * as crypto from 'crypto';
 import puppeteer from 'puppeteer';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 
 import {
   Booking,
@@ -190,7 +190,13 @@ export interface PaymentProviderDetails {
 }
 
 export interface PaymentDetailsResponse {
-  id: number;
+  // TODO: Deprecated.
+  // Synthetic pending Purohit payouts do not represent an actual payment transaction,
+  // so id and paymentId must be nullable.
+  // id: number;
+  id: number | null;
+  paymentId?: string | number | null;
+  customer?: string | null;
   // TODO: Old paymentType definition
   // paymentType: PAYMENT_TYPE;
   paymentType: PAYMENT_TYPE | string;
@@ -517,7 +523,42 @@ export class PaymentService {
       throw new BadRequestException('Payout amount must be greater than zero');
     }
 
-    // Check if payout already exists for this booking
+    // TODO: Deprecated.
+    // Relied solely on post-query payment records without checking booking-level
+    // purohitPayoutStatus and purohitPaymentId or pessimistic lock.
+    // const existingPayouts = await this.paymentRepository.find({
+    //   where: {
+    //     bookingId: booking.id,
+    //     paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT,
+    //   },
+    // });
+    //
+    // for (const ep of existingPayouts) {
+    //   if (ep.status === PAYMENT_STATUS.SUCCESS) {
+    //     throw new BadRequestException(
+    //       'Payout has already been completed for this booking',
+    //     );
+    //   }
+    // }
+
+    // TODO: Deprecated check on booking.purohitPaymentId != null.
+    // Now that a real PUROHIT_PAYOUT payment record is created in PENDING status
+    // when the customer fully pays, booking.purohitPaymentId points to that pending payout ID.
+    // Admin payout must update that SAME record to PAID rather than rejecting.
+    // if (
+    //   booking.purohitPayoutStatus === BOOKING_PAYMENT_STATUS.PAID ||
+    //   booking.purohitPaymentId != null
+    // ) {
+    //   throw new BadRequestException(
+    //     'Payout has already been completed for this booking',
+    //   );
+    // }
+    if (booking.purohitPayoutStatus === BOOKING_PAYMENT_STATUS.PAID) {
+      throw new BadRequestException(
+        'Payout has already been completed for this booking',
+      );
+    }
+
     const existingPayouts = await this.paymentRepository.find({
       where: {
         bookingId: booking.id,
@@ -549,30 +590,86 @@ export class PaymentService {
       const paymentRepo = manager.getRepository(Payment);
       const bkRepo = manager.getRepository(Booking);
 
-      let payoutRecord = paymentRepo.create({
-        paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT,
-        bookingId: booking.id,
-        createdById: adminId,
-        payerId: adminId,
-        payeeId: purohitProfile.userId,
-        amount: payoutAmount,
-        currency: 'INR',
-        paymentMethod:
-          bankAccount.paymentMethod === 'UPI'
-            ? PAYMENT_METHOD.UPI
-            : PAYMENT_METHOD.BANK_TRANSFER,
-        idempotencyKey,
-        purohitBankAccountId: bankAccount.id,
-        status: PAYMENT_STATUS.SUCCESS,
-        remark: dto.remark,
-        paidAt: new Date(),
+      // Lock booking row to prevent concurrent duplicate payouts
+      const lockedBooking = await bkRepo.findOne({
+        where: { id: booking.id },
+        lock: { mode: 'pessimistic_write' },
       });
 
-      payoutRecord = await paymentRepo.save(payoutRecord);
+      if (
+        !lockedBooking ||
+        lockedBooking.purohitPayoutStatus === BOOKING_PAYMENT_STATUS.PAID
+      ) {
+        throw new BadRequestException(
+          'Payout has already been completed for this booking',
+        );
+      }
+
+      // Find the existing PUROHIT_PAYOUT payment record for this booking
+      let payoutRecord = await paymentRepo.findOne({
+        where: [
+          ...(lockedBooking.purohitPaymentId
+            ? [{ id: lockedBooking.purohitPaymentId, paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT }]
+            : []),
+          {
+            bookingId: booking.id,
+            paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT,
+          },
+        ],
+      });
+
+      if (payoutRecord && payoutRecord.status === PAYMENT_STATUS.SUCCESS) {
+        throw new BadRequestException(
+          'Payout has already been completed for this booking',
+        );
+      }
+
+      const payoutMethod =
+        bankAccount.paymentMethod === 'UPI'
+          ? PAYMENT_METHOD.UPI
+          : PAYMENT_METHOD.BANK_TRANSFER;
+
+      if (payoutRecord) {
+        // Update the SAME Payment record: PENDING -> SUCCESS (PAID)
+        payoutRecord.status = PAYMENT_STATUS.SUCCESS;
+        payoutRecord.paidAt = new Date();
+        payoutRecord.payerId = adminId;
+        payoutRecord.payeeId = payoutRecord.payeeId || purohitProfile.userId;
+        payoutRecord.paymentMethod = payoutMethod;
+        payoutRecord.purohitBankAccountId = bankAccount.id;
+        payoutRecord.idempotencyKey = idempotencyKey;
+        if (dto.remark) {
+          payoutRecord.remark = dto.remark;
+        }
+        payoutRecord = await paymentRepo.save(payoutRecord);
+      } else {
+        // Fallback: create if none existed yet
+        // TODO: Deprecated new payout creation when one should already exist.
+        // Preserved as fallback for legacy bookings.
+        payoutRecord = paymentRepo.create({
+          paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT,
+          bookingId: booking.id,
+          createdById: adminId,
+          payerId: adminId,
+          payeeId: purohitProfile.userId,
+          amount: payoutAmount,
+          currency: 'INR',
+          paymentMethod: payoutMethod,
+          idempotencyKey,
+          purohitBankAccountId: bankAccount.id,
+          status: PAYMENT_STATUS.SUCCESS,
+          remark: dto.remark,
+          paidAt: new Date(),
+        });
+        payoutRecord = await paymentRepo.save(payoutRecord);
+      }
+
+      lockedBooking.purohitPayoutStatus = BOOKING_PAYMENT_STATUS.PAID;
+      lockedBooking.purohitPaymentId = payoutRecord.id;
+      await bkRepo.save(lockedBooking);
 
       booking.purohitPayoutStatus = BOOKING_PAYMENT_STATUS.PAID;
       booking.purohitPaymentId = payoutRecord.id;
-      await bkRepo.save(booking);
 
       await this.auditLogService.createAuditLog(
         {
@@ -1630,7 +1727,27 @@ export class PaymentService {
     //     payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
     //     Boolean(payment.razorpayPaymentLinkId?.trim()),
     // );
-    const filteredPayments = payments.filter((payment) => {
+    // TODO: Deprecated.
+    // Pending Purohit payout is a booking-level obligation.
+    // Customer can have multiple BOOKING_PAYMENT records for one booking,
+    // but these must not create multiple payout entries.
+    //
+    // const filteredPayments = payments.filter((payment) => {
+    //   if (user.role === USER_ROLE.CUSTOMER) {
+    //     if (payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) {
+    //       return false;
+    //     }
+    //     if (payment.status === PAYMENT_STATUS.CREATED) {
+    //       return false;
+    //     }
+    //   }
+    //   return (
+    //     payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+    //     Boolean(payment.razorpayPaymentLinkId?.trim()) ||
+    //     payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH
+    //   );
+    // });
+    let filteredPayments = payments.filter((payment) => {
       if (user.role === USER_ROLE.CUSTOMER) {
         if (payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) {
           return false;
@@ -1645,6 +1762,47 @@ export class PaymentService {
         payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH
       );
     });
+
+    if (user.role === USER_ROLE.PUROHIT) {
+      if (
+        booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID ||
+        (booking.remainingAmount != null && Number(booking.remainingAmount) > 0)
+      ) {
+        return [];
+      }
+      let purohitPayoutPayment = payments.find(
+        (p) => p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT,
+      );
+      if (
+        !purohitPayoutPayment &&
+        booking.purohitPayoutStatus !== BOOKING_PAYMENT_STATUS.PAID &&
+        Number(booking.purohitPayoutAmount) > 0
+      ) {
+        purohitPayoutPayment = (await this.ensurePurohitPendingPayout(
+          this.dataSource.manager,
+          booking,
+        )) as any;
+      }
+      if (purohitPayoutPayment) {
+        filteredPayments = [purohitPayoutPayment];
+      } else {
+        // TODO: Deprecated synthetic payout mapping.
+        // Purohit payouts are now represented by an actual
+        // PAYMENT_TYPE.PUROHIT_PAYOUT payment record created
+        // after the booking is fully paid.
+        // const successfulBookingPayments = payments.filter(
+        //   (p) =>
+        //     p.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT &&
+        //     p.status === PAYMENT_STATUS.SUCCESS,
+        // );
+        // if (successfulBookingPayments.length > 0) {
+        //   filteredPayments = [successfulBookingPayments[0]];
+        // } else {
+        //   filteredPayments = [];
+        // }
+        filteredPayments = [];
+      }
+    }
 
     return Promise.all(
       filteredPayments.map(async (payment) => {
@@ -1665,6 +1823,10 @@ export class PaymentService {
     user: User,
     query: PaymentQueryDto,
   ): Promise<PaginatedPaymentsResponse> {
+    if (user.role === USER_ROLE.PUROHIT) {
+      await this.ensurePendingPayoutsForPurohit(user.id);
+    }
+
     const page = Math.max(Number(query.page ?? 1), 1);
 
     const limit = Math.min(Math.max(Number(query.limit ?? 10), 1), 100);
@@ -1699,17 +1861,63 @@ export class PaymentService {
     //           Boolean(payment.razorpayPaymentLinkId?.trim()),
     //       )
     //     : payments;
-    const displayedPayments =
-      user.role === USER_ROLE.CUSTOMER
-        ? payments.filter(
-          (payment) =>
-            payment.status !== PAYMENT_STATUS.CREATED &&
-            payment.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
-            (payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
-              Boolean(payment.razorpayPaymentLinkId?.trim()) ||
-              payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH),
-        )
-        : payments;
+    // TODO: Deprecated.
+    // Pending Purohit payout is a booking-level obligation.
+    // Customer can have multiple BOOKING_PAYMENT records for one booking,
+    // but these must not create multiple payout entries.
+    //
+    // const displayedPayments =
+    //   user.role === USER_ROLE.CUSTOMER
+    //     ? payments.filter(
+    //       (payment) =>
+    //         payment.status !== PAYMENT_STATUS.CREATED &&
+    //         payment.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
+    //         (payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+    //           Boolean(payment.razorpayPaymentLinkId?.trim()) ||
+    //           payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH),
+    //     )
+    //     : payments;
+    let displayedPayments = payments;
+
+    if (user.role === USER_ROLE.CUSTOMER) {
+      displayedPayments = payments.filter(
+        (payment) =>
+          payment.status !== PAYMENT_STATUS.CREATED &&
+          payment.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
+          (payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+            Boolean(payment.razorpayPaymentLinkId?.trim()) ||
+            payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH),
+      );
+    } else if (user.role === USER_ROLE.PUROHIT) {
+      const seenBookingIds = new Set<number>();
+      displayedPayments = payments.filter((payment) => {
+        const primaryBooking =
+          payment.booking ?? payment.paymentBookings?.[0]?.booking;
+
+        if (primaryBooking) {
+          // 1. Only show bookings where paymentStatus is PAID
+          if (primaryBooking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID) {
+            return false;
+          }
+
+          // 2. Booking's remainingAmount must be 0 (or null/<=0)
+          if (
+            primaryBooking.remainingAmount != null &&
+            Number(primaryBooking.remainingAmount) > 0
+          ) {
+            return false;
+          }
+
+          // 3. Strictly only one payout entry per booking
+          if (seenBookingIds.has(primaryBooking.id)) {
+            return false;
+          }
+          seenBookingIds.add(primaryBooking.id);
+        }
+
+        return true;
+      });
+    }
 
     const items = await Promise.all(
       displayedPayments.map(async (payment) => {
@@ -2418,21 +2626,29 @@ export class PaymentService {
       payment.status,
     );
 
-    if (
-      viewerRole === USER_ROLE.PUROHIT &&
-      payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
-    ) {
-      responsePaymentType = PAYMENT_TYPE.PUROHIT_PAYOUT;
-      amount =
-        primaryBooking?.purohitPayoutAmount != null
-          ? Number(primaryBooking.purohitPayoutAmount)
-          : 0;
-      responseStatus =
-        primaryBooking?.purohitPayoutStatus === BOOKING_PAYMENT_STATUS.PAID
-          ? PAYMENT_STATUS.SUCCESS
-          : PAYMENT_STATUS.PENDING;
-      razorpayPayment = null; // Hide customer payment details from purohit
+    if (payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) {
+      razorpayPayment = null;
     }
+
+    // TODO: Deprecated synthetic payout mapping.
+    // Purohit payouts are now represented by an actual
+    // PAYMENT_TYPE.PUROHIT_PAYOUT payment record created
+    // after the booking is fully paid.
+    // if (
+    //   viewerRole === USER_ROLE.PUROHIT &&
+    //   payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
+    // ) {
+    //   responsePaymentType = PAYMENT_TYPE.PUROHIT_PAYOUT;
+    //   amount =
+    //     primaryBooking?.purohitPayoutAmount != null
+    //       ? Number(primaryBooking.purohitPayoutAmount)
+    //       : 0;
+    //   responseStatus =
+    //     primaryBooking?.purohitPayoutStatus === BOOKING_PAYMENT_STATUS.PAID
+    //       ? PAYMENT_STATUS.SUCCESS
+    //       : PAYMENT_STATUS.PENDING;
+    //   razorpayPayment = null; // Hide customer payment details from purohit
+    // }
 
     const isBookingPayment =
       payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT;
@@ -2459,8 +2675,33 @@ export class PaymentService {
     //   }
     // }
 
+    // TODO: Deprecated.
+    // The latest BOOKING_PAYMENT was previously used as the synthetic
+    // Purohit payout payment ID. A customer payment is not a payout
+    // transaction, so pending payout responses must not expose this ID.
+    // id: payment.id,
+    let responsePaymentId: number | null = payment.id;
+    let formattedPaymentId: string | null = payment.id ? `PAY-${payment.id}` : null;
+
+    // TODO: Deprecated synthetic paymentId suppression.
+    // The latest BOOKING_PAYMENT was previously used as the synthetic
+    // Purohit payout payment ID. A customer payment is not a payout
+    // transaction, so pending payout responses must not expose this ID.
+    // Now that real PUROHIT_PAYOUT records exist, paymentId is always the actual payout Payment ID.
+    // if (
+    //   viewerRole === USER_ROLE.PUROHIT &&
+    //   payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
+    // ) {
+    //   responsePaymentId = null;
+    //   formattedPaymentId = null;
+    // }
+
     return {
-      id: payment.id,
+      id: responsePaymentId as any,
+      paymentId: formattedPaymentId,
+      customer: primaryBooking?.customer
+        ? `${primaryBooking.customer.firstName || ''} ${primaryBooking.customer.lastName || ''}`.trim() || null
+        : null,
 
       paymentType: responsePaymentType as any,
 
@@ -3441,6 +3682,9 @@ export class PaymentService {
               booking.status = BOOKING_STATUS.COMPLETED;
               booking.completionConfirmedAt = new Date();
             }
+
+            // Create real PUROHIT_PAYOUT record when booking is fully paid
+            await this.ensurePurohitPendingPayout(manager, booking);
           } else if (totalPaid >= tokenAmount) {
             booking.paymentStatus = BOOKING_PAYMENT_STATUS.PARTIAL;
           } else {
@@ -3910,6 +4154,135 @@ export class PaymentService {
           }
         }
       }
+    }
+  }
+
+  async ensurePurohitPendingPayout(
+    manager: EntityManager,
+    booking: Booking,
+  ): Promise<Payment | null> {
+    // 1. Booking customer payment status is PAID
+    if (booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID) {
+      return null;
+    }
+
+    // 2. Booking remainingAmount is <= 0 OR null
+    if (
+      booking.remainingAmount != null &&
+      Number(booking.remainingAmount) > 0
+    ) {
+      return null;
+    }
+
+    // 3. booking.purohitPayoutAmount is available and greater than 0
+    const payoutAmount = Number(booking.purohitPayoutAmount);
+    if (!payoutAmount || payoutAmount <= 0) {
+      return null;
+    }
+
+    // 5. Purohit payout has not already been marked PAID
+    if (booking.purohitPayoutStatus === BOOKING_PAYMENT_STATUS.PAID) {
+      return null;
+    }
+
+    const paymentRepo = manager.getRepository(Payment);
+    const bkRepo = manager.getRepository(Booking);
+
+    // 4. No existing PUROHIT_PAYOUT payment is already linked to this booking
+    // Verify inside transaction for idempotency / duplicate protection
+    const existingPayout = await paymentRepo.findOne({
+      where: [
+        ...(booking.purohitPaymentId
+          ? [{ id: booking.purohitPaymentId, paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT }]
+          : []),
+        {
+          bookingId: booking.id,
+          paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT,
+        },
+      ],
+    });
+
+    if (existingPayout) {
+      // Reuse existing payout instead of creating another one
+      if (booking.purohitPaymentId !== existingPayout.id) {
+        booking.purohitPaymentId = existingPayout.id;
+        booking.purohitPayoutStatus =
+          existingPayout.status === PAYMENT_STATUS.SUCCESS
+            ? BOOKING_PAYMENT_STATUS.PAID
+            : BOOKING_PAYMENT_STATUS.PENDING;
+        await bkRepo.save(booking);
+      }
+      return existingPayout;
+    }
+
+    // Resolve payeeId (Purohit user ID)
+    let payeeId: number | undefined = booking.purohit?.userId;
+    if (!payeeId && booking.purohitId) {
+      const profile = await manager.getRepository(PurohitProfile).findOne({
+        where: { id: booking.purohitId },
+        select: ['id', 'userId'],
+      });
+      payeeId = profile?.userId;
+    }
+
+    // Create exactly ONE PUROHIT_PAYOUT record with PENDING status
+    let createdPayout = paymentRepo.create({
+      paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT,
+      bookingId: booking.id,
+      payeeId,
+      createdById: booking.customerId || 1,
+      amount: payoutAmount,
+      currency: 'INR',
+      status: PAYMENT_STATUS.PENDING,
+      remark: `Purohit payout pending for Booking #${booking.bookingNumber || booking.id}`,
+    });
+
+    createdPayout = await paymentRepo.save(createdPayout);
+
+    booking.purohitPaymentId = createdPayout.id;
+    booking.purohitPayoutStatus = BOOKING_PAYMENT_STATUS.PENDING;
+    await bkRepo.save(booking);
+
+    return createdPayout;
+  }
+
+  private async ensurePendingPayoutsForPurohit(userId: number): Promise<void> {
+    try {
+      if (typeof this.bookingRepository.createQueryBuilder !== 'function') {
+        return;
+      }
+      const eligibleBookings = await this.bookingRepository
+        .createQueryBuilder('booking')
+        .leftJoin('booking.purohit', 'purohit')
+        .where('purohit.userId = :userId', { userId })
+        .andWhere('booking.paymentStatus = :paidStatus', {
+          paidStatus: BOOKING_PAYMENT_STATUS.PAID,
+        })
+        .andWhere(
+          '(booking.remainingAmount <= 0 OR booking.remainingAmount IS NULL)',
+        )
+        .andWhere('booking.purohitPayoutAmount > 0')
+        .andWhere('booking.purohitPayoutStatus != :payoutPaidStatus', {
+          payoutPaidStatus: BOOKING_PAYMENT_STATUS.PAID,
+        })
+        .getMany();
+
+      for (const booking of eligibleBookings) {
+        await this.dataSource.transaction(async (manager) => {
+          const lockedBooking = await manager.getRepository(Booking).findOne({
+            where: { id: booking.id },
+            lock: { mode: 'pessimistic_write' },
+            relations: { purohit: true },
+          });
+          if (lockedBooking) {
+            await this.ensurePurohitPendingPayout(manager, lockedBooking);
+          }
+        });
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Failed to ensure pending payouts for purohit ${userId}: ${err}`,
+      );
     }
   }
 
