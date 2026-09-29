@@ -59,15 +59,6 @@ import {
   RepeatBookingDto,
   RescheduleBookingDto,
 } from '@poojawala/dtos';
-
-export interface CreateBookingResponse {
-  bookingId: number;
-  bookingNumber: string;
-  status: BOOKING_STATUS;
-  paymentStatus: BOOKING_PAYMENT_STATUS;
-  paymentId: number | string | null;
-  paymentUrl: string | null;
-}
 import { S3Service } from '@poojawala/s3';
 import { SmsService } from '@poojawala/sms-services';
 import { EmailService } from '@poojawala/email-services';
@@ -77,6 +68,15 @@ import { NotificationService } from '@poojawala/notification';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
 import { AuditLogService, normalizeCityName } from '@poojawala/common';
 import { PaymentService } from '../../../payment-service/src/payment/payment.service';
+
+export interface CreateBookingResponse {
+  bookingId: number;
+  bookingNumber: string;
+  status: BOOKING_STATUS;
+  paymentStatus: BOOKING_PAYMENT_STATUS;
+  paymentId: number | string | null;
+  paymentUrl: string | null;
+}
 
 interface CouponCalculationResult {
   coupon: Coupon;

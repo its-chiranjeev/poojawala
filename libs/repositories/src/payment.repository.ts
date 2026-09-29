@@ -181,7 +181,6 @@ export class PaymentRepository extends BaseRepository<Payment> {
         status: In([
           PAYMENT_STATUS.CREATED,
           PAYMENT_STATUS.PENDING,
-          PAYMENT_STATUS.SUCCESS,
         ]),
       },
 

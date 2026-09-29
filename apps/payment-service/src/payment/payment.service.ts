@@ -639,11 +639,13 @@ export class PaymentService {
 
     if (existingPayment) {
       if (existingPayment.status === PAYMENT_STATUS.SUCCESS) {
-        throw new ConflictException('This booking is already paid');
-      }
-
-      // Check if existing payment matches desired amount and is usable
-      if (
+        if (
+          booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
+          Number(booking.remainingAmount ?? 0) <= 0
+        ) {
+          throw new ConflictException('This booking is already paid');
+        }
+      } else if (
         Number(existingPayment.amount) === Number(amount) &&
         existingPayment.razorpayPaymentLinkId
       ) {
