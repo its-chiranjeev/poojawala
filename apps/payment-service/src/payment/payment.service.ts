@@ -4092,6 +4092,8 @@ export class PaymentService {
                 customerName,
                 bookingId: fullBooking.bookingNumber || `B-${fullBooking.id}`,
                 serviceName: fullBooking.service?.name || 'Vedic Pooja',
+                servicePlan: fullBooking.plan ? String(fullBooking.plan) : undefined,
+                planName: fullBooking.plan ? String(fullBooking.plan) : undefined,
                 bookingDate,
                 bookingTime,
                 purohitName,

@@ -11,12 +11,16 @@ import { PurohitService } from '@poojawala/entities';
 import { PurohitProfileRepository } from '@poojawala/repositories';
 import { PurohitProfile } from '@poojawala/entities';
 import { CommonModule } from '@poojawala/common';
+import { NotificationModule } from '@poojawala/notification';
+import { EmailServicesModule } from '@poojawala/email-services';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Service, ServiceCategory, PurohitService, PurohitProfile]),
     S3Module,
     CommonModule,
+    NotificationModule,
+    EmailServicesModule,
   ],
   controllers: [ServiceController],
   providers: [

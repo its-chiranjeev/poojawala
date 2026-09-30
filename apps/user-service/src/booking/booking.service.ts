@@ -682,9 +682,17 @@ export class BookingService {
             transactionResult.savedBooking.bookingNumber ||
             `B-${transactionResult.savedBooking.id}`;
 
+          const planPart = transactionResult.savedBooking.plan
+            ? ` - ${transactionResult.savedBooking.plan} plan`
+            : '';
+          // TODO: SERVICE_MESSAGE_IMPROVEMENT
+          // Old message retained for reference; replaced with plan-aware message.
+          // `New booking ${bookingDisplayId} for ${serviceName} created by ${customerName}. Scheduled at: ${scheduledDateStr}. Total: ₹${transactionResult.savedBooking.finalAmount}.`
+          const adminBookingMessage = `New booking ${bookingDisplayId} for service '${serviceName}'${planPart} created by ${customerName}. Scheduled at: ${scheduledDateStr}. Total: ₹${transactionResult.savedBooking.finalAmount}.`;
+
           await this.notificationService.notifyAdmins(
             'New Booking Request',
-            `New booking ${bookingDisplayId} for ${serviceName} created by ${customerName}. Scheduled at: ${scheduledDateStr}. Total: ₹${transactionResult.savedBooking.finalAmount}.`,
+            adminBookingMessage,
             NOTIFICATION_TYPE.BOOKING,
             transactionResult.savedBooking.id,
             'BOOKING',
@@ -694,6 +702,7 @@ export class BookingService {
               customerId: user.id,
               customerName,
               serviceName,
+              servicePlan: transactionResult.savedBooking.plan,
               finalAmount: transactionResult.savedBooking.finalAmount,
               status: transactionResult.savedBooking.status,
               scheduledAt: transactionResult.savedBooking.scheduledAt,
@@ -2223,6 +2232,8 @@ export class BookingService {
                 customerName,
                 bookingId: b.bookingNumber || `B-${b.id}`,
                 serviceName: acceptedBooking?.service?.name || 'Vedic Pooja',
+                servicePlan: acceptedBooking?.plan ? String(acceptedBooking.plan) : undefined,
+                planName: acceptedBooking?.plan ? String(acceptedBooking.plan) : undefined,
                 bookingDate,
                 bookingTime,
                 bookingAddress: addressString,
@@ -2758,6 +2769,8 @@ export class BookingService {
               customerName,
               bookingId: completedBooking.bookingNumber || `B-${completedBooking.id}`,
               serviceName: completedBooking.service?.name || 'Vedic Pooja',
+              servicePlan: completedBooking.plan ? String(completedBooking.plan) : undefined,
+              planName: completedBooking.plan ? String(completedBooking.plan) : undefined,
               bookingDate,
               bookingTime,
               purohitName,
@@ -4717,6 +4730,8 @@ export class BookingService {
             customerName,
             bookingId: b.bookingNumber,
             serviceName: service.name,
+            servicePlan: b.plan ? String(b.plan) : undefined,
+            planName: b.plan ? String(b.plan) : undefined,
             bookingDate,
             bookingTime,
             bookingAddress: addressString,
@@ -4746,6 +4761,8 @@ export class BookingService {
             customerName,
             customerPhone: customer.phone || 'N/A',
             serviceName: service.name,
+            servicePlan: b.plan ? String(b.plan) : undefined,
+            planName: b.plan ? String(b.plan) : undefined,
             bookingDate,
             bookingTime,
             bookingAddress: addressString,

@@ -25,12 +25,15 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { QueryFailedError, ILike } from 'typeorm';
-import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE, PUROHIT_VERIFICATION_STATUS, ServicePlans, ServicePlanDetails } from '@poojawala/entities';
+import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE, PUROHIT_VERIFICATION_STATUS, ServicePlans, ServicePlanDetails, NOTIFICATION_TYPE } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
+import { NotificationService } from '@poojawala/notification';
+import { EmailService } from '@poojawala/email-services';
 
 // 177 87
 
@@ -43,6 +46,8 @@ export class ServiceService {
     private readonly PurohitServiceRepository: PurohitServiceRepository,
     private readonly PurohitProfileRepository: PurohitProfileRepository,
     private readonly auditLogService: AuditLogService,
+    @Optional() private readonly notificationService?: NotificationService,
+    @Optional() private readonly emailService?: EmailService,
   ) { }
 
   async findAllServices(query: GetServicesQueryDto) {
@@ -492,6 +497,9 @@ export class ServiceService {
         }
       }
 
+      // TODO: SERVICE_MESSAGE_IMPROVEMENT
+      // Old message retained for reference; replaced with plan-aware message.
+      // message: `Admin created new service ${savedService.name}.`,
       await this.auditLogService?.createAuditLog?.({
         actorId: adminId,
         actorType: ACTOR_TYPE.USER,
@@ -500,19 +508,41 @@ export class ServiceService {
         entity: 'Service',
         entityId: String(savedService.id),
         action: 'SERVICE_CREATED',
-        message: `Admin created new service ${savedService.name}.`,
+        message: `Service '${savedService.name}' was created successfully.`,
         oldValue: undefined,
         newValue: { name: savedService.name, slug: savedService.slug },
       });
+
+      if (this.notificationService) {
+        try {
+          await this.notificationService.notifyAdmins(
+            'Service Created',
+            `Service '${savedService.name}' was created successfully.`,
+            NOTIFICATION_TYPE.SYSTEM,
+            savedService.id,
+            'SERVICE',
+            {
+              serviceId: savedService.id,
+              serviceName: savedService.name,
+              action: 'CREATED',
+            },
+          );
+        } catch (err: any) {
+          // Continue if admin notification fails
+        }
+      }
 
       // TODO: PLAN_BASED_PUROHIT_PAYOUT
       // Top-level purohitPayoutAmount removed from response.
       // (savedService as any).purohitPayoutAmount = this.computePurohitPayoutAmount(savedService);
       this.enrichServicePlansAndToken(savedService);
 
+      // TODO: SERVICE_MESSAGE_IMPROVEMENT
+      // Old message retained for reference; replaced with plan-aware message.
+      // message: 'Service created successfully',
       return {
         success: true,
-        message: 'Service created successfully',
+        message: `Service '${savedService.name}' was created successfully.`,
         data: savedService,
       };
     } catch (error: any) {
@@ -764,13 +794,48 @@ export class ServiceService {
 
     const updated = await this.serviceRepository.save(service);
 
+    const hasBasicPlan = Boolean(dto.plans && dto.plans.basic !== undefined);
+    const hasStandardPlan = Boolean(dto.plans && dto.plans.standard !== undefined);
+    const hasCarryBasic = Boolean(
+      dto.purohitCarryItems &&
+      typeof dto.purohitCarryItems === 'object' &&
+      !Array.isArray(dto.purohitCarryItems) &&
+      (dto.purohitCarryItems as any).basic !== undefined,
+    );
+    const hasCarryStandard = Boolean(
+      dto.purohitCarryItems &&
+      typeof dto.purohitCarryItems === 'object' &&
+      !Array.isArray(dto.purohitCarryItems) &&
+      (dto.purohitCarryItems as any).standard !== undefined,
+    );
+
+    const isBasicModified = hasBasicPlan || hasCarryBasic;
+    const isStandardModified = hasStandardPlan || hasCarryStandard;
+
+    let updateMessage: string;
+    if (isBasicModified && isStandardModified) {
+      updateMessage = `Service '${updated.name}' - BASIC and STANDARD plans were updated successfully.`;
+    } else if (isBasicModified) {
+      updateMessage = `Service '${updated.name}' - BASIC plan was updated successfully.`;
+    } else if (isStandardModified) {
+      updateMessage = `Service '${updated.name}' - STANDARD plan was updated successfully.`;
+    } else {
+      updateMessage = `Service '${updated.name}' was updated successfully.`;
+    }
+
     const updatedFields: Record<string, unknown> = { name: updated.name };
     if (dto.cities !== undefined) updatedFields.cities = updated.cities;
     if (dto.languages !== undefined) updatedFields.languages = updated.languages;
     if (dto.benefits !== undefined) updatedFields.benefits = updated.benefits;
     if (dto.purohitCarryItems !== undefined) updatedFields.purohitCarryItems = updated.purohitCarryItems;
     if (dto.plans !== undefined) updatedFields.plans = updated.plans;
+    if (isBasicModified && !isStandardModified) updatedFields.plan = 'BASIC';
+    if (!isBasicModified && isStandardModified) updatedFields.plan = 'STANDARD';
+    if (isBasicModified && isStandardModified) updatedFields.plan = 'BASIC, STANDARD';
 
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // message: `Admin updated service ${updated.name}.`,
     await this.auditLogService?.createAuditLog?.({
       actorId: adminId,
       actorType: ACTOR_TYPE.USER,
@@ -779,7 +844,7 @@ export class ServiceService {
       entity: 'Service',
       entityId: String(updated.id),
       action: 'SERVICE_UPDATED',
-      message: `Admin updated service ${updated.name}.`,
+      message: updateMessage,
       oldValue: {
         cities: oldCities,
         languages: oldLanguages,
@@ -790,14 +855,48 @@ export class ServiceService {
       newValue: updatedFields,
     });
 
+    if (this.notificationService) {
+      try {
+        let notificationMessage: string;
+        if (isBasicModified && isStandardModified) {
+          notificationMessage = `'${updated.name}' - BASIC and STANDARD plans were updated successfully.`;
+        } else if (isBasicModified) {
+          notificationMessage = `'${updated.name}' - BASIC plan was updated successfully.`;
+        } else if (isStandardModified) {
+          notificationMessage = `'${updated.name}' - STANDARD plan was updated successfully.`;
+        } else {
+          notificationMessage = `'${updated.name}' was updated successfully.`;
+        }
+
+        await this.notificationService.notifyAdmins(
+          'Service Updated',
+          notificationMessage,
+          NOTIFICATION_TYPE.SYSTEM,
+          updated.id,
+          'SERVICE',
+          {
+            serviceId: updated.id,
+            serviceName: updated.name,
+            action: 'UPDATED',
+            plan: isBasicModified && isStandardModified ? 'BASIC, STANDARD' : isBasicModified ? 'BASIC' : isStandardModified ? 'STANDARD' : undefined,
+          },
+        );
+      } catch (err: any) {
+        // Continue if admin notification fails
+      }
+    }
+
     // TODO: PLAN_BASED_PUROHIT_PAYOUT
     // Top-level purohitPayoutAmount removed from response.
     // (updated as any).purohitPayoutAmount = this.computePurohitPayoutAmount(updated);
     this.enrichServicePlansAndToken(updated);
 
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // message: 'Service updated successfully',
     return {
       success: true,
-      message: 'Service updated successfully',
+      message: updateMessage,
       data: updated,
     };
   }
@@ -842,6 +941,9 @@ export class ServiceService {
     try {
       await this.serviceRepository.remove(service);
 
+      // TODO: SERVICE_MESSAGE_IMPROVEMENT
+      // Old message retained for reference; replaced with plan-aware message.
+      // message: `Admin deleted service ${service.name}.`,
       await this.auditLogService?.createAuditLog?.({
         actorId: adminId,
         actorType: ACTOR_TYPE.USER,
@@ -850,14 +952,36 @@ export class ServiceService {
         entity: 'Service',
         entityId: String(id),
         action: 'SERVICE_DELETED',
-        message: `Admin deleted service ${service.name}.`,
+        message: `Service '${service.name}' was deleted successfully.`,
         oldValue: undefined,
         newValue: { deleted: true },
       });
 
+      if (this.notificationService) {
+        try {
+          await this.notificationService.notifyAdmins(
+            'Service Deleted',
+            `Service '${service.name}' was deleted successfully.`,
+            NOTIFICATION_TYPE.SYSTEM,
+            id,
+            'SERVICE',
+            {
+              serviceId: id,
+              serviceName: service.name,
+              action: 'DELETED',
+            },
+          );
+        } catch (err: any) {
+          // Continue if admin notification fails
+        }
+      }
+
+      // TODO: SERVICE_MESSAGE_IMPROVEMENT
+      // Old message retained for reference; replaced with plan-aware message.
+      // message: 'Service deleted successfully',
       return {
         success: true,
-        message: 'Service deleted successfully',
+        message: `Service '${service.name}' was deleted successfully.`,
       };
     } catch (error) {
       if (
@@ -885,6 +1009,12 @@ export class ServiceService {
     service.isActive = isActive;
     const updatedService = await this.serviceRepository.save(service);
 
+    const statusAction = isActive ? 'activated' : 'deactivated';
+    const statusMessage = `Service '${service.name}' was ${statusAction} successfully.`;
+
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // message: `Admin updated service #${id} (${service.name}) status to ${isActive}.`,
     await this.auditLogService?.createAuditLog?.({
       actorId: adminId,
       actorType: ACTOR_TYPE.USER,
@@ -893,14 +1023,37 @@ export class ServiceService {
       entity: 'Service',
       entityId: String(id),
       action: 'SERVICE_STATUS_UPDATED',
-      message: `Admin updated service #${id} (${service.name}) status to ${isActive}.`,
+      message: statusMessage,
       oldValue: { isActive: oldStatus },
       newValue: { isActive },
     });
 
+    if (this.notificationService) {
+      try {
+        await this.notificationService.notifyAdmins(
+          `Service ${isActive ? 'Activated' : 'Deactivated'}`,
+          statusMessage,
+          NOTIFICATION_TYPE.SYSTEM,
+          id,
+          'SERVICE',
+          {
+            serviceId: id,
+            serviceName: service.name,
+            action: isActive ? 'ACTIVATED' : 'DEACTIVATED',
+            isActive,
+          },
+        );
+      } catch (err: any) {
+        // Continue if admin notification fails
+      }
+    }
+
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // message: 'Service status updated successfully',
     return {
       success: true,
-      message: 'Service status updated successfully',
+      message: statusMessage,
       data: updatedService,
     };
   }
@@ -1122,6 +1275,7 @@ export class ServiceService {
   async deletePurohitService(Id: number, userId: number) {
     const purohitService = await this.PurohitServiceRepository.findOne({
       where: { id: Id },
+      relations: ['service'],
     });
 
     if (!purohitService) {
@@ -1144,9 +1298,16 @@ export class ServiceService {
 
     await this.PurohitServiceRepository.softDelete(Id);
 
+    const deleteMessage = purohitService.service?.name
+      ? `Service '${purohitService.service.name}' was deleted successfully.`
+      : 'Purohit service deleted successfully';
+
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // message: 'Purohit service deleted successfully',
     return {
       success: true,
-      message: 'Purohit service deleted successfully',
+      message: deleteMessage,
     };
   }
 
@@ -1196,9 +1357,17 @@ export class ServiceService {
     }
     this.enrichPurohitServiceWithPayout(updatedService);
 
+    const serviceName = updatedService.service?.name || purohitService.service?.name;
+    const updateMessage = serviceName
+      ? `Service '${serviceName}' was updated successfully.`
+      : 'Purohit service updated successfully';
+
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // message: 'Purohit service updated successfully',
     return {
       success: true,
-      message: 'Purohit service updated successfully',
+      message: updateMessage,
       data: updatedService,
     };
   }
@@ -1329,6 +1498,11 @@ export class ServiceService {
 
     const saved = await this.categoryRepository.save(category);
 
+    const categoryMessage = `Service category '${saved.name}' was created successfully.`;
+
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // message: `Admin created service category "${saved.name}"`,
     await this.auditLogService?.createAuditLog?.({
       actorId: adminId,
       actorType: ACTOR_TYPE.USER,
@@ -1337,13 +1511,16 @@ export class ServiceService {
       entity: 'ServiceCategory',
       entityId: String(saved.id),
       action: 'CATEGORY_CREATED',
-      message: `Admin created service category "${saved.name}"`,
+      message: categoryMessage,
       newValue: { id: saved.id, name: saved.name },
     });
 
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // message: 'Service category created successfully',
     return {
       success: true,
-      message: 'Service category created successfully',
+      message: categoryMessage,
       data: saved,
     };
   }
@@ -1388,6 +1565,11 @@ export class ServiceService {
 
     const updated = await this.categoryRepository.save(category);
 
+    const updateCategoryMessage = `Service category '${updated.name}' was updated successfully.`;
+
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // message: `Admin updated service category id ${id}`,
     await this.auditLogService?.createAuditLog?.({
       actorId: adminId,
       actorType: ACTOR_TYPE.USER,
@@ -1396,14 +1578,17 @@ export class ServiceService {
       entity: 'ServiceCategory',
       entityId: String(id),
       action: 'CATEGORY_UPDATED',
-      message: `Admin updated service category id ${id}`,
+      message: updateCategoryMessage,
       oldValue: oldSnapshot,
       newValue: { name: updated.name, isActive: updated.isActive, sortOrder: updated.sortOrder },
     });
 
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // message: 'Service category updated successfully',
     return {
       success: true,
-      message: 'Service category updated successfully',
+      message: updateCategoryMessage,
       data: updated,
     };
   }
@@ -1417,6 +1602,11 @@ export class ServiceService {
 
     await this.categoryRepository.softDelete(id);
 
+    const deleteCategoryMessage = `Service category '${category.name}' was deleted successfully.`;
+
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // message: `Admin soft-deleted service category "${category.name}" (id: ${id})`,
     await this.auditLogService?.createAuditLog?.({
       actorId: adminId,
       actorType: ACTOR_TYPE.USER,
@@ -1425,13 +1615,16 @@ export class ServiceService {
       entity: 'ServiceCategory',
       entityId: String(id),
       action: 'CATEGORY_DELETED',
-      message: `Admin soft-deleted service category "${category.name}" (id: ${id})`,
+      message: deleteCategoryMessage,
       oldValue: { name: category.name },
     });
 
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // message: 'Service category deleted successfully',
     return {
       success: true,
-      message: 'Service category deleted successfully',
+      message: deleteCategoryMessage,
     };
   }
 }

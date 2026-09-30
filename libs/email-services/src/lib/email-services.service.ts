@@ -251,6 +251,8 @@ export class EmailService {
     customerName: string;
     bookingId: string;
     serviceName: string;
+    servicePlan?: string;
+    planName?: string;
     bookingDate: string;
     bookingTime: string;
     bookingAddress: string;
@@ -262,19 +264,30 @@ export class EmailService {
     bookingStatus: string;
     specialInstructions?: string;
   }): Promise<void> {
+    const effectivePlan = data.planName || data.servicePlan;
+    const planText = effectivePlan ? ` - ${effectivePlan} Plan` : '';
+
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // preheaderText: `Booking #${data.bookingId} for ${data.serviceName} confirmed!`,
+    // emailMessage: `Your sacred pooja service for <strong>${this.escapeHtml(data.serviceName)}</strong> has been scheduled successfully.`,
+    const preheaderText = `Booking #${data.bookingId} for ${data.serviceName}${planText} confirmed!`;
+    const emailMessage = `Your sacred pooja service for <strong>${this.escapeHtml(data.serviceName)}</strong>${effectivePlan ? ` (<strong>${this.escapeHtml(effectivePlan)} Plan</strong>)` : ''} has been scheduled successfully.`;
+
     const html = renderPoojawalaEmail({
       statusBadge: 'Booking Confirmed',
       userName: data.customerName || 'Devotee',
-      preheaderText: `Booking #${data.bookingId} for ${data.serviceName} confirmed!`,
-      emailMessage: `Your sacred pooja service for <strong>${this.escapeHtml(data.serviceName)}</strong> has been scheduled successfully.`,
+      preheaderText,
+      emailMessage,
       detailsTable: {
         title: 'Booking & Payment Details',
         rows: [
           { label: 'Booking ID', value: `#${data.bookingId}` },
-          { label: 'pooja Service', value: data.serviceName },
+          { label: 'Pooja Service', value: data.serviceName },
+          ...(effectivePlan ? [{ label: 'Service Plan', value: `${effectivePlan} Plan` }] : []),
           { label: 'Date', value: data.bookingDate },
           { label: 'Time', value: data.bookingTime },
-          { label: 'pooja Location', value: data.bookingAddress },
+          { label: 'Pooja Location', value: data.bookingAddress },
           { label: 'Assigned Purohit', value: data.purohitName },
           { label: 'Amount Paid', value: `₹${data.amountPaid}` },
           { label: 'Pending Amount', value: `₹${data.pendingAmount}` },
@@ -292,7 +305,7 @@ export class EmailService {
           text: data.specialInstructions,
         }
         : {
-          title: 'pooja Day Preparation',
+          title: 'Pooja Day Preparation',
           text: 'Please ensure basic household pooja essentials and a clean, quiet space are ready at least 15 minutes before the scheduled time.',
         },
     });
@@ -311,6 +324,8 @@ export class EmailService {
     customerName: string;
     customerPhone: string;
     serviceName: string;
+    servicePlan?: string;
+    planName?: string;
     bookingDate: string;
     bookingTime: string;
     bookingAddress: string;
@@ -320,16 +335,27 @@ export class EmailService {
     bookingStatus: string;
     specialInstructions?: string;
   }): Promise<void> {
+    const effectivePlan = data.planName || data.servicePlan;
+    const planText = effectivePlan ? ` - ${effectivePlan} Plan` : '';
+
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // preheaderText: `New Booking #${data.bookingId} assigned to you!`,
+    // emailMessage: `A new sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong> has been assigned to you. Please review the details below.`,
+    const preheaderText = `New Booking #${data.bookingId} (${data.serviceName}${planText}) assigned to you!`;
+    const emailMessage = `A new sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong>${effectivePlan ? ` (<strong>${this.escapeHtml(effectivePlan)} Plan</strong>)` : ''} has been assigned to you. Please review the details below.`;
+
     const html = renderPoojawalaEmail({
       statusBadge: 'New Booking Assigned',
       userName: data.purohitName || 'Purohit',
-      preheaderText: `New Booking #${data.bookingId} assigned to you!`,
-      emailMessage: `A new sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong> has been assigned to you. Please review the details below.`,
+      preheaderText,
+      emailMessage,
       detailsTable: {
         title: 'Booking & Devotee Details',
         rows: [
           { label: 'Booking ID', value: `#${data.bookingId}` },
           { label: 'Pooja Service', value: data.serviceName },
+          ...(effectivePlan ? [{ label: 'Service Plan', value: `${effectivePlan} Plan` }] : []),
           { label: 'Date', value: data.bookingDate },
           { label: 'Time', value: data.bookingTime },
           { label: 'Pooja Location', value: data.bookingAddress },
@@ -367,6 +393,8 @@ export class EmailService {
     customerName: string;
     bookingId: string;
     serviceName: string;
+    servicePlan?: string;
+    planName?: string;
     bookingDate: string;
     bookingTime: string;
     bookingAddress: string;
@@ -375,9 +403,20 @@ export class EmailService {
     totalAmount?: number;
     bookingStatus?: string;
   }): Promise<void> {
+    const effectivePlan = data.planName || data.servicePlan;
+    const planText = effectivePlan ? ` - ${effectivePlan} Plan` : '';
+
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // preheaderText: `Booking #${data.bookingId} has been accepted by Purohit ${data.purohitName}!`,
+    // emailMessage: `Your sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong> has been accepted by Purohit <strong>${this.escapeHtml(data.purohitName)}</strong>. Our verified Vedic purohit is preparing to conduct your rituals with complete devotion and Vedic sanctity.`,
+    const preheaderText = `Booking #${data.bookingId} for ${data.serviceName}${planText} has been accepted by Purohit ${data.purohitName}!`;
+    const emailMessage = `Your sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong>${effectivePlan ? ` (<strong>${this.escapeHtml(effectivePlan)} Plan</strong>)` : ''} has been accepted by Purohit <strong>${this.escapeHtml(data.purohitName)}</strong>. Our verified Vedic purohit is preparing to conduct your rituals with complete devotion and Vedic sanctity.`;
+
     const rows = [
       { label: 'Booking ID', value: `#${data.bookingId}` },
       { label: 'Pooja Service', value: data.serviceName },
+      ...(effectivePlan ? [{ label: 'Service Plan', value: `${effectivePlan} Plan` }] : []),
       { label: 'Date', value: data.bookingDate },
       { label: 'Time', value: data.bookingTime },
       { label: 'Pooja Location', value: data.bookingAddress },
@@ -389,8 +428,8 @@ export class EmailService {
     const html = renderPoojawalaEmail({
       statusBadge: 'Booking Accepted',
       userName: data.customerName || 'Devotee',
-      preheaderText: `Booking #${data.bookingId} has been accepted by Purohit ${data.purohitName}!`,
-      emailMessage: `Your sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong> has been accepted by Purohit <strong>${this.escapeHtml(data.purohitName)}</strong>. Our verified Vedic purohit is preparing to conduct your rituals with complete devotion and Vedic sanctity.`,
+      preheaderText,
+      emailMessage,
       detailsTable: {
         title: 'Booking & Purohit Details',
         rows,
@@ -421,22 +460,35 @@ export class EmailService {
     customerName: string;
     bookingId: string;
     serviceName: string;
+    servicePlan?: string;
+    planName?: string;
     bookingDate: string;
     bookingTime: string;
     purohitName: string;
     totalAmount: number;
     paymentStatus?: string;
   }): Promise<void> {
+    const effectivePlan = data.planName || data.servicePlan;
+    const planText = effectivePlan ? ` - ${effectivePlan} Plan` : '';
+
+    // TODO: SERVICE_MESSAGE_IMPROVEMENT
+    // Old message retained for reference; replaced with plan-aware message.
+    // preheaderText: `Your sacred pooja #${data.bookingId} has been completed successfully!`,
+    // emailMessage: `May the divine blessings of your <strong>${this.escapeHtml(data.serviceName)}</strong> bring peace, prosperity, and happiness to you and your loved ones. The sacred ceremony has been completed and your payment has been processed successfully.`,
+    const preheaderText = `Your sacred pooja #${data.bookingId} for ${data.serviceName}${planText} has been completed successfully!`;
+    const emailMessage = `May the divine blessings of your <strong>${this.escapeHtml(data.serviceName)}</strong>${effectivePlan ? ` (<strong>${this.escapeHtml(effectivePlan)} Plan</strong>)` : ''} bring peace, prosperity, and happiness to you and your loved ones. The sacred ceremony has been completed and your payment has been processed successfully.`;
+
     const html = renderPoojawalaEmail({
       statusBadge: 'Pooja Completed',
       userName: data.customerName || 'Devotee',
-      preheaderText: `Your sacred pooja #${data.bookingId} has been completed successfully!`,
-      emailMessage: `May the divine blessings of your <strong>${this.escapeHtml(data.serviceName)}</strong> bring peace, prosperity, and happiness to you and your loved ones. The sacred ceremony has been completed and your payment has been processed successfully.`,
+      preheaderText,
+      emailMessage,
       detailsTable: {
         title: 'Ceremony & Payment Summary',
         rows: [
           { label: 'Booking ID', value: `#${data.bookingId}` },
           { label: 'Pooja Service', value: data.serviceName },
+          ...(effectivePlan ? [{ label: 'Service Plan', value: `${effectivePlan} Plan` }] : []),
           { label: 'Conducted By', value: data.purohitName },
           { label: 'Date', value: data.bookingDate },
           { label: 'Time', value: data.bookingTime },
@@ -457,6 +509,38 @@ export class EmailService {
     await this.sendMail({
       to: data.email,
       subject: `Pooja Completed Successfully - Poojawala | Booking #${data.bookingId}`,
+      html,
+    });
+  }
+
+  async sendServiceActionEmail(data: {
+    email: string;
+    serviceName: string;
+    action: string;
+    planName?: string;
+  }): Promise<void> {
+    const planText = data.planName ? ` - ${data.planName} plan` : '';
+    const actionPast = data.action.endsWith('e') || data.action.endsWith('ed') ? (data.action.endsWith('ed') ? data.action : `${data.action}d`) : `${data.action}ed`;
+    const messageContent = `Service '${data.serviceName}'${planText} was ${actionPast.toLowerCase()} successfully.`;
+
+    const html = renderPoojawalaEmail({
+      statusBadge: `Service ${actionPast}`,
+      userName: 'Administrator',
+      preheaderText: messageContent,
+      emailMessage: messageContent,
+      detailsTable: {
+        title: 'Service Update Details',
+        rows: [
+          { label: 'Service Name', value: data.serviceName },
+          { label: 'Action', value: actionPast },
+          ...(data.planName ? [{ label: 'Service Plan', value: `${data.planName} Plan` }] : []),
+        ],
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject: `Service ${actionPast} - ${data.serviceName}`,
       html,
     });
   }
