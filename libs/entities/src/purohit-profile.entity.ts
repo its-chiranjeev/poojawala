@@ -17,13 +17,6 @@ import { PurohitService } from './purohit-service.entity';
 import { CustomerFavorite } from './customer-favorite.entity';
 import { Booking } from './booking.entity';
 
-export enum QUALIFICATION {
-  SHASTRI = 'SHASTRI',
-  ACHARYA = 'ACHARYA',
-  VEDPATHI = 'VEDPATHI',
-  OTHER = 'OTHER',
-}
-
 export enum PUROHIT_VERIFICATION_STATUS {
   PENDING = 'PENDING',
   APPROVED = 'APPROVED',
@@ -46,12 +39,8 @@ export class PurohitProfile {
   @Column({ type: 'text', nullable: true })
   bio?: string;
 
-  @Column({
-    type: 'enum',
-    enum: QUALIFICATION,
-    nullable: true,
-  })
-  qualification?: QUALIFICATION;
+  @Column({ type: 'jsonb', nullable: true })
+  qualification?: string[];
 
   @Column({ type: 'int', nullable: true })
   experienceYears?: number;

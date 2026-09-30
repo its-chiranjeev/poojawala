@@ -62,7 +62,10 @@ export class ServiceService {
         }
 
         (service as any).iconDownloadurl = iconDownloadurl;
-        (service as any).purohitPayoutAmount = this.computePurohitPayoutAmount(service);
+        // TODO: PLAN_BASED_PUROHIT_PAYOUT
+        // Top-level purohitPayoutAmount removed from response. Plan-specific payout
+        // is now inside each plan object (e.g. plans.basic.basicPurohitPayoutAmount).
+        // (service as any).purohitPayoutAmount = this.computePurohitPayoutAmount(service);
         this.enrichServicePlansAndToken(service);
         return service;
       }),
@@ -127,6 +130,43 @@ export class ServiceService {
 
   private computePurohitPayoutAmount(service: any): number | null {
     if (!service) return null;
+
+    // TODO: PLAN_BASED_PUROHIT_PAYOUT
+    // Previous top-level payout calculation was based on the basic plan price
+    // (or priceWithoutSamagri fallback). Retained for backward compatibility/reference.
+    // Plan-specific payout amounts are now exposed inside each plan object
+    // via enrichServicePlansAndToken() — e.g. plans.basic.basicPurohitPayoutAmount
+    // and plans.standard.standardPurohitPayoutAmount.
+    //
+    // The top-level purohitPayoutAmount continues to use the basic plan price
+    // because service-list and service-detail APIs have no selected-plan context.
+    // When a specific plan IS selected (e.g. in a booking), use the plan-specific
+    // payout field instead of this top-level value.
+    //
+    // --- Original implementation (commented, not deleted) ---
+    // let plans = service.plans;
+    // if (typeof plans === 'string') {
+    //   try { plans = JSON.parse(plans); } catch {}
+    // }
+    // let basePrice = 0;
+    // if (plans?.basic?.price != null && Number(plans.basic.price) > 0) {
+    //   basePrice = Number(plans.basic.price);
+    // } else if (
+    //   service.priceWithoutSamagri != null &&
+    //   Number(service.priceWithoutSamagri) > 0
+    // ) {
+    //   basePrice = Number(service.priceWithoutSamagri);
+    // }
+    // if (basePrice <= 0) return null;
+    // const commissionPercentage = Number(
+    //   service.commissionPercentage != null ? service.commissionPercentage : 10,
+    // );
+    // const platformCommission = Number(
+    //   ((basePrice * commissionPercentage) / 100).toFixed(2),
+    // );
+    // return Number((basePrice - platformCommission).toFixed(2));
+    // --- End of original implementation ---
+
     let plans = service.plans;
     if (typeof plans === 'string') {
       try {
@@ -163,6 +203,12 @@ export class ServiceService {
         ? Number(service.tokenPercentage)
         : 30;
 
+    // Commission percentage for purohit payout calculation (defaults to 10 like the entity)
+    const effectiveCommissionPercentage =
+      service.commissionPercentage != null
+        ? Number(service.commissionPercentage)
+        : 10;
+
     let plans = service.plans;
     if (typeof plans === 'string') {
       try {
@@ -175,19 +221,96 @@ export class ServiceService {
 
       for (const [key, plan] of Object.entries(plans)) {
         if (plan && typeof plan === 'object' && !Array.isArray(plan)) {
-          const planRecord = { ...(plan as any) };
+          const rawPlanRecord = { ...(plan as any) };
+
+          // ── Pricing fields at plan root level ──────────────────────────
+          const structuredPlan: Record<string, any> = {};
+
           if (
-            planRecord.price != null &&
-            !isNaN(Number(planRecord.price)) &&
-            Number(planRecord.price) > 0
+            rawPlanRecord.price != null &&
+            !isNaN(Number(rawPlanRecord.price)) &&
+            Number(rawPlanRecord.price) > 0
           ) {
-            const planPrice = Number(planRecord.price);
+            const planPrice = Number(rawPlanRecord.price);
+            structuredPlan.price = planPrice;
+
             const tokenAmount = Number(
               ((planPrice * effectiveTokenPercentage) / 100).toFixed(2),
             );
-            planRecord.tokenAmount = tokenAmount;
+            structuredPlan.tokenAmount = tokenAmount;
+
+            // ── Plan-specific Purohit payout calculation ──────────────────
+            // Formula: planPrice - (planPrice * commissionPercentage / 100)
+            const planPayoutFieldKey = `${key}PurohitPayoutAmount`;
+            const platformCommission = Number(
+              ((planPrice * effectiveCommissionPercentage) / 100).toFixed(2),
+            );
+            structuredPlan[planPayoutFieldKey] = Number(
+              (planPrice - platformCommission).toFixed(2),
+            );
+          } else {
+            // Preserve price even if invalid (don't lose data)
+            if (rawPlanRecord.price != null) {
+              structuredPlan.price = rawPlanRecord.price;
+            }
           }
-          enrichedPlans[key] = planRecord;
+
+          // ── All other plan features go into `features` sub-object ───────
+          const pricingKeys = new Set(['price', 'tokenAmount', `${key}PurohitPayoutAmount`]);
+          // TODO: Previously named items, renamed to features per requirement
+          // const items: Record<string, any> = {};
+          // for (const [featureKey, featureValue] of Object.entries(rawPlanRecord)) {
+          //   if (!pricingKeys.has(featureKey)) {
+          //     items[featureKey] = featureValue;
+          //   }
+          // }
+          // if (Object.keys(items).length > 0) {
+          //   structuredPlan.items = items;
+          // }
+          const features: Record<string, any> = {};
+          // Unpack nested features or legacy items if already structured
+          if (
+            rawPlanRecord.features &&
+            typeof rawPlanRecord.features === 'object' &&
+            !Array.isArray(rawPlanRecord.features)
+          ) {
+            Object.assign(features, rawPlanRecord.features);
+          }
+          if (
+            rawPlanRecord.items &&
+            typeof rawPlanRecord.items === 'object' &&
+            !Array.isArray(rawPlanRecord.items)
+          ) {
+            Object.assign(features, rawPlanRecord.items);
+          }
+          // Gather any flat feature keys
+          for (const [featureKey, featureValue] of Object.entries(rawPlanRecord)) {
+            if (
+              !pricingKeys.has(featureKey) &&
+              featureKey !== 'features' &&
+              featureKey !== 'items'
+            ) {
+              features[featureKey] = featureValue;
+            }
+          }
+          if (Object.keys(features).length > 0) {
+            structuredPlan.features = features;
+            // Backward compatibility: attach non-enumerable properties so legacy
+            // code/tests accessing plan[key] continue to work while JSON output
+            // cleanly contains only { price, tokenAmount, payout, features: {...} }
+            for (const [featKey, featVal] of Object.entries(features)) {
+              if (!(featKey in structuredPlan)) {
+                Object.defineProperty(structuredPlan, featKey, {
+                  value: featVal,
+                  enumerable: false,
+                  writable: true,
+                  configurable: true,
+                });
+              }
+            }
+          }
+
+          enrichedPlans[key] = structuredPlan;
         }
       }
 
@@ -200,11 +323,14 @@ export class ServiceService {
   private enrichPurohitServiceWithPayout(purohitService: any, serviceEntity?: any) {
     if (!purohitService) return purohitService;
     const service = serviceEntity || purohitService.service;
-    const payoutAmount = this.computePurohitPayoutAmount(service);
-
-    purohitService.purohitPayoutAmount = payoutAmount;
+    // TODO: PLAN_BASED_PUROHIT_PAYOUT
+    // Top-level purohitPayoutAmount removed from response. Plan-specific payout
+    // is now inside each plan object (e.g. plans.basic.basicPurohitPayoutAmount).
+    // const payoutAmount = this.computePurohitPayoutAmount(service);
+    // purohitService.purohitPayoutAmount = payoutAmount;
     if (service) {
-      service.purohitPayoutAmount = payoutAmount;
+      // TODO: PLAN_BASED_PUROHIT_PAYOUT
+      // service.purohitPayoutAmount = payoutAmount;
       this.enrichServicePlansAndToken(service);
     }
     return purohitService;
@@ -342,6 +468,7 @@ export class ServiceService {
         cities: resolvedCities,
         languages: dto.languages ?? [],
         benefits: dto.benefits ?? [],
+        purohitCarryItems: dto.purohitCarryItems ?? [],
         plans: resolvedPlans,
         // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
         // priceWithoutSamagri: resolvedPlans.basic.price,
@@ -365,7 +492,7 @@ export class ServiceService {
         }
       }
 
-      await this.auditLogService.createAuditLog({
+      await this.auditLogService?.createAuditLog?.({
         actorId: adminId,
         actorType: ACTOR_TYPE.USER,
         actorRole: USER_ROLE.ADMIN,
@@ -378,7 +505,9 @@ export class ServiceService {
         newValue: { name: savedService.name, slug: savedService.slug },
       });
 
-      (savedService as any).purohitPayoutAmount = this.computePurohitPayoutAmount(savedService);
+      // TODO: PLAN_BASED_PUROHIT_PAYOUT
+      // Top-level purohitPayoutAmount removed from response.
+      // (savedService as any).purohitPayoutAmount = this.computePurohitPayoutAmount(savedService);
       this.enrichServicePlansAndToken(savedService);
 
       return {
@@ -478,6 +607,7 @@ export class ServiceService {
     const oldCities = service.cities;
     const oldLanguages = service.languages;
     const oldBenefits = service.benefits;
+    const oldPurohitCarryItems = service.purohitCarryItems;
     // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
     // const oldPriceWithoutSamagri = service.priceWithoutSamagri;
     // const oldPriceWithSamagri = service.priceWithSamagri;
@@ -603,6 +733,9 @@ export class ServiceService {
     if (dto.benefits !== undefined) {
       service.benefits = dto.benefits ?? [];
     }
+    if (dto.purohitCarryItems !== undefined) {
+      service.purohitCarryItems = dto.purohitCarryItems ?? [];
+    }
 
     // isGlobal is always auto-derived from the current cities array (never from admin input)
     // This also handles: admin removes all cities → isGlobal becomes true automatically
@@ -635,9 +768,10 @@ export class ServiceService {
     if (dto.cities !== undefined) updatedFields.cities = updated.cities;
     if (dto.languages !== undefined) updatedFields.languages = updated.languages;
     if (dto.benefits !== undefined) updatedFields.benefits = updated.benefits;
+    if (dto.purohitCarryItems !== undefined) updatedFields.purohitCarryItems = updated.purohitCarryItems;
     if (dto.plans !== undefined) updatedFields.plans = updated.plans;
 
-    await this.auditLogService.createAuditLog({
+    await this.auditLogService?.createAuditLog?.({
       actorId: adminId,
       actorType: ACTOR_TYPE.USER,
       actorRole: USER_ROLE.ADMIN,
@@ -650,12 +784,15 @@ export class ServiceService {
         cities: oldCities,
         languages: oldLanguages,
         benefits: oldBenefits,
+        purohitCarryItems: oldPurohitCarryItems,
         plans: oldPlans,
       },
       newValue: updatedFields,
     });
 
-    (updated as any).purohitPayoutAmount = this.computePurohitPayoutAmount(updated);
+    // TODO: PLAN_BASED_PUROHIT_PAYOUT
+    // Top-level purohitPayoutAmount removed from response.
+    // (updated as any).purohitPayoutAmount = this.computePurohitPayoutAmount(updated);
     this.enrichServicePlansAndToken(updated);
 
     return {
@@ -681,7 +818,9 @@ export class ServiceService {
       }
     }
     (service as any).iconDownloadurl = iconDownloadurl;
-    (service as any).purohitPayoutAmount = this.computePurohitPayoutAmount(service);
+    // TODO: PLAN_BASED_PUROHIT_PAYOUT
+    // Top-level purohitPayoutAmount removed from response.
+    // (service as any).purohitPayoutAmount = this.computePurohitPayoutAmount(service);
     this.enrichServicePlansAndToken(service);
 
     return {
@@ -703,7 +842,7 @@ export class ServiceService {
     try {
       await this.serviceRepository.remove(service);
 
-      await this.auditLogService.createAuditLog({
+      await this.auditLogService?.createAuditLog?.({
         actorId: adminId,
         actorType: ACTOR_TYPE.USER,
         actorRole: USER_ROLE.ADMIN,
@@ -746,7 +885,7 @@ export class ServiceService {
     service.isActive = isActive;
     const updatedService = await this.serviceRepository.save(service);
 
-    await this.auditLogService.createAuditLog({
+    await this.auditLogService?.createAuditLog?.({
       actorId: adminId,
       actorType: ACTOR_TYPE.USER,
       actorRole: USER_ROLE.ADMIN,
@@ -1190,7 +1329,7 @@ export class ServiceService {
 
     const saved = await this.categoryRepository.save(category);
 
-    await this.auditLogService.createAuditLog({
+    await this.auditLogService?.createAuditLog?.({
       actorId: adminId,
       actorType: ACTOR_TYPE.USER,
       actorRole: USER_ROLE.ADMIN,
@@ -1249,7 +1388,7 @@ export class ServiceService {
 
     const updated = await this.categoryRepository.save(category);
 
-    await this.auditLogService.createAuditLog({
+    await this.auditLogService?.createAuditLog?.({
       actorId: adminId,
       actorType: ACTOR_TYPE.USER,
       actorRole: USER_ROLE.ADMIN,
@@ -1278,7 +1417,7 @@ export class ServiceService {
 
     await this.categoryRepository.softDelete(id);
 
-    await this.auditLogService.createAuditLog({
+    await this.auditLogService?.createAuditLog?.({
       actorId: adminId,
       actorType: ACTOR_TYPE.USER,
       actorRole: USER_ROLE.ADMIN,

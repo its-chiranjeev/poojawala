@@ -551,7 +551,13 @@ export class AuthModuleService {
 
     // 7. Send OTP
     if (dto.phone) {
-      await this.smsService.sendOtpSms(dto.phone, otpCode);
+      // TODO: FAST2SMS_MIGRATION
+      // Previously used Twilio sendOtpSms. Now using Fast2SMS Smart OTP
+      // (WhatsApp primary / SMS fallback). Rollback: restore sendOtpSms.
+      await this.smsService.sendOtpViaFast2sms(dto.phone);
+
+      // TODO: FAST2SMS_MIGRATION (rollback reference)
+      // await this.smsService.sendOtpSms(dto.phone, otpCode);
 
       return {
         message: 'OTP has been sent to your phone.',
@@ -700,7 +706,13 @@ export class AuthModuleService {
 
     // 6. Send OTP
     if (dto.phone) {
-      await this.smsService.sendOtpSms(dto.phone, otpCode);
+      // TODO: FAST2SMS_MIGRATION
+      // Previously used Twilio sendOtpSms. Now using Fast2SMS Smart OTP
+      // (WhatsApp primary / SMS fallback). Rollback: restore sendOtpSms.
+      await this.smsService.sendOtpViaFast2sms(dto.phone);
+
+      // TODO: FAST2SMS_MIGRATION (rollback reference)
+      // await this.smsService.sendOtpSms(dto.phone, otpCode);
 
       return {
         message: 'OTP has been sent to your phone.',

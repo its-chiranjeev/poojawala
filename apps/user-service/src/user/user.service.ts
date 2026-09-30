@@ -584,42 +584,79 @@ export class UserService {
     await this.otpRepository.save(otpRecord);
 
     if (trimmedPhone) {
+      // ── Fast2SMS Smart OTP (WhatsApp primary / SMS fallback) ───────────────
+      // Fast2SMS handles the WhatsApp→SMS channel fallback internally.
+      // Poojawala makes a single send request; no manual fallback logic needed.
       try {
-        await this.smsService.sendOtpSms(trimmedPhone, otp);
-        this.logger.log(`OTP SMS sent successfully to ${trimmedPhone}`);
-      } catch (error: any) {
+        await this.smsService.sendOtpViaFast2sms(trimmedPhone);
+        this.logger.log(`[generateOtp] Fast2SMS OTP send request succeeded for phone ending …${trimmedPhone.slice(-4)}`);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
         this.logger.error(
-          `Failed to send OTP SMS to ${trimmedPhone}: ${error.message}`,
-          error.stack,
+          `[generateOtp] Fast2SMS OTP send failed for phone ending …${trimmedPhone.slice(-4)}: ${message}`,
         );
         if (normalizedEmail) {
-          this.logger.log(`Falling back to email for OTP delivery to ${normalizedEmail}`);
+          this.logger.log(`[generateOtp] Falling back to email OTP delivery for ${normalizedEmail}`);
           try {
             await this.emailService.sendOtpEmail(normalizedEmail, otp);
-            this.logger.log(`Fallback OTP email sent successfully to ${normalizedEmail}`);
-          } catch (emailError: any) {
+            this.logger.log(`[generateOtp] Fallback OTP email sent successfully to ${normalizedEmail}`);
+          } catch (emailError: unknown) {
+            const emailMessage = emailError instanceof Error ? emailError.message : String(emailError);
             this.logger.error(
-              `Failed to send fallback OTP email to ${normalizedEmail}: ${emailError.message}`,
-              emailError.stack,
+              `[generateOtp] Fallback OTP email also failed for ${normalizedEmail}: ${emailMessage}`,
             );
             throw new InternalServerErrorException(
-              'Failed to send OTP via SMS and fallback email delivery failed',
+              'Failed to send OTP via WhatsApp/SMS and fallback email delivery failed',
             );
           }
         } else {
           throw new InternalServerErrorException(
-            'Failed to send OTP via SMS and no email provided for fallback',
+            'Failed to send OTP via WhatsApp/SMS and no email provided for fallback',
           );
         }
       }
+
+      // TODO: FAST2SMS_MIGRATION
+      // Previous Twilio SMS OTP delivery — retained for rollback/reference.
+      // Re-enable the block below and remove the Fast2SMS block above
+      // if Fast2SMS integration needs to be rolled back.
+      //
+      // try {
+      //   await this.smsService.sendOtpSms(trimmedPhone, otp);
+      //   this.logger.log(`OTP SMS sent successfully to ${trimmedPhone}`);
+      // } catch (error: any) {
+      //   this.logger.error(
+      //     `Failed to send OTP SMS to ${trimmedPhone}: ${error.message}`,
+      //     error.stack,
+      //   );
+      //   if (normalizedEmail) {
+      //     this.logger.log(`Falling back to email for OTP delivery to ${normalizedEmail}`);
+      //     try {
+      //       await this.emailService.sendOtpEmail(normalizedEmail, otp);
+      //       this.logger.log(`Fallback OTP email sent successfully to ${normalizedEmail}`);
+      //     } catch (emailError: any) {
+      //       this.logger.error(
+      //         `Failed to send fallback OTP email to ${normalizedEmail}: ${emailError.message}`,
+      //         emailError.stack,
+      //       );
+      //       throw new InternalServerErrorException(
+      //         'Failed to send OTP via SMS and fallback email delivery failed',
+      //       );
+      //     }
+      //   } else {
+      //     throw new InternalServerErrorException(
+      //       'Failed to send OTP via SMS and no email provided for fallback',
+      //     );
+      //   }
+      // }
     } else if (normalizedEmail) {
       try {
         await this.emailService.sendOtpEmail(normalizedEmail, otp);
         this.logger.log(`OTP email sent successfully to ${normalizedEmail}`);
-      } catch (emailError: any) {
+      } catch (emailError: unknown) {
+        const message = emailError instanceof Error ? emailError.message : String(emailError);
         this.logger.error(
-          `Failed to send OTP email to ${normalizedEmail}: ${emailError.message}`,
-          emailError.stack,
+          `Failed to send OTP email to ${normalizedEmail}: ${message}`,
         );
         throw new InternalServerErrorException('Failed to send OTP via email');
       }
@@ -629,8 +666,16 @@ export class UserService {
       success: true,
       message: 'OTP sent successfully',
       otp,
+      // TODO: FAST2SMS_MIGRATION
+      // Previously, `otp` was always returned in the response.
+      // This is retained for backward compatibility and development testing.
+      // In production, consider removing `otp` from the response once Fast2SMS
+      // is confirmed stable, since Fast2SMS delivers the OTP directly to WhatsApp/SMS.
+      // Original line: otp,
     };
   }
+
+
 
   async upsertPlatformSetting(dto: UpsertPlatformSettingDto, userId: number) {
     const existingSetting = await this.platformSettingRepository.findOne({
@@ -817,8 +862,35 @@ export class UserService {
       throw new BadRequestException('OTP has expired');
     }
 
-    if (otpRecord.otp !== otp) {
-      throw new BadRequestException('Invalid OTP');
+    if (phone) {
+      // ── Fast2SMS OTP verification (phone-based) ─────────────────────────
+      // Fast2SMS is the OTP authority for phone-based flows.
+      // Verification is delegated to Fast2SMS; Poojawala does not compare the
+      // OTP value locally for phone flows.
+      this.logger.log(`[verifyOtp] Delegating OTP verification to Fast2SMS for phone ending …${phone.slice(-4)}`);
+
+      const fast2smsVerified = await this.smsService.verifyOtpViaFast2sms(phone, otp);
+
+      if (!fast2smsVerified) {
+        this.logger.warn(`[verifyOtp] Fast2SMS rejected OTP for phone ending …${phone.slice(-4)}`);
+        throw new BadRequestException('Invalid OTP');
+      }
+
+      this.logger.log(`[verifyOtp] Fast2SMS OTP verification succeeded for phone ending …${phone.slice(-4)}`);
+
+      // TODO: FAST2SMS_MIGRATION
+      // Previous local OTP string comparison for phone-based verification.
+      // Retained for rollback/reference. Re-enable and remove the Fast2SMS
+      // block above if Fast2SMS integration is rolled back.
+      //
+      // if (otpRecord.otp !== otp) {
+      //   throw new BadRequestException('Invalid OTP');
+      // }
+    } else {
+      // Email-based OTP: verified locally against the stored OTP value.
+      if (otpRecord.otp !== otp) {
+        throw new BadRequestException('Invalid OTP');
+      }
     }
 
     otpRecord.isVerified = true;
@@ -833,6 +905,7 @@ export class UserService {
       message: 'OTP verified successfully',
     };
   }
+
 
   // purohit status accept/reject
   // async updatePurohitStatus(id: string, status: USER_STATUS, rejectionReason?: string,) {

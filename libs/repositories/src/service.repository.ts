@@ -247,6 +247,7 @@ export class ServiceRepository extends BaseRepository<Service> {
           cities: service.cities ?? [],
           languages: service.languages ?? [],
           benefits: service.benefits ?? [],
+          purohitCarryItems: service.purohitCarryItems ?? [],
           totalBookings: countMap.get(service.id) || 0,
           onlinepurohitCount: onlineCount,
           offlinepurohitCount: offlineCount,
@@ -258,6 +259,7 @@ export class ServiceRepository extends BaseRepository<Service> {
         cities: service.cities ?? [],
         languages: service.languages ?? [],
         benefits: service.benefits ?? [],
+        purohitCarryItems: service.purohitCarryItems ?? [],
       }));
     }
 
@@ -302,6 +304,7 @@ export class ServiceRepository extends BaseRepository<Service> {
         cities: true,
         languages: true,
         benefits: true,
+        purohitCarryItems: true,
         iconUrl: true,
         minPrice: true,
         maxPrice: true,
@@ -367,6 +370,7 @@ export class ServiceRepository extends BaseRepository<Service> {
         cities: service.cities ?? [],
         languages: service.languages ?? [],
         benefits: service.benefits ?? [],
+        purohitCarryItems: service.purohitCarryItems ?? [],
         totalBookings: bookingCount,
         onlinepurohitCount: onlineCount,
         offlinepurohitCount: offlineCount,

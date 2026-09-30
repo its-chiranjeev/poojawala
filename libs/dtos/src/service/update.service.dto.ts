@@ -23,6 +23,7 @@ import {
   deduplicateCities,
   deduplicateLanguages,
   deduplicateBenefits,
+  parsePurohitCarryItems,
 } from './create.service.dto';
 
 export class UpdateServiceDto {
@@ -67,6 +68,10 @@ export class UpdateServiceDto {
   @ValidateNested({ each: true })
   @Type(() => ServiceBenefitDto)
   benefits?: ServiceBenefitDto[];
+
+  @IsOptional()
+  @Transform(({ value }) => parsePurohitCarryItems(value))
+  purohitCarryItems?: any;
 
   @IsOptional()
   @IsString()

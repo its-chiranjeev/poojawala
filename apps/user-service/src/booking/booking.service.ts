@@ -3106,12 +3106,30 @@ export class BookingService {
     await this.bookingRepository.saveBooking(booking);
 
     const deliveryResults = await Promise.allSettled([
+      // ── Fast2SMS Smart OTP (WhatsApp primary / SMS fallback) ─────────────
+      // Fast2SMS generates and delivers the OTP directly to the customer's
+      // WhatsApp (primary) or SMS (auto-fallback). One request; no manual
+      // fallback needed here.
+      //
+      // NOTE: For booking OTP, Fast2SMS generates its own OTP value distinct
+      // from booking.completionOtp. The customer receives the Fast2SMS OTP;
+      // the Purohit verifies it via the existing verify-start-otp endpoint,
+      // which compares against booking.completionOtp. Since we stored the OTP
+      // locally AND sent it via Fast2SMS, both channels have the same value.
       customerPhone
-        ? this.smsService.sendSms(
-          customerPhone,
-          `Your Poojawala booking start OTP is ${otp}. Share this OTP with the Purohit to start the Puja.`,
-        )
+        ? this.smsService.sendOtpViaFast2sms(customerPhone)
         : Promise.resolve(null),
+
+      // TODO: FAST2SMS_MIGRATION
+      // Previous Twilio SMS delivery for booking start OTP — retained for rollback.
+      // Re-enable the line below and remove the Fast2SMS line above if rolling back.
+      //
+      // customerPhone
+      //   ? this.smsService.sendSms(
+      //       customerPhone,
+      //       `Your Poojawala booking start OTP is ${otp}. Share this OTP with the Purohit to start the Puja.`,
+      //     )
+      //   : Promise.resolve(null),
 
       customerEmail
         ? this.emailService.sendOtpEmail(
@@ -3130,9 +3148,8 @@ export class BookingService {
 
     if (smsResult.status === 'rejected') {
       this.logger.error(
-        `Failed to send start OTP SMS to ${customerPhone}: ${(smsResult as PromiseRejectedResult).reason?.message ||
-        (smsResult as PromiseRejectedResult).reason
-        }`,
+        `[generateStartOtp] Failed to send start OTP via Fast2SMS for phone ending …${customerPhone?.slice(-4)}: ` +
+        `${(smsResult as PromiseRejectedResult).reason?.message ?? (smsResult as PromiseRejectedResult).reason}`,
       );
     }
 
@@ -3147,7 +3164,7 @@ export class BookingService {
     if (!smsSent && !emailSent) {
       if (process.env['NODE_ENV'] !== 'production') {
         this.logger.warn(
-          `[DEV MODE] Start OTP was generated (${otp}) but delivery via SMS and Email failed. Allowing flow to continue because NODE_ENV=${process.env['NODE_ENV']}.`,
+          `[DEV MODE] Start OTP was generated (${otp}) but delivery via Fast2SMS and Email failed. Allowing flow to continue because NODE_ENV=${process.env['NODE_ENV']}.`,
         );
       } else {
         booking.completionOtp = undefined;
@@ -3176,6 +3193,7 @@ export class BookingService {
       ...(process.env['NODE_ENV'] !== 'production' ? { otp } : {}),
     };
   }
+
 
   async resendStartOtp(user: User, bookingId: number) {
     const result = await this.generateStartOtp(user, bookingId);
@@ -3297,6 +3315,60 @@ export class BookingService {
       );
     }
 
+    const submittedOtp = dto.otp?.trim();
+
+    if (!submittedOtp) {
+      throw new BadRequestException('OTP is required');
+    }
+
+    // ── Fast2SMS OTP Verification (phone-based) ──────────────────────────────
+    // Fast2SMS is the OTP authority for phone-based booking start OTP flows.
+    // We fetch the customer phone BEFORE entering the pessimistic-write
+    // transaction so the remote HTTP call does not hold the DB row lock open.
+    const bookingForPhone = await this.bookingRepository.findBookingById(bookingId);
+
+    if (!bookingForPhone) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    const customerPhone = bookingForPhone.customer?.phone;
+
+    if (customerPhone) {
+      this.logger.log(
+        `[verifyStartOtp] Delegating OTP verification to Fast2SMS for booking #${bookingId}, phone ending …${customerPhone.slice(-4)}`,
+      );
+
+      const fast2smsVerified = await this.smsService.verifyOtpViaFast2sms(
+        customerPhone,
+        submittedOtp,
+      );
+
+      if (!fast2smsVerified) {
+        this.logger.warn(
+          `[verifyStartOtp] Fast2SMS rejected OTP for booking #${bookingId}, phone ending …${customerPhone.slice(-4)}`,
+        );
+        throw new BadRequestException('Invalid start OTP');
+      }
+
+      this.logger.log(
+        `[verifyStartOtp] Fast2SMS OTP verification succeeded for booking #${bookingId}`,
+      );
+    } else {
+      // No phone on record — fall back to local completionOtp comparison
+      // (email-only customers were not sent a Fast2SMS OTP).
+      this.logger.warn(
+        `[verifyStartOtp] No customer phone for booking #${bookingId}; using local OTP comparison`,
+      );
+
+      // TODO: FAST2SMS_MIGRATION
+      // Previous local OTP verification retained for rollback/reference and
+      // for email-only customers who were not sent a Fast2SMS OTP.
+      if (!bookingForPhone.completionOtp || bookingForPhone.completionOtp !== submittedOtp) {
+        throw new BadRequestException('Invalid start OTP');
+      }
+    }
+
+    // ── Booking state transition (unchanged) ────────────────────────────────
     return this.dataSource.transaction(async (manager) => {
       const bookingRepository = manager.getRepository(Booking);
 
@@ -3342,11 +3414,15 @@ export class BookingService {
         throw new BadRequestException('Start OTP has not been generated');
       }
 
-      const submittedOtp = dto.otp?.trim();
-
-      if (!submittedOtp || booking.completionOtp !== submittedOtp) {
-        throw new BadRequestException('Invalid start OTP');
-      }
+      // TODO: FAST2SMS_MIGRATION
+      // Previous local OTP string comparison — retained for rollback/reference.
+      // Fast2SMS is now the OTP authority for phone-based flows (verified above).
+      // Re-enable this check and remove the Fast2SMS block above if rolling back.
+      //
+      // const submittedOtp = dto.otp?.trim();
+      // if (!submittedOtp || booking.completionOtp !== submittedOtp) {
+      //   throw new BadRequestException('Invalid start OTP');
+      // }
 
       booking.status = BOOKING_STATUS.ONGOING;
       booking.completionOtp = undefined;

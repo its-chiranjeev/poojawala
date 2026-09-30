@@ -1,6 +1,37 @@
-import { USER_ROLE, QUALIFICATION, PUROHIT_PAYMENT_METHOD, VENUE_TYPE } from '@poojawala/entities';
+import { USER_ROLE, PUROHIT_PAYMENT_METHOD, VENUE_TYPE } from '@poojawala/entities';
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, ValidateIf, IsNumber, Min, Max } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, ValidateIf, IsNumber, Min, Max, IsArray } from 'class-validator';
+
+export function parseStringArray(value: unknown): string[] | undefined {
+  if (value === undefined || value === null || value === '' || value === 'null' || value === 'undefined') {
+    return undefined;
+  }
+  let parsed: unknown = value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        parsed = [trimmed];
+      }
+    } else if (trimmed.includes(',')) {
+      parsed = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+    } else {
+      parsed = [trimmed];
+    }
+  }
+
+  if (Array.isArray(parsed)) {
+    const result = parsed
+      .map((item) => (typeof item === 'string' ? item.trim() : item))
+      .filter((item) => item !== null && item !== undefined && item !== '');
+    return result;
+  }
+
+  return undefined;
+}
 
 export class OtpDto {
   @IsOptional()
@@ -91,8 +122,10 @@ export class RegisterNormalUserDto {
   bio?: string;
 
   @IsOptional()
-  @IsEnum(QUALIFICATION)
-  qualification?: QUALIFICATION;
+  @Transform(({ value }) => parseStringArray(value))
+  @IsArray()
+  @IsString({ each: true })
+  qualification?: string[];
 
   @IsOptional()
   experienceYears?: number;

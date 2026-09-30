@@ -38,6 +38,11 @@ export type ServicePlanFeatureValue =
 export interface ServicePlanDetails {
   price: number;
   tokenAmount?: number;
+  basicPurohitPayoutAmount?: number;
+  standardPurohitPayoutAmount?: number;
+  // TODO: Previously named items, renamed to features per requirement
+  // items?: Record<string, any>;
+  features?: Record<string, any>;
   [featureKey: string]: ServicePlanFeatureValue | undefined;
 }
 
@@ -82,6 +87,13 @@ export class Service {
     default: () => "'[]'",
   })
   benefits!: ServiceBenefit[];
+
+  @Column({
+    type: 'jsonb',
+    nullable: false,
+    default: () => "'[]'",
+  })
+  purohitCarryItems!: any;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   iconUrl?: string;

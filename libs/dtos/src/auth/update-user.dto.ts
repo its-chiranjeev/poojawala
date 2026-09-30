@@ -1,6 +1,7 @@
-import { IsEmail,IsDateString, IsOptional, IsString, IsEnum } from 'class-validator';
-import { USER_ROLE, USER_STATUS, QUALIFICATION, PUROHIT_PAYMENT_METHOD } from '@poojawala/entities';
-import { Match } from './register-user.dto';
+import { IsEmail, IsDateString, IsOptional, IsString, IsEnum, IsArray } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { USER_ROLE, USER_STATUS, PUROHIT_PAYMENT_METHOD } from '@poojawala/entities';
+import { Match, parseStringArray } from './register-user.dto';
 
 export class UpdateUserDto {
   @IsOptional()
@@ -65,8 +66,10 @@ export class UpdateUserDto {
   bio?: string;
 
   @IsOptional()
-  @IsEnum(QUALIFICATION)
-  qualification?: QUALIFICATION;
+  @Transform(({ value }) => parseStringArray(value))
+  @IsArray()
+  @IsString({ each: true })
+  qualification?: string[];
 
   @IsOptional()
   experienceYears?: number;

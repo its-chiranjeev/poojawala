@@ -162,6 +162,69 @@ export function deduplicateBenefits(benefits?: any[]): ServiceBenefitDto[] | und
   return result;
 }
 
+export function parsePurohitCarryItems(value: unknown): any {
+  if (value === undefined || value === null || value === '' || value === 'null' || value === 'undefined') {
+    return undefined;
+  }
+  let parsed: unknown = value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (
+      (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))
+    ) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        return undefined;
+      }
+    } else if (trimmed.includes(',')) {
+      parsed = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+    } else {
+      parsed = [trimmed];
+    }
+  }
+
+  // If it's an object with plan keys (like { basic: [...], standard: [...] })
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const result: Record<string, any> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (Array.isArray(v)) {
+        result[k] = v
+          .map((item) => (typeof item === 'string' ? item.trim() : item))
+          .filter(Boolean);
+      } else if (typeof v === 'string') {
+        result[k] = v.split(',').map((s) => s.trim()).filter(Boolean);
+      } else {
+        result[k] = v;
+      }
+    }
+    return result;
+  }
+
+  // If it's a flat array
+  if (Array.isArray(parsed)) {
+    const result: any[] = [];
+    const seen = new Set<string>();
+    for (const item of parsed) {
+      if (typeof item === 'string') {
+        const trimmed = item.trim();
+        const lower = trimmed.toLowerCase();
+        if (trimmed && !seen.has(lower)) {
+          seen.add(lower);
+          result.push(trimmed);
+        }
+      } else if (item && typeof item === 'object') {
+        result.push(item);
+      }
+    }
+    return result;
+  }
+
+  return undefined;
+}
+
 export class CreateServiceDto {
   @IsString()
   name!: string;
@@ -202,6 +265,10 @@ export class CreateServiceDto {
   @ValidateNested({ each: true })
   @Type(() => ServiceBenefitDto)
   benefits?: ServiceBenefitDto[];
+
+  @IsOptional()
+  @Transform(({ value }) => parsePurohitCarryItems(value))
+  purohitCarryItems?: any;
 
   @IsOptional()
   @IsString()
