@@ -120,6 +120,10 @@ export class RegisterNormalUserDto {
 
   @IsOptional()
   @IsString()
+  profileImage?: string;
+
+  @IsOptional()
+  @IsString()
   @Transform(({ value }) => value?.trim())
   city?: string;
 
@@ -240,10 +244,12 @@ export class RegisterNormalUserDto {
 export class GenerateOtpDto {
   @IsOptional()
   @IsEmail()
+  @Transform(({ value }) => value?.trim().toLowerCase())
   email?: string;
 
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => value?.trim())
   phone?: string;
 
   @IsOptional()

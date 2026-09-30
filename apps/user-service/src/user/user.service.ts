@@ -514,22 +514,28 @@ export class UserService {
       throw new BadRequestException('Invalid role');
     }
 
-    if (phone) {
-      const existingUserByPhone = await this.userRepository.findOne({
-        where: { phone },
-      });
+    const trimmedPhone = phone?.trim();
+    const normalizedEmail = email?.trim().toLowerCase();
 
-      if (existingUserByPhone) {
-        throw new ConflictException('Phone number already in use');
-      }
-    } else if (email) {
-      const existingUser = await this.userRepository.findByEmail(email);
-
-      if (existingUser) {
-        throw new ConflictException('User already exists');
-      }
-    } else {
+    if (!trimmedPhone && !normalizedEmail) {
       throw new BadRequestException('Email or phone number is required');
+    }
+
+    const [existingUserByPhone, existingUserByEmail] = await Promise.all([
+      trimmedPhone
+        ? this.userRepository.findOne({ where: { phone: trimmedPhone } })
+        : Promise.resolve(null),
+      normalizedEmail
+        ? this.userRepository.findByEmail(normalizedEmail)
+        : Promise.resolve(null),
+    ]);
+
+    if (existingUserByPhone) {
+      throw new ConflictException('Phone number already in use');
+    }
+
+    if (existingUserByEmail) {
+      throw new ConflictException('Email already in use');
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -539,13 +545,14 @@ export class UserService {
 
     let otpRecord;
 
-    if (phone) {
+    if (trimmedPhone) {
       otpRecord = await this.otpRepository.findOne({
-        where: { phone },
+        where: { phone: trimmedPhone },
       });
-    } else {
+    }
+    if (!otpRecord && normalizedEmail) {
       otpRecord = await this.otpRepository.findOne({
-        where: { email },
+        where: { email: normalizedEmail },
       });
     }
 
@@ -556,15 +563,16 @@ export class UserService {
       otpRecord.role = role;
       otpRecord.otpType = OTP_TYPE.USER_REGISTRATION;
 
-      if (phone) {
-        otpRecord.phone = phone;
-      } else {
-        otpRecord.email = email;
+      if (trimmedPhone) {
+        otpRecord.phone = trimmedPhone;
+      }
+      if (normalizedEmail) {
+        otpRecord.email = normalizedEmail;
       }
     } else {
       otpRecord = this.otpRepository.create({
-        phone,
-        email,
+        phone: trimmedPhone,
+        email: normalizedEmail,
         otp,
         expiresAt,
         isVerified: false,
@@ -575,23 +583,23 @@ export class UserService {
 
     await this.otpRepository.save(otpRecord);
 
-    if (phone) {
+    if (trimmedPhone) {
       try {
-        await this.smsService.sendOtpSms(phone, otp);
-        this.logger.log(`OTP SMS sent successfully to ${phone}`);
+        await this.smsService.sendOtpSms(trimmedPhone, otp);
+        this.logger.log(`OTP SMS sent successfully to ${trimmedPhone}`);
       } catch (error: any) {
         this.logger.error(
-          `Failed to send OTP SMS to ${phone}: ${error.message}`,
+          `Failed to send OTP SMS to ${trimmedPhone}: ${error.message}`,
           error.stack,
         );
-        if (email) {
-          this.logger.log(`Falling back to email for OTP delivery to ${email}`);
+        if (normalizedEmail) {
+          this.logger.log(`Falling back to email for OTP delivery to ${normalizedEmail}`);
           try {
-            await this.emailService.sendOtpEmail(email, otp);
-            this.logger.log(`Fallback OTP email sent successfully to ${email}`);
+            await this.emailService.sendOtpEmail(normalizedEmail, otp);
+            this.logger.log(`Fallback OTP email sent successfully to ${normalizedEmail}`);
           } catch (emailError: any) {
             this.logger.error(
-              `Failed to send fallback OTP email to ${email}: ${emailError.message}`,
+              `Failed to send fallback OTP email to ${normalizedEmail}: ${emailError.message}`,
               emailError.stack,
             );
             throw new InternalServerErrorException(
@@ -604,19 +612,18 @@ export class UserService {
           );
         }
       }
-    } else if (email) {
+    } else if (normalizedEmail) {
       try {
-        await this.emailService.sendOtpEmail(email, otp);
-        this.logger.log(`OTP email sent successfully to ${email}`);
+        await this.emailService.sendOtpEmail(normalizedEmail, otp);
+        this.logger.log(`OTP email sent successfully to ${normalizedEmail}`);
       } catch (emailError: any) {
         this.logger.error(
-          `Failed to send OTP email to ${email}: ${emailError.message}`,
+          `Failed to send OTP email to ${normalizedEmail}: ${emailError.message}`,
           emailError.stack,
         );
         throw new InternalServerErrorException('Failed to send OTP via email');
       }
     }
-    // }
 
     return {
       success: true,
@@ -2507,6 +2514,12 @@ export class UserService {
       );
     }
 
+    const regStartTime = performance.now();
+    const passwordHashPromise =
+      !dto.id && dto.password
+        ? bcrypt.hash(dto.password, 10)
+        : Promise.resolve('');
+
     // 1. Verify OTP record
     // const otpWhere: any[] = [];
 
@@ -2663,518 +2676,588 @@ export class UserService {
         throw new BadRequestException('Invalid payment method');
       }
 
-      const hasAadhaar = files.aadhaarDoc?.length || dto.aadhaarDoc;
-      const hasPan = files.panDoc?.length || dto.panDoc;
-
-      if (!hasAadhaar && !hasPan) {
+      const hasProfileImage = files.profileImage?.length || dto.profileImage;
+      if (!hasProfileImage) {
         throw new BadRequestException(
-          'Either Aadhaar or PAN document is required',
+          'Profile image is required for Purohit registration',
         );
       }
 
-      if (!files.certificate?.length && !dto.certificate) {
-        throw new BadRequestException('Certificate or URL is required');
-      }
+      // const hasAadhaar = files.aadhaarDoc?.length || dto.aadhaarDoc;
+      // const hasPan = files.panDoc?.length || dto.panDoc;
 
-      if (
-        !files.templeAffiliationProof?.length &&
-        !dto.templeAffiliationProof
-      ) {
-        throw new BadRequestException(
-          'Temple affiliation proof or URL is required',
-        );
-      }
+      // if (!hasAadhaar && !hasPan) {
+      //   throw new BadRequestException(
+      //     'Either Aadhaar or PAN document is required',
+      //   );
+      // }
+
+      // if (!files.certificate?.length && !dto.certificate) {
+      //   throw new BadRequestException('Certificate or URL is required');
+      // }
+
+      // if (
+      //   !files.templeAffiliationProof?.length &&
+      //   !dto.templeAffiliationProof
+      // ) {
+      //   throw new BadRequestException(
+      //     'Temple affiliation proof or URL is required',
+      //   );
+      // }
     }
 
-    if (!dto.id) {
-      // 2. Check if user already exists by email
-      if (dto.email) {
-        const existingUserByEmail = await this.userRepository.findByEmail(
-          dto.email,
-        );
+    if (!dto.id || (otpRecord.role === USER_ROLE.PUROHIT && (dto.aadhaarNumber || dto.accountNumber))) {
+      const [
+        existingUserByEmail,
+        existingUserByPhone,
+        existingUsername,
+        existingAadhaar,
+        existingAccount,
+      ] = await Promise.all([
+        !dto.id && dto.email
+          ? this.userRepository.findByEmail(dto.email)
+          : Promise.resolve(null),
+        !dto.id && dto.phone
+          ? this.userRepository.findOne({ where: { phone: dto.phone.trim() } })
+          : Promise.resolve(null),
+        !dto.id && dto.username
+          ? this.userRepository.findOne({ where: { username: dto.username.trim() } })
+          : Promise.resolve(null),
+        otpRecord.role === USER_ROLE.PUROHIT && dto.aadhaarNumber
+          ? this.purohitProfileRepository.findOne({
+            where: { aadhaarNumber: dto.aadhaarNumber.trim() },
+          })
+          : Promise.resolve(null),
+        otpRecord.role === USER_ROLE.PUROHIT && dto.accountNumber
+          ? this.dataSource
+            .getRepository(PurohitBankAccount)
+            .findOne({ where: { accountNumber: dto.accountNumber.trim() } })
+          : Promise.resolve(null),
+      ]);
+
+      if (!dto.id) {
         if (existingUserByEmail) {
           throw new ConflictException('Email already in use');
         }
-      }
-
-      // 3. Check if user already exists by phone
-      if (dto.phone) {
-        const existingUserByPhone = await this.userRepository.findOne({
-          where: { phone: dto.phone },
-        });
         if (existingUserByPhone) {
           throw new ConflictException('Phone number already in use');
         }
-      }
-
-      // 4. Check if username already in use
-      if (dto.username) {
-        const existingUsername = await this.userRepository.findOne({
-          where: { username: dto.username },
-        });
-
         if (existingUsername) {
           throw new ConflictException('Username already in use');
         }
       }
-    }
-
-    // 5. Check duplicate Aadhaar number (Purohit only)
-    if (otpRecord.role === USER_ROLE.PUROHIT && dto.aadhaarNumber) {
-      const existingAadhaar = await this.purohitProfileRepository.findOne({
-        where: { aadhaarNumber: dto.aadhaarNumber },
-      });
 
       if (existingAadhaar) {
         throw new ConflictException('Aadhaar number already in use');
       }
-    }
-
-    // 6. Check duplicate Bank Account number (Purohit only)
-    if (otpRecord.role === USER_ROLE.PUROHIT && dto.accountNumber) {
-      const existingAccount = await this.dataSource
-        .getRepository(PurohitBankAccount)
-        .findOne({ where: { accountNumber: dto.accountNumber } });
 
       if (existingAccount) {
         throw new ConflictException('Bank account number already in use');
       }
     }
 
+    // Track S3 URLs uploaded during this registration so we can clean them up
+    // if the database transaction fails (prevents orphaned S3 objects).
+    const uploadedS3Urls: string[] = [];
+
     // Run database writes inside a transaction
-    const { saved: savedUser, savedCustomerAddress } =
-      await this.dataSource.transaction(async (manager) => {
-        let saved: User;
+    let savedUser: User;
+    let savedCustomerAddress: CustomerAddress | null;
 
-        if (dto.id) {
-          saved = existingAdminCreatedUser!;
-          saved.isAdminCreated = false;
-          await manager.save(User, saved);
-        } else {
-          // 5. Hash password and save user
-          const hashedPassword = await bcrypt.hash(dto.password, 10);
+    try {
+      ({ saved: savedUser, savedCustomerAddress } =
+        await this.dataSource.transaction(async (manager) => {
+          let saved: User;
 
-          const username =
-            dto.username ??
-            `user${Date.now()}${Math.floor(Math.random() * 1000)}`;
-
-          const newUser = manager.create(User, {
-            dob: dto.dob,
-            birthPlace: dto.birthPlace,
-            rashi: dto.rashi,
-            gotra: dto.gotra,
-            ...(dto.email && { email: dto.email.toLowerCase() }),
-            username,
-            ...(dto.phone && { phone: dto.phone }),
-            ...(dto.countryCode && { countryCode: dto.countryCode }),
-            firstName: dto.firstName,
-            lastName: dto.lastName,
-            hashedPassword: hashedPassword,
-            role: otpRecord.role || USER_ROLE.CUSTOMER,
-            status:
-              otpRecord.role === USER_ROLE.PUROHIT
-                ? USER_STATUS.PENDING
-                : USER_STATUS.ACTIVE,
-          });
-
-          saved = await manager.save(User, newUser);
-        }
-
-        const aadhaarDocUrl = files.aadhaarDoc?.length
-          ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'aadhaarDoc',
-            files.aadhaarDoc,
-          )
-          : dto.aadhaarDoc;
-
-        const panDocUrl = files.panDoc?.length
-          ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'panDoc',
-            files.panDoc,
-          )
-          : dto.panDoc;
-
-        const certificateUrl = files.certificate?.length
-          ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'certificate',
-            files.certificate,
-          )
-          : dto.certificate;
-
-        const templeAffiliationProofUrl = files.templeAffiliationProof?.length
-          ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'templeAffiliationProof',
-            files.templeAffiliationProof,
-          )
-          : dto.templeAffiliationProof;
-
-        const profileImageUrl = files.profileImage?.length
-          ? await this.s3Service.uploadFileHelper(
-            saved.id,
-            'profileImage',
-            files.profileImage,
-          )
-          : undefined;
-
-        if (profileImageUrl) {
-          await manager.update(User, saved.id, { profileImage: profileImageUrl });
-          saved.profileImage = profileImageUrl;
-        }
-
-        if (otpRecord.role === USER_ROLE.PUROHIT) {
-          const missingDocs: string[] = [];
-          if (!aadhaarDocUrl && !panDocUrl)
-            missingDocs.push('Aadhaar or PAN document');
-          if (!certificateUrl) missingDocs.push('Certificate');
-          if (!templeAffiliationProofUrl)
-            missingDocs.push('Temple affiliation proof');
-
-          if (missingDocs.length > 0) {
-            throw new BadRequestException(
-              `Please provide all required images. Missing: ${missingDocs.join(', ')}`,
-            );
-          }
-
-          const isOnlineAvailable = dto.isOnlineAvailable === 'true';
-
-          const isOfflineAvailable = dto.isOfflineAvailable === 'true';
-
-          let profile = await manager.findOne(PurohitProfile, {
-            where: { userId: saved.id },
-          });
-
-          if (profile) {
-            Object.assign(profile, {
-              bio: dto.bio ?? profile.bio,
-              qualification: dto.qualification ?? profile.qualification,
-              experienceYears: dto.experienceYears ?? profile.experienceYears,
-              aadhaarNumber: dto.aadhaarNumber ?? profile.aadhaarNumber,
-              aadhaarDocUrl: aadhaarDocUrl || profile.aadhaarDocUrl,
-              panDocUrl: panDocUrl || profile.panDocUrl,
-              certificateUrl: certificateUrl || profile.certificateUrl,
-              templeAffiliationProofUrl:
-                templeAffiliationProofUrl || profile.templeAffiliationProofUrl,
-              city: dto.city ?? profile.city,
-              languages: dto.languages ?? profile.languages,
-              specializations: dto.specializations ?? profile.specializations,
-              isOnlineAvailable:
-                dto.isOnlineAvailable !== undefined
-                  ? isOnlineAvailable
-                  : profile.isOnlineAvailable,
-              isOfflineAvailable:
-                dto.isOfflineAvailable !== undefined
-                  ? isOfflineAvailable
-                  : profile.isOfflineAvailable,
-            });
-            await manager.save(profile);
+          if (dto.id) {
+            saved = existingAdminCreatedUser!;
+            saved.isAdminCreated = false;
+            await manager.save(User, saved);
           } else {
-            profile = manager.create(PurohitProfile, {
-              userId: saved.id,
-              bio: dto.bio,
-              qualification: dto.qualification,
-              experienceYears: dto.experienceYears,
-              aadhaarNumber: dto.aadhaarNumber,
-              aadhaarDocUrl,
-              panDocUrl,
-              certificateUrl,
-              templeAffiliationProofUrl,
-              city: dto.city,
-              languages: dto.languages,
-              specializations: dto.specializations,
-              isOnlineAvailable,
-              isOfflineAvailable,
+            // 5. Await pre-computed password hash
+            const hashedPassword = await passwordHashPromise;
+
+            const username =
+              dto.username ??
+              `user${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+            const newUser = manager.create(User, {
+              dob: dto.dob,
+              birthPlace: dto.birthPlace,
+              rashi: dto.rashi,
+              gotra: dto.gotra,
+              ...(dto.email && { email: dto.email.toLowerCase() }),
+              username,
+              ...(dto.phone && { phone: dto.phone }),
+              ...(dto.countryCode && { countryCode: dto.countryCode }),
+              firstName: dto.firstName,
+              lastName: dto.lastName,
+              hashedPassword: hashedPassword,
+              role: otpRecord.role || USER_ROLE.CUSTOMER,
+              status:
+                otpRecord.role === USER_ROLE.PUROHIT
+                  ? USER_STATUS.PENDING
+                  : USER_STATUS.ACTIVE,
             });
-            await manager.save(profile);
+
+            saved = await manager.save(User, newUser);
           }
 
-          const bankAccountData: any = {
-            purohitId: profile.id,
-            paymentMethod: dto.paymentMethod,
-            isPrimary: true,
-            verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
-          };
+          // Use Promise.allSettled so that every individual upload that succeeds
+          // is tracked immediately, even when one or more sibling uploads fail.
+          // Promise.all would short-circuit on the first rejection and leave the
+          // already-resolved uploads untracked (and therefore orphaned on cleanup).
+          const uploadResults = await Promise.allSettled([
+            files.aadhaarDoc?.length
+              ? this.s3Service.uploadFileHelper(
+                saved.id,
+                'aadhaarDoc',
+                files.aadhaarDoc,
+              )
+              : Promise.resolve(dto.aadhaarDoc),
+            files.panDoc?.length
+              ? this.s3Service.uploadFileHelper(
+                saved.id,
+                'panDoc',
+                files.panDoc,
+              )
+              : Promise.resolve(dto.panDoc),
+            files.certificate?.length
+              ? this.s3Service.uploadFileHelper(
+                saved.id,
+                'certificate',
+                files.certificate,
+              )
+              : Promise.resolve(dto.certificate),
+            files.templeAffiliationProof?.length
+              ? this.s3Service.uploadFileHelper(
+                saved.id,
+                'templeAffiliationProof',
+                files.templeAffiliationProof,
+              )
+              : Promise.resolve(dto.templeAffiliationProof),
+            files.profileImage?.length
+              ? this.s3Service.uploadFileHelper(
+                saved.id,
+                'profileImage',
+                files.profileImage,
+              )
+              : Promise.resolve(dto.profileImage),
+          ]);
 
-          if (dto.paymentMethod === 'BANK') {
-            bankAccountData.accountHolderName = dto.accountHolderName;
-            bankAccountData.accountNumber = dto.accountNumber;
-            bankAccountData.ifscCode = dto.ifscCode;
-            bankAccountData.bankName = dto.bankName;
-          } else if (dto.paymentMethod === 'UPI') {
-            bankAccountData.upiId = dto.upiId;
+          // Destructure in the same positional order as the upload array above.
+          const [
+            aadhaarResult,
+            panResult,
+            certificateResult,
+            templeResult,
+            profileImageResult,
+          ] = uploadResults;
+
+          // Track every URL that was freshly uploaded from a file (not a pre-existing DTO string).
+          // We check the file guard so that DTO pass-through strings are never treated as uploads.
+          if (files.aadhaarDoc?.length && aadhaarResult.status === 'fulfilled' && aadhaarResult.value)
+            uploadedS3Urls.push(aadhaarResult.value);
+          if (files.panDoc?.length && panResult.status === 'fulfilled' && panResult.value)
+            uploadedS3Urls.push(panResult.value);
+          if (files.certificate?.length && certificateResult.status === 'fulfilled' && certificateResult.value)
+            uploadedS3Urls.push(certificateResult.value);
+          if (files.templeAffiliationProof?.length && templeResult.status === 'fulfilled' && templeResult.value)
+            uploadedS3Urls.push(templeResult.value);
+          if (files.profileImage?.length && profileImageResult.status === 'fulfilled' && profileImageResult.value)
+            uploadedS3Urls.push(profileImageResult.value);
+
+          // If any upload failed, find the first rejection and rethrow it.
+          // The outer try/catch will then trigger S3 cleanup for everything tracked above.
+          const firstFailure = uploadResults.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+          if (firstFailure) {
+            throw firstFailure.reason instanceof Error
+              ? firstFailure.reason
+              : new Error(String(firstFailure.reason));
           }
 
-          await manager.save(manager.create(PurohitBankAccount, bankAccountData));
+          // All uploads succeeded — extract resolved values for use below.
+          const aadhaarDocUrl = (aadhaarResult as PromiseFulfilledResult<string | undefined>).value;
+          const panDocUrl = (panResult as PromiseFulfilledResult<string | undefined>).value;
+          const certificateUrl = (certificateResult as PromiseFulfilledResult<string | undefined>).value;
+          const templeAffiliationProofUrl = (templeResult as PromiseFulfilledResult<string | undefined>).value;
+          const profileImageUrl = (profileImageResult as PromiseFulfilledResult<string | undefined>).value;
 
-          const mediaEntries: PurohitMedia[] = [];
-          if (aadhaarDocUrl) {
-            mediaEntries.push(
-              manager.create(PurohitMedia, {
-                purohitId: profile.id,
-                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-                documentType: 'AADHAAR',
-                mediaUrl: aadhaarDocUrl,
-              }),
-            );
+
+          if (profileImageUrl) {
+            await manager.update(User, saved.id, { profileImage: profileImageUrl });
+            saved.profileImage = profileImageUrl;
           }
 
-          if (panDocUrl) {
-            mediaEntries.push(
-              manager.create(PurohitMedia, {
-                purohitId: profile.id,
-                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-                documentType: 'PAN',
-                mediaUrl: panDocUrl,
-              }),
-            );
-          }
+          if (otpRecord.role === USER_ROLE.PUROHIT) {
+            // const missingDocs: string[] = [];
+            // if (!aadhaarDocUrl && !panDocUrl)
+            //   missingDocs.push('Aadhaar or PAN document');
+            // if (!certificateUrl) missingDocs.push('Certificate');
+            // if (!templeAffiliationProofUrl)
+            //   missingDocs.push('Temple affiliation proof');
 
-          if (certificateUrl) {
-            mediaEntries.push(
-              manager.create(PurohitMedia, {
-                purohitId: profile.id,
-                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-                documentType: 'CERTIFICATE',
-                mediaUrl: certificateUrl,
-              }),
-            );
-          }
+            // if (missingDocs.length > 0) {
+            //   throw new BadRequestException(
+            //     `Please provide all required images. Missing: ${missingDocs.join(', ')}`,
+            //   );
+            // }
 
-          if (templeAffiliationProofUrl) {
-            mediaEntries.push(
-              manager.create(PurohitMedia, {
-                purohitId: profile.id,
-                mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
-                documentType: 'TEMPLE_PROOF',
-                mediaUrl: templeAffiliationProofUrl,
-              }),
-            );
-          }
+            const isOnlineAvailable = dto.isOnlineAvailable === 'true';
 
-          if (mediaEntries.length > 0) {
-            await manager.save(PurohitMedia, mediaEntries);
-          }
-        }
+            const isOfflineAvailable = dto.isOfflineAvailable === 'true';
 
-        let savedCustomerAddress: CustomerAddress | null = null;
-        if (saved.role === USER_ROLE.CUSTOMER) {
-          let addressData = dto.address;
-          if (typeof addressData === 'string') {
-            try {
-              addressData = JSON.parse(addressData);
-            } catch {
-              // ignore json parse error
+            let profile = await manager.findOne(PurohitProfile, {
+              where: { userId: saved.id },
+            });
+
+            if (profile) {
+              Object.assign(profile, {
+                bio: dto.bio ?? profile.bio,
+                qualification: dto.qualification ?? profile.qualification,
+                experienceYears: dto.experienceYears ?? profile.experienceYears,
+                aadhaarNumber: dto.aadhaarNumber ?? profile.aadhaarNumber,
+                aadhaarDocUrl: aadhaarDocUrl || profile.aadhaarDocUrl,
+                panDocUrl: panDocUrl || profile.panDocUrl,
+                certificateUrl: certificateUrl || profile.certificateUrl,
+                templeAffiliationProofUrl:
+                  templeAffiliationProofUrl || profile.templeAffiliationProofUrl,
+                city: dto.city ?? profile.city,
+                languages: dto.languages ?? profile.languages,
+                specializations: dto.specializations ?? profile.specializations,
+                isOnlineAvailable:
+                  dto.isOnlineAvailable !== undefined
+                    ? isOnlineAvailable
+                    : profile.isOnlineAvailable,
+                isOfflineAvailable:
+                  dto.isOfflineAvailable !== undefined
+                    ? isOfflineAvailable
+                    : profile.isOfflineAvailable,
+              });
+              await manager.save(profile);
+            } else {
+              profile = manager.create(PurohitProfile, {
+                userId: saved.id,
+                bio: dto.bio,
+                qualification: dto.qualification,
+                experienceYears: dto.experienceYears,
+                aadhaarNumber: dto.aadhaarNumber,
+                aadhaarDocUrl,
+                panDocUrl,
+                certificateUrl,
+                templeAffiliationProofUrl,
+                city: dto.city,
+                languages: dto.languages,
+                specializations: dto.specializations,
+                isOnlineAvailable,
+                isOfflineAvailable,
+              });
+              await manager.save(profile);
             }
-          }
 
-          const fullAddress =
-            dto.fullAddress ||
-            (typeof addressData === 'object' && addressData !== null
-              ? addressData.fullAddress
-              : undefined);
+            const bankAccountData: any = {
+              purohitId: profile.id,
+              paymentMethod: dto.paymentMethod,
+              isPrimary: true,
+              verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
+            };
 
-          if (
-            fullAddress &&
-            typeof fullAddress === 'string' &&
-            fullAddress.trim() !== ''
-          ) {
-            const addressLabel =
-              dto.addressLabel ||
-              (typeof addressData === 'object' && addressData !== null
-                ? addressData.addressLabel
-                : undefined) ||
-              'HOME';
-
-            let city =
-              (typeof addressData === 'object' && addressData !== null
-                ? addressData.city
-                : undefined) ||
-              dto.city ||
-              '';
-
-            let pincode =
-              dto.pincode ||
-              (typeof addressData === 'object' && addressData !== null
-                ? addressData.pincode
-                : undefined) ||
-              '';
-
-            if (!pincode || pincode.trim() === '') {
-              const pinMatch = fullAddress.match(/\b\d{6}\b/);
-              if (pinMatch) pincode = pinMatch[0];
-              else pincode = '000000';
+            if (dto.paymentMethod === 'BANK') {
+              bankAccountData.accountHolderName = dto.accountHolderName;
+              bankAccountData.accountNumber = dto.accountNumber;
+              bankAccountData.ifscCode = dto.ifscCode;
+              bankAccountData.bankName = dto.bankName;
+            } else if (dto.paymentMethod === 'UPI') {
+              bankAccountData.upiId = dto.upiId;
             }
 
-            if (!city || city.trim() === '') {
-              city = 'N/A';
-            }
+            await manager.save(manager.create(PurohitBankAccount, bankAccountData));
 
-            const state =
-              dto.state ||
-              (typeof addressData === 'object' && addressData !== null
-                ? addressData.state
-                : undefined) ||
-              undefined;
-
-            const venueType =
-              dto.venueType ||
-              (typeof addressData === 'object' && addressData !== null
-                ? addressData.venueType
-                : undefined) ||
-              VENUE_TYPE.HOME;
-
-            const latitude =
-              dto.latitude !== undefined
-                ? dto.latitude
-                : typeof addressData === 'object' &&
-                  addressData !== null &&
-                  addressData.latitude !== undefined
-                  ? Number(addressData.latitude)
-                  : undefined;
-
-            const longitude =
-              dto.longitude !== undefined
-                ? dto.longitude
-                : typeof addressData === 'object' &&
-                  addressData !== null &&
-                  addressData.longitude !== undefined
-                  ? Number(addressData.longitude)
-                  : undefined;
-
-            const isDefault =
-              dto.isDefault !== undefined
-                ? dto.isDefault
-                : typeof addressData === 'object' &&
-                  addressData !== null &&
-                  addressData.isDefault !== undefined
-                  ? addressData.isDefault === true || addressData.isDefault === 'true'
-                  : true;
-
-            if (isDefault) {
-              // Clear any existing default address for this customer just in case
-              await manager.update(
-                CustomerAddress,
-                { customerId: saved.id, isDefault: true },
-                { isDefault: false },
+            const mediaEntries: PurohitMedia[] = [];
+            if (aadhaarDocUrl) {
+              mediaEntries.push(
+                manager.create(PurohitMedia, {
+                  purohitId: profile.id,
+                  mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                  documentType: 'AADHAAR',
+                  mediaUrl: aadhaarDocUrl,
+                }),
               );
             }
 
-            const newAddress = manager.create(CustomerAddress, {
-              customerId: saved.id,
-              addressLabel: addressLabel.trim(),
-              fullAddress: fullAddress.trim(),
-              city: city.trim(),
-              state: state ? state.trim() : undefined,
-              pincode: pincode.trim(),
-              venueType,
-              latitude,
-              longitude,
-              isDefault,
-            });
+            if (panDocUrl) {
+              mediaEntries.push(
+                manager.create(PurohitMedia, {
+                  purohitId: profile.id,
+                  mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                  documentType: 'PAN',
+                  mediaUrl: panDocUrl,
+                }),
+              );
+            }
 
-            savedCustomerAddress = await manager.save(
-              CustomerAddress,
-              newAddress,
-            );
+            if (certificateUrl) {
+              mediaEntries.push(
+                manager.create(PurohitMedia, {
+                  purohitId: profile.id,
+                  mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                  documentType: 'CERTIFICATE',
+                  mediaUrl: certificateUrl,
+                }),
+              );
+            }
 
-            await this.auditLogService.createAuditLog(
-              {
-                actorId: saved.id,
-                actorType: ACTOR_TYPE.USER,
-                actorRole: saved.role,
-                module: AUDIT_MODULE.USER,
-                entity: 'CustomerAddress',
-                entityId: String(savedCustomerAddress.id),
-                action: 'CUSTOMER_ADDRESS_CREATED',
-                message: `Customer #${saved.id} registered with ${isDefault ? 'default ' : ''}address #${savedCustomerAddress.id}.`,
-                newValue: {
-                  addressId: savedCustomerAddress.id,
-                  fullAddress: savedCustomerAddress.fullAddress,
-                  isDefault,
-                },
-              },
-              manager,
-            );
+            if (templeAffiliationProofUrl) {
+              mediaEntries.push(
+                manager.create(PurohitMedia, {
+                  purohitId: profile.id,
+                  mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+                  documentType: 'TEMPLE_PROOF',
+                  mediaUrl: templeAffiliationProofUrl,
+                }),
+              );
+            }
+
+            if (mediaEntries.length > 0) {
+              await manager.save(PurohitMedia, mediaEntries);
+            }
           }
-        }
 
-        // 6. Delete OTP record after verification (skip if bypassed via purohitId)
-        if (otpRecord.id) {
-          await manager.delete(Otp, { id: otpRecord.id });
-        }
+          let savedCustomerAddress: CustomerAddress | null = null;
+          if (saved.role === USER_ROLE.CUSTOMER) {
+            let addressData = dto.address;
+            if (typeof addressData === 'string') {
+              try {
+                addressData = JSON.parse(addressData);
+              } catch {
+                // ignore json parse error
+              }
+            }
 
-        await this.auditLogService.createAuditLog(
-          {
-            actorId: saved.id,
-            actorType: ACTOR_TYPE.USER,
-            actorRole: saved.role,
-            module: AUDIT_MODULE.USER,
-            entity: 'User',
-            entityId: String(saved.id),
-            action: 'USER_REGISTERED',
-            message: `User ${saved.username || saved.email || saved.phone} registered as ${saved.role}.`,
-            oldValue: undefined,
-            newValue: {
-              role: saved.role,
-              email: saved.email,
-              phone: saved.phone,
+            const fullAddress =
+              dto.fullAddress ||
+              (typeof addressData === 'object' && addressData !== null
+                ? addressData.fullAddress
+                : undefined);
+
+            if (
+              fullAddress &&
+              typeof fullAddress === 'string' &&
+              fullAddress.trim() !== ''
+            ) {
+              const addressLabel =
+                dto.addressLabel ||
+                (typeof addressData === 'object' && addressData !== null
+                  ? addressData.addressLabel
+                  : undefined) ||
+                'HOME';
+
+              let city =
+                (typeof addressData === 'object' && addressData !== null
+                  ? addressData.city
+                  : undefined) ||
+                dto.city ||
+                '';
+
+              let pincode =
+                dto.pincode ||
+                (typeof addressData === 'object' && addressData !== null
+                  ? addressData.pincode
+                  : undefined) ||
+                '';
+
+              if (!pincode || pincode.trim() === '') {
+                const pinMatch = fullAddress.match(/\b\d{6}\b/);
+                if (pinMatch) pincode = pinMatch[0];
+                else pincode = '000000';
+              }
+
+              if (!city || city.trim() === '') {
+                city = 'N/A';
+              }
+
+              const state =
+                dto.state ||
+                (typeof addressData === 'object' && addressData !== null
+                  ? addressData.state
+                  : undefined) ||
+                undefined;
+
+              const venueType =
+                dto.venueType ||
+                (typeof addressData === 'object' && addressData !== null
+                  ? addressData.venueType
+                  : undefined) ||
+                VENUE_TYPE.HOME;
+
+              const latitude =
+                dto.latitude !== undefined
+                  ? dto.latitude
+                  : typeof addressData === 'object' &&
+                    addressData !== null &&
+                    addressData.latitude !== undefined
+                    ? Number(addressData.latitude)
+                    : undefined;
+
+              const longitude =
+                dto.longitude !== undefined
+                  ? dto.longitude
+                  : typeof addressData === 'object' &&
+                    addressData !== null &&
+                    addressData.longitude !== undefined
+                    ? Number(addressData.longitude)
+                    : undefined;
+
+              const isDefault =
+                dto.isDefault !== undefined
+                  ? dto.isDefault
+                  : typeof addressData === 'object' &&
+                    addressData !== null &&
+                    addressData.isDefault !== undefined
+                    ? addressData.isDefault === true || addressData.isDefault === 'true'
+                    : true;
+
+              if (isDefault) {
+                // Clear any existing default address for this customer just in case
+                await manager.update(
+                  CustomerAddress,
+                  { customerId: saved.id, isDefault: true },
+                  { isDefault: false },
+                );
+              }
+
+              const newAddress = manager.create(CustomerAddress, {
+                customerId: saved.id,
+                addressLabel: addressLabel.trim(),
+                fullAddress: fullAddress.trim(),
+                city: city.trim(),
+                state: state ? state.trim() : undefined,
+                pincode: pincode.trim(),
+                venueType,
+                latitude,
+                longitude,
+                isDefault,
+              });
+
+              savedCustomerAddress = await manager.save(
+                CustomerAddress,
+                newAddress,
+              );
+
+              await this.auditLogService.createAuditLog(
+                {
+                  actorId: saved.id,
+                  actorType: ACTOR_TYPE.USER,
+                  actorRole: saved.role,
+                  module: AUDIT_MODULE.USER,
+                  entity: 'CustomerAddress',
+                  entityId: String(savedCustomerAddress.id),
+                  action: 'CUSTOMER_ADDRESS_CREATED',
+                  message: `Customer #${saved.id} registered with ${isDefault ? 'default ' : ''}address #${savedCustomerAddress.id}.`,
+                  newValue: {
+                    addressId: savedCustomerAddress.id,
+                    fullAddress: savedCustomerAddress.fullAddress,
+                    isDefault,
+                  },
+                },
+                manager,
+              );
+            }
+          }
+
+          // 6. Delete OTP record after verification (skip if bypassed via purohitId)
+          if (otpRecord.id) {
+            await manager.delete(Otp, { id: otpRecord.id });
+          }
+
+          await this.auditLogService.createAuditLog(
+            {
+              actorId: saved.id,
+              actorType: ACTOR_TYPE.USER,
+              actorRole: saved.role,
+              module: AUDIT_MODULE.USER,
+              entity: 'User',
+              entityId: String(saved.id),
+              action: 'USER_REGISTERED',
+              message: `User ${saved.username || saved.email || saved.phone} registered as ${saved.role}.`,
+              oldValue: undefined,
+              newValue: {
+                role: saved.role,
+                email: saved.email,
+                phone: saved.phone,
+              },
             },
-          },
-          manager,
+            manager,
+          );
+
+          return { saved, savedCustomerAddress };
+        }));
+    } catch (transactionError) {
+      // DB transaction failed — clean up any S3 files uploaded during this attempt
+      // to prevent orphaned objects. Runs best-effort; errors are logged but not rethrown.
+      if (uploadedS3Urls.length > 0) {
+        this.logger.warn(
+          `[UserRegistration] Transaction failed. Cleaning up ${uploadedS3Urls.length} uploaded S3 file(s)…`,
         );
-
-        return { saved, savedCustomerAddress };
-      });
-
-    // 7. Send Registration Email to Customer or Purohit
-    if (savedUser.email) {
-      try {
-        const fullName = savedUser.firstName
-          ? `${savedUser.firstName} ${savedUser.lastName || ''}`.trim()
-          : savedUser.role === USER_ROLE.PUROHIT
-            ? 'Purohit'
-            : 'Devotee';
-
-        if (savedUser.role === USER_ROLE.PUROHIT) {
-          this.logger.log(
-            `[UserRegistration] Sending registration email to Purohit ${savedUser.email}...`,
-          );
-          await this.emailService.sendPurohitRegistrationEmail({
-            email: savedUser.email,
-            name: fullName,
-            username: savedUser.username,
-            phone: savedUser.phone,
-          });
-          this.logger.log(
-            `[UserRegistration] Purohit registration email sent successfully to ${savedUser.email}.`,
-          );
-        } else {
-          this.logger.log(
-            `[UserRegistration] Sending welcome registration email to customer ${savedUser.email}...`,
-          );
-          await this.emailService.sendCustomerRegistrationEmail({
-            email: savedUser.email,
-            name: fullName,
-            username: savedUser.username,
-            phone: savedUser.phone,
-          });
-          this.logger.log(
-            `[UserRegistration] Customer registration email sent successfully to ${savedUser.email}.`,
-          );
-        }
-      } catch (emailErr) {
-        this.logger.error(
-          `[UserRegistration] Failed to send registration email to ${savedUser.email}`,
-          emailErr instanceof Error ? emailErr.stack : String(emailErr),
+        await Promise.allSettled(
+          uploadedS3Urls.map((url) => this.s3Service.deleteByUrl(url)),
+        );
+        this.logger.warn(
+          `[UserRegistration] S3 cleanup complete for failed registration attempt.`,
         );
       }
+      throw transactionError;
+    }
+
+    // 7. Send Registration Email to Customer or Purohit asynchronously post-commit
+    if (savedUser.email) {
+      const fullName = savedUser.firstName
+        ? `${savedUser.firstName} ${savedUser.lastName || ''}`.trim()
+        : savedUser.role === USER_ROLE.PUROHIT
+          ? 'Purohit'
+          : 'Devotee';
+      const emailPayload = {
+        email: savedUser.email,
+        name: fullName,
+        username: savedUser.username,
+        phone: savedUser.phone,
+      };
+      const isPurohit = savedUser.role === USER_ROLE.PUROHIT;
+
+      setImmediate(async () => {
+        try {
+          if (isPurohit) {
+            this.logger.log(
+              `[UserRegistration] Sending registration email to Purohit ${emailPayload.email}...`,
+            );
+            await this.emailService.sendPurohitRegistrationEmail(emailPayload);
+            this.logger.log(
+              `[UserRegistration] Purohit registration email sent successfully to ${emailPayload.email}.`,
+            );
+          } else {
+            this.logger.log(
+              `[UserRegistration] Sending welcome registration email to customer ${emailPayload.email}...`,
+            );
+            await this.emailService.sendCustomerRegistrationEmail(emailPayload);
+            this.logger.log(
+              `[UserRegistration] Customer registration email sent successfully to ${emailPayload.email}.`,
+            );
+          }
+        } catch (emailErr) {
+          this.logger.error(
+            `[UserRegistration] Failed to send registration email to ${emailPayload.email}`,
+            emailErr instanceof Error ? emailErr.stack : String(emailErr),
+          );
+        }
+      });
     }
 
     // 8. Issue Auth Tokens
     const data = await this.issueAuthTokens(savedUser);
+
+    this.logger.debug?.(
+      `[UserRegistration] Completed registration for user #${savedUser.id} (${savedUser.role}) in ${(performance.now() - regStartTime).toFixed(2)}ms`,
+    );
 
     return {
       message: 'User registration successful',

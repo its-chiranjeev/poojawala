@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, ILike } from 'typeorm';
 import { User } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 import { Brackets } from 'typeorm';
@@ -19,8 +19,9 @@ export class UserRepository extends BaseRepository<User> {
 
   // Only user-specific queries here
   async findByEmail(email: string) {
+    if (!email) return null;
     return this.repo.findOne({
-      where: { email },
+      where: { email: ILike(email.trim()) },
     });
   }
 

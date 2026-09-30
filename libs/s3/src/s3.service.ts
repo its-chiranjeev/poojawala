@@ -225,6 +225,19 @@ export class S3Service {
     );
   }
 
+  /**
+   * Deletes an S3 object given its full URL (as returned by uploadFile / uploadFileHelper).
+   * Silently ignores errors so that cleanup never masks the original failure.
+   */
+  async deleteByUrl(url: string): Promise<void> {
+    try {
+      const key = this.normalizeS3Key(url);
+      await this.deleteObject(key);
+    } catch (err) {
+      console.error('[S3Service] deleteByUrl failed (non-fatal):', url, err);
+    }
+  }
+
   async copyObject(sourceKey: string, destinationKey: string): Promise<void> {
     try {
       const normalizedSourceKey = this.normalizeS3Key(sourceKey);
