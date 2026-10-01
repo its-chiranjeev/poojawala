@@ -2040,8 +2040,9 @@ export class UserService {
     const requiredFields: Record<string, unknown> = {
       email: user.email,
       'first name': user.firstName,
-      'Aadhaar number': profile.aadhaarNumber,
-      'qualification certificate': profile.certificateUrl,
+      // 'Aadhaar number': profile.aadhaarNumber,
+      // TODO: Qualification certificate is optional as per business requirements
+      // 'qualification certificate': profile.certificateUrl,
       qualification: profile.qualification,
       'experience years': profile.experienceYears,
       languages: profile.languages,
