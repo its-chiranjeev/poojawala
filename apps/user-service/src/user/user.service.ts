@@ -69,7 +69,15 @@ import * as bcrypt from 'bcryptjs';
 import { createHmac } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
-import { AuditLogService } from '@poojawala/common';
+import {
+  AuditLogService,
+  generateSecureOtp,
+  hashOtp,
+  verifyOtpHash,
+  DEFAULT_OTP_EXPIRY_SECONDS,
+  MAX_OTP_ATTEMPTS,
+  RESEND_COOLDOWN_SECONDS,
+} from '@poojawala/common';
 
 @Injectable()
 export class UserService {
@@ -538,26 +546,49 @@ export class UserService {
       throw new ConflictException('Email already in use');
     }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-    const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + 10);
-
-    let otpRecord;
-
+    // Check resend cooldown / rate limiting
+    let existingOtpRecord: Otp | null = null;
     if (trimmedPhone) {
-      otpRecord = await this.otpRepository.findOne({
+      existingOtpRecord = await this.otpRepository.findOne({
         where: { phone: trimmedPhone },
+        order: { id: 'DESC' },
       });
-    }
-    if (!otpRecord && normalizedEmail) {
-      otpRecord = await this.otpRepository.findOne({
+    } else if (normalizedEmail) {
+      existingOtpRecord = await this.otpRepository.findOne({
         where: { email: normalizedEmail },
+        order: { id: 'DESC' },
       });
     }
 
-    if (otpRecord) {
-      otpRecord.otp = otp;
+    if (existingOtpRecord && !existingOtpRecord.isVerified) {
+      const cooldownMs = RESEND_COOLDOWN_SECONDS * 1000;
+      const elapsedMs = Date.now() - new Date(existingOtpRecord.createdAt).getTime();
+      if (elapsedMs < cooldownMs) {
+        const remainingSec = Math.ceil((cooldownMs - elapsedMs) / 1000);
+        throw new BadRequestException(
+          `Please wait ${remainingSec} second(s) before requesting another OTP.`,
+        );
+      }
+    }
+
+    // TODO: FAST2SMS_OTP_FIX - Previous non-cryptographic Math.random() OTP generation:
+    // const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp = generateSecureOtp(6);
+    const hashedOtp = hashOtp(otp);
+
+    const configuredExpiry = this.configService.get<string>('OTP_EXPIRY_SECONDS');
+    const expirySeconds = configuredExpiry
+      ? parseInt(configuredExpiry, 10)
+      : DEFAULT_OTP_EXPIRY_SECONDS;
+
+    const expiresAt = new Date(Date.now() + expirySeconds * 1000);
+
+    let otpRecord: Otp;
+
+    if (existingOtpRecord) {
+      otpRecord = existingOtpRecord;
+      otpRecord.otp = hashedOtp;
+      otpRecord.attempts = 0;
       otpRecord.expiresAt = expiresAt;
       otpRecord.isVerified = false;
       otpRecord.role = role;
@@ -573,7 +604,8 @@ export class UserService {
       otpRecord = this.otpRepository.create({
         phone: trimmedPhone,
         email: normalizedEmail,
-        otp,
+        otp: hashedOtp,
+        attempts: 0,
         expiresAt,
         isVerified: false,
         role,
@@ -585,23 +617,34 @@ export class UserService {
 
     if (trimmedPhone) {
       // ── Fast2SMS Smart OTP (WhatsApp primary / SMS fallback) ───────────────
-      // Fast2SMS handles the WhatsApp→SMS channel fallback internally.
-      // Poojawala makes a single send request; no manual fallback logic needed.
+      // Backend is single authority: backend generates OTP, stores hash, and
+      // delivers the exact backend OTP through Fast2SMS.
       try {
-        await this.smsService.sendOtpViaFast2sms(trimmedPhone);
-        this.logger.log(`[generateOtp] Fast2SMS OTP send request succeeded for phone ending …${trimmedPhone.slice(-4)}`);
+        // TODO: FAST2SMS_MIGRATION - Previous call without backend OTP:
+        // await this.smsService.sendOtpViaFast2sms(trimmedPhone);
+        await this.smsService.sendOtpViaFast2sms(trimmedPhone, otp);
+        this.logger.log(
+          `[generateOtp] Fast2SMS OTP delivery request succeeded for phone ending …${trimmedPhone.slice(-4)}`,
+        );
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(
-          `[generateOtp] Fast2SMS OTP send failed for phone ending …${trimmedPhone.slice(-4)}: ${message}`,
+          `[generateOtp] Fast2SMS OTP delivery failed for phone ending …${trimmedPhone.slice(-4)}: ${message}`,
         );
         if (normalizedEmail) {
-          this.logger.log(`[generateOtp] Falling back to email OTP delivery for ${normalizedEmail}`);
+          this.logger.log(
+            `[generateOtp] Falling back to email OTP delivery for ${normalizedEmail}`,
+          );
           try {
             await this.emailService.sendOtpEmail(normalizedEmail, otp);
-            this.logger.log(`[generateOtp] Fallback OTP email sent successfully to ${normalizedEmail}`);
+            this.logger.log(
+              `[generateOtp] Fallback OTP email sent successfully to ${normalizedEmail}`,
+            );
           } catch (emailError: unknown) {
-            const emailMessage = emailError instanceof Error ? emailError.message : String(emailError);
+            // Clean up un-delivered OTP to avoid leaving system in inconsistent state
+            await this.otpRepository.delete(otpRecord.id);
+            const emailMessage =
+              emailError instanceof Error ? emailError.message : String(emailError);
             this.logger.error(
               `[generateOtp] Fallback OTP email also failed for ${normalizedEmail}: ${emailMessage}`,
             );
@@ -610,6 +653,8 @@ export class UserService {
             );
           }
         } else {
+          // Clean up un-delivered OTP to avoid leaving system in inconsistent state
+          await this.otpRepository.delete(otpRecord.id);
           throw new InternalServerErrorException(
             'Failed to send OTP via WhatsApp/SMS and no email provided for fallback',
           );
@@ -654,7 +699,9 @@ export class UserService {
         await this.emailService.sendOtpEmail(normalizedEmail, otp);
         this.logger.log(`OTP email sent successfully to ${normalizedEmail}`);
       } catch (emailError: unknown) {
-        const message = emailError instanceof Error ? emailError.message : String(emailError);
+        await this.otpRepository.delete(otpRecord.id);
+        const message =
+          emailError instanceof Error ? emailError.message : String(emailError);
         this.logger.error(
           `Failed to send OTP email to ${normalizedEmail}: ${message}`,
         );
@@ -665,13 +712,9 @@ export class UserService {
     return {
       success: true,
       message: 'OTP sent successfully',
-      otp,
-      // TODO: FAST2SMS_MIGRATION
-      // Previously, `otp` was always returned in the response.
-      // This is retained for backward compatibility and development testing.
-      // In production, consider removing `otp` from the response once Fast2SMS
-      // is confirmed stable, since Fast2SMS delivers the OTP directly to WhatsApp/SMS.
-      // Original line: otp,
+      // TODO: SECURITY_FIX - Plaintext OTP must never be exposed in API responses.
+      // Kept commented out for reference.
+      // otp,
     };
   }
 
@@ -862,43 +905,46 @@ export class UserService {
       throw new BadRequestException('OTP has expired');
     }
 
-    if (phone) {
-      // ── Fast2SMS OTP verification (phone-based) ─────────────────────────
-      // Fast2SMS is the OTP authority for phone-based flows.
-      // Verification is delegated to Fast2SMS; Poojawala does not compare the
-      // OTP value locally for phone flows.
-      this.logger.log(`[verifyOtp] Delegating OTP verification to Fast2SMS for phone ending …${phone.slice(-4)}`);
+    if ((otpRecord.attempts ?? 0) >= MAX_OTP_ATTEMPTS) {
+      this.logger.warn(
+        `[verifyOtp] Maximum verification attempts exceeded for ${phone ? `phone ending …${phone.slice(-4)}` : 'email'}`,
+      );
+      throw new BadRequestException(
+        'Maximum verification attempts exceeded. Please request a new OTP.',
+      );
+    }
 
-      const fast2smsVerified = await this.smsService.verifyOtpViaFast2sms(phone, otp);
+    // TODO: FAST2SMS_VERIFY_DEPRECATED
+    // Fast2SMS is no longer the verification authority. Backend verifies against
+    // stored secure hash as the single source of truth.
+    // Retained for rollback reference:
+    // if (phone) {
+    //   const fast2smsVerified = await this.smsService.verifyOtpViaFast2sms(phone, otp);
+    //   if (!fast2smsVerified) throw new BadRequestException('Invalid OTP');
+    // }
 
-      if (!fast2smsVerified) {
-        this.logger.warn(`[verifyOtp] Fast2SMS rejected OTP for phone ending …${phone.slice(-4)}`);
-        throw new BadRequestException('Invalid OTP');
-      }
+    const isMatch = verifyOtpHash(otp, otpRecord.otp);
 
-      this.logger.log(`[verifyOtp] Fast2SMS OTP verification succeeded for phone ending …${phone.slice(-4)}`);
-
-      // TODO: FAST2SMS_MIGRATION
-      // Previous local OTP string comparison for phone-based verification.
-      // Retained for rollback/reference. Re-enable and remove the Fast2SMS
-      // block above if Fast2SMS integration is rolled back.
-      //
-      // if (otpRecord.otp !== otp) {
-      //   throw new BadRequestException('Invalid OTP');
-      // }
-    } else {
-      // Email-based OTP: verified locally against the stored OTP value.
-      if (otpRecord.otp !== otp) {
-        throw new BadRequestException('Invalid OTP');
-      }
+    if (!isMatch) {
+      otpRecord.attempts = (otpRecord.attempts ?? 0) + 1;
+      await this.otpRepository.save(otpRecord);
+      this.logger.warn(
+        `[verifyOtp] Invalid OTP submitted for ${phone ? `phone ending …${phone.slice(-4)}` : 'email'}. Attempt ${otpRecord.attempts}/${MAX_OTP_ATTEMPTS}`,
+      );
+      throw new BadRequestException('Invalid OTP');
     }
 
     otpRecord.isVerified = true;
+    otpRecord.attempts = 0;
     const verifiedExpiresAt = new Date();
     verifiedExpiresAt.setMinutes(verifiedExpiresAt.getMinutes() + 30);
     otpRecord.expiresAt = verifiedExpiresAt;
 
     await this.otpRepository.save(otpRecord);
+
+    this.logger.log(
+      `[verifyOtp] OTP verification succeeded for ${phone ? `phone ending …${phone.slice(-4)}` : 'email'}`,
+    );
 
     return {
       success: true,
@@ -3325,7 +3371,12 @@ export class UserService {
       });
     }
 
-    // 8. Issue Auth Tokens
+    // 8. Invalidate/consume OTP record to prevent replay/reuse
+    if (otpRecord?.id) {
+      await this.otpRepository.delete(otpRecord.id);
+    }
+
+    // 9. Issue Auth Tokens
     const data = await this.issueAuthTokens(savedUser);
 
     this.logger.debug?.(

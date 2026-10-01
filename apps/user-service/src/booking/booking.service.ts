@@ -3120,17 +3120,10 @@ export class BookingService {
 
     const deliveryResults = await Promise.allSettled([
       // ── Fast2SMS Smart OTP (WhatsApp primary / SMS fallback) ─────────────
-      // Fast2SMS generates and delivers the OTP directly to the customer's
-      // WhatsApp (primary) or SMS (auto-fallback). One request; no manual
-      // fallback needed here.
-      //
-      // NOTE: For booking OTP, Fast2SMS generates its own OTP value distinct
-      // from booking.completionOtp. The customer receives the Fast2SMS OTP;
-      // the Purohit verifies it via the existing verify-start-otp endpoint,
-      // which compares against booking.completionOtp. Since we stored the OTP
-      // locally AND sent it via Fast2SMS, both channels have the same value.
+      // Fast2SMS delivers the backend-generated OTP directly to the customer's
+      // WhatsApp (primary) or SMS (auto-fallback).
       customerPhone
-        ? this.smsService.sendOtpViaFast2sms(customerPhone)
+        ? this.smsService.sendOtpViaFast2sms(customerPhone, otp)
         : Promise.resolve(null),
 
       // TODO: FAST2SMS_MIGRATION
@@ -3346,39 +3339,22 @@ export class BookingService {
 
     const customerPhone = bookingForPhone.customer?.phone;
 
-    if (customerPhone) {
-      this.logger.log(
-        `[verifyStartOtp] Delegating OTP verification to Fast2SMS for booking #${bookingId}, phone ending …${customerPhone.slice(-4)}`,
-      );
+    // TODO: FAST2SMS_VERIFY_DEPRECATED
+    // Fast2SMS is no longer the verification authority. Backend verifies against
+    // booking.completionOtp as the single source of truth for both SMS and email delivery.
+    // Retained for rollback reference:
+    // if (customerPhone) {
+    //   const fast2smsVerified = await this.smsService.verifyOtpViaFast2sms(
+    //     customerPhone,
+    //     submittedOtp,
+    //   );
+    //   if (!fast2smsVerified) {
+    //     throw new BadRequestException('Invalid start OTP');
+    //   }
+    // }
 
-      const fast2smsVerified = await this.smsService.verifyOtpViaFast2sms(
-        customerPhone,
-        submittedOtp,
-      );
-
-      if (!fast2smsVerified) {
-        this.logger.warn(
-          `[verifyStartOtp] Fast2SMS rejected OTP for booking #${bookingId}, phone ending …${customerPhone.slice(-4)}`,
-        );
-        throw new BadRequestException('Invalid start OTP');
-      }
-
-      this.logger.log(
-        `[verifyStartOtp] Fast2SMS OTP verification succeeded for booking #${bookingId}`,
-      );
-    } else {
-      // No phone on record — fall back to local completionOtp comparison
-      // (email-only customers were not sent a Fast2SMS OTP).
-      this.logger.warn(
-        `[verifyStartOtp] No customer phone for booking #${bookingId}; using local OTP comparison`,
-      );
-
-      // TODO: FAST2SMS_MIGRATION
-      // Previous local OTP verification retained for rollback/reference and
-      // for email-only customers who were not sent a Fast2SMS OTP.
-      if (!bookingForPhone.completionOtp || bookingForPhone.completionOtp !== submittedOtp) {
-        throw new BadRequestException('Invalid start OTP');
-      }
+    if (!bookingForPhone.completionOtp || bookingForPhone.completionOtp !== submittedOtp) {
+      throw new BadRequestException('Invalid start OTP');
     }
 
     // ── Booking state transition (unchanged) ────────────────────────────────

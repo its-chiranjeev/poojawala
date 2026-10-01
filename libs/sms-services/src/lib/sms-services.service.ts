@@ -72,14 +72,29 @@ export class SmsService {
    * Poojawala does NOT implement the WhatsApp→SMS fallback manually;
    * it is fully handled by Fast2SMS Smart OTP configuration.
    *
+  // TODO: FAST2SMS_MIGRATION - Previous implementation did not pass backend-generated OTP,
+  // causing Fast2SMS to generate an independent OTP. Kept for rollback reference.
+  // async sendOtpViaFast2sms(mobile: string): Promise<void> { ... }
+
+  /**
+   * Sends a backend-generated OTP via Fast2SMS Smart OTP API.
+   *
+   * Fast2SMS internally attempts delivery via:
+   *   1. WhatsApp (primary)
+   *   2. SMS (automatic fallback if WhatsApp fails)
+   *
+   * Backend generates the OTP and passes it via `otp`. Fast2SMS acts strictly
+   * as the delivery provider, not an OTP generator.
+   *
    * @param mobile  Indian mobile number (10 digits, without country code).
+   * @param otp     The authoritative backend-generated OTP to deliver.
    */
-  async sendOtpViaFast2sms(mobile: string): Promise<void> {
+  async sendOtpViaFast2sms(mobile: string, otp: string): Promise<void> {
     // Strip any leading +91 or 0 to get the bare 10-digit number.
     const normalizedMobile = this.normalizeMobileForFast2sms(mobile);
 
     this.logger.log(
-      `[Fast2SMS] OTP send request initiated for mobile ending …${normalizedMobile.slice(-4)}`,
+      `[Fast2SMS] OTP delivery request initiated for mobile ending …${normalizedMobile.slice(-4)}`,
     );
 
     try {
@@ -90,6 +105,7 @@ export class SmsService {
           otp_id: this.fast2smsOtpId,
           otp_expiry: this.fast2smsOtpExpiryMinutes,
           otp_length: this.fast2smsOtpLength,
+          otp, // Pass the backend-generated OTP to Fast2SMS
         },
         {
           headers: {
@@ -103,7 +119,7 @@ export class SmsService {
 
       if (!response.data?.return) {
         this.logger.error(
-          `[Fast2SMS] OTP send rejected for mobile ending …${normalizedMobile.slice(-4)}: ` +
+          `[Fast2SMS] OTP delivery rejected for mobile ending …${normalizedMobile.slice(-4)}: ` +
           `${JSON.stringify(response.data?.message)}`,
         );
         throw new InternalServerErrorException(
@@ -112,7 +128,7 @@ export class SmsService {
       }
 
       this.logger.log(
-        `[Fast2SMS] OTP send succeeded for mobile ending …${normalizedMobile.slice(-4)}. ` +
+        `[Fast2SMS] OTP delivery succeeded for mobile ending …${normalizedMobile.slice(-4)}. ` +
         `RequestId: ${response.data.request_id}`,
       );
     } catch (error: unknown) {
@@ -122,13 +138,13 @@ export class SmsService {
       if (axios.isAxiosError(error) && error.response) {
         // Provider returned an HTTP error — log safely without exposing the API key.
         this.logger.error(
-          `[Fast2SMS] OTP send failed for mobile ending …${normalizedMobile.slice(-4)}. ` +
+          `[Fast2SMS] OTP delivery failed for mobile ending …${normalizedMobile.slice(-4)}. ` +
           `HTTP ${error.response.status}: ${JSON.stringify(error.response.data?.message ?? error.response.data)}`,
         );
       } else {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(
-          `[Fast2SMS] OTP send request failed for mobile ending …${normalizedMobile.slice(-4)}: ${message}`,
+          `[Fast2SMS] OTP delivery request failed for mobile ending …${normalizedMobile.slice(-4)}: ${message}`,
         );
       }
       throw new InternalServerErrorException(
@@ -137,71 +153,37 @@ export class SmsService {
     }
   }
 
-  /**
-   * Verifies an OTP via Fast2SMS Smart OTP verify API.
-   *
-   * Returns `true` if Fast2SMS confirms the OTP is valid; `false` otherwise.
-   * The caller is responsible for converting a `false` result into the
-   * appropriate application error.
-   *
-   * @param mobile  Indian mobile number (10 digits, without country code).
-   * @param otp     OTP string submitted by the user.
-   */
-  async verifyOtpViaFast2sms(mobile: string, otp: string): Promise<boolean> {
-    const normalizedMobile = this.normalizeMobileForFast2sms(mobile);
-
-    this.logger.log(
-      `[Fast2SMS] OTP verify request initiated for mobile ending …${normalizedMobile.slice(-4)}`,
-    );
-
-    try {
-      const response = await axios.post<Fast2SmsOtpVerifyResponse>(
-        'https://www.fast2sms.com/dev/otp/verify',
-        {
-          mobile: normalizedMobile,
-          otp,
-        },
-        {
-          headers: {
-            authorization: this.fast2smsApiKey,
-            'Content-Type': 'application/json',
-          },
-          timeout: SmsService.FAST2SMS_TIMEOUT_MS,
-        },
-      );
-
-      const verified = Boolean(response.data?.return);
-
-      if (verified) {
-        this.logger.log(
-          `[Fast2SMS] OTP verification succeeded for mobile ending …${normalizedMobile.slice(-4)}`,
-        );
-      } else {
-        this.logger.warn(
-          `[Fast2SMS] OTP verification failed for mobile ending …${normalizedMobile.slice(-4)}: ` +
-          `${JSON.stringify(response.data?.message)}`,
-        );
-      }
-
-      return verified;
-    } catch (error: unknown) {
-      if (axios.isAxiosError(error) && error.response) {
-        // A 4xx typically means wrong OTP or expired — return false, not a 500.
-        this.logger.error(
-          `[Fast2SMS] OTP verify HTTP ${error.response.status} for mobile ending …${normalizedMobile.slice(-4)}: ` +
-          `${JSON.stringify(error.response.data?.message ?? error.response.data)}`,
-        );
-        return false;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `[Fast2SMS] OTP verify request failed for mobile ending …${normalizedMobile.slice(-4)}: ${message}`,
-      );
-      throw new InternalServerErrorException(
-        'OTP verification service unavailable. Please try again.',
-      );
-    }
-  }
+  // TODO: FAST2SMS_VERIFY_DEPRECATED
+  // Fast2SMS is no longer the verification authority. The backend is the single source
+  // of truth for OTP generation and verification against securely hashed records in the DB.
+  // This method is retained commented out for rollback reference if needed.
+  //
+  // async verifyOtpViaFast2sms(mobile: string, otp: string): Promise<boolean> {
+  //   const normalizedMobile = this.normalizeMobileForFast2sms(mobile);
+  //   this.logger.log(
+  //     `[Fast2SMS] OTP verify request initiated for mobile ending …${normalizedMobile.slice(-4)}`,
+  //   );
+  //   try {
+  //     const response = await axios.post<Fast2SmsOtpVerifyResponse>(
+  //       'https://www.fast2sms.com/dev/otp/verify',
+  //       {
+  //         mobile: normalizedMobile,
+  //         otp,
+  //       },
+  //       {
+  //         headers: {
+  //           authorization: this.fast2smsApiKey,
+  //           'Content-Type': 'application/json',
+  //         },
+  //         timeout: SmsService.FAST2SMS_TIMEOUT_MS,
+  //       },
+  //     );
+  //     const verified = Boolean(response.data?.return);
+  //     return verified;
+  //   } catch (error: unknown) {
+  //     return false;
+  //   }
+  // }
 
   // ─── Twilio OTP (legacy — retained for rollback) ─────────────────────────
 

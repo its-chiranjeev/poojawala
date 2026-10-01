@@ -34,7 +34,15 @@ import {
 } from '@poojawala/dtos';
 import { DataSource } from 'typeorm';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
-import { AuditLogService } from '@poojawala/common';
+import {
+  AuditLogService,
+  generateSecureOtp,
+  hashOtp,
+  verifyOtpHash,
+  DEFAULT_OTP_EXPIRY_SECONDS,
+  MAX_OTP_ATTEMPTS,
+  RESEND_COOLDOWN_SECONDS,
+} from '@poojawala/common';
 import { EmailService } from '@poojawala/email-services';
 import { SmsService } from '@poojawala/sms-services';
 import { MoreThan } from 'typeorm';
@@ -522,25 +530,50 @@ export class AuthModuleService {
       );
     }
 
-    // 3. Delete previous OTP
-    /* const whereCondition = dto.email
-    ? { email: dto.email }
-    : { phone: dto.phone };
+    // 3. Check resend cooldown / rate limiting
+    const existingActiveOtp = await this.otpRepository.findOne({
+      where: dto.phone
+        ? { phone: dto.phone, otpType: OTP_TYPE.RESET_PASSWORD }
+        : { email: dto.email, otpType: OTP_TYPE.RESET_PASSWORD },
+      order: { id: 'DESC' },
+    });
 
-  await this.otpRepository.delete(whereCondition);*/
+    if (existingActiveOtp && !existingActiveOtp.isVerified) {
+      const cooldownMs = RESEND_COOLDOWN_SECONDS * 1000;
+      const elapsedMs = Date.now() - new Date(existingActiveOtp.createdAt).getTime();
+      if (elapsedMs < cooldownMs) {
+        const remainingSec = Math.ceil((cooldownMs - elapsedMs) / 1000);
+        throw new BadRequestException(
+          `Please wait ${remainingSec} second(s) before requesting another OTP.`,
+        );
+      }
+    }
 
-    // 4. Generate OTP
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    // Invalidate previous OTP(s) for this purpose
+    const whereCondition = dto.email
+      ? { email: dto.email, otpType: OTP_TYPE.RESET_PASSWORD }
+      : { phone: dto.phone, otpType: OTP_TYPE.RESET_PASSWORD };
+    await this.otpRepository.delete(whereCondition);
+
+    // 4. Generate cryptographically secure OTP
+    // TODO: FAST2SMS_OTP_FIX - Previous non-cryptographic Math.random() generation:
+    // const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpCode = generateSecureOtp(6);
+    const hashedOtp = hashOtp(otpCode);
 
     // 5. Expiry
-    const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + 2);
+    const configuredExpiry = this.configService.get<string>('OTP_EXPIRY_SECONDS');
+    const expirySeconds = configuredExpiry
+      ? parseInt(configuredExpiry, 10)
+      : DEFAULT_OTP_EXPIRY_SECONDS;
+    const expiresAt = new Date(Date.now() + expirySeconds * 1000);
 
     // 6. Save OTP
     const newOtp = this.otpRepository.create({
       email: dto.email,
       phone: dto.phone,
-      otp: otpCode,
+      otp: hashedOtp,
+      attempts: 0,
       expiresAt,
       role: user.role,
       isVerified: false,
@@ -551,20 +584,28 @@ export class AuthModuleService {
 
     // 7. Send OTP
     if (dto.phone) {
-      // TODO: FAST2SMS_MIGRATION
-      // Previously used Twilio sendOtpSms. Now using Fast2SMS Smart OTP
-      // (WhatsApp primary / SMS fallback). Rollback: restore sendOtpSms.
-      await this.smsService.sendOtpViaFast2sms(dto.phone);
-
-      // TODO: FAST2SMS_MIGRATION (rollback reference)
-      // await this.smsService.sendOtpSms(dto.phone, otpCode);
+      try {
+        // Pass the backend-generated OTP to Fast2SMS
+        // TODO: FAST2SMS_MIGRATION - Previous call without backend OTP:
+        // await this.smsService.sendOtpViaFast2sms(dto.phone);
+        await this.smsService.sendOtpViaFast2sms(dto.phone, otpCode);
+      } catch (smsError) {
+        // Clean up un-delivered OTP record to prevent inconsistent state
+        await this.otpRepository.delete(newOtp.id);
+        throw smsError;
+      }
 
       return {
         message: 'OTP has been sent to your phone.',
       };
     }
 
-    await this.emailService.sendOtpEmail(dto.email!, otpCode);
+    try {
+      await this.emailService.sendOtpEmail(dto.email!, otpCode);
+    } catch (emailError) {
+      await this.otpRepository.delete(newOtp.id);
+      throw emailError;
+    }
 
     return {
       message: 'OTP has been sent to your email.',
@@ -597,29 +638,41 @@ export class AuthModuleService {
       where: dto.email
         ? {
           email: dto.email,
-          expiresAt: MoreThan(new Date()),
           otpType: OTP_TYPE.RESET_PASSWORD,
         }
         : {
           phone: dto.phone,
-          expiresAt: MoreThan(new Date()),
           otpType: OTP_TYPE.RESET_PASSWORD,
         },
+      order: { id: 'DESC' },
     });
 
     if (!otp) {
       throw new BadRequestException('OTP is invalid or has expired');
     }
 
-    // 4. Check OTP
-    if (otp.otp !== dto.otp) {
-      throw new BadRequestException('Invalid OTP');
+    if (otp.expiresAt < new Date()) {
+      throw new BadRequestException('OTP has expired');
     }
 
-    // 5. Check expiry
-    /* if (otp.expiresAt < new Date()) {
-    throw new BadRequestException('OTP has expired');
-  }*/
+    if ((otp.attempts ?? 0) >= MAX_OTP_ATTEMPTS) {
+      throw new BadRequestException(
+        'Maximum verification attempts exceeded. Please request a new OTP.',
+      );
+    }
+
+    // 4. Secure timing-safe hash check
+    // TODO: FAST2SMS_OTP_FIX - Previous plaintext check:
+    // if (otp.otp !== dto.otp) {
+    //   throw new BadRequestException('Invalid OTP');
+    // }
+    const isMatch = verifyOtpHash(dto.otp, otp.otp);
+
+    if (!isMatch) {
+      otp.attempts = (otp.attempts ?? 0) + 1;
+      await this.otpRepository.save(otp);
+      throw new BadRequestException('Invalid OTP');
+    }
 
     if (user.hashedPassword) {
       const isSamePassword = await bcrypt.compare(
@@ -673,53 +726,79 @@ export class AuthModuleService {
       }
     }
 
-    // 3. Find existing OTP or generate new one
-    let otpCode;
-    const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + 2);
-
+    // 3. Find existing OTP and enforce resend cooldown
     const existingOtp = await this.otpRepository.findOne({
       where: dto.phone
-        ? { phone: dto.phone, isVerified: false, otpType: dto.otpType }
-        : { email: dto.email, isVerified: false, otpType: dto.otpType },
-      order: { createdAt: 'DESC' },
+        ? { phone: dto.phone, otpType: dto.otpType }
+        : { email: dto.email, otpType: dto.otpType },
+      order: { id: 'DESC' },
     });
 
-    if (existingOtp) {
-      otpCode = existingOtp.otp;
-      existingOtp.expiresAt = expiresAt;
-      await this.otpRepository.save(existingOtp);
-    } else {
-      otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-      const newOtp = this.otpRepository.create({
-        email: dto.email,
-        phone: dto.phone,
-        otp: otpCode,
-        expiresAt,
-        role: user.role,
-        isVerified: false,
-        otpType: dto.otpType,
-      });
-
-      await this.otpRepository.save(newOtp);
+    if (existingOtp && !existingOtp.isVerified) {
+      const cooldownMs = RESEND_COOLDOWN_SECONDS * 1000;
+      const elapsedMs = Date.now() - new Date(existingOtp.createdAt).getTime();
+      if (elapsedMs < cooldownMs) {
+        const remainingSec = Math.ceil((cooldownMs - elapsedMs) / 1000);
+        throw new BadRequestException(
+          `Please wait ${remainingSec} second(s) before requesting another OTP.`,
+        );
+      }
     }
+
+    // 4. Invalidate previous OTP(s)
+    // TODO: FAST2SMS_OTP_FIX - Previously reused existing OTP:
+    // if (existingOtp) { otpCode = existingOtp.otp; ... }
+    if (existingOtp) {
+      await this.otpRepository.delete(existingOtp.id);
+    }
+
+    // 5. Generate fresh cryptographically secure OTP and hash
+    const otpCode = generateSecureOtp(6);
+    const hashedOtp = hashOtp(otpCode);
+
+    const configuredExpiry = this.configService.get<string>('OTP_EXPIRY_SECONDS');
+    const expirySeconds = configuredExpiry
+      ? parseInt(configuredExpiry, 10)
+      : DEFAULT_OTP_EXPIRY_SECONDS;
+    const expiresAt = new Date(Date.now() + expirySeconds * 1000);
+
+    const newOtp = this.otpRepository.create({
+      email: dto.email,
+      phone: dto.phone,
+      otp: hashedOtp,
+      attempts: 0,
+      expiresAt,
+      role: user.role,
+      isVerified: false,
+      otpType: dto.otpType,
+    });
+
+    await this.otpRepository.save(newOtp);
 
     // 6. Send OTP
     if (dto.phone) {
-      // TODO: FAST2SMS_MIGRATION
-      // Previously used Twilio sendOtpSms. Now using Fast2SMS Smart OTP
-      // (WhatsApp primary / SMS fallback). Rollback: restore sendOtpSms.
-      await this.smsService.sendOtpViaFast2sms(dto.phone);
-
-      // TODO: FAST2SMS_MIGRATION (rollback reference)
-      // await this.smsService.sendOtpSms(dto.phone, otpCode);
+      try {
+        // Pass backend OTP to Fast2SMS
+        // TODO: FAST2SMS_MIGRATION - Previous call without backend OTP:
+        // await this.smsService.sendOtpViaFast2sms(dto.phone);
+        await this.smsService.sendOtpViaFast2sms(dto.phone, otpCode);
+      } catch (smsError) {
+        await this.otpRepository.delete(newOtp.id);
+        throw smsError;
+      }
 
       return {
         message: 'OTP has been sent to your phone.',
       };
     } else {
-      await this.emailService.sendOtpEmail(dto.email!, otpCode);
+      try {
+        await this.emailService.sendOtpEmail(dto.email!, otpCode);
+      } catch (emailError) {
+        await this.otpRepository.delete(newOtp.id);
+        throw emailError;
+      }
     }
+
     return {
       message: 'OTP has been sent to your email.',
     };

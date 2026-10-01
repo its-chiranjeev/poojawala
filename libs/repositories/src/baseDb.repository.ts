@@ -49,7 +49,7 @@ export class BaseRepository<T extends ObjectLiteral> {
     return this.repo.update(criteria, data);
   }
 
-  async delete(id: string | number) {
+  async delete(id: string | number | any) {
     return this.repo.delete(id);
   }
 
