@@ -30,10 +30,24 @@ import {
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { QueryFailedError, ILike } from 'typeorm';
-import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE, PUROHIT_VERIFICATION_STATUS, ServicePlans, ServicePlanDetails, NOTIFICATION_TYPE } from '@poojawala/entities';
+import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE, PUROHIT_VERIFICATION_STATUS, ServicePlans, ServicePlanDetails, NOTIFICATION_TYPE, ServiceCity } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
 import { NotificationService } from '@poojawala/notification';
 import { EmailService } from '@poojawala/email-services';
+
+function sanitizeServiceCities(rawList: any): ServiceCity[] {
+  if (!rawList) return [];
+  const list = Array.isArray(rawList) ? rawList : [rawList];
+  const result: ServiceCity[] = [];
+  for (const c of list) {
+    if (!c) continue;
+    const name = typeof c === 'string' ? c.trim() : String(c.name || c.cityName || '').trim();
+    if (!name) continue;
+    const state = c && typeof c === 'object' && c.state ? String(c.state).trim() : undefined;
+    result.push({ name, ...(state ? { state } : {}) });
+  }
+  return result;
+}
 
 // 177 87
 
@@ -464,13 +478,16 @@ export class ServiceService {
         }
       }
 
-      const resolvedCities = dto.cities ?? [];
-      // isGlobal is always auto-derived: true when no cities, false when city-specific
-      const resolvedIsGlobal = resolvedCities.length === 0;
+      // Ensure valid cities list (support dto.cities and dto.city)
+      const rawCities = dto.cities !== undefined ? dto.cities : (dto as any).city !== undefined ? (dto as any).city : [];
+      const validCities = sanitizeServiceCities(rawCities);
+
+      // Final condition: agar service main city h toh isGlobal = false, agar ek bhi city nahi h toh isGlobal = true
+      const resolvedIsGlobal = validCities.length === 0;
 
       const service = this.serviceRepository.create({
         ...dto,
-        cities: resolvedCities,
+        cities: validCities,
         languages: dto.languages ?? [],
         benefits: dto.benefits ?? [],
         purohitCarryItems: dto.purohitCarryItems ?? [],
@@ -484,6 +501,10 @@ export class ServiceService {
         isGlobal: resolvedIsGlobal,
         isUpcomingFestival: dto.isUpcomingFestival ?? false,
       });
+
+      // Explicitly guarantee values before save
+      service.cities = validCities;
+      service.isGlobal = resolvedIsGlobal;
 
       const savedService = await this.serviceRepository.save(service);
 
@@ -754,8 +775,9 @@ export class ServiceService {
       service.tokenPercentage = oldTokenPercentage;
     }
 
-    if (dto.cities !== undefined) {
-      service.cities = dto.cities ?? [];
+    if (dto.cities !== undefined || (dto as any).city !== undefined) {
+      const rawInput = dto.cities !== undefined ? dto.cities : (dto as any).city;
+      service.cities = sanitizeServiceCities(rawInput);
     }
     if (dto.languages !== undefined) {
       service.languages = dto.languages ?? [];
@@ -767,9 +789,12 @@ export class ServiceService {
       service.purohitCarryItems = dto.purohitCarryItems ?? [];
     }
 
-    // isGlobal is always auto-derived from the current cities array (never from admin input)
-    // This also handles: admin removes all cities → isGlobal becomes true automatically
-    service.isGlobal = !service.cities || service.cities.length === 0;
+    // Ensure valid cities list from current service.cities
+    const validCities = sanitizeServiceCities(service.cities);
+    service.cities = validCities;
+
+    // Final condition: agar kisi service main city h toh isGlobal = false, agar ek bhi city nahi h toh isGlobal = true
+    service.isGlobal = validCities.length === 0;
 
     if (service.isUpcomingFestival) {
       if (!service.festivalStartDate || !service.festivalEndDate) {

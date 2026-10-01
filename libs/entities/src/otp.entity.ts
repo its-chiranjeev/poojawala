@@ -41,7 +41,7 @@ export class Otp {
   @Column({ type: 'enum', enum: USER_ROLE, nullable: true })
   role?: USER_ROLE;
 
-   @Column({
+  @Column({
     type: 'enum',
     enum: OTP_TYPE,
     nullable: true,

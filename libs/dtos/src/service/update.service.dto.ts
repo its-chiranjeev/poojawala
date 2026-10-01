@@ -40,14 +40,22 @@ export class UpdateServiceDto {
   description?: string;
 
   @IsOptional()
-  @Transform(({ value }) => {
-    const deduped = deduplicateCities(parseJsonArray(value));
-    return deduped ? plainToInstance(ServiceCityDto, deduped) : undefined;
+  @Transform(({ obj, value }) => {
+    const raw = obj?.cities !== undefined ? obj.cities : obj?.city !== undefined ? obj.city : value;
+    if (raw === undefined || raw === 'undefined') return undefined;
+    if (raw === null || raw === '' || raw === 'null') return [];
+    const parsed = parseJsonArray(raw);
+    if (parsed === undefined) return undefined;
+    const deduped = deduplicateCities(parsed);
+    return deduped !== undefined ? plainToInstance(ServiceCityDto, deduped) : [];
   })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ServiceCityDto)
   cities?: ServiceCityDto[];
+
+  @IsOptional()
+  city?: any;
 
   @IsOptional()
   @Transform(({ value }) => {

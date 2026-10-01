@@ -375,7 +375,28 @@ export interface PaginatedPaymentsResponse {
 @Injectable()
 export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
-  private readonly razorpay: Razorpay;
+
+  private get razorpay(): Razorpay {
+    try {
+      require('dotenv').config({ override: true });
+    } catch {}
+
+    const keyId =
+      this.configService?.get<string>('RAZORPAY_KEY_ID')?.trim() ||
+      process.env['RAZORPAY_KEY_ID']?.trim();
+    const keySecret =
+      this.configService?.get<string>('RAZORPAY_KEY_SECRET')?.trim() ||
+      process.env['RAZORPAY_KEY_SECRET']?.trim();
+
+    if (!keyId || !keySecret) {
+      throw new Error('Razorpay credentials are not configured');
+    }
+
+    return new Razorpay({
+      key_id: keyId,
+      key_secret: keySecret,
+    });
+  }
 
   constructor(
     private readonly bookingRepository: BookingRepository,
@@ -387,19 +408,7 @@ export class PaymentService {
     @Optional() private readonly emailService?: EmailService,
     @Optional() private readonly configService?: ConfigService,
     @Optional() private readonly assignmentService?: AssignmentService,
-  ) {
-    const keyId = process.env['RAZORPAY_KEY_ID'];
-    const keySecret = process.env['RAZORPAY_KEY_SECRET'];
-
-    if (!keyId || !keySecret) {
-      throw new Error('Razorpay credentials are not configured');
-    }
-
-    this.razorpay = new Razorpay({
-      key_id: keyId,
-      key_secret: keySecret,
-    });
-  }
+  ) {}
 
   async getPurohitPayoutDetails(bookingId: number) {
     const booking = await this.bookingRepository.findOne({

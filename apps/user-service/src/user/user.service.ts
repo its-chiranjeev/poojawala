@@ -27,6 +27,7 @@ import {
   PurohitBankAccount,
   PurohitMedia,
   PurohitProfile,
+  PurohitServiceArea,
   User,
   USER_ROLE,
   USER_STATUS,
@@ -2882,10 +2883,11 @@ export class UserService {
 
     // Run database writes inside a transaction
     let savedUser: User;
-    let savedCustomerAddress: CustomerAddress | null;
+    let savedCustomerAddress: CustomerAddress | null = null;
+    let savedPurohitServiceArea: PurohitServiceArea | null = null;
 
     try {
-      ({ saved: savedUser, savedCustomerAddress } =
+      ({ saved: savedUser, savedCustomerAddress, savedPurohitServiceArea } =
         await this.dataSource.transaction(async (manager) => {
           let saved: User;
 
@@ -3285,6 +3287,164 @@ export class UserService {
             }
           }
 
+          let savedPurohitServiceArea: PurohitServiceArea | null = null;
+          if (saved.role === USER_ROLE.PUROHIT) {
+            let serviceAreaData = dto.serviceArea;
+            if (typeof serviceAreaData === 'string') {
+              try {
+                serviceAreaData = JSON.parse(serviceAreaData);
+              } catch {
+                // ignore json parse error
+              }
+            }
+
+            const fullAddress =
+              dto.fullAddress ||
+              (typeof serviceAreaData === 'object' && serviceAreaData !== null
+                ? serviceAreaData.fullAddress
+                : undefined);
+
+            if (
+              fullAddress &&
+              typeof fullAddress === 'string' &&
+              fullAddress.trim() !== ''
+            ) {
+              const addressLabel =
+                dto.addressLabel ||
+                (typeof serviceAreaData === 'object' && serviceAreaData !== null
+                  ? serviceAreaData.addressLabel
+                  : undefined) ||
+                'PRIMARY';
+
+              const streetName =
+                dto.streetName ||
+                (typeof serviceAreaData === 'object' && serviceAreaData !== null
+                  ? serviceAreaData.streetName
+                  : undefined) ||
+                fullAddress.split(',')[0].trim() ||
+                'Main Street';
+
+              let city =
+                (typeof serviceAreaData === 'object' && serviceAreaData !== null
+                  ? serviceAreaData.city
+                  : undefined) ||
+                dto.city ||
+                '';
+
+              let pincode =
+                dto.pincode ||
+                (typeof serviceAreaData === 'object' && serviceAreaData !== null
+                  ? serviceAreaData.pincode
+                  : undefined) ||
+                '';
+
+              if (!pincode || pincode.trim() === '') {
+                const pinMatch = fullAddress.match(/\b\d{6}\b/);
+                if (pinMatch) pincode = pinMatch[0];
+                else pincode = '000000';
+              }
+
+              if (!city || city.trim() === '') {
+                city = 'N/A';
+              }
+
+              const state =
+                dto.state ||
+                (typeof serviceAreaData === 'object' && serviceAreaData !== null
+                  ? serviceAreaData.state
+                  : undefined) ||
+                undefined;
+
+              const latitude =
+                dto.latitude !== undefined
+                  ? dto.latitude
+                  : typeof serviceAreaData === 'object' &&
+                    serviceAreaData !== null &&
+                    serviceAreaData.latitude !== undefined
+                    ? Number(serviceAreaData.latitude)
+                    : undefined;
+
+              const longitude =
+                dto.longitude !== undefined
+                  ? dto.longitude
+                  : typeof serviceAreaData === 'object' &&
+                    serviceAreaData !== null &&
+                    serviceAreaData.longitude !== undefined
+                    ? Number(serviceAreaData.longitude)
+                    : undefined;
+
+              const serviceRadiusKm =
+                dto.serviceRadiusKm !== undefined
+                  ? Number(dto.serviceRadiusKm)
+                  : typeof serviceAreaData === 'object' &&
+                    serviceAreaData !== null &&
+                    serviceAreaData.serviceRadiusKm !== undefined
+                    ? Number(serviceAreaData.serviceRadiusKm)
+                    : 10;
+
+              const isDefault =
+                dto.isDefault !== undefined
+                  ? dto.isDefault
+                  : typeof serviceAreaData === 'object' &&
+                    serviceAreaData !== null &&
+                    serviceAreaData.isDefault !== undefined
+                    ? serviceAreaData.isDefault === true || serviceAreaData.isDefault === 'true'
+                    : true;
+
+              if (isDefault) {
+                await manager.update(
+                  PurohitServiceArea,
+                  { purohitId: saved.id, isDefault: true },
+                  { isDefault: false },
+                );
+              }
+
+              const newServiceArea = manager.create(PurohitServiceArea, {
+                purohitId: saved.id,
+                addressLabel: addressLabel.trim(),
+                streetName: streetName.trim(),
+                fullAddress: fullAddress.trim(),
+                city: city.trim(),
+                state: state ? state.trim() : undefined,
+                pincode: pincode.trim(),
+                latitude,
+                longitude,
+                serviceRadiusKm:
+                  Number.isFinite(serviceRadiusKm) && serviceRadiusKm > 0
+                    ? serviceRadiusKm
+                    : 10,
+                isDefault,
+              });
+
+              savedPurohitServiceArea = await manager.save(
+                PurohitServiceArea,
+                newServiceArea,
+              );
+
+              await this.auditLogService.createAuditLog(
+                {
+                  actorId: saved.id,
+                  actorType: ACTOR_TYPE.USER,
+                  actorRole: saved.role,
+                  module: AUDIT_MODULE.USER,
+                  entity: 'PurohitServiceArea',
+                  entityId: String(savedPurohitServiceArea.id),
+                  action: 'PUROHIT_SERVICE_AREA_CREATED',
+                  message: `Purohit #${saved.id} registered with ${isDefault ? 'default ' : ''}service area #${savedPurohitServiceArea.id}.`,
+                  newValue: {
+                    serviceAreaId: savedPurohitServiceArea.id,
+                    fullAddress: savedPurohitServiceArea.fullAddress,
+                    city: savedPurohitServiceArea.city,
+                    pincode: savedPurohitServiceArea.pincode,
+                    serviceRadiusKm: savedPurohitServiceArea.serviceRadiusKm,
+                    isDefault,
+                  },
+                },
+                manager,
+              );
+            }
+          }
+
           // 6. Delete OTP record after verification (skip if bypassed via purohitId)
           if (otpRecord.id) {
             await manager.delete(Otp, { id: otpRecord.id });
@@ -3310,7 +3470,7 @@ export class UserService {
             manager,
           );
 
-          return { saved, savedCustomerAddress };
+          return { saved, savedCustomerAddress, savedPurohitServiceArea };
         }));
     } catch (transactionError) {
       // DB transaction failed — clean up any S3 files uploaded during this attempt
@@ -3388,6 +3548,7 @@ export class UserService {
       message: 'User registration successful',
       ...data,
       ...(savedCustomerAddress && { address: savedCustomerAddress }),
+      ...(savedPurohitServiceArea && { serviceArea: savedPurohitServiceArea }),
     };
   }
 

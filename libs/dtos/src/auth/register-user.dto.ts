@@ -272,6 +272,21 @@ export class RegisterNormalUserDto {
 
   @IsOptional()
   address?: any;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  streetName?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  serviceRadiusKm?: number;
+
+  @IsOptional()
+  serviceArea?: any;
 }
 
 export class GenerateOtpDto {

@@ -776,7 +776,14 @@ export class BookingService {
       */
 
       let paymentLinkRes: any = null;
-      if (this.paymentService) {
+      let paymentFailureReason: string | null = null;
+
+      if (!this.paymentService) {
+        paymentFailureReason = 'PaymentService is not injected or available in BookingService';
+        this.logger.error(
+          `[Booking #${transactionResult.savedBooking.id}] ❌ ${paymentFailureReason}. Cannot generate payment URL.`,
+        );
+      } else {
         try {
           const paymentOption = (dto.paymentOption as any) === 'FULL' ? 'FULL' : 'TOKEN';
           paymentLinkRes = await this.paymentService.createBookingPaymentLink(user, {
@@ -784,8 +791,16 @@ export class BookingService {
             paymentOption,
           });
         } catch (err: any) {
+          const errorMsg =
+            err?.response?.message ||
+            err?.error?.description ||
+            err?.response?.data?.message ||
+            err?.message ||
+            String(err);
+          paymentFailureReason = errorMsg;
+
           this.logger.error(
-            `Failed to create payment link for booking ${transactionResult.savedBooking.id}: ${err?.message}`,
+            `[Booking #${transactionResult.savedBooking.id}] ❌ Failed to create payment link for booking #${transactionResult.savedBooking.bookingNumber}: ${errorMsg}`,
             err?.stack,
           );
         }
@@ -793,6 +808,16 @@ export class BookingService {
 
       const existingPaymentId = paymentLinkRes?.paymentId ?? null;
       const existingPaymentUrl = paymentLinkRes?.paymentUrl ?? null;
+
+      if (!existingPaymentUrl) {
+        this.logger.error(
+          `[Booking #${transactionResult.savedBooking.id}] ⚠️ PAYMENT URL NOT GENERATED! Booking #${transactionResult.savedBooking.bookingNumber} created with paymentUrl: null. Reason: ${paymentFailureReason || 'PaymentService returned null/empty paymentUrl'}. Payment ID: ${existingPaymentId}`,
+        );
+      } else {
+        this.logger.log(
+          `[Booking #${transactionResult.savedBooking.id}] ✅ Payment link generated successfully: ${existingPaymentUrl} (Payment ID: ${existingPaymentId})`,
+        );
+      }
 
       const bookingData: CreateBookingResponse = {
         bookingId: transactionResult.savedBooking.id,
@@ -4311,7 +4336,7 @@ export class BookingService {
           assignedPurohitProfile = await purohitProfileRepository
             .createQueryBuilder('purohit')
             .innerJoinAndSelect('purohit.user', 'user')
-            .where('purohit.id = :purohitId OR purohit.userId = :purohitId', {
+            .where('purohit.userId = :purohitId', {
               purohitId: dto.purohitId,
             })
             .getOne();
@@ -4694,8 +4719,8 @@ export class BookingService {
 
       const purohitName = assignedPurohitUser
         ? (assignedPurohitUser.firstName
-            ? `${assignedPurohitUser.firstName} ${assignedPurohitUser.lastName || ''}`.trim()
-            : 'Purohit')
+          ? `${assignedPurohitUser.firstName} ${assignedPurohitUser.lastName || ''}`.trim()
+          : 'Purohit')
         : 'To be assigned';
 
       if (customer.email) {
