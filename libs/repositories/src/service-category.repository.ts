@@ -28,19 +28,29 @@ export class CategoryRepository extends BaseRepository<Category> {
       }
     }
 
-    // Resolve categoryType filter.
-    // Backward-compatibility rule: when categoryType is NOT supplied, default
-    // to SERVICE so that existing callers always receive SERVICE categories.
-    const resolvedCategoryType: CATEGORY_TYPE =
-      categoryType === CATEGORY_TYPE.PRODUCT
-        ? CATEGORY_TYPE.PRODUCT
-        : CATEGORY_TYPE.SERVICE;
+    // Resolve categoryType filter:
+    // - PRODUCT: only product categories
+    // - SERVICE: only service categories
+    // - Omitted / ALL: returns all categories (both SERVICE and PRODUCT)
+    let resolvedCategoryType: CATEGORY_TYPE | undefined = undefined;
+    if (categoryType && String(categoryType).trim() !== '') {
+      const upper = String(categoryType).trim().toUpperCase();
+      if (upper === CATEGORY_TYPE.PRODUCT) {
+        resolvedCategoryType = CATEGORY_TYPE.PRODUCT;
+      } else if (upper === CATEGORY_TYPE.SERVICE) {
+        resolvedCategoryType = CATEGORY_TYPE.SERVICE;
+      }
+      // 'ALL' leaves resolvedCategoryType as undefined (all categories returned)
+    }
 
     const qb = this.repo
       .createQueryBuilder('category')
-      .where('category.deletedAt IS NULL')
-      // Always filter by categoryType (defaults to SERVICE)
-      .andWhere('category.categoryType = :categoryType', { categoryType: resolvedCategoryType });
+      .where('category.deletedAt IS NULL');
+
+    // Filter by categoryType only if explicitly specified
+    if (resolvedCategoryType) {
+      qb.andWhere('category.categoryType = :categoryType', { categoryType: resolvedCategoryType });
+    }
 
     // 1. isActive filter
     if (parsedIsActive !== undefined) {
@@ -56,41 +66,37 @@ export class CategoryRepository extends BaseRepository<Category> {
     }
 
     // 3. Service filter (categories that contain a specific service by ID or slug)
-    //    Only applies when listing SERVICE categories.
-    if (resolvedCategoryType === CATEGORY_TYPE.SERVICE) {
-      const serviceFilter = query.serviceId ?? query.service;
-      if (serviceFilter !== undefined && serviceFilter !== null && serviceFilter !== '') {
-        const numServiceId = Number(serviceFilter);
-        if (!isNaN(numServiceId)) {
-          qb.innerJoin(
-            'category.services',
-            'srvFilter',
-            'srvFilter.id = :srvId AND srvFilter.deletedAt IS NULL',
-            { srvId: numServiceId },
-          );
-        } else {
-          qb.innerJoin(
-            'category.services',
-            'srvFilter',
-            'srvFilter.slug = :srvSlug AND srvFilter.deletedAt IS NULL',
-            { srvSlug: String(serviceFilter).trim() },
-          );
-        }
+    const serviceFilter = query.serviceId ?? query.service;
+    if (serviceFilter !== undefined && serviceFilter !== null && serviceFilter !== '') {
+      const numServiceId = Number(serviceFilter);
+      if (!isNaN(numServiceId)) {
+        qb.innerJoin(
+          'category.services',
+          'srvFilter',
+          'srvFilter.id = :srvId AND srvFilter.deletedAt IS NULL',
+          { srvId: numServiceId },
+        );
+      } else {
+        qb.innerJoin(
+          'category.services',
+          'srvFilter',
+          'srvFilter.slug = :srvSlug AND srvFilter.deletedAt IS NULL',
+          { srvSlug: String(serviceFilter).trim() },
+        );
       }
     }
 
-    // 4. Optionally include child services (only meaningful for SERVICE categories)
+    // 4. Optionally include child services
     const includeServices =
       String(query.includeServices).toLowerCase() === 'true' ||
       (query as any).includeServices === true;
-    if (includeServices && resolvedCategoryType === CATEGORY_TYPE.SERVICE) {
+    if (includeServices && resolvedCategoryType !== CATEGORY_TYPE.PRODUCT) {
       qb.leftJoinAndSelect('category.services', 'services', 'services.deletedAt IS NULL');
     }
 
-    // 5. Load relation count of total services under each category
-    if (resolvedCategoryType === CATEGORY_TYPE.SERVICE) {
-      qb.loadRelationCountAndMap('category.totalServices', 'category.services');
-    }
+    // 5. Load relation counts of total services & total products under each category
+    qb.loadRelationCountAndMap('category.totalServices', 'category.services');
+    qb.loadRelationCountAndMap('category.totalProducts', 'category.products');
 
     qb.orderBy('category.sortOrder', 'ASC').addOrderBy('category.name', 'ASC');
 

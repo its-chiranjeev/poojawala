@@ -79,9 +79,8 @@ export class GetServicesQueryDto {
   language?: string;
 
   /**
-   * Filter categories by type: SERVICE | PRODUCT.
-   * When omitted on the list-categories endpoint, defaults to SERVICE for
-   * backward compatibility with existing clients.
+   * Filter categories by type: SERVICE | PRODUCT | ALL.
+   * When omitted or ALL, returns categories of all types (both SERVICE and PRODUCT).
    */
   @IsOptional()
   @IsString()

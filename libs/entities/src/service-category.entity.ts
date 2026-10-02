@@ -83,6 +83,7 @@ export class Category {
 
   // Computed / virtual fields (not persisted columns)
   totalServices?: number;
+  totalProducts?: number;
 
   @CreateDateColumn()
   createdAt!: Date;
