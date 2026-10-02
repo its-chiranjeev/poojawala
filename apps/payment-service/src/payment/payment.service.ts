@@ -13,7 +13,7 @@ import { ConfigService } from '@nestjs/config';
 import Razorpay from 'razorpay';
 import * as crypto from 'crypto';
 import puppeteer from 'puppeteer';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, FindOptionsWhere, In } from 'typeorm';
 
 import {
   Booking,
@@ -201,6 +201,8 @@ export interface PaymentDetailsResponse {
   // paymentType: PAYMENT_TYPE;
   paymentType: PAYMENT_TYPE | string;
   bookingId: number | null;
+  orderId: number | null;
+  orderNumber: string | null;
   bookingPaymentStatus: BOOKING_PAYMENT_STATUS | null;
   purohitPayoutStatus: BOOKING_PAYMENT_STATUS | null;
   purohitPayoutAmount: number | null;
@@ -218,6 +220,11 @@ export interface PaymentDetailsResponse {
     id: number;
     bookingNumber?: string;
   }>;
+
+  linkedOrder: {
+    id: number;
+    orderNumber?: string;
+  } | null;
 
   createdById: number;
   payerId: number | null;
@@ -376,11 +383,33 @@ export interface PaginatedPaymentsResponse {
 export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
 
-  private get razorpay(): Razorpay {
-    try {
-      require('dotenv').config({ override: true });
-    } catch {}
+  private _cachedRazorpay: Razorpay | null = null;
+  private _cachedRazorpayKeyId: string | null = null;
+  private _cachedRazorpayKeySecret: string | null = null;
 
+  // TODO: Replaced unmemoized getter that called dotenv.config() and instantiated new Razorpay on every property access
+  // private get razorpay(): Razorpay {
+  //   try {
+  //     require('dotenv').config({ override: true });
+  //   } catch { }
+  //
+  //   const keyId =
+  //     this.configService?.get<string>('RAZORPAY_KEY_ID')?.trim() ||
+  //     process.env['RAZORPAY_KEY_ID']?.trim();
+  //   const keySecret =
+  //     this.configService?.get<string>('RAZORPAY_KEY_SECRET')?.trim() ||
+  //     process.env['RAZORPAY_KEY_SECRET']?.trim();
+  //
+  //   if (!keyId || !keySecret) {
+  //     throw new Error('Razorpay credentials are not configured');
+  //   }
+  //
+  //   return new Razorpay({
+  //     key_id: keyId,
+  //     key_secret: keySecret,
+  //   });
+  // }
+  private get razorpay(): Razorpay {
     const keyId =
       this.configService?.get<string>('RAZORPAY_KEY_ID')?.trim() ||
       process.env['RAZORPAY_KEY_ID']?.trim();
@@ -392,10 +421,101 @@ export class PaymentService {
       throw new Error('Razorpay credentials are not configured');
     }
 
-    return new Razorpay({
+    if (
+      this._cachedRazorpay &&
+      this._cachedRazorpayKeyId === keyId &&
+      this._cachedRazorpayKeySecret === keySecret
+    ) {
+      return this._cachedRazorpay;
+    }
+
+    this._cachedRazorpayKeyId = keyId;
+    this._cachedRazorpayKeySecret = keySecret;
+    this._cachedRazorpay = new Razorpay({
       key_id: keyId,
       key_secret: keySecret,
     });
+
+    return this._cachedRazorpay;
+  }
+
+  private formatRazorpayError(error: unknown): string {
+    if (!error) {
+      return 'Unknown error';
+    }
+
+    if (typeof error === 'string') {
+      return error;
+    }
+
+    if (typeof error === 'object') {
+      const errObj = error as Record<string, unknown>;
+      const parts: string[] = [];
+
+      const statusCode = errObj['statusCode'] ?? errObj['status'];
+      if (statusCode) {
+        parts.push(`status: ${statusCode}`);
+      }
+
+      const nestedError =
+        errObj['error'] && typeof errObj['error'] === 'object'
+          ? (errObj['error'] as Record<string, unknown>)
+          : null;
+
+      const code = nestedError?.['code'] ?? errObj['code'];
+      if (code) {
+        parts.push(`code: ${code}`);
+      }
+
+      const description =
+        nestedError?.['description'] ??
+        errObj['description'] ??
+        (error instanceof Error ? error.message : errObj['message']);
+      if (description) {
+        parts.push(`description: ${description}`);
+      }
+
+      if (parts.length > 0) {
+        return parts.join(', ');
+      }
+
+      if (error instanceof Error) {
+        return error.message;
+      }
+
+      try {
+        const sanitized = { ...errObj };
+        delete sanitized['key_secret'];
+        delete sanitized['key_id'];
+        delete sanitized['auth'];
+        delete sanitized['headers'];
+        delete sanitized['authorization'];
+        return JSON.stringify(sanitized);
+      } catch {
+        return 'Unserializable error';
+      }
+    }
+
+    return String(error);
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    timeoutMessage: string,
+  ): Promise<T> {
+    let timer: NodeJS.Timeout;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(timeoutMessage));
+      }, timeoutMs);
+    });
+
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      clearTimeout(timer!);
+    }
   }
 
   constructor(
@@ -408,7 +528,7 @@ export class PaymentService {
     @Optional() private readonly emailService?: EmailService,
     @Optional() private readonly configService?: ConfigService,
     @Optional() private readonly assignmentService?: AssignmentService,
-  ) {}
+  ) { }
 
   async getPurohitPayoutDetails(bookingId: number) {
     const booking = await this.bookingRepository.findOne({
@@ -790,8 +910,7 @@ export class PaymentService {
           }
         } catch (error) {
           this.logger.warn(
-            `Failed to verify payment link for payment ${existingPayment.id}: ${
-              error instanceof Error ? error.message : 'Unknown error'
+            `Failed to verify payment link for payment ${existingPayment.id}: ${error instanceof Error ? error.message : 'Unknown error'
             }`,
           );
           existingPayment.status = PAYMENT_STATUS.FAILED;
@@ -813,8 +932,8 @@ export class PaymentService {
       dto.paymentOption === 'TOKEN'
         ? 'BOOKING_TOKEN_PAYMENT'
         : Number(booking.paidAmount ?? 0) > 0
-        ? 'BOOKING_SETTLEMENT'
-        : 'BOOKING_FULL_PAYMENT';
+          ? 'BOOKING_SETTLEMENT'
+          : 'BOOKING_FULL_PAYMENT';
 
     // Create the new payment only after the check passes
     const savedPayment = await this.dataSource.transaction(async (manager) => {
@@ -1670,6 +1789,8 @@ export class PaymentService {
 
     this.validatePaymentViewAccess(user, payment);
 
+    await this.ensurePaymentOrders([payment]);
+
     const razorpayPayment = await this.resolveRazorpayPayment(payment);
 
     // TODO: Old call without viewerRole
@@ -1832,6 +1953,8 @@ export class PaymentService {
     user: User,
     query: PaymentQueryDto,
   ): Promise<PaginatedPaymentsResponse> {
+    const startTime = Date.now();
+
     if (user.role === USER_ROLE.PUROHIT) {
       await this.ensurePendingPayoutsForPurohit(user.id);
     }
@@ -1842,6 +1965,7 @@ export class PaymentService {
 
     const search = query.search?.trim() || undefined;
 
+    const repoStart = Date.now();
     const { payments, total } = await this.paymentRepository.findMyPayments({
       userId: user.id,
 
@@ -1860,6 +1984,7 @@ export class PaymentService {
 
       search,
     });
+    const repoQueryDurationMs = Date.now() - repoStart;
 
     // TODO: Old displayedPayments filter
     // const displayedPayments =
@@ -1928,16 +2053,58 @@ export class PaymentService {
       });
     }
 
-    const items = await Promise.all(
-      displayedPayments.map(async (payment) => {
-        const razorpayPayment = await this.resolveRazorpayPayment(payment);
+    const ordersStart = Date.now();
+    await this.ensurePaymentOrders(displayedPayments);
+    const ensureOrdersDurationMs = Date.now() - ordersStart;
 
-        return this.buildCombinedPaymentResponse(
-          payment,
-          razorpayPayment,
-          user.role,
-        );
-      }),
+    // TODO: Old unbounded Promise.all mapping without request deduplication
+    // const items = await Promise.all(
+    //   displayedPayments.map(async (payment) => {
+    //     const razorpayPayment = await this.resolveRazorpayPayment(payment);
+    //
+    //     return this.buildCombinedPaymentResponse(
+    //       payment,
+    //       razorpayPayment,
+    //       user.role,
+    //     );
+    //   }),
+    // );
+
+    const paymentCache = new Map<string, Promise<RazorpayPaymentData | null>>();
+    const orderCache = new Map<string, Promise<RazorpayPaymentData[]>>();
+    const razorpayStats = {
+      attempted: 0,
+      skipped: 0,
+      successful: 0,
+      notFound400: 0,
+    };
+
+    const razorpayStart = Date.now();
+    const razorpayPayments = await this.resolveRazorpayPaymentsBatch(
+      displayedPayments,
+      paymentCache,
+      orderCache,
+      razorpayStats,
+      5,
+    );
+    const razorpayFetchDurationMs = Date.now() - razorpayStart;
+
+    const buildStart = Date.now();
+    const items = displayedPayments.map((payment, index) => {
+      const razorpayPayment = razorpayPayments[index];
+
+      return this.buildCombinedPaymentResponse(
+        payment,
+        razorpayPayment,
+        user.role,
+      );
+    });
+    const buildResponseDurationMs = Date.now() - buildStart;
+
+    const totalDurationMs = Date.now() - startTime;
+
+    this.logger.log(
+      `[getMyPayments] Total: ${totalDurationMs}ms | Repo: ${repoQueryDurationMs}ms | Orders: ${ensureOrdersDurationMs}ms | Razorpay: ${razorpayFetchDurationMs}ms (attempted: ${razorpayStats.attempted}, skipped: ${razorpayStats.skipped}, successful: ${razorpayStats.successful}, notFound400: ${razorpayStats.notFound400}) | Build: ${buildResponseDurationMs}ms (items: ${items.length}, total: ${total})`,
     );
 
     return {
@@ -1963,6 +2130,71 @@ export class PaymentService {
     return this.generateBookingInvoicePdf(user, bookingId);
   }
 
+  // TODO: Replaced by hardened generateBookingInvoicePdf that:
+  // 1. Resolves booking by bookingId (with fallback to paymentId if caller passed paymentId)
+  // 2. Resolves confirmed payment via booking.bookingPaymentId first, then findLatestByBookingId
+  // 3. Handles unpaid / pending / proforma booking invoices gracefully without throwing 404
+  // 4. Correctly preserves all token, remaining, discount, donation, customer-paid, and Razorpay fee breakdowns
+  // async generateBookingInvoicePdf(
+  //   user: User,
+  //   bookingId: number,
+  // ): Promise<{
+  //   buffer: Buffer;
+  //   filename: string;
+  // }> {
+  //   const booking = await this.bookingRepository.findBookingById(bookingId);
+  //   if (!booking) {
+  //     throw new NotFoundException('Booking not found');
+  //   }
+  //   const canDownload =
+  //     user.role === USER_ROLE.ADMIN ||
+  //     booking.customerId === user.id ||
+  //     booking.purohit?.userId === user.id;
+  //   if (!canDownload) {
+  //     throw new ForbiddenException(
+  //       'You are not allowed to download this invoice',
+  //     );
+  //   }
+  //   const payment = await this.paymentRepository.findLatestByBookingId(
+  //     booking.id,
+  //   );
+  //   if (!payment) {
+  //     throw new NotFoundException('Payment record not found');
+  //   }
+  //   const razorpayPayment = await this.resolveRazorpayPayment(payment);
+  //   const finalStatus = this.resolvePaymentStatus(payment, razorpayPayment);
+  //   const isPaid = this.isSuccessfulPaymentStatus(finalStatus);
+  //   const amount =
+  //     razorpayPayment?.amount != null
+  //       ? Number(razorpayPayment.amount) / 100
+  //       : Number(payment.amount ?? 0);
+  //   const invoiceTitle = isPaid
+  //     ? 'Poojawala Tax Invoice'
+  //     : 'Poojawala Proforma Invoice';
+  //   const invoiceId = isPaid
+  //     ? `INV-${booking.bookingNumber}`
+  //     : `PROFORMA-${booking.bookingNumber}`;
+  //   const customerPaidAmount =
+  //     payment.customerPaidAmount != null
+  //       ? Number(payment.customerPaidAmount)
+  //       : (razorpayPayment?.amount != null
+  //         ? Number(razorpayPayment.amount) / 100
+  //         : (isPaid ? Number(payment.amount ?? booking.finalAmount) : null));
+  //   const razorpayFee =
+  //     payment.razorpayFee != null
+  //       ? Number(payment.razorpayFee)
+  //       : (razorpayPayment?.fee != null ? Number(razorpayPayment.fee) / 100 : null);
+  //   const razorpayTax =
+  //     payment.razorpayTax != null
+  //       ? Number(payment.razorpayTax)
+  //       : (razorpayPayment?.tax != null ? Number(razorpayPayment.tax) / 100 : null);
+  //   const html = paymentInvoiceTemplate({ ... });
+  //   return this.renderHtmlToPdf(
+  //     html,
+  //     `invoice-${booking.bookingNumber}.pdf`,
+  //     `booking ${booking.id}`,
+  //   );
+  // }
   async generateBookingInvoicePdf(
     user: User,
     bookingId: number,
@@ -1970,7 +2202,20 @@ export class PaymentService {
     buffer: Buffer;
     filename: string;
   }> {
-    const booking = await this.bookingRepository.findBookingById(bookingId);
+    let booking = await this.bookingRepository.findBookingById(bookingId);
+
+    // If not found by bookingId, verify if caller passed a paymentId referencing a booking
+    if (!booking) {
+      const paymentById = await this.paymentRepository.findPaymentById(bookingId);
+      const linkedBookingId =
+        paymentById?.bookingId ??
+        paymentById?.booking?.id ??
+        paymentById?.paymentBookings?.[0]?.bookingId;
+
+      if (linkedBookingId) {
+        booking = await this.bookingRepository.findBookingById(linkedBookingId);
+      }
+    }
 
     if (!booking) {
       throw new NotFoundException('Booking not found');
@@ -1987,24 +2232,43 @@ export class PaymentService {
       );
     }
 
-    const payment = await this.paymentRepository.findLatestByBookingId(
-      booking.id,
-    );
-
-    if (!payment) {
-      throw new NotFoundException('Payment record not found');
+    // 1. Try to load confirmed payment via bookingPaymentId if set
+    let payment: Payment | null = null;
+    if (booking.bookingPaymentId) {
+      payment = await this.paymentRepository.findPaymentById(
+        booking.bookingPaymentId,
+      );
     }
 
-    const razorpayPayment = await this.resolveRazorpayPayment(payment);
+    // 2. If not found via bookingPaymentId, find latest payment by bookingId (including payment_bookings junction)
+    if (!payment) {
+      payment = await this.paymentRepository.findLatestByBookingId(
+        booking.id,
+      );
+    }
 
-    const finalStatus = this.resolvePaymentStatus(payment, razorpayPayment);
+    const razorpayPayment = payment
+      ? await this.resolveRazorpayPayment(payment)
+      : undefined;
 
-    const isPaid = this.isSuccessfulPaymentStatus(finalStatus);
+    const finalStatus = payment
+      ? this.resolvePaymentStatus(payment, razorpayPayment ?? null)
+      : (booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID
+        ? PAYMENT_STATUS.SUCCESS
+        : PAYMENT_STATUS.PENDING);
+
+    const isPaid =
+      booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
+      this.isSuccessfulPaymentStatus(finalStatus);
 
     const amount =
       razorpayPayment?.amount != null
         ? Number(razorpayPayment.amount) / 100
-        : Number(payment.amount ?? 0);
+        : (payment?.amount != null
+          ? Number(payment.amount)
+          : (Number(booking.paidAmount) > 0
+            ? Number(booking.paidAmount)
+            : Number(booking.finalAmount ?? 0)));
 
     const invoiceTitle = isPaid
       ? 'Poojawala Tax Invoice'
@@ -2015,21 +2279,45 @@ export class PaymentService {
       : `PROFORMA-${booking.bookingNumber}`;
 
     const customerPaidAmount =
-      payment.customerPaidAmount != null
+      payment?.customerPaidAmount != null
         ? Number(payment.customerPaidAmount)
         : (razorpayPayment?.amount != null
           ? Number(razorpayPayment.amount) / 100
-          : (isPaid ? Number(payment.amount ?? booking.finalAmount) : null));
+          : (isPaid
+            ? Number(
+                payment?.amount ??
+                  (Number(booking.paidAmount) > 0
+                    ? booking.paidAmount
+                    : booking.finalAmount),
+              )
+            : null));
 
     const razorpayFee =
-      payment.razorpayFee != null
+      payment?.razorpayFee != null
         ? Number(payment.razorpayFee)
-        : (razorpayPayment?.fee != null ? Number(razorpayPayment.fee) / 100 : null);
+        : (razorpayPayment?.fee != null
+          ? Number(razorpayPayment.fee) / 100
+          : null);
 
     const razorpayTax =
-      payment.razorpayTax != null
+      payment?.razorpayTax != null
         ? Number(payment.razorpayTax)
-        : (razorpayPayment?.tax != null ? Number(razorpayPayment.tax) / 100 : null);
+        : (razorpayPayment?.tax != null
+          ? Number(razorpayPayment.tax) / 100
+          : null);
+
+    const paymentDate =
+      payment?.paidAt ?? payment?.createdAt ?? booking.createdAt;
+
+    const paymentMethodDisplay = payment
+      ? (payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH
+        ? 'Cash'
+        : this.formatPaymentMethod(
+            razorpayPayment?.method ?? payment.paymentMethod ?? '-',
+          ))
+      : (booking.paymentType === BOOKING_PAYMENT_TYPE.DEFERRED
+        ? 'Pay After Service (Deferred)'
+        : '-');
 
     const html = paymentInvoiceTemplate({
       invoiceType: 'BOOKING',
@@ -2051,38 +2339,38 @@ export class PaymentService {
       serviceName: booking.service?.name ?? '-',
       bookingStatus: booking.status,
       paymentId: String(
-        razorpayPayment?.id ?? payment.razorpayPaymentId ?? '-',
+        razorpayPayment?.id ??
+          payment?.razorpayPaymentId ??
+          (payment ? String(payment.id) : '-'),
       ),
       orderId: String(
-        razorpayPayment?.order_id ?? payment.razorpayOrderId ?? '-',
+        razorpayPayment?.order_id ?? payment?.razorpayOrderId ?? '-',
       ),
-      paymentMethod:
-        payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH
-          ? 'Cash'
-          : this.formatPaymentMethod(
-            razorpayPayment?.method ?? payment.paymentMethod ?? '-',
-          ),
+      paymentMethod: paymentMethodDisplay,
       paymentStatus: this.getPaymentStatusDisplay(finalStatus),
       statusClass: this.getStatusClass(finalStatus),
-      currency: String(razorpayPayment?.currency ?? payment.currency ?? 'INR'),
+      currency: String(
+        razorpayPayment?.currency ?? payment?.currency ?? 'INR',
+      ),
       amount: amount.toFixed(2),
       finalAmount: Number(booking.finalAmount).toFixed(2),
       customerPaidAmount:
         customerPaidAmount != null ? customerPaidAmount.toFixed(2) : null,
       razorpayFee: razorpayFee != null ? razorpayFee.toFixed(2) : null,
       razorpayTax: razorpayTax != null ? razorpayTax.toFixed(2) : null,
-      paidAmount: booking.paidAmount != null ? Number(booking.paidAmount).toFixed(2) : null,
-      remainingAmount: booking.remainingAmount != null ? Number(booking.remainingAmount).toFixed(2) : null,
+      paidAmount:
+        booking.paidAmount != null ? Number(booking.paidAmount).toFixed(2) : null,
+      remainingAmount:
+        booking.remainingAmount != null
+          ? Number(booking.remainingAmount).toFixed(2)
+          : null,
       donationAmount: Number(booking.donationAmount ?? 0).toFixed(2),
       discountAmount: Number(booking.discountAmount ?? 0).toFixed(2),
-      date: new Date(payment.paidAt ?? payment.createdAt).toLocaleString(
-        'en-IN',
-        {
-          timeZone: 'Asia/Kolkata',
-        },
-      ),
+      date: new Date(paymentDate).toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+      }),
       errorMessage: String(
-        razorpayPayment?.error_description ?? payment.failureReason ?? '-',
+        razorpayPayment?.error_description ?? payment?.failureReason ?? '-',
       ),
     });
 
@@ -2356,36 +2644,140 @@ export class PaymentService {
     return parsedId;
   }
 
+  // TODO: Replaced un-timed and [object Object] logging implementation
+  // private async fetchPaymentFromRazorpay(
+  //   razorpayPaymentId: string,
+  // ): Promise<RazorpayPaymentData | null> {
+  //   try {
+  //     return (await this.razorpay.payments.fetch(
+  //       razorpayPaymentId,
+  //     )) as unknown as RazorpayPaymentData;
+  //   } catch (error) {
+  //     this.logger.warn(
+  //       `Unable to fetch Razorpay payment ${razorpayPaymentId}: ${error instanceof Error ? error.message : String(error)
+  //       }`,
+  //     );
+  //
+  //     return null;
+  //   }
+  // }
+  private shouldFetchRazorpay(payment: Payment): boolean {
+    // 1. Skip if no Razorpay payment ID exists
+    if (!payment.razorpayPaymentId?.trim()) {
+      return false;
+    }
+
+    // 2. Skip for purohit payouts (payouts never expose live customer Razorpay details)
+    if (payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) {
+      return false;
+    }
+
+    // 3. Skip for cash payments
+    if (
+      payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH ||
+      (payment.paymentMethod as string)?.toUpperCase() === 'CASH'
+    ) {
+      return false;
+    }
+
+    // TODO: Old hasCompleteDbData required non-null customerPaidAmount and failureReason
+    // const hasCompleteDbData =
+    //   payment.status === PAYMENT_STATUS.SUCCESS &&
+    //   payment.amount != null &&
+    //   payment.customerPaidAmount != null &&
+    //   payment.paymentMethod != null &&
+    //   payment.paidAt != null &&
+    //   payment.razorpayFee != null &&
+    //   payment.razorpayTax != null;
+    // if (hasCompleteDbData) { return false; }
+    // if (payment.status === PAYMENT_STATUS.FAILED && payment.failureReason) { return false; }
+
+    // 4. If payment is in a terminal SUCCESS state and already has core database records:
+    // (status is SUCCESS, amount is present, paidAt or paymentMethod is recorded)
+    // The database data already satisfies the complete response requirements.
+    if (
+      payment.status === PAYMENT_STATUS.SUCCESS &&
+      payment.amount != null &&
+      (payment.paidAt != null || payment.paymentMethod != null)
+    ) {
+      return false;
+    }
+
+    // 5. If payment is already in terminal FAILED state in the database
+    if (payment.status === PAYMENT_STATUS.FAILED) {
+      return false;
+    }
+
+    // Otherwise, live data is genuinely required (e.g. status is PENDING, or missing fee/tax/method/paidAt)
+    return true;
+  }
+
   private async fetchPaymentFromRazorpay(
     razorpayPaymentId: string,
+    stats?: { notFound400: number },
   ): Promise<RazorpayPaymentData | null> {
     try {
-      return (await this.razorpay.payments.fetch(
-        razorpayPaymentId,
+      return (await this.withTimeout(
+        this.razorpay.payments.fetch(razorpayPaymentId),
+        3500,
+        `Razorpay payment fetch timed out after 3500ms`,
       )) as unknown as RazorpayPaymentData;
     } catch (error) {
+      const errObj = error && typeof error === 'object' ? (error as Record<string, unknown>) : null;
+      const statusCode = errObj?.['statusCode'] ?? errObj?.['status'];
+      const nestedError =
+        errObj?.['error'] && typeof errObj['error'] === 'object'
+          ? (errObj['error'] as Record<string, unknown>)
+          : null;
+      const code = nestedError?.['code'] ?? errObj?.['code'];
+
+      if (statusCode === 400 && code === 'BAD_REQUEST_ERROR') {
+        if (stats) {
+          stats.notFound400++;
+        }
+      }
+
       this.logger.warn(
-        `Unable to fetch Razorpay payment ${razorpayPaymentId}: ${error instanceof Error ? error.message : String(error)
-        }`,
+        `Unable to fetch Razorpay payment ${razorpayPaymentId}: ${this.formatRazorpayError(error)}`,
       );
 
       return null;
     }
   }
 
+  // TODO: Replaced un-timed and [object Object] logging implementation
+  // private async fetchOrderPaymentsFromRazorpay(
+  //   razorpayOrderId: string,
+  // ): Promise<RazorpayPaymentData[]> {
+  //   try {
+  //     const response = (await this.razorpay.orders.fetchPayments(
+  //       razorpayOrderId,
+  //     )) as unknown as RazorpayPaymentCollection;
+  //
+  //     return response.items ?? [];
+  //   } catch (error) {
+  //     this.logger.warn(
+  //       `Unable to fetch payments for Razorpay order ${razorpayOrderId}: ${error instanceof Error ? error.message : String(error)
+  //       }`,
+  //     );
+  //
+  //     return [];
+  //   }
+  // }
   private async fetchOrderPaymentsFromRazorpay(
     razorpayOrderId: string,
   ): Promise<RazorpayPaymentData[]> {
     try {
-      const response = (await this.razorpay.orders.fetchPayments(
-        razorpayOrderId,
+      const response = (await this.withTimeout(
+        this.razorpay.orders.fetchPayments(razorpayOrderId),
+        3500,
+        `Razorpay order payments fetch timed out after 3500ms`,
       )) as unknown as RazorpayPaymentCollection;
 
       return response.items ?? [];
     } catch (error) {
       this.logger.warn(
-        `Unable to fetch payments for Razorpay order ${razorpayOrderId}: ${error instanceof Error ? error.message : String(error)
-        }`,
+        `Unable to fetch payments for Razorpay order ${razorpayOrderId}: ${this.formatRazorpayError(error)}`,
       );
 
       return [];
@@ -2420,28 +2812,121 @@ export class PaymentService {
     })[0];
   }
 
+  // TODO: Replaced uncached resolveRazorpayPayment
+  // private async resolveRazorpayPayment(
+  //   payment: Payment,
+  // ): Promise<RazorpayPaymentData | null> {
+  //   if (payment.razorpayPaymentId) {
+  //     const directPayment = await this.fetchPaymentFromRazorpay(
+  //       payment.razorpayPaymentId,
+  //     );
+  //
+  //     if (directPayment) {
+  //       return directPayment;
+  //     }
+  //   }
+  //
+  //   if (payment.razorpayOrderId) {
+  //     const paymentAttempts = await this.fetchOrderPaymentsFromRazorpay(
+  //       payment.razorpayOrderId,
+  //     );
+  //
+  //     return this.selectBestRazorpayPayment(paymentAttempts);
+  //   }
+  //
+  //   return null;
+  // }
   private async resolveRazorpayPayment(
     payment: Payment,
+    paymentCache?: Map<string, Promise<RazorpayPaymentData | null>>,
+    orderCache?: Map<string, Promise<RazorpayPaymentData[]>>,
+    stats?: {
+      attempted: number;
+      skipped: number;
+      successful: number;
+      notFound400: number;
+    },
   ): Promise<RazorpayPaymentData | null> {
+    // 1. Skip live Razorpay fetch when database data already satisfies requirements or live call inapplicable
+    if (!this.shouldFetchRazorpay(payment)) {
+      if (stats) {
+        stats.skipped++;
+      }
+      return null;
+    }
+
     if (payment.razorpayPaymentId) {
-      const directPayment = await this.fetchPaymentFromRazorpay(
-        payment.razorpayPaymentId,
-      );
+      if (stats) {
+        stats.attempted++;
+      }
+
+      let fetchPromise: Promise<RazorpayPaymentData | null>;
+      if (paymentCache) {
+        const cached = paymentCache.get(payment.razorpayPaymentId);
+        if (cached) {
+          fetchPromise = cached;
+        } else {
+          fetchPromise = this.fetchPaymentFromRazorpay(payment.razorpayPaymentId, stats);
+          paymentCache.set(payment.razorpayPaymentId, fetchPromise);
+        }
+      } else {
+        fetchPromise = this.fetchPaymentFromRazorpay(payment.razorpayPaymentId, stats);
+      }
+
+      const directPayment = await fetchPromise;
 
       if (directPayment) {
+        if (stats) {
+          stats.successful++;
+        }
         return directPayment;
       }
+
+      // If direct payment fetch returned null (e.g. 400 BAD_REQUEST_ERROR ID not found or error),
+      // do NOT retry or attempt order payments fetch for the same failed payment ID.
+      return null;
     }
 
-    if (payment.razorpayOrderId) {
-      const paymentAttempts = await this.fetchOrderPaymentsFromRazorpay(
-        payment.razorpayOrderId,
-      );
-
-      return this.selectBestRazorpayPayment(paymentAttempts);
+    if (stats) {
+      stats.skipped++;
     }
-
     return null;
+  }
+
+  private async resolveRazorpayPaymentsBatch(
+    payments: Payment[],
+    paymentCache: Map<string, Promise<RazorpayPaymentData | null>>,
+    orderCache: Map<string, Promise<RazorpayPaymentData[]>>,
+    stats?: {
+      attempted: number;
+      skipped: number;
+      successful: number;
+      notFound400: number;
+    },
+    concurrencyLimit: number = 5,
+  ): Promise<Array<RazorpayPaymentData | null>> {
+    if (payments.length === 0) {
+      return [];
+    }
+
+    const results: Array<RazorpayPaymentData | null> = new Array(payments.length);
+    let currentIndex = 0;
+    const workerCount = Math.min(concurrencyLimit, payments.length);
+
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (currentIndex < payments.length) {
+        const index = currentIndex++;
+        results[index] = await this.resolveRazorpayPayment(
+          payments[index],
+          paymentCache,
+          orderCache,
+          stats,
+        );
+      }
+    });
+
+    await Promise.all(workers);
+    return results;
   }
 
   private resolvePaymentStatus(
@@ -2603,6 +3088,218 @@ export class PaymentService {
     );
   }
 
+  // TODO: Replaced basic parsing with hardened batch resolution, conflict detection, and safety handling
+  // private async ensurePaymentOrders(payments: Payment[]): Promise<void> { ... }
+  private async ensurePaymentOrders(payments: Payment[]): Promise<void> {
+    try {
+      const missingOrderPayments = payments.filter(
+        (p) => p.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT && !p.order,
+      );
+
+      if (missingOrderPayments.length === 0) {
+        return;
+      }
+
+      // Reuse already-loaded Order/customer data from payments in memory
+      const loadedOrdersById = new Map<number, Order>();
+      const loadedOrdersByNumber = new Map<string, Order>();
+
+      for (const p of payments) {
+        if (p.order) {
+          if (p.order.id) {
+            loadedOrdersById.set(p.order.id, p.order);
+          }
+          if (p.order.orderNumber) {
+            loadedOrdersByNumber.set(p.order.orderNumber, p.order);
+          }
+        }
+      }
+
+      interface PaymentOrderCandidate {
+        payment: Payment;
+        extractedId: number | null;
+        extractedNumber: string | null;
+        isAmbiguous: boolean;
+      }
+
+      const candidates: PaymentOrderCandidate[] = [];
+      const orderIdsToFetch = new Set<number>();
+      const orderNumbersToFetch = new Set<string>();
+
+      for (const payment of missingOrderPayments) {
+        const remark = payment.remark?.trim();
+        if (!remark) {
+          continue;
+        }
+
+        // 1. Extract numeric order IDs (e.g., 'Order ORD-14' or 'Order ORD-5')
+        const ordIdMatches = Array.from(
+          remark.matchAll(/(?:^|\s)Order\s+ORD-(\d+)(?:\b|$)/gi),
+        );
+        const uniqueOrdIds = Array.from(
+          new Set(
+            ordIdMatches
+              .map((m) => Number(m[1]))
+              .filter((id) => Number.isSafeInteger(id) && id > 0),
+          ),
+        );
+
+        // 2. Extract alphanumeric order numbers (e.g., 'Order #PW-ORD-548321-8144' or '#PW-ORD-...')
+        const ordNumMatches = Array.from(
+          remark.matchAll(/#([A-Za-z0-9_-]+)/gi),
+        );
+        const uniqueOrdNums = Array.from(
+          new Set(
+            ordNumMatches
+              .map((m) => m[1].trim())
+              .filter((n) => n.length > 0),
+          ),
+        );
+
+        // Check for multiple distinct ID matches in the same remark
+        if (uniqueOrdIds.length > 1) {
+          this.logger.warn(
+            `Ambiguous order IDs in remark for payment #${payment.id}: "${remark}" (found IDs: ${uniqueOrdIds.join(', ')})`,
+          );
+          candidates.push({
+            payment,
+            extractedId: null,
+            extractedNumber: null,
+            isAmbiguous: true,
+          });
+          continue;
+        }
+
+        // Check for multiple distinct order number matches in the same remark
+        if (uniqueOrdNums.length > 1) {
+          this.logger.warn(
+            `Ambiguous order numbers in remark for payment #${payment.id}: "${remark}" (found numbers: ${uniqueOrdNums.join(', ')})`,
+          );
+          candidates.push({
+            payment,
+            extractedId: null,
+            extractedNumber: null,
+            isAmbiguous: true,
+          });
+          continue;
+        }
+
+        const extractedId = uniqueOrdIds.length === 1 ? uniqueOrdIds[0] : null;
+        const extractedNumber = uniqueOrdNums.length === 1 ? uniqueOrdNums[0] : null;
+
+        if (extractedId == null && extractedNumber == null) {
+          continue;
+        }
+
+        if (extractedNumber && /^\d+$/.test(extractedNumber)) {
+          const numAsId = Number(extractedNumber);
+          if (Number.isSafeInteger(numAsId) && numAsId > 0 && !loadedOrdersById.has(numAsId)) {
+            orderIdsToFetch.add(numAsId);
+          }
+        }
+
+        if (extractedId != null && !loadedOrdersById.has(extractedId)) {
+          orderIdsToFetch.add(extractedId);
+        }
+        if (extractedNumber != null && !loadedOrdersByNumber.has(extractedNumber)) {
+          orderNumbersToFetch.add(extractedNumber);
+        }
+
+        candidates.push({
+          payment,
+          extractedId,
+          extractedNumber,
+          isAmbiguous: false,
+        });
+      }
+
+      let fetchedOrders: Order[] = [];
+
+      if (orderIdsToFetch.size > 0 || orderNumbersToFetch.size > 0) {
+        const orderRepo = this.dataSource.getRepository(Order);
+        const conditions: Array<FindOptionsWhere<Order>> = [];
+
+        if (orderIdsToFetch.size > 0) {
+          conditions.push({ id: In(Array.from(orderIdsToFetch)) });
+        }
+        if (orderNumbersToFetch.size > 0) {
+          conditions.push({ orderNumber: In(Array.from(orderNumbersToFetch)) });
+        }
+
+        fetchedOrders = await orderRepo.find({
+          where: conditions,
+          relations: {
+            customer: true,
+          },
+        });
+      }
+
+      // Combine fetched orders and already-loaded in-memory orders
+      const orderPool = new Map<number, Order>(loadedOrdersById);
+      const orderPoolByNumber = new Map<string, Order>(loadedOrdersByNumber);
+
+      for (const order of fetchedOrders) {
+        orderPool.set(order.id, order);
+        if (order.orderNumber) {
+          orderPoolByNumber.set(order.orderNumber, order);
+        }
+      }
+
+      for (const candidate of candidates) {
+        if (candidate.isAmbiguous) {
+          continue;
+        }
+
+        const { payment, extractedId, extractedNumber } = candidate;
+
+        let matchedById: Order | null = null;
+        let matchedByNumber: Order | null = null;
+
+        if (extractedId != null) {
+          matchedById = orderPool.get(extractedId) ?? null;
+        }
+
+        if (extractedNumber != null) {
+          matchedByNumber = orderPoolByNumber.get(extractedNumber) ?? null;
+
+          if (!matchedByNumber && /^\d+$/.test(extractedNumber)) {
+            const numAsId = Number(extractedNumber);
+            matchedByNumber = orderPool.get(numAsId) ?? null;
+          }
+        }
+
+        // Conflict check: if both were extracted and resolved to different orders
+        if (
+          matchedById &&
+          matchedByNumber &&
+          matchedById.id !== matchedByNumber.id
+        ) {
+          this.logger.warn(
+            `Conflicting order identifiers for payment #${payment.id}: orderId ${extractedId} resolved to Order #${matchedById.id} (${matchedById.orderNumber}), but orderNumber "${extractedNumber}" resolved to Order #${matchedByNumber.id} (${matchedByNumber.orderNumber}). No association made.`,
+          );
+          continue;
+        }
+
+        const finalMatchedOrder = matchedById ?? matchedByNumber;
+
+        if (finalMatchedOrder) {
+          payment.order = finalMatchedOrder;
+          if (finalMatchedOrder.id) {
+            orderPool.set(finalMatchedOrder.id, finalMatchedOrder);
+          }
+          if (finalMatchedOrder.orderNumber) {
+            orderPoolByNumber.set(finalMatchedOrder.orderNumber, finalMatchedOrder);
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to ensure payment orders: ${this.formatRazorpayError(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
   private buildCombinedPaymentResponse(
     payment: Payment,
     razorpayPayment: RazorpayPaymentData | null,
@@ -2692,30 +3389,55 @@ export class PaymentService {
     let responsePaymentId: number | null = payment.id;
     let formattedPaymentId: string | null = payment.id ? `PAY-${payment.id}` : null;
 
-    // TODO: Deprecated synthetic paymentId suppression.
-    // The latest BOOKING_PAYMENT was previously used as the synthetic
-    // Purohit payout payment ID. A customer payment is not a payout
-    // transaction, so pending payout responses must not expose this ID.
-    // Now that real PUROHIT_PAYOUT records exist, paymentId is always the actual payout Payment ID.
-    // if (
-    //   viewerRole === USER_ROLE.PUROHIT &&
-    //   payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT
-    // ) {
-    //   responsePaymentId = null;
-    //   formattedPaymentId = null;
-    // }
+    // TODO: Replaced unvalidated remark regex fallback with strict validation from payment.order
+    // const orderId =
+    //   payment.order?.id ??
+    //   (payment as any).orderId ??
+    //   (() => {
+    //     if (!payment.remark) return null;
+    //     const matchOrdId = payment.remark.match(/Order\s+(?:ORD-)?(\d+)/i);
+    //     return matchOrdId ? Number(matchOrdId[1]) : null;
+    //   })() ??
+    //   null;
+    // const orderNumber =
+    //   payment.order?.orderNumber ??
+    //   (payment as any).orderNumber ??
+    //   (() => {
+    //     if (!payment.remark) return null;
+    //     const matchOrdNum = payment.remark.match(/Order\s+#?([A-Za-z0-9_-]+)/i);
+    //     return matchOrdNum ? matchOrdNum[1] : null;
+    //   })() ??
+    //   null;
+
+    const orderId = payment.order?.id ?? null;
+    const orderNumber = payment.order?.orderNumber ?? null;
+    const linkedOrder = payment.order
+      ? {
+          id: payment.order.id,
+          orderNumber: payment.order.orderNumber,
+        }
+      : null;
+
+    const resolvedCustomer =
+      primaryBooking?.customer ?? payment.order?.customer ?? payment.payer ?? null;
 
     return {
       id: responsePaymentId as any,
       paymentId: formattedPaymentId,
-      customer: primaryBooking?.customer
-        ? `${primaryBooking.customer.firstName || ''} ${primaryBooking.customer.lastName || ''}`.trim() || null
+      customer: resolvedCustomer
+        ? `${resolvedCustomer.firstName || ''} ${resolvedCustomer.lastName || ''}`.trim() || null
         : null,
 
       paymentType: responsePaymentType as any,
 
       bookingId:
         payment.bookingId ?? payment.paymentBookings?.[0]?.bookingId ?? null,
+
+      orderId,
+
+      orderNumber,
+
+      linkedOrder,
 
       bookingPaymentStatus: primaryBooking?.paymentStatus ?? null,
 
@@ -2736,14 +3458,14 @@ export class PaymentService {
             ? Number(primaryBooking.purohitPayoutAmount)
             : null,
 
-      customerDetails: primaryBooking?.customer
+      customerDetails: resolvedCustomer
         ? {
-          id: primaryBooking.customer.id,
-          firstName: primaryBooking.customer.firstName ?? '',
-          lastName: primaryBooking.customer.lastName ?? '',
-          email: primaryBooking.customer.email ?? '',
-          phone: primaryBooking.customer.phone ?? '',
-          profileImage: primaryBooking.customer.profileImage ?? null,
+          id: resolvedCustomer.id,
+          firstName: resolvedCustomer.firstName ?? '',
+          lastName: resolvedCustomer.lastName ?? '',
+          email: resolvedCustomer.email ?? '',
+          phone: resolvedCustomer.phone ?? '',
+          profileImage: resolvedCustomer.profileImage ?? null,
         }
         : null,
 
@@ -2935,6 +3657,8 @@ export class PaymentService {
 
       toDate: query.toDate,
     });
+
+    await this.ensurePaymentOrders(payments);
 
     const items = await Promise.all(
       payments.map(async (payment) => {
@@ -3673,8 +4397,8 @@ export class PaymentService {
             booking.tokenAmount != null
               ? Number(booking.tokenAmount)
               : Number(
-                  ((finalAmount * effectiveTokenPercentage) / 100).toFixed(2),
-                );
+                ((finalAmount * effectiveTokenPercentage) / 100).toFixed(2),
+              );
 
           booking.paidAmount = totalPaid;
           booking.remainingAmount = Math.max(
@@ -3981,62 +4705,62 @@ export class PaymentService {
     }
 
     if (payment.booking && payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT) {
-        const remaining = Number(payment.booking.remainingAmount ?? 0);
-        const notificationMsg =
-          remaining > 0
-            ? `Your payment for Booking #${payment.booking.bookingNumber} was successful. Paid: ₹${payment.amount}, Remaining: ₹${remaining}.`
-            : `Your payment for Booking #${payment.booking.bookingNumber} was successful. Paid: ₹${payment.amount}, Remaining: ₹0.`;
+      const remaining = Number(payment.booking.remainingAmount ?? 0);
+      const notificationMsg =
+        remaining > 0
+          ? `Your payment for Booking #${payment.booking.bookingNumber} was successful. Paid: ₹${payment.amount}, Remaining: ₹${remaining}.`
+          : `Your payment for Booking #${payment.booking.bookingNumber} was successful. Paid: ₹${payment.amount}, Remaining: ₹0.`;
 
-        await this.notificationService.createNotification(
-          payment.booking.customerId,
-          'Payment Successful',
-          notificationMsg,
-          NOTIFICATION_TYPE.PAYMENT,
-          payment.id,
-          'PAYMENT',
-        );
+      await this.notificationService.createNotification(
+        payment.booking.customerId,
+        'Payment Successful',
+        notificationMsg,
+        NOTIFICATION_TYPE.PAYMENT,
+        payment.id,
+        'PAYMENT',
+      );
 
-        // Notify Admin on Booking Payment Success
-        const bookingCustomer = payment.booking.customer;
-        const bookingCustomerName =
-          [bookingCustomer?.firstName, bookingCustomer?.lastName].filter(Boolean).join(' ') ||
-          'Customer';
-        await this.notificationService.notifyAdmins(
-          'Booking Payment Received',
-          `Booking Payment Successful — Booking #${payment.booking.bookingNumber} has been successfully paid by ${bookingCustomerName}. Payment ID: ${payment.razorpayPaymentId || `PAY-${payment.id}`}. Amount: ₹${payment.amount}.`,
-          NOTIFICATION_TYPE.PAYMENT,
-          payment.booking.id,
-          'BOOKING',
-          {
-            bookingId: payment.booking.id,
-            bookingNumber: payment.booking.bookingNumber,
-            customerId: payment.booking.customerId,
-            customerName: bookingCustomerName,
-            paymentId: payment.id,
-            razorpayPaymentId: payment.razorpayPaymentId,
-            amount: payment.amount,
-            status: 'PAID',
-          },
-        );
+      // Notify Admin on Booking Payment Success
+      const bookingCustomer = payment.booking.customer;
+      const bookingCustomerName =
+        [bookingCustomer?.firstName, bookingCustomer?.lastName].filter(Boolean).join(' ') ||
+        'Customer';
+      await this.notificationService.notifyAdmins(
+        'Booking Payment Received',
+        `Booking Payment Successful — Booking #${payment.booking.bookingNumber} has been successfully paid by ${bookingCustomerName}. Payment ID: ${payment.razorpayPaymentId || `PAY-${payment.id}`}. Amount: ₹${payment.amount}.`,
+        NOTIFICATION_TYPE.PAYMENT,
+        payment.booking.id,
+        'BOOKING',
+        {
+          bookingId: payment.booking.id,
+          bookingNumber: payment.booking.bookingNumber,
+          customerId: payment.booking.customerId,
+          customerName: bookingCustomerName,
+          paymentId: payment.id,
+          razorpayPaymentId: payment.razorpayPaymentId,
+          amount: payment.amount,
+          status: 'PAID',
+        },
+      );
 
-        if (newlyAssignedPurohitUserIds.length > 0) {
-          for (const purohitUserId of newlyAssignedPurohitUserIds) {
-            try {
-              await this.notificationService.createNotification(
-                purohitUserId,
-                'New Booking',
-                `You have received a new booking request (Booking B-${payment.booking.id}).`,
-                NOTIFICATION_TYPE.BOOKING,
-                payment.booking.id,
-                'BOOKING',
-              );
-            } catch (notifyErr: any) {
-              this.logger.warn(
-                `Failed to notify Purohit ${purohitUserId}: ${notifyErr?.message}`,
-              );
-            }
+      if (newlyAssignedPurohitUserIds.length > 0) {
+        for (const purohitUserId of newlyAssignedPurohitUserIds) {
+          try {
+            await this.notificationService.createNotification(
+              purohitUserId,
+              'New Booking',
+              `You have received a new booking request (Booking B-${payment.booking.id}).`,
+              NOTIFICATION_TYPE.BOOKING,
+              payment.booking.id,
+              'BOOKING',
+            );
+          } catch (notifyErr: any) {
+            this.logger.warn(
+              `Failed to notify Purohit ${purohitUserId}: ${notifyErr?.message}`,
+            );
           }
         }
+      }
 
       if (!wasBookingCompleted) {
         this.bookingGateway.notifyUser(
@@ -4291,8 +5015,12 @@ export class PaymentService {
         });
       }
     } catch (err) {
+      // TODO: Replaced string interpolation which could result in [object Object]
+      // this.logger.warn(
+      //   `Failed to ensure pending payouts for purohit ${userId}: ${err}`,
+      // );
       this.logger.warn(
-        `Failed to ensure pending payouts for purohit ${userId}: ${err}`,
+        `Failed to ensure pending payouts for purohit ${userId}: ${this.formatRazorpayError(err)}`,
       );
     }
   }

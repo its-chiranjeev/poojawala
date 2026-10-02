@@ -78,38 +78,70 @@ export class PaymentRepository extends BaseRepository<Payment> {
         paymentBookings: {
           booking: true,
         },
+        order: {
+          customer: true,
+        },
       },
     });
   }
 
+  // TODO: Replaced by comprehensive findLatestByBookingId that searches both
+  // direct payment.bookingId and junction paymentBookings.bookingId, and prioritizes
+  // confirmed SUCCESS payments over later failed/pending attempts.
+  // async findLatestByBookingId(bookingId: number): Promise<Payment | null> {
+  //   return this.repo.findOne({
+  //     where: {
+  //       bookingId,
+  //       paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+  //     },
+  //     relations: {
+  //       booking: {
+  //         customer: true,
+  //         service: true,
+  //         purohit: {
+  //           user: true,
+  //         },
+  //       },
+  //       payer: true,
+  //       payee: true,
+  //       paymentBookings: {
+  //         booking: true,
+  //       },
+  //     },
+  //     order: {
+  //       createdAt: 'DESC',
+  //     },
+  //   });
+  // }
   async findLatestByBookingId(bookingId: number): Promise<Payment | null> {
-    return this.repo.findOne({
-      where: {
-        bookingId,
+    return this.repo
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.booking', 'booking')
+      .leftJoinAndSelect('booking.customer', 'customer')
+      .leftJoinAndSelect('booking.service', 'service')
+      .leftJoinAndSelect('booking.purohit', 'purohit')
+      .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('payment.payer', 'payer')
+      .leftJoinAndSelect('payment.payee', 'payee')
+      .leftJoinAndSelect('payment.paymentBookings', 'paymentBookings')
+      .leftJoinAndSelect('paymentBookings.booking', 'linkedBooking')
+      .where(
+        '(payment.bookingId = :bookingId OR paymentBookings.bookingId = :bookingId)',
+        { bookingId },
+      )
+      .andWhere('payment.paymentType = :paymentType', {
         paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
-      },
-
-      relations: {
-        booking: {
-          customer: true,
-          service: true,
-          purohit: {
-            user: true,
-          },
-        },
-
-        payer: true,
-        payee: true,
-
-        paymentBookings: {
-          booking: true,
-        },
-      },
-
-      order: {
-        createdAt: 'DESC',
-      },
-    });
+      })
+      .orderBy(
+        `CASE 
+          WHEN payment.status = 'SUCCESS' THEN 1 
+          WHEN payment.status = 'PENDING' THEN 2 
+          ELSE 3 
+        END`,
+        'ASC',
+      )
+      .addOrderBy('payment.createdAt', 'DESC')
+      .getOne();
   }
 
   async findByRazorpayOrderId(
@@ -257,37 +289,69 @@ export class PaymentRepository extends BaseRepository<Payment> {
 
     const skip = (safePage - 1) * safeLimit;
 
-    const query = this.repo
-      .createQueryBuilder('payment')
+    // TODO: Replaced monolithic 13-join getManyAndCount query with targeted filter + ID pagination + primary key hydration
+    // const query = this.repo
+    //   .createQueryBuilder('payment')
+    //   .leftJoinAndSelect('payment.booking', 'booking')
+    //   .leftJoinAndSelect('booking.customer', 'customer')
+    //   .leftJoinAndSelect('booking.service', 'service')
+    //   .leftJoinAndSelect('booking.purohit', 'purohit')
+    //   .leftJoinAndSelect('purohit.user', 'purohitUser')
+    //   .leftJoinAndSelect('payment.createdBy', 'createdBy')
+    //   .leftJoinAndSelect('payment.payer', 'payer')
+    //   .leftJoinAndSelect('payment.payee', 'payee')
+    //   .leftJoinAndSelect('payment.paymentBookings', 'paymentBookings')
+    //   .leftJoinAndSelect('paymentBookings.booking', 'linkedBooking')
+    //   .leftJoinAndSelect('linkedBooking.service', 'linkedService')
+    //   .leftJoinAndSelect('payment.order', 'order')
+    //   .leftJoinAndSelect('order.customer', 'orderCustomer');
+    // ...
+    // const [payments, total] = await query.distinct(true).orderBy('payment.createdAt', 'DESC').skip(skip).take(safeLimit).getManyAndCount();
+    // return { payments, total };
 
-      .leftJoinAndSelect('payment.booking', 'booking')
-
-      .leftJoinAndSelect('booking.customer', 'customer')
-
-      .leftJoinAndSelect('booking.service', 'service')
-
-      .leftJoinAndSelect('booking.purohit', 'purohit')
-
-      .leftJoinAndSelect('purohit.user', 'purohitUser')
-
-      .leftJoinAndSelect('payment.createdBy', 'createdBy')
-
-      .leftJoinAndSelect('payment.payer', 'payer')
-
-      .leftJoinAndSelect('payment.payee', 'payee')
-
-      .leftJoinAndSelect('payment.paymentBookings', 'paymentBookings')
-
-      .leftJoinAndSelect('paymentBookings.booking', 'linkedBooking')
-
-      .leftJoinAndSelect('linkedBooking.service', 'linkedService');
+    // 1. Build targeted filter query containing only the joins necessary for filtering and searching
+    const filterQuery = this.repo.createQueryBuilder('payment');
 
     if (userRole === USER_ROLE.CUSTOMER) {
-      query.andWhere(
+      filterQuery
+        .leftJoin('payment.booking', 'booking')
+        .leftJoin('payment.order', 'order');
+    }
+
+    if (purohitPayoutStatus || bookingPaymentStatus) {
+      if (userRole !== USER_ROLE.CUSTOMER) {
+        filterQuery.leftJoin('payment.booking', 'booking');
+      }
+      filterQuery
+        .leftJoin('payment.paymentBookings', 'paymentBookings')
+        .leftJoin('paymentBookings.booking', 'linkedBooking');
+    }
+
+    const normalizedSearch = search?.trim();
+    if (normalizedSearch) {
+      if (userRole !== USER_ROLE.CUSTOMER && !purohitPayoutStatus && !bookingPaymentStatus) {
+        filterQuery.leftJoin('payment.booking', 'booking');
+      }
+      if (!purohitPayoutStatus && !bookingPaymentStatus) {
+        filterQuery
+          .leftJoin('payment.paymentBookings', 'paymentBookings')
+          .leftJoin('paymentBookings.booking', 'linkedBooking');
+      }
+      filterQuery
+        .leftJoin('booking.service', 'service')
+        .leftJoin('linkedBooking.service', 'linkedService');
+      if (userRole !== USER_ROLE.CUSTOMER) {
+        filterQuery.leftJoin('payment.order', 'order');
+      }
+    }
+
+    if (userRole === USER_ROLE.CUSTOMER) {
+      filterQuery.andWhere(
         `(
         payment."payerId" = :userId
         OR payment."createdById" = :userId
         OR booking."customerId" = :userId
+        OR "order"."customerId" = :userId
       )`,
         {
           userId,
@@ -295,21 +359,16 @@ export class PaymentRepository extends BaseRepository<Payment> {
       );
 
       // Exclude purohit payout payment details from customer
-      query.andWhere('payment."paymentType" != :payoutType', {
+      filterQuery.andWhere('payment."paymentType" != :payoutType', {
         payoutType: PAYMENT_TYPE.PUROHIT_PAYOUT,
       });
 
       // Do NOT show payments in CREATED status to customer (e.g. payment link generated but not paid)
-      query.andWhere('payment."status" != :createdStatus', {
+      filterQuery.andWhere('payment."status" != :createdStatus', {
         createdStatus: PAYMENT_STATUS.CREATED,
       });
 
-      // TODO: Old filter requiring razorpayPaymentLinkId for all booking payments
-      // query.andWhere(
-      //   '(payment."paymentType" != :bookingPaymentType OR (payment."razorpayPaymentLinkId" IS NOT NULL AND payment."razorpayPaymentLinkId" != \'\'))',
-      //   { bookingPaymentType: PAYMENT_TYPE.BOOKING_PAYMENT },
-      // );
-      query.andWhere(
+      filterQuery.andWhere(
         '(payment."paymentType" != :bookingPaymentType OR (payment."razorpayPaymentLinkId" IS NOT NULL AND payment."razorpayPaymentLinkId" != \'\') OR payment."customerPaymentMethod" = :cashMethod)',
         {
           bookingPaymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
@@ -317,71 +376,7 @@ export class PaymentRepository extends BaseRepository<Payment> {
         },
       );
     } else if (userRole === USER_ROLE.PUROHIT) {
-      // TODO: Deprecated.
-      // Pending Purohit payout is a booking-level obligation.
-      // Customer can have multiple BOOKING_PAYMENT records for one booking,
-      // but these must not create multiple payout entries.
-      //
-      // query.andWhere(
-      //   `(
-      //   payment."createdById" = :userId
-      //   OR (payment."paymentType" = 'PUROHIT_PAYOUT' AND payment."payeeId" = :userId)
-      //   OR (payment."paymentType" = 'BOOKING_PAYMENT' AND purohitUser.id = :userId AND "booking"."paymentStatus" = 'PAID' AND "booking"."purohitPayoutStatus" = 'PENDING')
-      // )`,
-      //   {
-      //     userId,
-      //   },
-      // );
-      // TODO: Deprecated synthetic payout mapping.
-      // Purohit payouts are now represented by an actual
-      // PAYMENT_TYPE.PUROHIT_PAYOUT payment record created
-      // after the booking is fully paid.
-      // query.andWhere(
-      //   `(
-      //     (
-      //       payment."paymentType" = 'PUROHIT_PAYOUT'
-      //       AND payment."payeeId" = :userId
-      //       AND (
-      //         "booking".id IS NULL
-      //         OR (
-      //           "booking"."paymentStatus" = 'PAID'
-      //           AND ("booking"."remainingAmount" <= 0 OR "booking"."remainingAmount" IS NULL)
-      //           AND payment.id = (
-      //             SELECT MAX(p_payout.id)
-      //             FROM payments p_payout
-      //             WHERE (p_payout."bookingId" = "booking".id OR p_payout.id = payment.id)
-      //               AND p_payout."paymentType" = 'PUROHIT_PAYOUT'
-      //               AND p_payout."payeeId" = :userId
-      //           )
-      //         )
-      //       )
-      //     )
-      //     OR (
-      //       payment."paymentType" = 'BOOKING_PAYMENT'
-      //       AND purohitUser.id = :userId
-      //       AND "booking"."paymentStatus" = 'PAID'
-      //       AND ("booking"."remainingAmount" <= 0 OR "booking"."remainingAmount" IS NULL)
-      //       AND "booking"."purohitPayoutStatus" = 'PENDING'
-      //       AND "booking"."purohitPaymentId" IS NULL
-      //       AND NOT EXISTS (
-      //         SELECT 1 FROM payments p_payout_check
-      //         WHERE p_payout_check."bookingId" = "booking".id
-      //           AND p_payout_check."paymentType" = 'PUROHIT_PAYOUT'
-      //       )
-      //       AND payment.id = (
-      //         SELECT MAX(p_sub.id)
-      //         FROM payments p_sub
-      //         WHERE p_sub."bookingId" = "booking".id
-      //           AND p_sub."paymentType" = 'BOOKING_PAYMENT'
-      //           AND p_sub.status = 'SUCCESS'
-      //       )
-      //     )
-      //   )`,
-      //   {
-      //     userId,
-      //   },
-      // );
-      query.andWhere(
+      filterQuery.andWhere(
         'payment."paymentType" = :payoutType AND payment."payeeId" = :userId',
         {
           payoutType: PAYMENT_TYPE.PUROHIT_PAYOUT,
@@ -389,14 +384,11 @@ export class PaymentRepository extends BaseRepository<Payment> {
         },
       );
     } else {
-      query.andWhere('1 = 0');
+      filterQuery.andWhere('1 = 0');
     }
 
     if (status) {
       if (userRole === USER_ROLE.PUROHIT) {
-        // TODO: Deprecated synthetic payout status filter mapping.
-        // For Purohits, pending and completed payouts are actual PUROHIT_PAYOUT records.
-        // if (hasPending && !hasSuccess) { ... }
         const statuses = (Array.isArray(status) ? status : [status]).map((s) =>
           String(s).toUpperCase(),
         );
@@ -410,30 +402,26 @@ export class PaymentRepository extends BaseRepository<Payment> {
             mappedStatuses.push(s);
           }
         }
-        query.andWhere('payment.status IN (:...payoutStatuses)', {
+        filterQuery.andWhere('payment.status IN (:...payoutStatuses)', {
           payoutStatuses: mappedStatuses,
         });
       } else {
         if (Array.isArray(status)) {
-          query.andWhere('payment.status IN (:...status)', { status });
+          filterQuery.andWhere('payment.status IN (:...status)', { status });
         } else {
-          query.andWhere('payment.status = :status', { status });
+          filterQuery.andWhere('payment.status = :status', { status });
         }
       }
     }
 
     if (paymentType) {
-      // TODO: Old direct paymentType filter
-      // query.andWhere('payment."paymentType" = :paymentType', {
-      //   paymentType,
-      // });
       if ((paymentType as string) === 'CASH') {
-        query.andWhere(
+        filterQuery.andWhere(
           '(payment."customerPaymentMethod" = :cashMethod OR (payment."createdById" != booking."customerId" AND payment."createdById" = payment."payeeId"))',
           { cashMethod: CUSTOMER_PAYMENT_METHOD.CASH },
         );
       } else {
-        query.andWhere('payment."paymentType" = :paymentType', {
+        filterQuery.andWhere('payment."paymentType" = :paymentType', {
           paymentType,
         });
       }
@@ -441,12 +429,12 @@ export class PaymentRepository extends BaseRepository<Payment> {
 
     if (purohitPayoutStatus) {
       if (Array.isArray(purohitPayoutStatus)) {
-        query.andWhere(
+        filterQuery.andWhere(
           '("booking"."purohitPayoutStatus" IN (:...purohitPayoutStatus1) OR "linkedBooking"."purohitPayoutStatus" IN (:...purohitPayoutStatus2))',
           { purohitPayoutStatus1: purohitPayoutStatus, purohitPayoutStatus2: purohitPayoutStatus },
         );
       } else {
-        query.andWhere(
+        filterQuery.andWhere(
           '("booking"."purohitPayoutStatus" = :purohitPayoutStatus1 OR "linkedBooking"."purohitPayoutStatus" = :purohitPayoutStatus2)',
           { purohitPayoutStatus1: purohitPayoutStatus, purohitPayoutStatus2: purohitPayoutStatus },
         );
@@ -455,29 +443,28 @@ export class PaymentRepository extends BaseRepository<Payment> {
 
     if (bookingPaymentStatus) {
       if (Array.isArray(bookingPaymentStatus)) {
-        query.andWhere(
+        filterQuery.andWhere(
           '("booking"."paymentStatus" IN (:...bookingPaymentStatus1) OR "linkedBooking"."paymentStatus" IN (:...bookingPaymentStatus2))',
           { bookingPaymentStatus1: bookingPaymentStatus, bookingPaymentStatus2: bookingPaymentStatus },
         );
       } else {
-        query.andWhere(
+        filterQuery.andWhere(
           '("booking"."paymentStatus" = :bookingPaymentStatus1 OR "linkedBooking"."paymentStatus" = :bookingPaymentStatus2)',
           { bookingPaymentStatus1: bookingPaymentStatus, bookingPaymentStatus2: bookingPaymentStatus },
         );
       }
     }
 
-    const normalizedSearch = search?.trim();
-
     if (normalizedSearch) {
-      query.andWhere(
+      filterQuery.andWhere(
         `(
-        booking."bookingNumber" ILIKE :search
-        OR service.name ILIKE :search
-        OR payment."razorpayPaymentId" ILIKE :search
-        OR payment."razorpayOrderId" ILIKE :search
-        OR linkedBooking."bookingNumber" ILIKE :search
-        OR linkedService.name ILIKE :search
+        "booking"."bookingNumber" ILIKE :search
+        OR "service"."name" ILIKE :search
+        OR "payment"."razorpayPaymentId" ILIKE :search
+        OR "payment"."razorpayOrderId" ILIKE :search
+        OR "linkedBooking"."bookingNumber" ILIKE :search
+        OR "linkedService"."name" ILIKE :search
+        OR "order"."orderNumber" ILIKE :search
       )`,
         {
           search: `%${normalizedSearch}%`,
@@ -485,15 +472,59 @@ export class PaymentRepository extends BaseRepository<Payment> {
       );
     }
 
-    const [payments, total] = await query
+    // 2. Fast count using targeted filter query without Cartesian expansion
+    const total = await filterQuery.getCount();
+
+    if (total === 0) {
+      return {
+        payments: [],
+        total: 0,
+      };
+    }
+
+    // 3. Fast ID pagination (payment.createdAt added to select list for PostgreSQL SELECT DISTINCT ORDER BY requirement)
+    const idRows = await filterQuery
+      .select('payment.id', 'id')
+      .addSelect('payment.createdAt', 'createdAt')
       .distinct(true)
-
       .orderBy('payment.createdAt', 'DESC')
-
       .skip(skip)
       .take(safeLimit)
+      .getRawMany();
 
-      .getManyAndCount();
+    const targetIds = idRows.map((r) => Number(r.id)).filter((id) => Number.isInteger(id) && id > 0);
+
+    if (targetIds.length === 0) {
+      return {
+        payments: [],
+        total,
+      };
+    }
+
+    // 4. Batch hydrate exactly the paginated payment records with all required relations
+    const payments = await this.repo
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.booking', 'booking')
+      .leftJoinAndSelect('booking.customer', 'customer')
+      .leftJoinAndSelect('booking.service', 'service')
+      .leftJoinAndSelect('booking.purohit', 'purohit')
+      .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('payment.createdBy', 'createdBy')
+      .leftJoinAndSelect('payment.payer', 'payer')
+      .leftJoinAndSelect('payment.payee', 'payee')
+      .leftJoinAndSelect('payment.paymentBookings', 'paymentBookings')
+      .leftJoinAndSelect('paymentBookings.booking', 'linkedBooking')
+      .leftJoinAndSelect('linkedBooking.service', 'linkedService')
+      .leftJoinAndSelect('payment.order', 'order')
+      .leftJoinAndSelect('order.customer', 'orderCustomer')
+      .where('payment.id IN (:...targetIds)', { targetIds })
+      .orderBy('payment.createdAt', 'DESC')
+      .getMany();
+
+    // Preserve exact sort order of targetIds
+    const idOrderMap = new Map<number, number>();
+    targetIds.forEach((id, idx) => idOrderMap.set(id, idx));
+    payments.sort((a, b) => (idOrderMap.get(a.id) ?? 0) - (idOrderMap.get(b.id) ?? 0));
 
     return {
       payments,
@@ -528,6 +559,7 @@ export class PaymentRepository extends BaseRepository<Payment> {
 
       relations: {
         booking: true,
+        order: true,
         payee: true,
       },
 
@@ -603,7 +635,11 @@ export class PaymentRepository extends BaseRepository<Payment> {
 
       .leftJoinAndSelect('paymentBookings.booking', 'linkedBooking')
 
-      .leftJoinAndSelect('linkedBooking.service', 'linkedService');
+      .leftJoinAndSelect('linkedBooking.service', 'linkedService')
+
+      .leftJoinAndSelect('payment.order', 'order')
+
+      .leftJoinAndSelect('order.customer', 'orderCustomer');
 
     query.andWhere(
       '(payment."paymentType" != :bookingPaymentType OR (payment."razorpayPaymentLinkId" IS NOT NULL AND payment."razorpayPaymentLinkId" != \'\'))',
@@ -699,25 +735,26 @@ export class PaymentRepository extends BaseRepository<Payment> {
     if (normalizedSearch) {
       query.andWhere(
         `(
-        booking."bookingNumber" ILIKE :search
-        OR linkedBooking."bookingNumber" ILIKE :search
-        OR service.name ILIKE :search
-        OR linkedService.name ILIKE :search
+        "booking"."bookingNumber" ILIKE :search
+        OR "linkedBooking"."bookingNumber" ILIKE :search
+        OR "service"."name" ILIKE :search
+        OR "linkedService"."name" ILIKE :search
 
-        OR customer."firstName" ILIKE :search
-        OR customer."lastName" ILIKE :search
-        OR customer.email ILIKE :search
-        OR customer.phone ILIKE :search
+        OR "customer"."firstName" ILIKE :search
+        OR "customer"."lastName" ILIKE :search
+        OR "customer"."email" ILIKE :search
+        OR "customer"."phone" ILIKE :search
 
-        OR purohitUser."firstName" ILIKE :search
-        OR purohitUser."lastName" ILIKE :search
-        OR purohitUser.email ILIKE :search
-        OR purohitUser.phone ILIKE :search
+        OR "purohitUser"."firstName" ILIKE :search
+        OR "purohitUser"."lastName" ILIKE :search
+        OR "purohitUser"."email" ILIKE :search
+        OR "purohitUser"."phone" ILIKE :search
 
-        OR payment."razorpayPaymentId" ILIKE :search
-        OR payment."razorpayOrderId" ILIKE :search
-        OR payment."razorpayRefundId" ILIKE :search
-        OR payment."bankTransferReference" ILIKE :search
+        OR "payment"."razorpayPaymentId" ILIKE :search
+        OR "payment"."razorpayOrderId" ILIKE :search
+        OR "order"."orderNumber" ILIKE :search
+        OR "payment"."razorpayRefundId" ILIKE :search
+        OR "payment"."bankTransferReference" ILIKE :search
       )`,
         {
           search: `%${normalizedSearch}%`,

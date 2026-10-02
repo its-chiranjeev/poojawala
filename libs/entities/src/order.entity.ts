@@ -71,7 +71,10 @@ export class Order {
   @Column({ type: 'int', nullable: true })
   paymentId?: number | null;
 
-  @OneToOne(() => Payment, { onDelete: 'SET NULL', nullable: true })
+  @OneToOne(() => Payment, (payment) => payment.order, {
+    onDelete: 'SET NULL',
+    nullable: true,
+  })
   @JoinColumn({ name: 'paymentId' })
   payment?: Payment | null;
 

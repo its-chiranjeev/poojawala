@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   ManyToOne,
   OneToMany,
+  OneToOne,
   JoinColumn,
   DeleteDateColumn,
 } from 'typeorm';
@@ -13,6 +14,7 @@ import { Booking } from './booking.entity';
 import { User } from './user.entity';
 import { PaymentBooking } from './payment-booking.entity';
 import { PurohitBankAccount } from './purohit-bank-account.entity';
+import { Order } from './order.entity';
 
 export enum PAYMENT_TYPE {
   BOOKING_PAYMENT = 'BOOKING_PAYMENT',
@@ -63,6 +65,9 @@ export class Payment {
   })
   @JoinColumn({ name: 'bookingId' })
   booking?: Booking;
+
+  @OneToOne(() => Order, (order) => order.payment)
+  order?: Order;
 
   @Column({ type: 'int' })
   createdById!: number;
