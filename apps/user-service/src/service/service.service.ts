@@ -2,8 +2,8 @@ import {
   CreateServiceDto,
   CreatePurohitServiceDto,
   PurohitServiceItemDto,
-  CreateServiceCategoryDto,
-  UpdateServiceCategoryDto,
+  CreateCategoryDto,
+  UpdateCategoryDto,
 } from '@poojawala/dtos/service/create.service.dto';
 import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
 import {
@@ -12,7 +12,7 @@ import {
 } from '@poojawala/dtos/service/update.service.dto';
 import {
   ServiceRepository,
-  ServiceCategoryRepository,
+  CategoryRepository,
   PurohitServiceRepository,
   PurohitProfileRepository,
 } from '@poojawala/repositories';
@@ -30,7 +30,7 @@ import {
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { QueryFailedError, ILike } from 'typeorm';
-import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE, PUROHIT_VERIFICATION_STATUS, ServicePlans, ServicePlanDetails, NOTIFICATION_TYPE, ServiceCity } from '@poojawala/entities';
+import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE, PUROHIT_VERIFICATION_STATUS, ServicePlans, ServicePlanDetails, NOTIFICATION_TYPE, ServiceCity, CATEGORY_TYPE } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
 import { NotificationService } from '@poojawala/notification';
 import { EmailService } from '@poojawala/email-services';
@@ -55,7 +55,7 @@ function sanitizeServiceCities(rawList: any): ServiceCity[] {
 export class ServiceService {
   constructor(
     private readonly serviceRepository: ServiceRepository,
-    private readonly categoryRepository: ServiceCategoryRepository,
+    private readonly categoryRepository: CategoryRepository,
     private readonly s3Service: S3Service,
     private readonly PurohitServiceRepository: PurohitServiceRepository,
     private readonly PurohitProfileRepository: PurohitProfileRepository,
@@ -386,6 +386,34 @@ export class ServiceService {
     return { basic, standard };
   }
 
+  /**
+   * Validates that a given categoryId references an active, non-deleted SERVICE-type category.
+   * Throws BadRequestException if validation fails.
+   */
+  private async validateServiceCategory(categoryId: number): Promise<void> {
+    const category = await this.categoryRepository.findOne({
+      where: { id: categoryId },
+    });
+
+    if (!category || category.deletedAt) {
+      throw new BadRequestException(
+        `Category with id ${categoryId} does not exist or has been deleted.`,
+      );
+    }
+
+    if (!category.isActive) {
+      throw new BadRequestException(
+        `Category with id ${categoryId} is not active.`,
+      );
+    }
+
+    if (category.categoryType !== CATEGORY_TYPE.SERVICE) {
+      throw new BadRequestException(
+        `Category with id ${categoryId} is a PRODUCT category. Services must be assigned to SERVICE-type categories only.`,
+      );
+    }
+  }
+
   async createService(
     dto: CreateServiceDto,
     files: {
@@ -394,6 +422,9 @@ export class ServiceService {
     adminId: number,
   ) {
     try {
+      if (dto.categoryId !== undefined && dto.categoryId !== null) {
+        await this.validateServiceCategory(dto.categoryId);
+      }
       const existing = await this.serviceRepository.findOne({
         where: [{ name: dto.name }, { slug: dto.slug }],
       });
@@ -613,6 +644,10 @@ export class ServiceService {
       if (existingSlug && existingSlug.id !== id) {
         throw new ConflictException('Service with same slug already exists');
       }
+    }
+
+    if (dto.categoryId !== undefined && dto.categoryId !== null) {
+      await this.validateServiceCategory(dto.categoryId);
     }
 
     // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
@@ -1493,14 +1528,18 @@ export class ServiceService {
   }
 
   async createCategory(
-    dto: CreateServiceCategoryDto,
+    dto: CreateCategoryDto,
     files: { icon?: Express.Multer.File[] },
     adminId: number,
   ) {
-    const existing = await this.categoryRepository.findByName(dto.name);
+    // Resolve categoryType — default to SERVICE for backward compatibility
+    const categoryType: CATEGORY_TYPE = dto.categoryType ?? CATEGORY_TYPE.SERVICE;
+
+    // Composite uniqueness check: same name is OK across different types
+    const existing = await this.categoryRepository.findByNameAndType(dto.name.trim(), categoryType);
     if (existing) {
       throw new ConflictException(
-        `A service category with name "${dto.name}" already exists`,
+        `A ${categoryType.toLowerCase()} category with name "${dto.name}" already exists`,
       );
     }
 
@@ -1519,11 +1558,12 @@ export class ServiceService {
       iconUrl: iconKey ?? dto.iconUrl,
       sortOrder: dto.sortOrder ?? 0,
       isActive: dto.isActive !== undefined ? dto.isActive : true,
+      categoryType,
     });
 
     const saved = await this.categoryRepository.save(category);
 
-    const categoryMessage = `Service category '${saved.name}' was created successfully.`;
+    const categoryMessage = `${categoryType === CATEGORY_TYPE.PRODUCT ? 'Product' : 'Service'} category '${saved.name}' was created successfully.`;
 
     // TODO: SERVICE_MESSAGE_IMPROVEMENT
     // Old message retained for reference; replaced with plan-aware message.
@@ -1537,7 +1577,7 @@ export class ServiceService {
       entityId: String(saved.id),
       action: 'CATEGORY_CREATED',
       message: categoryMessage,
-      newValue: { id: saved.id, name: saved.name },
+      newValue: { id: saved.id, name: saved.name, categoryType: saved.categoryType },
     });
 
     // TODO: SERVICE_MESSAGE_IMPROVEMENT
@@ -1552,7 +1592,7 @@ export class ServiceService {
 
   async updateCategory(
     id: number,
-    dto: UpdateServiceCategoryDto,
+    dto: UpdateCategoryDto,
     files: { icon?: Express.Multer.File[] },
     adminId: number,
   ) {
@@ -1562,16 +1602,48 @@ export class ServiceService {
       throw new NotFoundException(`Service category with id ${id} not found`);
     }
 
-    if (dto.name && dto.name !== category.name) {
-      const existing = await this.categoryRepository.findByName(dto.name);
+    // Guard against categoryType change when entities are already assigned
+    const currentCategoryType = category.categoryType || CATEGORY_TYPE.SERVICE;
+    if (dto.categoryType !== undefined && dto.categoryType !== currentCategoryType) {
+      if (dto.categoryType === CATEGORY_TYPE.PRODUCT) {
+        // Changing to PRODUCT: reject if services are currently assigned
+        const serviceCount = await this.serviceRepository.count({
+          where: { categoryId: id },
+        });
+        if (serviceCount > 0) {
+          throw new BadRequestException(
+            `Cannot change category type to PRODUCT: ${serviceCount} service(s) are assigned to this category. Remove the assignments first.`,
+          );
+        }
+      } else if (dto.categoryType === CATEGORY_TYPE.SERVICE) {
+        // Changing to SERVICE: reject if products are currently assigned
+        const productCount = await this.categoryRepository.countProductsForCategory(id);
+        if (productCount > 0) {
+          throw new BadRequestException(
+            `Cannot change category type to SERVICE: ${productCount} product(s) are assigned to this category. Remove the assignments first.`,
+          );
+        }
+      }
+    }
+
+    // Composite name uniqueness check (only when name is being changed)
+    const newName = dto.name?.trim();
+    const targetType = dto.categoryType ?? category.categoryType;
+    if (newName && newName !== category.name) {
+      const existing = await this.categoryRepository.findByNameAndType(newName, targetType);
       if (existing && existing.id !== id) {
         throw new ConflictException(
-          `A service category with name "${dto.name}" already exists`,
+          `A ${targetType.toLowerCase()} category with name "${newName}" already exists`,
         );
       }
     }
 
-    const oldSnapshot = { name: category.name, isActive: category.isActive, sortOrder: category.sortOrder };
+    const oldSnapshot = {
+      name: category.name,
+      isActive: category.isActive,
+      sortOrder: category.sortOrder,
+      categoryType: category.categoryType,
+    };
 
     if (files?.icon?.length) {
       category.iconUrl = await this.s3Service.uploadFileHelper(
@@ -1583,14 +1655,15 @@ export class ServiceService {
       category.iconUrl = dto.iconUrl;
     }
 
-    if (dto.name !== undefined) category.name = dto.name.trim();
+    if (newName !== undefined) category.name = newName;
     if (dto.description !== undefined) category.description = dto.description?.trim();
     if (dto.sortOrder !== undefined) category.sortOrder = dto.sortOrder;
     if (dto.isActive !== undefined) category.isActive = dto.isActive;
+    if (dto.categoryType !== undefined) category.categoryType = dto.categoryType;
 
     const updated = await this.categoryRepository.save(category);
 
-    const updateCategoryMessage = `Service category '${updated.name}' was updated successfully.`;
+    const updateCategoryMessage = `${updated.categoryType === CATEGORY_TYPE.PRODUCT ? 'Product' : 'Service'} category '${updated.name}' was updated successfully.`;
 
     // TODO: SERVICE_MESSAGE_IMPROVEMENT
     // Old message retained for reference; replaced with plan-aware message.
@@ -1605,7 +1678,12 @@ export class ServiceService {
       action: 'CATEGORY_UPDATED',
       message: updateCategoryMessage,
       oldValue: oldSnapshot,
-      newValue: { name: updated.name, isActive: updated.isActive, sortOrder: updated.sortOrder },
+      newValue: {
+        name: updated.name,
+        isActive: updated.isActive,
+        sortOrder: updated.sortOrder,
+        categoryType: updated.categoryType,
+      },
     });
 
     // TODO: SERVICE_MESSAGE_IMPROVEMENT
@@ -1625,9 +1703,26 @@ export class ServiceService {
       throw new NotFoundException(`Service category with id ${id} not found`);
     }
 
+    // Guard: prevent deleting when services or products are associated with it
+    const serviceCount = await this.serviceRepository.count({
+      where: { categoryId: id },
+    });
+    if (serviceCount > 0) {
+      throw new BadRequestException(
+        `Cannot delete this category: ${serviceCount} service(s) are assigned to it. Reassign or remove them first.`,
+      );
+    }
+
+    const productCount = await this.categoryRepository.countProductsForCategory(id);
+    if (productCount > 0) {
+      throw new BadRequestException(
+        `Cannot delete this category: ${productCount} product(s) are assigned to it. Reassign or remove them first.`,
+      );
+    }
+
     await this.categoryRepository.softDelete(id);
 
-    const deleteCategoryMessage = `Service category '${category.name}' was deleted successfully.`;
+    const deleteCategoryMessage = `${category.categoryType === CATEGORY_TYPE.PRODUCT ? 'Product' : 'Service'} category '${category.name}' was deleted successfully.`;
 
     // TODO: SERVICE_MESSAGE_IMPROVEMENT
     // Old message retained for reference; replaced with plan-aware message.
@@ -1641,7 +1736,7 @@ export class ServiceService {
       entityId: String(id),
       action: 'CATEGORY_DELETED',
       message: deleteCategoryMessage,
-      oldValue: { name: category.name },
+      oldValue: { name: category.name, categoryType: category.categoryType },
     });
 
     // TODO: SERVICE_MESSAGE_IMPROVEMENT

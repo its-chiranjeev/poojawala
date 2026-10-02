@@ -19,7 +19,7 @@ import {
 import { ServiceService } from './service.service';
 import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@poojawala/common';
 import { USER_ROLE } from '@poojawala/entities';
-import { CreateServiceDto, CreatePurohitServiceDto, CreateServiceCategoryDto, UpdateServiceCategoryDto } from '@poojawala/dtos/service/create.service.dto';
+import { CreateServiceDto, CreatePurohitServiceDto, CreateCategoryDto, UpdateCategoryDto } from '@poojawala/dtos/service/create.service.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
 import { UpdateServiceDto, UpdatePurohitServiceDto, UpdateServiceStatusDto } from '@poojawala/dtos/service/update.service.dto';
@@ -189,7 +189,7 @@ export class ServiceController {
   @HttpCode(HttpStatus.CREATED)
   async createCategory(
     @Req() req: Request,
-    @Body() dto: CreateServiceCategoryDto,
+    @Body() dto: CreateCategoryDto,
     @UploadedFiles() files: { icon?: Express.Multer.File[] },
   ) {
     const user = (req as any).user;
@@ -204,7 +204,7 @@ export class ServiceController {
   async updateCategory(
     @Req() req: Request,
     @Param('id', ParseIntPipe) id: number,
-    @Body() dto: UpdateServiceCategoryDto,
+    @Body() dto: UpdateCategoryDto,
     @UploadedFiles() files: { icon?: Express.Multer.File[] },
   ) {
     const user = (req as any).user;

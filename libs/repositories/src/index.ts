@@ -7,7 +7,7 @@ export * from './purohit-bank-account.repository';
 export * from './purohit-service-area.repository';
 export * from './purohit-media.repository';
 export * from './service.repository';
-export * from './service-category.repository';
+export * from './service-category.repository'; // exports CategoryRepository + ServiceCategoryRepository alias
 export * from './purohit-service.repository';
 export * from './customer-address.repository';
 export * from './customer-favorite.repository';

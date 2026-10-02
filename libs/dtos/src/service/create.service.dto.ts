@@ -2,6 +2,7 @@
 // import { Transform } from 'class-transformer';
 import {
   IsBoolean,
+  IsEnum,
   IsInt,
   IsNumber,
   IsOptional,
@@ -19,6 +20,7 @@ import {
 } from 'class-validator';
 import { Transform, Type, plainToInstance } from 'class-transformer';
 import type { ServicePlans } from '@poojawala/entities';
+import { CATEGORY_TYPE } from '@poojawala/entities';
 
 export function normalizeKey(str?: string): string {
   return str ? str.trim().toLowerCase() : '';
@@ -427,7 +429,7 @@ export class CreatePurohitServiceDto {
   services!: any[];
 }
 
-export class CreateServiceCategoryDto {
+export class CreateCategoryDto {
   @IsString()
   @IsNotEmpty()
   name!: string;
@@ -453,9 +455,18 @@ export class CreateServiceCategoryDto {
   })
   @IsBoolean()
   isActive?: boolean;
+
+  /**
+   * Determines whether this is a SERVICE or PRODUCT category.
+   * Defaults to SERVICE when omitted — ensures existing callers
+   * that do not supply categoryType continue to create SERVICE categories.
+   */
+  @IsOptional()
+  @IsEnum(CATEGORY_TYPE, { message: `categoryType must be one of: ${Object.values(CATEGORY_TYPE).join(', ')}` })
+  categoryType?: CATEGORY_TYPE;
 }
 
-export class UpdateServiceCategoryDto {
+export class UpdateCategoryDto {
   @IsOptional()
   @IsString()
   @IsNotEmpty()
@@ -482,5 +493,17 @@ export class UpdateServiceCategoryDto {
   })
   @IsBoolean()
   isActive?: boolean;
+
+  /**
+   * Updating categoryType is intentionally allowed via the DTO but guarded
+   * at the service layer: changing SERVICE→PRODUCT is blocked when services
+   * are assigned; changing PRODUCT→SERVICE is blocked when products are assigned.
+   */
+  @IsOptional()
+  @IsEnum(CATEGORY_TYPE, { message: `categoryType must be one of: ${Object.values(CATEGORY_TYPE).join(', ')}` })
+  categoryType?: CATEGORY_TYPE;
 }
 
+// Backward-compat aliases — remove once all direct imports are updated
+export { CreateCategoryDto as CreateServiceCategoryDto };
+export { UpdateCategoryDto as UpdateServiceCategoryDto };

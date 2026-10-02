@@ -5,7 +5,10 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   DeleteDateColumn,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { Category } from './service-category.entity';
 
 /**
  * Defines the unit against which the product price is measured.
@@ -64,6 +67,30 @@ export class Product {
 
   @Column({ type: 'boolean', default: true })
   isActive!: boolean;
+
+  // ─── Category relation ────────────────────────────────────────────────────
+
+  /**
+   * FK to service_categories.
+   * Nullable for backward compatibility with existing products that were
+   * created before this field was introduced.
+   * New product creation MUST supply categoryId and it MUST reference a
+   * PRODUCT-type category (enforced at the service layer).
+   *
+   * RESTRICT prevents orphaned products when a category is deleted.
+   */
+  @Column({ type: 'int', nullable: true })
+  categoryId?: number | null;
+
+  @ManyToOne(() => Category, (cat) => cat.products, {
+    nullable: true,
+    onDelete: 'RESTRICT',
+    eager: false,
+  })
+  @JoinColumn({ name: 'categoryId' })
+  category?: Category | null;
+
+  // ─── Timestamps ──────────────────────────────────────────────────────────
 
   @CreateDateColumn()
   createdAt!: Date;

@@ -12,17 +12,47 @@ import {
   UpdateProductDto,
 } from '@poojawala/dtos';
 import { ProductRepository } from '@poojawala/repositories';
+import { CategoryRepository } from '@poojawala/repositories';
 import { S3Service } from '@poojawala/s3';
 import { AuditLogService } from '@poojawala/common';
-import { ACTOR_TYPE, AUDIT_MODULE, USER_ROLE } from '@poojawala/entities';
+import { ACTOR_TYPE, AUDIT_MODULE, CATEGORY_TYPE, USER_ROLE } from '@poojawala/entities';
 
 @Injectable()
 export class ProductService {
   constructor(
     private readonly productRepository: ProductRepository,
+    private readonly categoryRepository: CategoryRepository,
     private readonly s3Service: S3Service,
     private readonly auditLogService: AuditLogService,
   ) {}
+
+  /**
+   * Validates that a given categoryId references a valid PRODUCT-type category.
+   * Throws BadRequestException with a clear message if validation fails.
+   */
+  private async validateProductCategory(categoryId: number): Promise<void> {
+    const category = await this.categoryRepository.findOne({
+      where: { id: categoryId },
+    });
+
+    if (!category || category.deletedAt) {
+      throw new BadRequestException(
+        `Category with id ${categoryId} does not exist or has been deleted.`,
+      );
+    }
+
+    if (!category.isActive) {
+      throw new BadRequestException(
+        `Category with id ${categoryId} is not active.`,
+      );
+    }
+
+    if (category.categoryType !== CATEGORY_TYPE.PRODUCT) {
+      throw new BadRequestException(
+        `Category with id ${categoryId} is a SERVICE category. Products must be assigned to PRODUCT-type categories only.`,
+      );
+    }
+  }
 
   async createProduct(
     dto: CreateProductDto,
@@ -50,6 +80,11 @@ export class ProductService {
         throw new BadRequestException('Quantity cannot be negative');
       }
 
+      // Validate the provided PRODUCT category if supplied
+      if (dto.categoryId !== undefined && dto.categoryId !== null) {
+        await this.validateProductCategory(dto.categoryId);
+      }
+
       let imageUrl: string | undefined = dto.imageUrl?.trim() || undefined;
 
       if (files?.image?.length) {
@@ -68,13 +103,20 @@ export class ProductService {
         pricingUnit: dto.pricingUnit,
         quantity,
         isActive: dto.isActive !== undefined ? dto.isActive : true,
+        categoryId: dto.categoryId ?? null,
       });
 
       const saved = await this.productRepository.save(product);
 
-      if (saved.imageUrl) {
+      // Re-fetch with category relation for the response
+      const savedWithCategory = await this.productRepository.findOne({
+        where: { id: saved.id },
+        relations: ['category'],
+      });
+
+      if (savedWithCategory?.imageUrl) {
         try {
-          saved.imageUrl = await this.s3Service.getDownloadUrl(saved.imageUrl);
+          savedWithCategory.imageUrl = await this.s3Service.getDownloadUrl(savedWithCategory.imageUrl);
         } catch {
           // Keep raw imageUrl if not an S3 key
         }
@@ -96,13 +138,14 @@ export class ProductService {
           pricingUnit: saved.pricingUnit,
           quantity: saved.quantity,
           isActive: saved.isActive,
+          categoryId: saved.categoryId,
         },
       });
 
       return {
         success: true,
         message: 'Product created successfully',
-        data: saved,
+        data: savedWithCategory ?? saved,
       };
     } catch (error: any) {
       if (error instanceof HttpException) {
@@ -117,6 +160,14 @@ export class ProductService {
   }
 
   async getAllProducts(query: GetProductsQueryDto) {
+    if (query.categoryType !== undefined && query.categoryType !== null) {
+      if (query.categoryType !== CATEGORY_TYPE.PRODUCT) {
+        throw new BadRequestException(
+          'categoryType must be PRODUCT when querying products. SERVICE category type is not allowed.',
+        );
+      }
+    }
+
     try {
       const result = await this.productRepository.findAllProducts(query);
 
@@ -152,6 +203,7 @@ export class ProductService {
   async getProductById(id: number) {
     const product = await this.productRepository.findOne({
       where: { id },
+      relations: ['category'],
     });
 
     if (!product) {
@@ -186,6 +238,7 @@ export class ProductService {
     try {
       const product = await this.productRepository.findOne({
         where: { id },
+        relations: ['category'],
       });
 
       if (!product) {
@@ -210,6 +263,11 @@ export class ProductService {
         throw new BadRequestException('Quantity cannot be negative');
       }
 
+      // Validate the new category if provided
+      if (dto.categoryId !== undefined && dto.categoryId !== null) {
+        await this.validateProductCategory(dto.categoryId);
+      }
+
       const oldValue = {
         name: product.name,
         description: product.description,
@@ -218,6 +276,7 @@ export class ProductService {
         quantity: product.quantity,
         imageUrl: product.imageUrl,
         isActive: product.isActive,
+        categoryId: product.categoryId,
       };
 
       if (dto.name !== undefined) product.name = dto.name.trim();
@@ -226,6 +285,7 @@ export class ProductService {
       if (dto.pricingUnit !== undefined) product.pricingUnit = dto.pricingUnit;
       if (dto.quantity !== undefined) product.quantity = dto.quantity;
       if (dto.isActive !== undefined) product.isActive = dto.isActive;
+      if (dto.categoryId !== undefined) product.categoryId = dto.categoryId;
 
       if (files?.image?.length) {
         product.imageUrl = await this.s3Service.uploadFileHelper(
@@ -239,10 +299,16 @@ export class ProductService {
 
       const updated = await this.productRepository.save(product);
 
-      if (updated.imageUrl) {
+      // Re-fetch with category relation for the response
+      const updatedWithCategory = await this.productRepository.findOne({
+        where: { id: updated.id },
+        relations: ['category'],
+      });
+
+      if (updatedWithCategory?.imageUrl) {
         try {
-          updated.imageUrl = await this.s3Service.getDownloadUrl(
-            updated.imageUrl,
+          updatedWithCategory.imageUrl = await this.s3Service.getDownloadUrl(
+            updatedWithCategory.imageUrl,
           );
         } catch {
           // Keep raw imageUrl
@@ -265,13 +331,14 @@ export class ProductService {
           pricingUnit: updated.pricingUnit,
           quantity: updated.quantity,
           isActive: updated.isActive,
+          categoryId: updated.categoryId,
         },
       });
 
       return {
         success: true,
         message: 'Product updated successfully',
-        data: updated,
+        data: updatedWithCategory ?? updated,
       };
     } catch (error: any) {
       if (error instanceof HttpException) {

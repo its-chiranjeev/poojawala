@@ -49,5 +49,15 @@ export class CreateProductDto {
   })
   @IsBoolean()
   isActive?: boolean;
+
+  /**
+   * Optional ID of the PRODUCT-type category this product belongs to.
+   * When provided, must reference an active, non-deleted Category with categoryType = PRODUCT.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  categoryId?: number;
 }
 

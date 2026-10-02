@@ -29,7 +29,7 @@ import { BookingProduct } from './booking-product.entity';
 import { Order } from './order.entity';
 import { OrderItem } from './order-item.entity';
 import { EntitiesService } from './entities.service';
-import { ServiceCategory } from './service-category.entity';
+import { Category } from './service-category.entity';
 
 @Module({
   imports: [
@@ -41,7 +41,7 @@ import { ServiceCategory } from './service-category.entity';
       PurohitServiceArea,
       PurohitMedia,
       Service,
-      ServiceCategory,
+      Category,
       PurohitService,
       CustomerAddress,
       CustomerFavorite,

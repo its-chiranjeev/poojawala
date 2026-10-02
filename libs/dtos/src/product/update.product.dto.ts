@@ -53,6 +53,17 @@ export class UpdateProductDto {
   })
   @IsBoolean()
   isActive?: boolean;
+
+  /**
+   * Optional: reassign the product to a different PRODUCT-type category.
+   * Applies the same validation as create (active, non-deleted, PRODUCT type).
+   * When omitted, the existing category assignment is preserved.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  categoryId?: number;
 }
 
 export class UpdateProductStatusDto {

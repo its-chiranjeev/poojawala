@@ -12,7 +12,7 @@ import {
 } from 'typeorm';
 import { PurohitService } from './purohit-service.entity';
 import { Booking } from './booking.entity';
-import { ServiceCategory } from './service-category.entity';
+import { Category } from './service-category.entity';
 
 export interface ServiceCity {
   name: string;
@@ -160,13 +160,13 @@ export class Service {
   @Column({ type: 'int', nullable: true })
   categoryId?: number | null;
 
-  @ManyToOne(() => ServiceCategory, (category) => category.services, {
+  @ManyToOne(() => Category, (category) => category.services, {
     nullable: true,
     onDelete: 'SET NULL',
     eager: false,
   })
   @JoinColumn({ name: 'categoryId' })
-  category?: ServiceCategory | null;
+  category?: Category | null;
 
   @OneToMany(() => PurohitService, (purohitService) => purohitService.service)
   purohitServices!: PurohitService[];

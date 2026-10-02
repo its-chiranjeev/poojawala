@@ -283,16 +283,18 @@ export class BookingService {
           );
         }
 
-        const serviceCities = Array.isArray(service.cities) ? service.cities : [];
-        const normalizedBookingCity = normalizeCityName(bookingCity);
-        const isCityAvailable = serviceCities.some(
-          (c) => normalizeCityName(c.name) === normalizedBookingCity,
-        );
-
-        if (!isCityAvailable) {
-          throw new BadRequestException(
-            'Selected service is not available in the booking city.',
+        if (!service.isGlobal) {
+          const serviceCities = Array.isArray(service.cities) ? service.cities : [];
+          const normalizedBookingCity = normalizeCityName(bookingCity);
+          const isCityAvailable = serviceCities.some(
+            (c) => normalizeCityName(c.name) === normalizedBookingCity,
           );
+
+          if (!isCityAvailable) {
+            throw new BadRequestException(
+              'Selected service is not available in the booking city.',
+            );
+          }
         }
 
         const customerPincode = customerAddress.pincode?.trim();
@@ -4397,16 +4399,18 @@ export class BookingService {
           );
         }
 
-        const serviceCities = Array.isArray(service.cities) ? service.cities : [];
-        const normalizedBookingCity = normalizeCityName(bookingCity);
-        const isCityAvailable = serviceCities.some(
-          (c) => normalizeCityName(c.name) === normalizedBookingCity,
-        );
-
-        if (!isCityAvailable) {
-          throw new BadRequestException(
-            'Selected service is not available in the booking city.',
+        if (!service.isGlobal) {
+          const serviceCities = Array.isArray(service.cities) ? service.cities : [];
+          const normalizedBookingCity = normalizeCityName(bookingCity);
+          const isCityAvailable = serviceCities.some(
+            (c) => normalizeCityName(c.name) === normalizedBookingCity,
           );
+
+          if (!isCityAvailable) {
+            throw new BadRequestException(
+              'Selected service is not available in the booking city.',
+            );
+          }
         }
 
         // Prevent concurrent duplicate bookings

@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { CATEGORY_TYPE } from '@poojawala/entities';
 
 export class GetProductsQueryDto {
   @IsOptional()
@@ -22,4 +23,22 @@ export class GetProductsQueryDto {
   @IsOptional()
   @IsString()
   isActive?: string;
+
+  /** Filter products by their category ID. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  categoryId?: number;
+
+  /**
+   * Filter products by their category's type.
+   * Only PRODUCT is supported. SERVICE category type is not allowed for product queries.
+   * Example: ?categoryType=PRODUCT
+   */
+  @IsOptional()
+  @IsIn([CATEGORY_TYPE.PRODUCT], {
+    message: 'categoryType must be PRODUCT when querying products. SERVICE category type is not allowed.',
+  })
+  categoryType?: CATEGORY_TYPE;
 }
