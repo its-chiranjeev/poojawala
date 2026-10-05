@@ -5,6 +5,7 @@ export * from './filters/global-exception.filter';
 export * from './auth/common-auth.module';
 export * from './decorators/roles.decorator';
 export * from './guards/jwtAuth.guard';
+export * from './guards/optionalJwtAuth.guard';
 export * from './guards/localAuth.guard';
 export * from './guards/roles.guard';
 export * from './guards/csrf.guard';

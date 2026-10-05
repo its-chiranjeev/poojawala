@@ -141,6 +141,9 @@ export class AuthModuleController {
     const csrfToken = crypto.randomUUID();
     this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
 
+    // TODO: VERCEL_BLOB_MIGRATION
+    // Legacy S3 signed URL generation retained for rollback/reference.
+    /*
     if (result.user && result.user.profileImage) {
       try {
         result.user.profileImage = await this.s3Service.getDownloadUrl(result.user.profileImage);
@@ -148,6 +151,9 @@ export class AuthModuleController {
         console.error('Failed to generate pre-signed URL for profileImage:', e);
       }
     }
+    */
+    // Active Vercel Blob implementation:
+    // Stored public Blob URLs or existing URLs are returned directly without S3 signed URL.
 
     return {
       success: true,
@@ -209,6 +215,9 @@ export class AuthModuleController {
     const csrfToken = crypto.randomUUID();
     this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
 
+    // TODO: VERCEL_BLOB_MIGRATION
+    // Legacy S3 signed URL generation retained for rollback/reference.
+    /*
     if (result.user && result.user.profileImage) {
       try {
         result.user.profileImage = await this.s3Service.getDownloadUrl(result.user.profileImage);
@@ -216,6 +225,9 @@ export class AuthModuleController {
         console.error('Failed to generate pre-signed URL for profileImage:', e);
       }
     }
+    */
+    // Active Vercel Blob implementation:
+    // Stored public Blob URLs or existing URLs are returned directly without S3 signed URL.
 
     return {
       success: true,
@@ -258,6 +270,9 @@ export class AuthModuleController {
     const csrfToken = crypto.randomUUID();
     this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
 
+    // TODO: VERCEL_BLOB_MIGRATION
+    // Legacy S3 signed URL generation retained for rollback/reference.
+    /*
     if (result.user && result.user.profileImage) {
       try {
         result.user.profileImage = await this.s3Service.getDownloadUrl(result.user.profileImage);
@@ -265,6 +280,9 @@ export class AuthModuleController {
         console.error('Failed to generate pre-signed URL for profileImage:', e);
       }
     }
+    */
+    // Active Vercel Blob implementation:
+    // Stored public Blob URLs or existing URLs are returned directly without S3 signed URL.
 
     return {
       success: true,
@@ -280,6 +298,9 @@ export class AuthModuleController {
   @HttpCode(HttpStatus.OK)
   async getMe(@Req() req: any) {
     const safeUser = await this.authModuleService.getFullProfile(req.user.id, req.user.role);
+    // TODO: VERCEL_BLOB_MIGRATION
+    // Legacy S3 signed URL generation retained for rollback/reference.
+    /*
     if (safeUser.profileImage) {
       try {
         safeUser.profileImage = await this.s3Service.getDownloadUrl(safeUser.profileImage);
@@ -287,6 +308,9 @@ export class AuthModuleController {
         console.error('Failed to generate pre-signed URL for profileImage:', e);
       }
     }
+    */
+    // Active Vercel Blob implementation:
+    // Stored public Blob URLs or existing URLs are returned directly without S3 signed URL.
 
     if ((safeUser as any).profile) {
       const profile = { ...(safeUser as any).profile };
@@ -485,6 +509,9 @@ export class AuthModuleController {
     const csrfToken = crypto.randomUUID();
     this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
 
+    // TODO: VERCEL_BLOB_MIGRATION
+    // Legacy S3 signed URL generation retained for rollback/reference.
+    /*
     if (result.user && result.user.profileImage) {
       try {
         result.user.profileImage = await this.s3Service.getDownloadUrl(result.user.profileImage);
@@ -492,6 +519,9 @@ export class AuthModuleController {
         console.error('Failed to generate pre-signed URL for profileImage:', e);
       }
     }
+    */
+    // Active Vercel Blob implementation:
+    // Stored public Blob URLs or existing URLs are returned directly without S3 signed URL.
 
     return {
       success: true,

@@ -150,12 +150,17 @@ export class UserService {
     }
 
     if (file) {
-      const imageUrl = await this.s3Service.uploadFileHelper(
+      const oldProfileImage = user.profileImage;
+      const imageUrl = await this.s3Service.uploadProfileImage(
         id,
-        'profileImage',
-        [file],
+        file,
       );
       dto.profileImage = imageUrl;
+
+      // Delete old profile image if it was a Vercel Blob URL
+      if (oldProfileImage && this.s3Service.isVercelBlobUrl(oldProfileImage)) {
+        await this.s3Service.deleteByUrl(oldProfileImage);
+      }
     }
 
     const userPayload: Partial<User> = {
@@ -206,6 +211,9 @@ export class UserService {
 
     const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } =
       updatedUser!;
+    // TODO: VERCEL_BLOB_MIGRATION
+    // Legacy S3 signed URL generation retained for rollback/reference.
+    /*
     if (safeUser.profileImage) {
       try {
         safeUser.profileImage = await this.s3Service.getDownloadUrl(
@@ -215,6 +223,9 @@ export class UserService {
         console.error('Failed to generate pre-signed URL for profileImage:', e);
       }
     }
+    */
+    // Active Vercel Blob implementation:
+    // Stored public Blob URLs or existing URLs are returned directly without generating an S3-style signed URL.
 
     await this.auditLogService.createAuditLog({
       actorId: adminId,
@@ -268,11 +279,16 @@ export class UserService {
     }
 
     if (files?.profileImage?.length) {
-      dto.profileImage = await this.s3Service.uploadFileHelper(
+      const oldProfileImage = user.profileImage;
+      dto.profileImage = await this.s3Service.uploadProfileImage(
         id,
-        'profileImage',
-        files.profileImage,
+        files.profileImage[0],
       );
+
+      // Delete old profile image if it was a Vercel Blob URL
+      if (oldProfileImage && this.s3Service.isVercelBlobUrl(oldProfileImage)) {
+        await this.s3Service.deleteByUrl(oldProfileImage);
+      }
     }
 
     if (files?.certificate?.length) {
@@ -383,6 +399,9 @@ export class UserService {
 
     const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } =
       updatedUser as any;
+    // TODO: VERCEL_BLOB_MIGRATION
+    // Legacy S3 signed URL generation retained for rollback/reference.
+    /*
     if (safeUser.profileImage) {
       try {
         safeUser.profileImage = await this.s3Service.getDownloadUrl(
@@ -392,6 +411,9 @@ export class UserService {
         console.error('Failed to generate pre-signed URL for profileImage:', e);
       }
     }
+    */
+    // Active Vercel Blob implementation:
+    // Stored public Blob URLs or existing URLs are returned directly without generating an S3-style signed URL.
 
     // Also generate pre-signed URLs for documents if present in the profile
     if (safeUser.profile) {
@@ -794,11 +816,17 @@ export class UserService {
           ...safeUser
         } = user;
 
+        // TODO: VERCEL_BLOB_MIGRATION
+        // Legacy S3 signed URL generation retained for rollback/reference.
+        /*
         if (safeUser.profileImage) {
           safeUser.profileImage = await this.s3Service.getDownloadUrl(
             safeUser.profileImage,
           );
         }
+        */
+        // Active Vercel Blob implementation:
+        // Stored public Blob URLs or existing URLs are returned directly.
         if ((safeUser as any).profile) {
           const profile = { ...(safeUser as any).profile };
           if (profile.aadhaarDocUrl) {
@@ -1060,12 +1088,18 @@ export class UserService {
 
     const dataWithServicesUrls = await Promise.all(
       result.data.map(async (user: any) => {
+        // TODO: VERCEL_BLOB_MIGRATION
+        // Legacy S3 signed URL generation retained for rollback/reference.
+        /*
         let profileImage = user.profileImage;
         if (profileImage) {
           try {
             profileImage = await this.s3Service.getDownloadUrl(profileImage);
           } catch (e) { }
         }
+        */
+        // Active Vercel Blob implementation:
+        const profileImage = user.profileImage;
 
         const purohitService = user.services
           ? user.services.map((ps: any) => {
@@ -1135,11 +1169,17 @@ export class UserService {
     }
 
     const profile = await this.purohitProfileRepository.findByUserId(id);
+    // TODO: VERCEL_BLOB_MIGRATION
+    // Legacy S3 signed URL generation retained for rollback/reference.
+    /*
     let profileImage = user.profileImage;
 
     if (profileImage) {
       profileImage = await this.s3Service.getDownloadUrl(profileImage);
     }
+    */
+    // Active Vercel Blob implementation:
+    const profileImage = user.profileImage;
 
     let aadhaarDocUrl = profile?.aadhaarDocUrl;
     let aadhaarDocDownloadUrl;
@@ -1253,11 +1293,17 @@ export class UserService {
       const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } =
         fullUser!;
 
+      // TODO: VERCEL_BLOB_MIGRATION
+      // Legacy S3 signed URL generation retained for rollback/reference.
+      /*
       if (safeUser.profileImage) {
         safeUser.profileImage = await this.s3Service.getDownloadUrl(
           safeUser.profileImage,
         );
       }
+      */
+      // Active Vercel Blob implementation:
+      // Stored public Blob URLs or existing URLs are returned directly.
       if ((safeUser as any).profile) {
         const profile = { ...(safeUser as any).profile };
         if (profile.aadhaarDocUrl) {

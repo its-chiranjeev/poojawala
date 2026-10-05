@@ -13,6 +13,7 @@ import { AuditLogModule } from './audit-log/audit-log.module';
 import { ProductModule } from './product/product.module';
 import { CartModule } from './cart/cart.module';
 import { OrderModule } from './order/order.module';
+import { BlogModule } from './blog/blog.module';
 
 import { DatabaseModule } from '@poojawala/database';
 import { EntitiesModule } from '@poojawala/entities';
@@ -39,6 +40,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     AssignmentModule,
     ContactUsModule,
     AuditLogModule,
+    BlogModule,
   ],
   controllers: [UserManagementController],
   providers: [UserManagementService],

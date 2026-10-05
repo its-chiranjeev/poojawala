@@ -30,6 +30,8 @@ import { Order } from './order.entity';
 import { OrderItem } from './order-item.entity';
 import { EntitiesService } from './entities.service';
 import { Category } from './service-category.entity';
+import { BlogPost } from './blog-post.entity';
+import { BlogCategory } from './blog-category.entity';
 
 @Module({
   imports: [
@@ -62,6 +64,8 @@ import { Category } from './service-category.entity';
       BookingProduct,
       Order,
       OrderItem,
+      BlogPost,
+      BlogCategory,
     ]),
   ],
   providers: [EntitiesService],

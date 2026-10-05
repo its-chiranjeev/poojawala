@@ -52,3 +52,7 @@ export * from './cart/update-cart-item.dto';
 export * from './cart/checkout.dto';
 export * from './cart/get-cart-query.dto';
 export * from './order/order.dto';
+export * from './blog/create-blog-category.dto';
+export * from './blog/update-blog-category.dto';
+export * from './blog/create-blog-post.dto';
+export * from './blog/update-blog-post.dto';

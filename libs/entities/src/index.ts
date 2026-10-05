@@ -28,3 +28,6 @@ export * from './cart-item.entity';
 export * from './booking-product.entity';
 export * from './order.entity';
 export * from './order-item.entity';
+export * from './blog-category.entity';
+export * from './blog-post.entity';
+
