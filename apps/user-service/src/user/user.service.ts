@@ -2557,11 +2557,19 @@ export class UserService {
   }
 
   async addPurohitBankAccount(
-    userId: number,
+    callerOrUserId: { id: number; role?: USER_ROLE } | number,
     dto: CreatePurohitBankAccountDto,
+    requestedPurohitId?: number,
   ) {
+    const caller = this.normalizeCaller(callerOrUserId);
+    const targetUserId = await this.resolveTargetPurohitId(
+      caller.id,
+      caller.role,
+      requestedPurohitId ?? (dto as any)?.purohitId,
+    );
+
     const profile = await this.purohitProfileRepository.findOne({
-      where: { userId },
+      where: { userId: targetUserId },
     });
 
     if (!profile) {
@@ -2632,14 +2640,17 @@ export class UserService {
     });
 
     await this.auditLogService.createAuditLog({
-      actorId: userId,
+      actorId: caller.id,
       actorType: ACTOR_TYPE.USER,
-      actorRole: USER_ROLE.PUROHIT,
+      actorRole: caller.role,
       module: AUDIT_MODULE.USER,
       entity: 'User',
-      entityId: String(userId),
+      entityId: String(targetUserId),
       action: 'PUROHIT_BANK_UPDATED',
-      message: `Purohit #${userId} added a new bank account #${account.id}.`,
+      message:
+        caller.role === USER_ROLE.ADMIN
+          ? `Admin #${caller.id} added a new bank account #${account.id} for Purohit #${targetUserId}.`
+          : `Purohit #${caller.id} added a new bank account #${account.id}.`,
       oldValue: undefined,
       newValue: { bankAccountId: account.id },
     });
@@ -2652,13 +2663,21 @@ export class UserService {
   }
 
   async getPurohitBankAccounts(
-    userId: number,
+    callerOrUserId: { id: number; role?: USER_ROLE } | number,
     page: number = 1,
     limit: number = 10,
     search?: string,
+    requestedPurohitId?: number,
   ) {
+    const caller = this.normalizeCaller(callerOrUserId);
+    const targetUserId = await this.resolveTargetPurohitId(
+      caller.id,
+      caller.role,
+      requestedPurohitId,
+    );
+
     const profile = await this.purohitProfileRepository.findOne({
-      where: { userId },
+      where: { userId: targetUserId },
     });
 
     if (!profile) {
@@ -2686,16 +2705,21 @@ export class UserService {
     };
   }
 
-  async getPurohitBankAccountById(user: any, id: number) {
+  async getPurohitBankAccountById(
+    callerOrUserId: { id: number; role?: USER_ROLE } | number | any,
+    id: number,
+    requestedPurohitId?: number,
+  ) {
+    const caller = this.normalizeCaller(callerOrUserId);
     const account = await this.purohitBankAccountRepository.findById(id);
 
     if (!account) {
       throw new NotFoundException('Bank account not found');
     }
 
-    if (user.role !== USER_ROLE.ADMIN) {
+    if (caller.role === USER_ROLE.PUROHIT) {
       const profile = await this.purohitProfileRepository.findOne({
-        where: { userId: user.id },
+        where: { userId: caller.id },
       });
 
       if (!profile) {
@@ -2707,6 +2731,22 @@ export class UserService {
           'You can access only your own bank account',
         );
       }
+    } else if (caller.role === USER_ROLE.ADMIN) {
+      if (requestedPurohitId) {
+        const targetUserId = await this.resolveTargetPurohitId(
+          caller.id,
+          caller.role,
+          requestedPurohitId,
+        );
+        const profile = await this.purohitProfileRepository.findOne({
+          where: { userId: targetUserId },
+        });
+        if (!profile || account.purohitId !== profile.id) {
+          throw new NotFoundException('Bank account is not mapped to this Purohit');
+        }
+      }
+    } else {
+      throw new ForbiddenException('Access denied');
     }
 
     return {
@@ -2717,26 +2757,55 @@ export class UserService {
   }
 
   async updatePurohitBankAccount(
-    userId: number,
+    callerOrUserId: { id: number; role?: USER_ROLE } | number,
     id: number,
     dto: UpdatePurohitBankAccountDto,
+    requestedPurohitId?: number,
   ) {
-    const profile = await this.purohitProfileRepository.findOne({
-      where: { userId },
-    });
-
-    if (!profile) {
-      throw new NotFoundException('Purohit profile not found');
-    }
-
+    const caller = this.normalizeCaller(callerOrUserId);
     const account = await this.purohitBankAccountRepository.findById(id);
 
     if (!account) {
       throw new NotFoundException('Bank account not found');
     }
 
-    if (account.purohitId !== profile.id) {
-      throw new ForbiddenException('You can update only your own bank account');
+    let profile: PurohitProfile | null = null;
+    if (caller.role === USER_ROLE.PUROHIT) {
+      profile = await this.purohitProfileRepository.findOne({
+        where: { userId: caller.id },
+      });
+
+      if (!profile) {
+        throw new NotFoundException('Purohit profile not found');
+      }
+
+      if (account.purohitId !== profile.id) {
+        throw new ForbiddenException('You can update only your own bank account');
+      }
+    } else if (caller.role === USER_ROLE.ADMIN) {
+      const targetIdToValidate = requestedPurohitId ?? (dto as any)?.purohitId;
+      if (targetIdToValidate) {
+        const targetUserId = await this.resolveTargetPurohitId(
+          caller.id,
+          caller.role,
+          targetIdToValidate,
+        );
+        profile = await this.purohitProfileRepository.findOne({
+          where: { userId: targetUserId },
+        });
+        if (!profile || account.purohitId !== profile.id) {
+          throw new NotFoundException('Bank account is not mapped to this Purohit');
+        }
+      } else {
+        profile = await this.purohitProfileRepository.findOne({
+          where: { id: account.purohitId },
+        });
+        if (!profile) {
+          throw new NotFoundException('Purohit profile not found');
+        }
+      }
+    } else {
+      throw new ForbiddenException('Access denied');
     }
 
     if (dto.accountNumber && dto.accountNumber !== account.accountNumber) {
@@ -2777,8 +2846,10 @@ export class UserService {
       );
     }
 
+    const { purohitId: _ignoredPurohitId, ...updatePayload } = dto as any;
+
     const updatedData: Partial<PurohitBankAccount> = {
-      ...dto,
+      ...updatePayload,
       ...(isPrimary !== undefined && { isPrimary }),
       verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
     };
@@ -2789,14 +2860,17 @@ export class UserService {
       await this.purohitBankAccountRepository.findById(id);
 
     await this.auditLogService.createAuditLog({
-      actorId: userId,
+      actorId: caller.id,
       actorType: ACTOR_TYPE.USER,
-      actorRole: USER_ROLE.PUROHIT,
+      actorRole: caller.role,
       module: AUDIT_MODULE.USER,
       entity: 'User',
-      entityId: String(userId),
+      entityId: String(profile.userId),
       action: 'PUROHIT_BANK_UPDATED',
-      message: `Purohit #${userId} updated bank account #${id}.`,
+      message:
+        caller.role === USER_ROLE.ADMIN
+          ? `Admin #${caller.id} updated bank account #${id} for Purohit #${profile.userId}.`
+          : `Purohit #${caller.id} updated bank account #${id}.`,
       oldValue: undefined,
       newValue: { bankAccountId: id },
     });
@@ -2808,23 +2882,54 @@ export class UserService {
     };
   }
 
-  async deletePurohitBankAccount(userId: number, id: number) {
-    const profile = await this.purohitProfileRepository.findOne({
-      where: { userId },
-    });
-
-    if (!profile) {
-      throw new NotFoundException('Purohit profile not found');
-    }
-
+  async deletePurohitBankAccount(
+    callerOrUserId: { id: number; role?: USER_ROLE } | number,
+    id: number,
+    requestedPurohitId?: number,
+  ) {
+    const caller = this.normalizeCaller(callerOrUserId);
     const account = await this.purohitBankAccountRepository.findById(id);
 
     if (!account) {
       throw new NotFoundException('Bank account not found');
     }
 
-    if (account.purohitId !== profile.id) {
-      throw new ForbiddenException('You can delete only your own bank account');
+    let profile: PurohitProfile | null = null;
+    if (caller.role === USER_ROLE.PUROHIT) {
+      profile = await this.purohitProfileRepository.findOne({
+        where: { userId: caller.id },
+      });
+
+      if (!profile) {
+        throw new NotFoundException('Purohit profile not found');
+      }
+
+      if (account.purohitId !== profile.id) {
+        throw new ForbiddenException('You can delete only your own bank account');
+      }
+    } else if (caller.role === USER_ROLE.ADMIN) {
+      if (requestedPurohitId) {
+        const targetUserId = await this.resolveTargetPurohitId(
+          caller.id,
+          caller.role,
+          requestedPurohitId,
+        );
+        profile = await this.purohitProfileRepository.findOne({
+          where: { userId: targetUserId },
+        });
+        if (!profile || account.purohitId !== profile.id) {
+          throw new NotFoundException('Bank account is not mapped to this Purohit');
+        }
+      } else {
+        profile = await this.purohitProfileRepository.findOne({
+          where: { id: account.purohitId },
+        });
+        if (!profile) {
+          throw new NotFoundException('Purohit profile not found');
+        }
+      }
+    } else {
+      throw new ForbiddenException('Access denied');
     }
 
     const wasPrimary = account.isPrimary;
@@ -2844,14 +2949,17 @@ export class UserService {
     }
 
     await this.auditLogService.createAuditLog({
-      actorId: userId,
+      actorId: caller.id,
       actorType: ACTOR_TYPE.USER,
-      actorRole: USER_ROLE.PUROHIT,
+      actorRole: caller.role,
       module: AUDIT_MODULE.USER,
       entity: 'User',
-      entityId: String(userId),
+      entityId: String(profile.userId),
       action: 'PUROHIT_BANK_UPDATED',
-      message: `Purohit #${userId} deleted bank account #${id}.`,
+      message:
+        caller.role === USER_ROLE.ADMIN
+          ? `Admin #${caller.id} deleted bank account #${id} for Purohit #${profile.userId}.`
+          : `Purohit #${caller.id} deleted bank account #${id}.`,
       oldValue: undefined,
       newValue: { bankAccountId: id, deleted: true },
     });

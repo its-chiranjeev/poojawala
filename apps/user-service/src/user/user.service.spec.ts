@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { UserService } from './user.service';
 import { UserController } from './user.controller';
 import {
@@ -12,6 +12,8 @@ import {
   PUROHIT_MEDIA_VERIFICATION_STATUS,
   PurohitBankAccount,
   BANK_VERIFICATION_STATUS,
+  PUROHIT_PAYMENT_METHOD,
+  BANK_ACCOUNT_TYPE,
   Service,
   PurohitService,
   PurohitServiceArea,
@@ -48,6 +50,7 @@ describe('UserService - Purohit Verification Rework', () => {
   let testProfile: PurohitProfile;
   let testMedia: PurohitMedia[];
   let testBankAccount: PurohitBankAccount;
+  let testBankAccounts: any[];
   let testServices: Service[];
   let testPurohitServices: any[];
   let testServiceAreas: any[];
@@ -138,9 +141,12 @@ describe('UserService - Purohit Verification Rework', () => {
       accountNumber: '1234567890',
       ifscCode: 'SBIN0001234',
       bankName: 'State Bank of India',
+      paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
       verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
       isPrimary: true,
     } as unknown as PurohitBankAccount;
+
+    testBankAccounts = [testBankAccount];
 
     mockUserRepo = {
       findById: jest.fn().mockImplementation((id: number | string) => {
@@ -200,10 +206,24 @@ describe('UserService - Purohit Verification Rework', () => {
         if (where?.userId === testUser.id || where?.id === testProfile.id) {
           return Promise.resolve(testProfile);
         }
+        if (where?.userId === 20 || where?.id === 201) {
+          return Promise.resolve({
+            id: 201,
+            userId: 20,
+            verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+          });
+        }
         return Promise.resolve(null);
       }),
       findByUserId: jest.fn().mockImplementation((userId: number) => {
         if (userId === testUser.id) return Promise.resolve(testProfile);
+        if (userId === 20) {
+          return Promise.resolve({
+            id: 201,
+            userId: 20,
+            verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+          });
+        }
         return Promise.resolve(null);
       }),
       update: jest.fn().mockImplementation((id: number, payload: any) => {
@@ -257,17 +277,53 @@ describe('UserService - Purohit Verification Rework', () => {
     };
 
     mockPurohitBankRepo = {
-      findById: jest.fn().mockResolvedValue(testBankAccount),
-      findByPurohitId: jest.fn().mockResolvedValue([testBankAccount]),
-      findOne: jest.fn().mockResolvedValue(testBankAccount),
+      findById: jest.fn().mockImplementation((id: number) => {
+        const found = testBankAccounts.find((b) => b.id === id);
+        return Promise.resolve(found || null);
+      }),
+      findByPurohitId: jest.fn().mockImplementation((purohitId: number) => {
+        const found = testBankAccounts.filter((b) => b.purohitId === purohitId);
+        return Promise.resolve(found);
+      }),
+      findByAccountNumber: jest.fn().mockImplementation((accountNumber: string) => {
+        const found = testBankAccounts.find((b) => b.accountNumber === accountNumber);
+        return Promise.resolve(found || null);
+      }),
+      clearPrimaryAccount: jest.fn().mockImplementation((purohitId: number) => {
+        testBankAccounts.forEach((b) => {
+          if (b.purohitId === purohitId) b.isPrimary = false;
+        });
+        return Promise.resolve();
+      }),
+      createAccount: jest.fn().mockImplementation((payload: any) => {
+        const newAcc = { id: testBankAccounts.length + 10, ...payload };
+        testBankAccounts.push(newAcc);
+        return Promise.resolve(newAcc);
+      }),
+      updateAccount: jest.fn().mockImplementation((id: number, data: any) => {
+        const found = testBankAccounts.find((b) => b.id === id);
+        if (found) Object.assign(found, data);
+        return Promise.resolve(found || null);
+      }),
+      deleteAccount: jest.fn().mockImplementation((id: number) => {
+        testBankAccounts = testBankAccounts.filter((b) => b.id !== id);
+        return Promise.resolve({ affected: 1 });
+      }),
+      findBankAccounts: jest.fn().mockImplementation((purohitId: number, page: number = 1, limit: number = 10, search?: string) => {
+        let list = testBankAccounts.filter((b) => b.purohitId === purohitId);
+        if (search) {
+          list = list.filter((b) => b.accountHolderName?.includes(search) || b.accountNumber?.includes(search));
+        }
+        return Promise.resolve({ data: list, total: list.length });
+      }),
+      findOne: jest.fn().mockImplementation(() => Promise.resolve(testBankAccounts[0] || null)),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
-      updateAccount: jest.fn().mockResolvedValue({ affected: 1 }),
       create: jest.fn().mockImplementation((payload: any) => payload),
       save: jest.fn().mockImplementation((payload: any) => Promise.resolve(payload)),
       createQueryBuilder: jest.fn().mockReturnValue({
         update: () => ({
           set: (payload: any) => {
-            if (payload.verificationStatus) testBankAccount.verificationStatus = payload.verificationStatus;
+            if (payload.verificationStatus && testBankAccounts[0]) testBankAccounts[0].verificationStatus = payload.verificationStatus;
             return {
               where: () => ({
                 andWhere: () => ({
@@ -2230,6 +2286,320 @@ describe('UserService - Purohit Verification Rework', () => {
         expect(res.success).toBe(true);
         expect(res.data.profile.city).toBe('Active City');
         expect(res.data.profile.state).toBe('Active State');
+      });
+    });
+  });
+
+  describe('Purohit & Admin Bank Account Management', () => {
+    describe('Controller Decorator and Authorization Guard Verification', () => {
+      it('all 5 bank account controller endpoints allow both PUROHIT and ADMIN roles', () => {
+        const addRoles = Reflect.getMetadata('roles', UserController.prototype.addPurohitBankAccount);
+        expect(addRoles).toContain(USER_ROLE.PUROHIT);
+        expect(addRoles).toContain(USER_ROLE.ADMIN);
+
+        const listRoles = Reflect.getMetadata('roles', UserController.prototype.getPurohitBankAccounts);
+        expect(listRoles).toContain(USER_ROLE.PUROHIT);
+        expect(listRoles).toContain(USER_ROLE.ADMIN);
+
+        const getByIdRoles = Reflect.getMetadata('roles', UserController.prototype.getPurohitBankAccountById);
+        expect(getByIdRoles).toContain(USER_ROLE.PUROHIT);
+        expect(getByIdRoles).toContain(USER_ROLE.ADMIN);
+
+        const updateRoles = Reflect.getMetadata('roles', UserController.prototype.updatePurohitBankAccount);
+        expect(updateRoles).toContain(USER_ROLE.PUROHIT);
+        expect(updateRoles).toContain(USER_ROLE.ADMIN);
+
+        const deleteRoles = Reflect.getMetadata('roles', UserController.prototype.deletePurohitBankAccount);
+        expect(deleteRoles).toContain(USER_ROLE.PUROHIT);
+        expect(deleteRoles).toContain(USER_ROLE.ADMIN);
+      });
+    });
+
+    describe('PUROHIT Permissions and Ownership', () => {
+      it('1. Purohit can add own bank account', async () => {
+        const dto = {
+          paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+          accountHolderName: 'Ramesh Sharma',
+          accountNumber: '9998887776',
+          ifscCode: 'HDFC0001234',
+          bankName: 'HDFC Bank',
+          accountType: BANK_ACCOUNT_TYPE.SAVINGS,
+          isPrimary: false,
+        };
+
+        const res = await service.addPurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          dto as any,
+        );
+
+        expect(res.success).toBe(true);
+        expect(res.data.accountNumber).toBe('9998887776');
+        expect(res.data.purohitId).toBe(testProfile.id);
+      });
+
+      it('2. Purohit can list own bank accounts', async () => {
+        const res = await service.getPurohitBankAccounts(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          1,
+          10,
+        );
+
+        expect(res.success).toBe(true);
+        expect(res.data.length).toBeGreaterThan(0);
+        expect(res.data[0].purohitId).toBe(testProfile.id);
+      });
+
+      it('3. Purohit can get own bank account by id', async () => {
+        const res = await service.getPurohitBankAccountById(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          5,
+        );
+
+        expect(res.success).toBe(true);
+        expect(res.data.id).toBe(5);
+      });
+
+      it('4. Purohit cannot get another Purohit bank account', async () => {
+        // Create an account mapped to profile 201 (another Purohit)
+        testBankAccounts.push({
+          id: 99,
+          purohitId: 201,
+          accountHolderName: 'Other Purohit',
+          accountNumber: '5554443332',
+          paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+        });
+
+        await expect(
+          service.getPurohitBankAccountById(
+            { id: testUser.id, role: USER_ROLE.PUROHIT },
+            99,
+          ),
+        ).rejects.toThrow(ForbiddenException);
+      });
+
+      it('5. Purohit cannot update another Purohit bank account', async () => {
+        testBankAccounts.push({
+          id: 98,
+          purohitId: 201,
+          accountHolderName: 'Other Purohit',
+          accountNumber: '5554443331',
+          paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+        });
+
+        await expect(
+          service.updatePurohitBankAccount(
+            { id: testUser.id, role: USER_ROLE.PUROHIT },
+            98,
+            { accountHolderName: 'Hacked Name' } as any,
+          ),
+        ).rejects.toThrow(ForbiddenException);
+      });
+
+      it('6. Purohit cannot delete another Purohit bank account', async () => {
+        testBankAccounts.push({
+          id: 97,
+          purohitId: 201,
+          accountHolderName: 'Other Purohit',
+          accountNumber: '5554443330',
+          paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+        });
+
+        await expect(
+          service.deletePurohitBankAccount(
+            { id: testUser.id, role: USER_ROLE.PUROHIT },
+            97,
+          ),
+        ).rejects.toThrow(ForbiddenException);
+      });
+    });
+
+    describe('ADMIN Permissions and Target Purohit Resolution', () => {
+      it('7. Admin can add a bank account for a Purohit', async () => {
+        const dto = {
+          paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
+          upiId: 'ramesh@upi',
+          isPrimary: false,
+        };
+
+        const res = await service.addPurohitBankAccount(
+          { id: testAdmin.id, role: USER_ROLE.ADMIN },
+          dto as any,
+          testUser.id,
+        );
+
+        expect(res.success).toBe(true);
+        expect(res.data.upiId).toBe('ramesh@upi');
+        expect(res.data.purohitId).toBe(testProfile.id);
+      });
+
+      it('8. Admin fails to add bank account without specifying purohitId', async () => {
+        const dto = {
+          paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
+          upiId: 'unknown@upi',
+        };
+
+        await expect(
+          service.addPurohitBankAccount(
+            { id: testAdmin.id, role: USER_ROLE.ADMIN },
+            dto as any,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('9. Admin fails to add bank account for nonexistent Purohit', async () => {
+        const dto = {
+          paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
+          upiId: 'ghost@upi',
+        };
+
+        await expect(
+          service.addPurohitBankAccount(
+            { id: testAdmin.id, role: USER_ROLE.ADMIN },
+            dto as any,
+            9999,
+          ),
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it('10. Admin can list bank accounts for a Purohit', async () => {
+        const res = await service.getPurohitBankAccounts(
+          { id: testAdmin.id, role: USER_ROLE.ADMIN },
+          1,
+          10,
+          undefined,
+          testUser.id,
+        );
+
+        expect(res.success).toBe(true);
+        expect(res.data.length).toBeGreaterThan(0);
+      });
+
+      it('11. Admin can get a Purohit bank account by id', async () => {
+        const res = await service.getPurohitBankAccountById(
+          { id: testAdmin.id, role: USER_ROLE.ADMIN },
+          5,
+          testUser.id,
+        );
+
+        expect(res.success).toBe(true);
+        expect(res.data.id).toBe(5);
+      });
+
+      it('12. Admin gets 404 when requestedPurohitId does not match bank account owner', async () => {
+        // Account 5 belongs to testUser (profile 101), but admin asks for user 20 (profile 201)
+        await expect(
+          service.getPurohitBankAccountById(
+            { id: testAdmin.id, role: USER_ROLE.ADMIN },
+            5,
+            20,
+          ),
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it('13. Admin can update a Purohit bank account', async () => {
+        const res = await service.updatePurohitBankAccount(
+          { id: testAdmin.id, role: USER_ROLE.ADMIN },
+          5,
+          { accountHolderName: 'Ramesh S Sharma' } as any,
+          testUser.id,
+        );
+
+        expect(res.success).toBe(true);
+        expect(res.data.accountHolderName).toBe('Ramesh S Sharma');
+      });
+
+      it('14. Admin can delete a Purohit bank account', async () => {
+        const res = await service.deletePurohitBankAccount(
+          { id: testAdmin.id, role: USER_ROLE.ADMIN },
+          5,
+          testUser.id,
+        );
+
+        expect(res.success).toBe(true);
+        expect(testBankAccounts.find((b) => b.id === 5)).toBeUndefined();
+      });
+    });
+
+    describe('Bank Account Business Logic & Invariants', () => {
+      it('15. Reject duplicate account number', async () => {
+        testBankAccounts = [
+          {
+            id: 5,
+            purohitId: 101,
+            accountNumber: '111122223333',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            accountHolderName: 'Account 1',
+            ifscCode: 'SBIN0001234',
+          },
+        ];
+
+        const dto = {
+          paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+          accountNumber: '111122223333',
+          accountHolderName: 'Account 2',
+          ifscCode: 'SBIN0001234',
+        };
+
+        await expect(
+          service.addPurohitBankAccount(
+            { id: testUser.id, role: USER_ROLE.PUROHIT },
+            dto as any,
+          ),
+        ).rejects.toThrow(ConflictException);
+      });
+
+      it('16. When adding second account with isPrimary=true, previous primary is cleared', async () => {
+        testBankAccounts = [
+          {
+            id: 1,
+            purohitId: 101,
+            accountNumber: '1001',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            accountHolderName: 'Acc 1',
+            ifscCode: 'SBIN0001234',
+            isPrimary: true,
+          },
+        ];
+
+        const res = await service.addPurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          {
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            accountNumber: '1002',
+            accountHolderName: 'Acc 2',
+            ifscCode: 'SBIN0001234',
+            isPrimary: true,
+          } as any,
+        );
+
+        expect(res.data.isPrimary).toBe(true);
+        const acc1 = testBankAccounts.find((b) => b.id === 1);
+        expect(acc1.isPrimary).toBe(false);
+      });
+
+      it('17. Deleting primary account promotes next remaining account to primary', async () => {
+        testBankAccounts = [
+          {
+            id: 1,
+            purohitId: 101,
+            accountNumber: '1001',
+            isPrimary: true,
+          },
+          {
+            id: 2,
+            purohitId: 101,
+            accountNumber: '1002',
+            isPrimary: false,
+          },
+        ];
+
+        await service.deletePurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          1,
+        );
+
+        const acc2 = testBankAccounts.find((b) => b.id === 2);
+        expect(acc2.isPrimary).toBe(true);
       });
     });
   });

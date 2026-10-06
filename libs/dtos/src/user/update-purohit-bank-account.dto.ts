@@ -39,4 +39,8 @@ export class UpdatePurohitBankAccountDto {
     return value;
   })
   isPrimary?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => (value !== undefined && value !== null ? Number(value) : undefined))
+  purohitId?: number;
 }

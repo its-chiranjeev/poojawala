@@ -83,4 +83,4 @@ import { OrderRepository } from './order.repository';
     OrderRepository,
   ],
 })
-export class RepositoriesModule {}
+export class RepositoriesModule { }

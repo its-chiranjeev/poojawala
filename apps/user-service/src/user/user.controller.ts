@@ -625,19 +625,24 @@ export class UserController {
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   @Post('purohit/bank-account')
   @HttpCode(HttpStatus.CREATED)
   async addPurohitBankAccount(
     @Req() req: any,
     @Body(new ValidationPipe({ whitelist: true, transform: true }))
     dto: CreatePurohitBankAccountDto,
+    @Query('purohitId') purohitId?: string,
   ) {
-    return this.userService.addPurohitBankAccount(req.user.id, dto);
+    return this.userService.addPurohitBankAccount(
+      { id: req.user.id, role: req.user.role },
+      dto,
+      purohitId ? Number(purohitId) : undefined,
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   @Get('purohit/bank-accounts')
   @HttpCode(HttpStatus.OK)
   async getPurohitBankAccounts(
@@ -645,12 +650,14 @@ export class UserController {
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '10',
     @Query('search') search?: string,
+    @Query('purohitId') purohitId?: string,
   ) {
     return this.userService.getPurohitBankAccounts(
-      req.user.id,
+      { id: req.user.id, role: req.user.role },
       Number(page),
       Number(limit),
       search,
+      purohitId ? Number(purohitId) : undefined,
     );
   }
 
@@ -661,12 +668,17 @@ export class UserController {
   async getPurohitBankAccountById(
     @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
+    @Query('purohitId') purohitId?: string,
   ) {
-    return this.userService.getPurohitBankAccountById(req.user, id);
+    return this.userService.getPurohitBankAccountById(
+      { id: req.user.id, role: req.user.role },
+      id,
+      purohitId ? Number(purohitId) : undefined,
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   @Patch('purohit/bank-account/:id')
   @HttpCode(HttpStatus.OK)
   async updatePurohitBankAccount(
@@ -674,19 +686,30 @@ export class UserController {
     @Param('id', ParseIntPipe) id: number,
     @Body(new ValidationPipe({ whitelist: true, transform: true }))
     dto: UpdatePurohitBankAccountDto,
+    @Query('purohitId') purohitId?: string,
   ) {
-    return this.userService.updatePurohitBankAccount(req.user.id, id, dto);
+    return this.userService.updatePurohitBankAccount(
+      { id: req.user.id, role: req.user.role },
+      id,
+      dto,
+      purohitId ? Number(purohitId) : undefined,
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   @Delete('purohit/bank-account/:id')
   @HttpCode(HttpStatus.OK)
   async deletePurohitBankAccount(
     @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
+    @Query('purohitId') purohitId?: string,
   ) {
-    return this.userService.deletePurohitBankAccount(req.user.id, id);
+    return this.userService.deletePurohitBankAccount(
+      { id: req.user.id, role: req.user.role },
+      id,
+      purohitId ? Number(purohitId) : undefined,
+    );
   }
 
   @Get('purohit/dashboard-stats')
