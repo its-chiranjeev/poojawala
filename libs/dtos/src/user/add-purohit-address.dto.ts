@@ -10,6 +10,11 @@ import {
 import { Type } from 'class-transformer';
 
 export class CreatePurohitServiceAreaDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  purohitId?: number;
+
   @IsString()
   @Length(2, 50)
   addressLabel!: string;

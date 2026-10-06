@@ -56,9 +56,9 @@ export class UserRepository extends BaseRepository<User> {
     const qb = this.repo.createQueryBuilder('user');
     qb.leftJoinAndMapOne('user.profile', 'purohit_profiles', 'profile', 'profile.userId = user.id');
     qb.leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id');
-    qb.leftJoinAndSelect('user.serviceAreas', 'serviceAreas');
-    qb.leftJoinAndSelect('user.addresses', 'addresses');
-    qb.leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id');
+    qb.leftJoinAndSelect('user.serviceAreas', 'serviceAreas', 'serviceAreas.deletedAt IS NULL');
+    qb.leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL');
+    qb.leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id AND purohitServices.deletedAt IS NULL');
     qb.leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId');
     if (search) {
       qb.andWhere(
@@ -128,6 +128,12 @@ export class UserRepository extends BaseRepository<User> {
     qb.take(limit);
 
     const [users, total] = await qb.getManyAndCount();
+
+    for (const u of users) {
+      if (u.role === USER_ROLE.PUROHIT) {
+        this.enrichPurohitServicesPayout(u);
+      }
+    }
 
     return {
       users,
@@ -255,11 +261,13 @@ export class UserRepository extends BaseRepository<User> {
         'profile.userId = user.id',
       )
         .leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id')
-        .leftJoinAndSelect('user.serviceAreas', 'serviceAreas')
-        .leftJoinAndSelect('user.addresses', 'addresses')
-        .leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id').leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId');
+        .leftJoinAndSelect('user.serviceAreas', 'serviceAreas', 'serviceAreas.deletedAt IS NULL')
+        .leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL')
+        .leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id AND purohitServices.deletedAt IS NULL').leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId')
+        .addOrderBy('serviceAreas.isDefault', 'DESC')
+        .addOrderBy('serviceAreas.createdAt', 'DESC');
     } else {
-      qb.leftJoinAndSelect('user.addresses', 'addresses');
+      qb.leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL');
     }
 
     const user = await qb.getOne();
@@ -283,32 +291,12 @@ export class UserRepository extends BaseRepository<User> {
             } catch {}
           }
 
-          let basePrice = 0;
-          if (plans?.basic?.price != null && Number(plans.basic.price) > 0) {
-            basePrice = Number(plans.basic.price);
-          } else if (
-            service.priceWithoutSamagri != null &&
-            Number(service.priceWithoutSamagri) > 0
-          ) {
-            basePrice = Number(service.priceWithoutSamagri);
-          }
 
-          if (basePrice > 0) {
-            const commissionPercentage = Number(
-              service.commissionPercentage != null
-                ? service.commissionPercentage
-                : 10,
-            );
-            const platformCommission = Number(
-              ((basePrice * commissionPercentage) / 100).toFixed(2),
-            );
-            const payout = Number((basePrice - platformCommission).toFixed(2));
-            ps.purohitPayoutAmount = payout;
-            service.purohitPayoutAmount = payout;
-          } else {
-            ps.purohitPayoutAmount = null;
-            service.purohitPayoutAmount = null;
-          }
+          const commissionPercentage = Number(
+            service.commissionPercentage != null
+              ? service.commissionPercentage
+              : 10,
+          );
 
           const effectiveToken =
             service.tokenPercentage != null && Number(service.tokenPercentage) > 0
@@ -321,6 +309,19 @@ export class UserRepository extends BaseRepository<User> {
                 const planPrice = Number((plan as any).price);
                 const tAmt = Number(((planPrice * effectiveToken) / 100).toFixed(2));
                 (plan as any).tokenAmount = tAmt;
+
+                const platformCommission = Number(
+                  ((planPrice * commissionPercentage) / 100).toFixed(2),
+                );
+                const planPayout = Number((planPrice - platformCommission).toFixed(2));
+                (plan as any).purohitPayoutAmount = planPayout;
+                (plan as any)[`${key}PurohitPayoutAmount`] = planPayout;
+
+                if (key === 'basic') {
+                  service.basicPurohitPayoutAmount = planPayout;
+                } else if (key === 'standard') {
+                  service.standardPurohitPayoutAmount = planPayout;
+                }
               }
             }
             service.plans = plans;

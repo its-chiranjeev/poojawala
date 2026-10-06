@@ -25,9 +25,64 @@ export function parseStringArray(value: unknown): string[] | undefined {
 
   if (Array.isArray(parsed)) {
     const result = parsed
-      .map((item) => (typeof item === 'string' ? item.trim() : item))
+      .map((item) => {
+        if (typeof item === 'string') return item.trim();
+        if (typeof item === 'object' && item !== null) {
+          const obj = item as Record<string, unknown>;
+          const val =
+            obj.city ||
+            obj.addressLabel ||
+            obj.name ||
+            obj.fullAddress ||
+            obj.area ||
+            obj.value;
+          if (typeof val === 'string') return val.trim();
+        }
+        return item;
+      })
       .filter((item) => item !== null && item !== undefined && item !== '');
     return result;
+  }
+
+  return undefined;
+}
+
+export function parseIntArray(value: unknown): number[] | undefined {
+  if (value === undefined || value === null || value === '' || value === 'null' || value === 'undefined') {
+    return undefined;
+  }
+  let parsed: unknown = value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        parsed = [trimmed];
+      }
+    } else if (trimmed.includes(',')) {
+      parsed = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+    } else {
+      parsed = [trimmed];
+    }
+  }
+
+  if (Array.isArray(parsed)) {
+    const result = parsed
+      .map((item) => {
+        if (typeof item === 'object' && item !== null) {
+          const val = (item as any).id ?? (item as any).serviceId ?? (item as any).value;
+          return Number(val);
+        }
+        return Number(item);
+      })
+      .filter((item) => !Number.isNaN(item) && Number.isInteger(item));
+    return result;
+  }
+
+  if (typeof parsed === 'number' && Number.isInteger(parsed)) {
+    return [parsed];
   }
 
   return undefined;

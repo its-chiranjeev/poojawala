@@ -8,6 +8,8 @@ import {
   UpdatePurohitBankAccountDto,
   UpdateUserDto,
   VerifyPurohitDto,
+  parseIntArray,
+  parseStringArray,
 } from '@poojawala/dtos';
 import { UpsertPlatformSettingDto } from '@poojawala/dtos/Platform setting/Platform.dto';
 import { CreateCustomerAddressDto } from '@poojawala/dtos/user/add-customer-address.dto';
@@ -32,6 +34,8 @@ import {
   USER_ROLE,
   USER_STATUS,
   CustomerAddress,
+  Service,
+  PurohitService,
   VENUE_TYPE,
   NOTIFICATION_TYPE,
   Order,
@@ -68,7 +72,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { createHmac } from 'crypto';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, In, DeepPartial } from 'typeorm';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
 import {
   AuditLogService,
@@ -142,6 +146,61 @@ export class UserService {
       throw new NotFoundException('User not found');
     }
 
+    let profile: PurohitProfile | null = null;
+    let uniqueServiceIds: number[] | undefined;
+    let uniqueAreaNames: string[] | undefined;
+
+    if (user.role === USER_ROLE.PUROHIT) {
+      profile = await this.purohitProfileRepository.findByUserId(
+        Number(id),
+      );
+
+      if (!profile) {
+        throw new NotFoundException('Purohit profile not found');
+      }
+
+      const rawServices =
+        dto.services !== undefined
+          ? dto.services
+          : dto.purohitServices !== undefined
+            ? dto.purohitServices
+            : dto.profile?.services !== undefined
+              ? dto.profile.services
+              : dto.profile?.purohitServices !== undefined
+                ? dto.profile.purohitServices
+                : undefined;
+
+      if (rawServices !== undefined) {
+        const parsedServices = parseIntArray(rawServices) || [];
+        uniqueServiceIds = Array.from(new Set(parsedServices));
+        if (uniqueServiceIds.length > 0) {
+          const serviceRepo = this.dataSource.getRepository(Service);
+          const foundServices = await serviceRepo.find({
+            where: { id: In(uniqueServiceIds) },
+          });
+          if (foundServices.length !== uniqueServiceIds.length) {
+            const foundSet = new Set(foundServices.map((s) => s.id));
+            const missing = uniqueServiceIds.filter((sId) => !foundSet.has(sId));
+            throw new NotFoundException(`Services not found: ${missing.join(', ')}`);
+          }
+        }
+      }
+
+      const rawServiceAreas =
+        dto.serviceAreas !== undefined
+          ? dto.serviceAreas
+          : dto.profile?.serviceAreas !== undefined
+            ? dto.profile.serviceAreas
+            : undefined;
+
+      if (rawServiceAreas !== undefined) {
+        const parsedAreas = parseStringArray(rawServiceAreas) || [];
+        uniqueAreaNames = Array.from(
+          new Set(parsedAreas.map((a) => String(a).trim()).filter(Boolean)),
+        );
+      }
+    }
+
     if (dto.password) {
       const hashedPassword = await bcrypt.hash(dto.password, 10);
       (dto as any).hashedPassword = hashedPassword;
@@ -168,7 +227,11 @@ export class UserService {
       username: dto.username,
       firstName: dto.firstName,
       lastName: dto.lastName,
-      // phone: dto.phone,
+      ...(dto.phone !== undefined && { phone: dto.phone }),
+      ...(dto.countryCode !== undefined && { countryCode: dto.countryCode }),
+      ...(dto.emergencyContact !== undefined && { emergencyContact: dto.emergencyContact }),
+      ...(dto.status !== undefined && { status: dto.status }),
+      ...(dto.role !== undefined && { role: dto.role }),
       profileImage: dto.profileImage,
       birthPlace: dto.birthPlace,
       ...(dto.rashi !== undefined && { rashi: dto.rashi }),
@@ -181,34 +244,45 @@ export class UserService {
 
     const updatedUser = await this.userRepository.updateUser(id, userPayload);
 
-    if (user.role === USER_ROLE.PUROHIT) {
-      const profile = await this.purohitProfileRepository.findByUserId(
-        Number(id),
-      );
+    if (user.role === USER_ROLE.PUROHIT && profile) {
+      const bio = dto.bio !== undefined ? dto.bio : dto.profile?.bio;
+      const qualification = dto.qualification !== undefined ? dto.qualification : dto.profile?.qualification;
+      const experienceYears = dto.experienceYears !== undefined ? dto.experienceYears : dto.profile?.experienceYears;
+      const aadhaarNumber = dto.aadhaarNumber !== undefined ? dto.aadhaarNumber : dto.profile?.aadhaarNumber;
+      const city = dto.city !== undefined ? dto.city : dto.profile?.city;
+      const languages = dto.languages !== undefined ? dto.languages : dto.profile?.languages;
+      const specializations = dto.specializations !== undefined ? dto.specializations : dto.profile?.specializations;
+      const isOnlineAvailable = dto.isOnlineAvailable !== undefined ? dto.isOnlineAvailable : dto.profile?.isOnlineAvailable;
+      const isOfflineAvailable = dto.isOfflineAvailable !== undefined ? dto.isOfflineAvailable : dto.profile?.isOfflineAvailable;
 
-      if (!profile) {
-        throw new NotFoundException('Purohit profile not found');
+      const profilePayload: any = {};
+      if (bio !== undefined) profilePayload.bio = bio;
+      if (qualification !== undefined) profilePayload.qualification = qualification;
+      if (experienceYears !== undefined) profilePayload.experienceYears = Number(experienceYears);
+      if (aadhaarNumber !== undefined) profilePayload.aadhaarNumber = aadhaarNumber;
+      if (city !== undefined) profilePayload.city = city;
+      if (languages !== undefined) profilePayload.languages = languages;
+      if (specializations !== undefined) profilePayload.specializations = specializations;
+      if (isOnlineAvailable !== undefined) {
+        profilePayload.isOnlineAvailable =
+          isOnlineAvailable === true ||
+          isOnlineAvailable === 'true' ||
+          String(isOnlineAvailable) === 'true';
+      }
+      if (isOfflineAvailable !== undefined) {
+        profilePayload.isOfflineAvailable =
+          isOfflineAvailable === true ||
+          isOfflineAvailable === 'true' ||
+          String(isOfflineAvailable) === 'true';
       }
 
-      await this.purohitProfileRepository.update(profile.id, {
-        bio: dto.bio,
-        qualification: dto.qualification,
-        experienceYears: dto.experienceYears,
-        aadhaarNumber: dto.aadhaarNumber,
-        city: dto.city,
-        languages: dto.languages,
-        specializations: dto.specializations,
-        isOnlineAvailable:
-          dto.isOnlineAvailable === undefined
-            ? profile.isOnlineAvailable
-            : dto.isOnlineAvailable === 'true',
-        isOfflineAvailable:
-          dto.isOfflineAvailable === undefined
-            ? profile.isOfflineAvailable
-            : dto.isOfflineAvailable === 'true',
-      });
+      if (Object.keys(profilePayload).length > 0) {
+        await this.purohitProfileRepository.update(profile.id, profilePayload);
+      }
 
-      if (dto.state !== undefined || dto.city !== undefined) {
+      const stateToUpdate = dto.state !== undefined ? dto.state : dto.profile?.state;
+      const cityToUpdate = dto.city !== undefined ? dto.city : dto.profile?.city;
+      if (stateToUpdate !== undefined || cityToUpdate !== undefined) {
         const defaultArea =
           (await this.purohitServiceAreaRepository.findOne({
             where: { purohitId: Number(id), isDefault: true },
@@ -219,13 +293,161 @@ export class UserService {
           }));
         if (defaultArea) {
           await this.purohitServiceAreaRepository.update(defaultArea.id, {
-            ...(dto.state !== undefined && { state: dto.state }),
-            ...(dto.city !== undefined && { city: dto.city }),
+            ...(stateToUpdate !== undefined && { state: stateToUpdate }),
+            ...(cityToUpdate !== undefined && { city: cityToUpdate }),
           });
         }
       }
+
+      // Bank account update if provided
+      const bankData = dto.bankAccount || (dto.bankAccounts && dto.bankAccounts[0]) || {};
+      const accountHolderName = dto.accountHolderName ?? bankData.accountHolderName;
+      const accountNumber = dto.accountNumber ?? bankData.accountNumber;
+      const ifscCode = dto.ifscCode ?? bankData.ifscCode;
+      const bankName = dto.bankName ?? bankData.bankName;
+      const paymentMethod = dto.paymentMethod ?? bankData.paymentMethod;
+      const upiId = dto.upiId ?? bankData.upiId;
+
+      if (
+        accountHolderName !== undefined ||
+        accountNumber !== undefined ||
+        ifscCode !== undefined ||
+        bankName !== undefined ||
+        paymentMethod !== undefined ||
+        upiId !== undefined
+      ) {
+        const existingBankAccount = await this.purohitBankAccountRepository.findOne({
+          where: { purohitId: profile.id },
+        });
+
+        if (existingBankAccount) {
+          await this.purohitBankAccountRepository.update(existingBankAccount.id, {
+            ...(accountHolderName !== undefined && { accountHolderName }),
+            ...(accountNumber !== undefined && { accountNumber }),
+            ...(ifscCode !== undefined && { ifscCode }),
+            ...(bankName !== undefined && { bankName }),
+            ...(paymentMethod !== undefined && { paymentMethod }),
+            ...(upiId !== undefined && { upiId }),
+          });
+        } else if (accountNumber || upiId) {
+          const newAccount = this.purohitBankAccountRepository.create({
+            purohitId: profile.id,
+            accountHolderName: accountHolderName || '',
+            accountNumber: accountNumber || '',
+            ifscCode: ifscCode || '',
+            bankName: bankName || '',
+            paymentMethod: paymentMethod || PUROHIT_PAYMENT_METHOD.BANK,
+            upiId: upiId || null,
+          });
+          await this.purohitBankAccountRepository.save(newAccount);
+        }
+      }
+
+      if (uniqueServiceIds !== undefined) {
+        const existingServices = await this.purohitServiceRepository.find({
+          where: { purohitId: profile.id } as any,
+          withDeleted: true,
+        });
+
+        // 1. Soft-delete active mappings not in desired list
+        for (const existing of existingServices) {
+          if (!existing.deletedAt && !uniqueServiceIds.includes(existing.serviceId)) {
+            await this.purohitServiceRepository.update(existing.id, {
+              isActive: false,
+            });
+            await this.purohitServiceRepository.softDelete(existing.id);
+          }
+        }
+
+        // 2. Add or restore desired services
+        for (const serviceId of uniqueServiceIds) {
+          const existing = existingServices.find((es) => es.serviceId === serviceId);
+          if (existing) {
+            if (existing.deletedAt) {
+              await this.purohitServiceRepository.restore(existing.id);
+              await this.purohitServiceRepository.update(existing.id, {
+                deletedAt: null as any,
+                isActive: true,
+              });
+            } else if (!existing.isActive) {
+              await this.purohitServiceRepository.update(existing.id, {
+                isActive: true,
+              });
+            }
+          } else {
+            const newMapping = this.purohitServiceRepository.create({
+              purohitId: profile.id,
+              serviceId,
+              isActive: true,
+              isOnline: false,
+              isOffline: true,
+            });
+            await this.purohitServiceRepository.save(newMapping);
+          }
+        }
+      }
+
+      if (uniqueAreaNames !== undefined) {
+        const activeAreas = await this.purohitServiceAreaRepository.find({
+          where: { purohitId: Number(id) } as any,
+        });
+
+        // 1. Soft-delete existing active areas not in desired list
+        for (const existingArea of activeAreas) {
+          const areaNameMatch = uniqueAreaNames.find(
+            (name) =>
+              name.toLowerCase() === (existingArea.city || '').toLowerCase() ||
+              name.toLowerCase() === (existingArea.addressLabel || '').toLowerCase(),
+          );
+          if (!areaNameMatch) {
+            await this.purohitServiceAreaRepository.deleteArea(existingArea.id);
+          }
+        }
+
+        // 2. Retain or add desired areas
+        const retainedAreas = activeAreas.filter((a) =>
+          uniqueAreaNames.some(
+            (name) =>
+              name.toLowerCase() === (a.city || '').toLowerCase() ||
+              name.toLowerCase() === (a.addressLabel || '').toLowerCase(),
+          ),
+        );
+
+        let hasDefault = retainedAreas.some((a) => a.isDefault);
+
+        for (const areaName of uniqueAreaNames) {
+          const existing = retainedAreas.find(
+            (ea) =>
+              ea.city?.toLowerCase() === areaName.toLowerCase() ||
+              ea.addressLabel?.toLowerCase() === areaName.toLowerCase(),
+          );
+          if (existing) {
+            if (!hasDefault) {
+              await this.purohitServiceAreaRepository.updateArea(existing.id, {
+                isDefault: true,
+              });
+              hasDefault = true;
+            }
+          } else {
+            const newArea = this.purohitServiceAreaRepository.create({
+              purohitId: Number(id),
+              addressLabel: areaName,
+              streetName: areaName,
+              fullAddress: areaName,
+              city: areaName,
+              pincode: '000000',
+              isDefault: !hasDefault,
+              serviceRadiusKm: 10,
+            });
+            await this.purohitServiceAreaRepository.save(newArea);
+            if (!hasDefault) hasDefault = true;
+          }
+        }
+      }
     } else if (user.role === USER_ROLE.CUSTOMER) {
-      if (dto.state !== undefined || dto.city !== undefined) {
+      const stateToUpdate = dto.state !== undefined ? dto.state : dto.profile?.state;
+      const cityToUpdate = dto.city !== undefined ? dto.city : dto.profile?.city;
+      if (stateToUpdate !== undefined || cityToUpdate !== undefined) {
         const defaultAddress =
           (await this.customerAddressRepository.findOne({
             where: { customerId: Number(id), isDefault: true },
@@ -236,8 +458,8 @@ export class UserService {
           }));
         if (defaultAddress) {
           await this.customerAddressRepository.update(defaultAddress.id, {
-            ...(dto.state !== undefined && { state: dto.state }),
-            ...(dto.city !== undefined && { city: dto.city }),
+            ...(stateToUpdate !== undefined && { state: stateToUpdate }),
+            ...(cityToUpdate !== undefined && { city: cityToUpdate }),
           });
         }
       }
@@ -266,32 +488,27 @@ export class UserService {
     // Active Vercel Blob implementation:
     // Stored public Blob URLs or existing URLs are returned directly without generating an S3-style signed URL.
 
-    // Resolve state for user profile
-    let userState: string | null = (safeUser as any)?.state || null;
-    if (!userState) {
-      if (user.role === USER_ROLE.PUROHIT) {
-        const serviceAreas = (safeUser as any).serviceAreas;
-        if (serviceAreas && serviceAreas.length > 0) {
-          const defaultArea =
-            serviceAreas.find((a: any) => a.isDefault) || serviceAreas[0];
-          userState = defaultArea?.state || null;
-        }
-        if (!userState && (safeUser as any).profile?.state) {
-          userState = (safeUser as any).profile.state;
-        }
-      } else if (user.role === USER_ROLE.CUSTOMER) {
-        const addresses = (safeUser as any).addresses;
-        if (addresses && addresses.length > 0) {
-          const defaultAddress =
-            addresses.find((a: any) => a.isDefault) || addresses[0];
-          userState = defaultAddress?.state || null;
-        }
-      }
-    }
-    (safeUser as any).state = userState;
+    // Resolve city and state for user profile
+    const { city: userCity, state: userState } = this.resolveUserCityAndState(safeUser);
     if ((safeUser as any).profile) {
-      (safeUser as any).profile.state =
-        (safeUser as any).profile.state || userState;
+      (safeUser as any).profile = this.formatProfileWithCityAndState(
+        (safeUser as any).profile,
+        userCity,
+        userState,
+      );
+      delete (safeUser as any).city;
+      delete (safeUser as any).state;
+      delete (safeUser as any).purohitServices;
+    } else {
+      (safeUser as any).city = userCity;
+      (safeUser as any).state = userState;
+    }
+
+    if (Array.isArray(safeUser.addresses)) {
+      safeUser.addresses = safeUser.addresses.filter((a: any) => !a.deletedAt);
+    }
+    if (Array.isArray(safeUser.serviceAreas)) {
+      safeUser.serviceAreas = this.sortServiceAreas(safeUser.serviceAreas);
     }
 
     await this.auditLogService.createAuditLog({
@@ -1063,6 +1280,136 @@ export class UserService {
     };
   }
 
+  private enrichPurohitServicePlansPayout(service: any): void {
+    if (!service) return;
+    let plans = service.plans;
+    if (typeof plans === 'string') {
+      try {
+        plans = JSON.parse(plans);
+      } catch { }
+    }
+    if (plans && typeof plans === 'object' && !Array.isArray(plans)) {
+      const effectiveCommission =
+        service.commissionPercentage != null
+          ? Number(service.commissionPercentage)
+          : 10;
+      const effectiveToken =
+        service.tokenPercentage != null && Number(service.tokenPercentage) > 0
+          ? Number(service.tokenPercentage)
+          : 30;
+
+      const enrichedPlans: Record<string, any> = {};
+      for (const [key, plan] of Object.entries(plans as Record<string, any>)) {
+        if (!plan || typeof plan !== 'object') {
+          enrichedPlans[key] = plan;
+          continue;
+        }
+        const planCopy = { ...plan };
+        const planPrice = Number(planCopy.price);
+        if (Number.isFinite(planPrice) && planPrice > 0) {
+          const commission = Number(((planPrice * effectiveCommission) / 100).toFixed(2));
+          const planPayout = Number((planPrice - commission).toFixed(2));
+          planCopy.purohitPayoutAmount = planPayout;
+          planCopy[`${key}PurohitPayoutAmount`] = planPayout;
+          planCopy.tokenAmount = Number(((planPrice * effectiveToken) / 100).toFixed(2));
+
+          if (key === 'basic') {
+            service.basicPurohitPayoutAmount = planPayout;
+          } else if (key === 'standard') {
+            service.standardPurohitPayoutAmount = planPayout;
+          }
+        }
+        enrichedPlans[key] = planCopy;
+      }
+      service.plans = enrichedPlans;
+    }
+  }
+
+  private resolveUserCityAndState(user: any): { city: string | null; state: string | null } {
+    let state: string | null = user?.state || null;
+    let city: string | null = user?.city || null;
+
+    if (user.role === USER_ROLE.PUROHIT) {
+      const serviceAreas = (user.serviceAreas || []).filter((a: any) => !a.deletedAt);
+      if (serviceAreas.length > 0) {
+        const defaultArea =
+          serviceAreas.find((a: any) => a.isDefault) ||
+          serviceAreas[0];
+        if (!state) state = defaultArea?.state || null;
+        if (!city) city = defaultArea?.city || null;
+      }
+      if (!city && user.profile?.city) {
+        city = user.profile.city;
+      }
+      if (!state && user.profile?.state) {
+        state = user.profile.state;
+      }
+      const addresses = (user.addresses || []).filter((a: any) => !a.deletedAt);
+      if (addresses.length > 0) {
+        const defaultAddress =
+          addresses.find((a: any) => a.isDefault) ||
+          addresses[0];
+        if (!state) state = defaultAddress?.state || null;
+        if (!city) city = defaultAddress?.city || null;
+      }
+    } else if (user.role === USER_ROLE.CUSTOMER) {
+      const addresses = (user.addresses || []).filter((a: any) => !a.deletedAt);
+      if (addresses.length > 0) {
+        const defaultAddress =
+          addresses.find((a: any) => a.isDefault) ||
+          addresses[0];
+        if (!state) state = defaultAddress?.state || null;
+        if (!city) city = defaultAddress?.city || null;
+      }
+    }
+
+    return { city, state };
+  }
+
+  private formatProfileWithCityAndState(
+    profile: any,
+    userCity: string | null,
+    userState: string | null,
+  ): any {
+    if (!profile) return profile;
+
+    const resolvedCity = profile.city || userCity || null;
+    const resolvedState = profile.state || userState || null;
+
+    const orderedProfile: Record<string, any> = {};
+    for (const [key, value] of Object.entries(profile)) {
+      if (key === 'state') continue;
+      if (key === 'city') {
+        orderedProfile.city = resolvedCity;
+        orderedProfile.state = resolvedState;
+      } else {
+        orderedProfile[key] = value;
+      }
+    }
+    if (!('city' in orderedProfile)) {
+      orderedProfile.city = resolvedCity;
+      orderedProfile.state = resolvedState;
+    }
+
+    return orderedProfile;
+  }
+
+  private sortServiceAreas(serviceAreas: any[]): any[] {
+    if (!Array.isArray(serviceAreas)) return [];
+    return serviceAreas
+      .filter((a: any) => !a.deletedAt)
+      .sort((a: any, b: any) => {
+        const aDefault = a.isDefault ? 1 : 0;
+        const bDefault = b.isDefault ? 1 : 0;
+        if (aDefault !== bDefault) {
+          return bDefault - aDefault;
+        }
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
+  }
+
   async getAllUsers(query: GetAllUsersDto) {
     const { users, total } = await this.userRepository.getAllUsers(query);
 
@@ -1134,20 +1481,45 @@ export class UserService {
                     );
                   } catch (e) { }
                 }
+                if (ps.service) {
+                  this.enrichPurohitServicePlansPayout(ps.service);
+                }
+                const { purohitPayoutAmount: _psPayout, ...restPs } = ps;
+                const { purohitPayoutAmount: _servicePayout, ...restService } = ps.service || {};
                 return {
-                  ...ps,
-                  purohitPayoutAmount: ps.purohitPayoutAmount ?? null,
+                  ...restPs,
                   service: {
-                    ...ps.service,
-                    purohitPayoutAmount: ps.service?.purohitPayoutAmount ?? null,
+                    ...restService,
                     iconDownloadurl,
                   },
                 };
               }),
             );
-            (safeUser as any).purohitServices = profile.purohitServices;
+            delete (safeUser as any).purohitServices;
           }
           (safeUser as any).profile = profile;
+        }
+
+        const { city: userCity, state: userState } = this.resolveUserCityAndState(safeUser);
+        if ((safeUser as any).profile) {
+          (safeUser as any).profile = this.formatProfileWithCityAndState(
+            (safeUser as any).profile,
+            userCity,
+            userState,
+          );
+          delete (safeUser as any).city;
+          delete (safeUser as any).state;
+          delete (safeUser as any).purohitServices;
+        } else {
+          (safeUser as any).city = userCity;
+          (safeUser as any).state = userState;
+        }
+
+        if (Array.isArray(safeUser.addresses)) {
+          safeUser.addresses = safeUser.addresses.filter((a: any) => !a.deletedAt);
+        }
+        if (Array.isArray(safeUser.serviceAreas)) {
+          safeUser.serviceAreas = this.sortServiceAreas(safeUser.serviceAreas);
         }
 
         return safeUser;
@@ -1611,22 +1983,47 @@ export class UserService {
                   );
                 } catch (e) { }
               }
+              if (ps.service) {
+                this.enrichPurohitServicePlansPayout(ps.service);
+              }
+              const { purohitPayoutAmount: _psPayout, ...restPs } = ps;
+              const { purohitPayoutAmount: _servicePayout, ...restService } = ps.service || {};
               return {
-                ...ps,
-                purohitPayoutAmount: ps.purohitPayoutAmount ?? null,
+                ...restPs,
                 service: {
-                  ...ps.service,
-                  purohitPayoutAmount: ps.service?.purohitPayoutAmount ?? null,
+                  ...restService,
                   iconDownloadurl,
                 },
               };
             }),
           );
-          (safeUser as any).purohitServices = profile.purohitServices;
+          delete (safeUser as any).purohitServices;
         }
         (safeUser as any).profile = profile;
         (safeUser as any).verificationStatus = profile.verificationStatus;
         (safeUser as any).rejectionReason = profile.rejectionReason ?? null;
+      }
+
+      const { city: userCity, state: userState } = this.resolveUserCityAndState(safeUser);
+      if ((safeUser as any).profile) {
+        (safeUser as any).profile = this.formatProfileWithCityAndState(
+          (safeUser as any).profile,
+          userCity,
+          userState,
+        );
+        delete (safeUser as any).city;
+        delete (safeUser as any).state;
+        delete (safeUser as any).purohitServices;
+      } else {
+        (safeUser as any).city = userCity;
+        (safeUser as any).state = userState;
+      }
+
+      if (Array.isArray(safeUser.addresses)) {
+        safeUser.addresses = safeUser.addresses.filter((a: any) => !a.deletedAt);
+      }
+      if (Array.isArray(safeUser.serviceAreas)) {
+        safeUser.serviceAreas = this.sortServiceAreas(safeUser.serviceAreas);
       }
 
       return {
@@ -1652,23 +2049,35 @@ export class UserService {
         throw new NotFoundException('User not found');
       }
 
-      const existingAddresses = await this.customerAddressRepository.find({
-        where: { customerId: userId } as any,
-      });
+      const address = await this.dataSource.transaction(async (manager) => {
+        const addressRepo = manager.getRepository(CustomerAddress);
 
-      let isDefault = dto.isDefault || false;
+        let isDefault: boolean;
+        if (dto.isDefault === true) {
+          isDefault = true;
+          await addressRepo.update(
+            { customerId: userId, isDefault: true },
+            { isDefault: false },
+          );
+        } else if (dto.isDefault === false) {
+          isDefault = false;
+        } else {
+          // If isDefault is omitted, preserve existing business behavior
+          const existingCount = await addressRepo.count({
+            where: { customerId: userId },
+          });
+          isDefault = existingCount === 0;
+        }
 
-      if (existingAddresses.length === 0) {
-        isDefault = true;
-      } else if (isDefault) {
-        await this.customerAddressRepository.clearDefaultAddress(userId);
-      }
+        const { id: _ignoredId, ...addressPayload } = dto as any;
+        const newAddress = addressRepo.create({
+          customerId: userId,
+          ...addressPayload,
+          isDefault,
+        } as DeepPartial<CustomerAddress>);
 
-      const { id: _ignoredId, ...addressPayload } = dto as any;
-      const address = await this.customerAddressRepository.createAddress({
-        customerId: userId,
-        ...addressPayload,
-        isDefault,
+        const savedAddress = await addressRepo.save(newAddress);
+        return savedAddress;
       });
 
       await this.auditLogService.createAuditLog({
@@ -1689,13 +2098,18 @@ export class UserService {
         message: 'Address added successfully',
         data: address,
       };
-    } catch (error) {
-      console.error('Error adding address:', error);
-
-      if (error instanceof NotFoundException) {
+    } catch (error: unknown) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException ||
+        error instanceof ForbiddenException
+      ) {
         throw error;
       }
-
+      this.logger.error(
+        'Error adding address:',
+        error instanceof Error ? error.stack : String(error),
+      );
       throw new InternalServerErrorException('Failed to add address');
     }
   }
@@ -1759,12 +2173,22 @@ export class UserService {
       throw new ForbiddenException('You can update only your own address');
     }
 
-    if (dto.isDefault) {
-      await this.customerAddressRepository.clearDefaultAddress(userId);
+    const { id: _ignoredId, ...updatePayload } = dto as any;
+
+    if (dto.isDefault === true) {
+      await this.dataSource.transaction(async (manager) => {
+        const repo = manager.getRepository(CustomerAddress);
+        await repo.update(
+          { customerId: userId, isDefault: true },
+          { isDefault: false },
+        );
+        await repo.update(id, updatePayload);
+      });
+    } else {
+      await this.customerAddressRepository.update(id, updatePayload);
     }
 
-    const { id: _ignoredId, ...updatePayload } = dto as any;
-    const updated = await this.customerAddressRepository.update(id, updatePayload);
+    const updated = await this.customerAddressRepository.findById(id);
 
     await this.auditLogService.createAuditLog({
       actorId: userId,
@@ -1839,34 +2263,82 @@ export class UserService {
     };
   }
 
-  async addServiceArea(userId: number, dto: CreatePurohitServiceAreaDto) {
-    const user = await this.userRepository.findById(userId);
+  private normalizeCaller(
+    callerOrUserId: { id: number; role?: USER_ROLE } | number,
+  ): { id: number; role: USER_ROLE } {
+    if (typeof callerOrUserId === 'number') {
+      return { id: callerOrUserId, role: USER_ROLE.PUROHIT };
+    }
+    return {
+      id: callerOrUserId.id,
+      role: callerOrUserId.role || USER_ROLE.PUROHIT,
+    };
+  }
 
-    if (!user) {
-      throw new NotFoundException('User not found');
+  async resolveTargetPurohitId(
+    authenticatedUserId: number,
+    role: USER_ROLE,
+    requestedPurohitId?: number,
+  ): Promise<number> {
+    if (role === USER_ROLE.ADMIN) {
+      if (!requestedPurohitId) {
+        throw new BadRequestException('purohitId is required for admin');
+      }
+
+      const user = await this.userRepository.findById(requestedPurohitId);
+      if (!user || user.role !== USER_ROLE.PUROHIT) {
+        throw new NotFoundException('Purohit not found');
+      }
+
+      return user.id;
     }
 
-    const existing = await this.purohitServiceAreaRepository.findOne({
-      where: {
-        purohitId: userId,
-        pincode: dto.pincode,
-      },
-    });
+    if (role === USER_ROLE.PUROHIT) {
+      // Never trust a purohitId supplied by a Purohit
+      const user = await this.userRepository.findById(authenticatedUserId);
+      if (!user || user.role !== USER_ROLE.PUROHIT) {
+        throw new NotFoundException('Purohit not found');
+      }
+      return user.id;
+    }
 
-    // if (existing) {
-    //   throw new ConflictException(
-    //     'Service area already exists for this pincode',
-    //   );
-    // }
+    throw new ForbiddenException('Access denied');
+  }
+
+  async addServiceArea(
+    callerOrUserId: { id: number; role?: USER_ROLE } | number,
+    dto: CreatePurohitServiceAreaDto,
+    requestedPurohitId?: number,
+  ) {
+    const caller = this.normalizeCaller(callerOrUserId);
+    const targetPurohitId = await this.resolveTargetPurohitId(
+      caller.id,
+      caller.role,
+      requestedPurohitId ?? dto.purohitId,
+    );
+
+    const { purohitId: _ignored, ...createPayload } = dto;
+    let area: PurohitServiceArea;
 
     if (dto.isDefault) {
-      await this.purohitServiceAreaRepository.clearDefaultAddress(userId);
+      area = await this.dataSource.transaction(async (manager) => {
+        const areaRepo = manager.getRepository(PurohitServiceArea);
+        await areaRepo.update(
+          { purohitId: targetPurohitId, isDefault: true },
+          { isDefault: false },
+        );
+        const newArea = areaRepo.create({
+          purohitId: targetPurohitId,
+          ...createPayload,
+        });
+        return areaRepo.save(newArea);
+      });
+    } else {
+      area = await this.purohitServiceAreaRepository.createArea({
+        purohitId: targetPurohitId,
+        ...createPayload,
+      });
     }
-
-    const area = await this.purohitServiceAreaRepository.createArea({
-      purohitId: userId,
-      ...dto,
-    });
 
     return {
       success: true,
@@ -1875,42 +2347,96 @@ export class UserService {
     };
   }
 
-  async updateServiceArea(
-    userId: number,
+  async getServiceAreaById(
+    callerOrUserId: { id: number; role?: USER_ROLE } | number,
     id: number,
-    dto: UpdatePurohitServiceAreaDto,
+    requestedPurohitId?: number,
   ) {
+    const caller = this.normalizeCaller(callerOrUserId);
     const area = await this.purohitServiceAreaRepository.findById(id);
 
-    if (!area) {
+    if (!area || area.deletedAt) {
       throw new NotFoundException('Service area not found');
     }
 
-    if (area.purohitId !== userId) {
-      throw new ForbiddenException('You can update only your own service area');
+    if (caller.role === USER_ROLE.PUROHIT) {
+      if (area.purohitId !== caller.id) {
+        throw new ForbiddenException('You can access only your own service area');
+      }
+    } else if (caller.role === USER_ROLE.ADMIN) {
+      if (requestedPurohitId) {
+        const targetPurohitId = await this.resolveTargetPurohitId(
+          caller.id,
+          caller.role,
+          requestedPurohitId,
+        );
+        if (area.purohitId !== targetPurohitId) {
+          throw new NotFoundException('Service area is not mapped to this Purohit');
+        }
+      }
+    } else {
+      throw new ForbiddenException('Access denied');
     }
 
-    // Check duplicate pincode only if pincode is being updated
-    // if (dto.pincode) {
-    //   const existing =
-    //     await this.purohitServiceAreaRepository.findByPurohitAndPincode(
-    //       userId,
-    //       dto.pincode,
-    //     );
+    return {
+      success: true,
+      message: 'Service area fetched successfully',
+      data: area,
+    };
+  }
 
-    //   if (existing && existing.id !== id) {
-    //     throw new ConflictException(
-    //       'Service area already exists for this pincode',
-    //     );
-    //   }
-    // }
+  async updateServiceArea(
+    callerOrUserId: { id: number; role?: USER_ROLE } | number,
+    id: number,
+    dto: UpdatePurohitServiceAreaDto,
+    requestedPurohitId?: number,
+  ) {
+    const caller = this.normalizeCaller(callerOrUserId);
+    const area = await this.purohitServiceAreaRepository.findById(id);
+
+    if (!area || area.deletedAt) {
+      throw new NotFoundException('Service area not found');
+    }
+
+    if (caller.role === USER_ROLE.PUROHIT) {
+      if (area.purohitId !== caller.id) {
+        throw new ForbiddenException('You can update only your own service area');
+      }
+    } else if (caller.role === USER_ROLE.ADMIN) {
+      const targetIdToValidate = requestedPurohitId ?? dto.purohitId;
+      if (targetIdToValidate) {
+        const targetPurohitId = await this.resolveTargetPurohitId(
+          caller.id,
+          caller.role,
+          targetIdToValidate,
+        );
+        if (area.purohitId !== targetPurohitId) {
+          throw new NotFoundException('Service area is not mapped to this Purohit');
+        }
+      }
+    } else {
+      throw new ForbiddenException('Access denied');
+    }
+
+    const { id: _ignoredId, purohitId: _ignoredPurohitId, ...updatePayload } = dto;
+    let updated: PurohitServiceArea | null;
 
     if (dto.isDefault) {
-      await this.purohitServiceAreaRepository.clearDefaultAddress(userId);
+      await this.dataSource.transaction(async (manager) => {
+        const areaRepo = manager.getRepository(PurohitServiceArea);
+        await areaRepo.update(
+          { purohitId: area.purohitId, isDefault: true },
+          { isDefault: false },
+        );
+        await areaRepo.update(id, updatePayload as Partial<PurohitServiceArea>);
+      });
+      updated = await this.purohitServiceAreaRepository.findById(id);
+    } else {
+      updated = await this.purohitServiceAreaRepository.updateArea(
+        id,
+        updatePayload as Partial<PurohitServiceArea>,
+      );
     }
-
-    const { id: _ignoredId, ...updatePayload } = dto as any;
-    const updated = await this.purohitServiceAreaRepository.updateArea(id, updatePayload);
 
     return {
       success: true,
@@ -1920,15 +2446,23 @@ export class UserService {
   }
 
   async getMyServiceAreas(
-    userId: number,
+    callerOrUserId: { id: number; role?: USER_ROLE } | number,
     page: number = 1,
     limit: number = 10,
     search?: string,
     state?: string,
+    requestedPurohitId?: number,
   ) {
+    const caller = this.normalizeCaller(callerOrUserId);
+    const targetPurohitId = await this.resolveTargetPurohitId(
+      caller.id,
+      caller.role,
+      requestedPurohitId,
+    );
+
     const { data, total } =
       await this.purohitServiceAreaRepository.findServiceAreas(
-        userId,
+        targetPurohitId,
         page,
         limit,
         search,
@@ -1938,7 +2472,7 @@ export class UserService {
     return {
       success: true,
       message: 'Service areas fetched successfully',
-      data,
+      data: this.sortServiceAreas(data),
       pagination: {
         total,
         page,
@@ -1948,38 +2482,72 @@ export class UserService {
     };
   }
 
-  async deleteServiceArea(userId: number, id: number) {
+  async deleteServiceArea(
+    callerOrUserId: { id: number; role?: USER_ROLE } | number,
+    id: number,
+    requestedPurohitId?: number,
+  ) {
+    const caller = this.normalizeCaller(callerOrUserId);
     const area = await this.purohitServiceAreaRepository.findById(id);
 
-    if (!area) {
+    if (!area || area.deletedAt) {
       throw new NotFoundException('Service area not found');
     }
 
-    if (area.purohitId !== userId) {
-      throw new ForbiddenException('You can delete only your own service area');
-    }
-
-    if (area.isDefault) {
-      // Unset isDefault from the one being deleted
-      await this.purohitServiceAreaRepository.updateArea(id, {
-        isDefault: false,
-      });
-    }
-
-    await this.purohitServiceAreaRepository.deleteArea(id);
-
-    // If the deleted area was the default one, make the next most recent one the default
-    if (area.isDefault) {
-      const remainingAreas =
-        await this.purohitServiceAreaRepository.findByPurohitId(userId);
-      if (remainingAreas.length > 0) {
-        const nextDefaultArea = remainingAreas.sort(
-          (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
-        )[0];
-        await this.purohitServiceAreaRepository.updateArea(nextDefaultArea.id, {
-          isDefault: true,
-        });
+    if (caller.role === USER_ROLE.PUROHIT) {
+      if (area.purohitId !== caller.id) {
+        throw new ForbiddenException('You can delete only your own service area');
       }
+    } else if (caller.role === USER_ROLE.ADMIN) {
+      if (requestedPurohitId) {
+        const targetPurohitId = await this.resolveTargetPurohitId(
+          caller.id,
+          caller.role,
+          requestedPurohitId,
+        );
+        if (area.purohitId !== targetPurohitId) {
+          throw new NotFoundException('Service area is not mapped to this Purohit');
+        }
+      }
+    } else {
+      throw new ForbiddenException('Access denied');
+    }
+
+    const wasDefault = Boolean(area.isDefault);
+
+    await this.dataSource.transaction(async (manager) => {
+      const areaRepo = manager.getRepository(PurohitServiceArea);
+      if (wasDefault) {
+        await areaRepo.update(id, { isDefault: false });
+      }
+      await areaRepo.softDelete(id);
+
+      if (wasDefault) {
+        const remainingAreas = await areaRepo.find({
+          where: { purohitId: area.purohitId },
+          order: { createdAt: 'DESC' },
+        });
+
+        if (remainingAreas && remainingAreas.length > 0) {
+          const nextDefaultArea = remainingAreas[0];
+          await areaRepo.update(nextDefaultArea.id, { isDefault: true });
+        }
+      }
+    });
+
+    if (caller.role === USER_ROLE.ADMIN) {
+      await this.auditLogService.createAuditLog({
+        actorId: caller.id,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: USER_ROLE.ADMIN,
+        module: AUDIT_MODULE.USER,
+        entity: 'PurohitServiceArea',
+        entityId: String(id),
+        action: 'PUROHIT_SERVICE_AREA_DELETED',
+        message: `Admin #${caller.id} removed service area #${id} from Purohit #${area.purohitId}.`,
+        oldValue: { serviceAreaId: id, city: area.city },
+        newValue: undefined,
+      });
     }
 
     return {
@@ -2970,11 +3538,62 @@ export class UserService {
         userId: savedUser.id,
         verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
       });
-      await manager.save(profile);
+      const savedProfile = await manager.save(profile);
+
+      const createdServices: PurohitService[] = [];
+      if (dto.services && dto.services.length > 0) {
+        const uniqueServiceIds = Array.from(new Set(dto.services));
+        const serviceRepo = manager.getRepository(Service);
+        const foundServices = await serviceRepo.find({
+          where: { id: In(uniqueServiceIds) },
+        });
+        if (foundServices.length !== uniqueServiceIds.length) {
+          const foundIds = new Set(foundServices.map((s) => s.id));
+          const missingIds = uniqueServiceIds.filter((sId) => !foundIds.has(sId));
+          throw new NotFoundException(`Services not found: ${missingIds.join(', ')}`);
+        }
+
+        const purohitServiceRepo = manager.getRepository(PurohitService);
+        for (const serviceId of uniqueServiceIds) {
+          const ps = purohitServiceRepo.create({
+            purohitId: savedProfile.id,
+            serviceId,
+            isActive: true,
+            isOnline: false,
+            isOffline: true,
+          });
+          createdServices.push(await purohitServiceRepo.save(ps));
+        }
+      }
+
+      const createdAreas: PurohitServiceArea[] = [];
+      if (dto.serviceAreas && dto.serviceAreas.length > 0) {
+        const uniqueAreas = Array.from(
+          new Set(dto.serviceAreas.map((a) => a.trim()).filter(Boolean)),
+        );
+        const areaRepo = manager.getRepository(PurohitServiceArea);
+        let isFirst = true;
+        for (const areaName of uniqueAreas) {
+          const area = areaRepo.create({
+            purohitId: savedUser.id,
+            addressLabel: areaName,
+            streetName: areaName,
+            fullAddress: areaName,
+            city: areaName,
+            pincode: '000000',
+            isDefault: isFirst,
+            serviceRadiusKm: 10,
+          });
+          createdAreas.push(await areaRepo.save(area));
+          isFirst = false;
+        }
+      }
 
       return {
         user: savedUser,
-        profile,
+        profile: savedProfile,
+        services: createdServices,
+        serviceAreas: createdAreas,
       };
     });
 

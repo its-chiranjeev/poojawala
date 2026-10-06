@@ -16,6 +16,11 @@ export class UpdatePurohitServiceAreaDto {
   id?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  purohitId?: number;
+
+  @IsOptional()
   @IsString()
   @Length(2, 50)
   addressLabel?: string;

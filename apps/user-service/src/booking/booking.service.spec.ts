@@ -744,8 +744,8 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       const savedBooking = getLastSavedBooking();
       expect(savedBooking.servicePrice).toBe(6100);
       expect(savedBooking.finalAmount).toBe(6100);
-      expect(savedBooking.platformCommission).toBe(410);
-      expect(savedBooking.purohitPayoutAmount).toBe(3690);
+      expect(savedBooking.platformCommission).toBe(610);
+      expect(savedBooking.purohitPayoutAmount).toBe(5490);
     });
 
     it('23. Invalid plan rejected', async () => {

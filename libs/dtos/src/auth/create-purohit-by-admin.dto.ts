@@ -1,5 +1,6 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MaxLength, IsDateString } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString, MaxLength, IsDateString, IsArray, IsInt } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { parseStringArray, parseIntArray } from './register-user.dto';
 
 export class CreatePurohitByAdminDto {
   @IsOptional()
@@ -41,4 +42,16 @@ export class CreatePurohitByAdminDto {
   @IsOptional()
   @IsDateString()
   dob?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => parseIntArray(value))
+  @IsArray()
+  @IsInt({ each: true })
+  services?: number[];
+
+  @IsOptional()
+  @Transform(({ value }) => parseStringArray(value))
+  @IsArray()
+  @IsString({ each: true })
+  serviceAreas?: string[];
 }

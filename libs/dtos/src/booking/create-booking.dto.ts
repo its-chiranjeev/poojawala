@@ -11,8 +11,10 @@ import {
   MaxLength,
   Min,
   IsIn,
+  ValidateNested,
 } from 'class-validator';
 import { SERVICE_PLAN } from '@poojawala/entities';
+import { CreateCustomerAddressDto } from '../user/add-customer-address.dto';
 
 export enum BOOKING_PAYMENT_OPTION {
   TOKEN = 'TOKEN',
@@ -25,10 +27,16 @@ export class CreateBookingDto {
   @Min(1)
   serviceId!: number;
 
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  customerAddressId!: number;
+  customerAddressId?: number;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateCustomerAddressDto)
+  address?: CreateCustomerAddressDto;
 
   @IsDateString()
   scheduledAt!: string;

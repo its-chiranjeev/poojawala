@@ -18,6 +18,7 @@ import {
   EntityManager,
   Repository,
   QueryFailedError,
+  DeepPartial,
 } from 'typeorm';
 import {
   ASSIGNMENT_TYPE,
@@ -228,13 +229,51 @@ export class BookingService {
         const serviceRepository = manager.getRepository(Service);
         const addressRepository = manager.getRepository(CustomerAddress);
         const bookingRepository = manager.getRepository(Booking);
-        if (!dto.customerAddressId) {
+
+        let customerAddress: CustomerAddress | null = null;
+
+        if (dto.address) {
+          let isDefault: boolean;
+          if (dto.address.isDefault === true) {
+            isDefault = true;
+            await addressRepository.update(
+              { customerId: user.id, isDefault: true },
+              { isDefault: false },
+            );
+          } else if (dto.address.isDefault === false) {
+            isDefault = false;
+          } else {
+            const existingCount = await addressRepository.count({
+              where: { customerId: user.id },
+            });
+            isDefault = existingCount === 0;
+          }
+
+          const { id: _ignoredId, ...addressPayload } = dto.address as any;
+          const newAddress = addressRepository.create({
+            customerId: user.id,
+            ...addressPayload,
+            isDefault,
+          } as DeepPartial<CustomerAddress>);
+          const savedAddress = await addressRepository.save(newAddress);
+          customerAddress = savedAddress;
+          dto.customerAddressId = savedAddress.id;
+        } else if (dto.customerAddressId) {
+          customerAddress = await addressRepository.findOne({
+            where: {
+              id: dto.customerAddressId,
+              customerId: user.id,
+            },
+          });
+        }
+
+        if (!dto.customerAddressId && !customerAddress) {
           throw new BadRequestException(
             'Customer address is required for booking',
           );
         }
 
-        const [customer, service, customerAddress] = await Promise.all([
+        const [customer, service] = await Promise.all([
           userRepository.findOne({
             where: {
               id: user.id,
@@ -245,12 +284,6 @@ export class BookingService {
           serviceRepository.findOne({
             where: {
               id: dto.serviceId,
-            },
-          }),
-          addressRepository.findOne({
-            where: {
-              id: dto.customerAddressId,
-              customerId: user.id,
             },
           }),
         ]);

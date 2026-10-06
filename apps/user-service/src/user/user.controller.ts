@@ -138,7 +138,7 @@ export class UserController {
   async updateProfileByAdmin(
     @Req() req: any,
     @Param('id') id: string,
-    @Body(new ValidationPipe({ whitelist: true })) dto: UpdateUserDto,
+    @Body(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: false })) dto: UpdateUserDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     return this.userService.updateProfileByAdmin(req.user.id, id, dto, file);
@@ -542,28 +542,39 @@ export class UserController {
   // Separate resubmit endpoint POST purohit/verification/resubmit is intentionally removed.
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   @Post('purohit/service-area')
   async addServiceArea(
     @Req() req: any,
     @Body() dto: CreatePurohitServiceAreaDto,
+    @Query('purohitId') purohitId?: string,
   ) {
-    return this.userService.addServiceArea(req.user.id, dto);
+    return this.userService.addServiceArea(
+      { id: req.user.id, role: req.user.role },
+      dto,
+      purohitId ? Number(purohitId) : undefined,
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   @Patch('purohit/service-area/:id')
   async updateServiceArea(
     @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdatePurohitServiceAreaDto,
+    @Query('purohitId') purohitId?: string,
   ) {
-    return this.userService.updateServiceArea(req.user.id, id, dto);
+    return this.userService.updateServiceArea(
+      { id: req.user.id, role: req.user.role },
+      id,
+      dto,
+      purohitId ? Number(purohitId) : undefined,
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   @Get('purohit/service-areas')
   async getMyServiceAreas(
     @Req() req: any,
@@ -571,24 +582,46 @@ export class UserController {
     @Query('limit') limit: string = '10',
     @Query('search') search?: string,
     @Query('state') state?: string,
+    @Query('purohitId') purohitId?: string,
   ) {
     return this.userService.getMyServiceAreas(
-      req.user.id,
+      { id: req.user.id, role: req.user.role },
       Number(page),
       Number(limit),
       search,
       state,
+      purohitId ? Number(purohitId) : undefined,
     );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
+  @Get('purohit/service-area/:id')
+  async getServiceAreaById(
+    @Req() req: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Query('purohitId') purohitId?: string,
+  ) {
+    return this.userService.getServiceAreaById(
+      { id: req.user.id, role: req.user.role },
+      id,
+      purohitId ? Number(purohitId) : undefined,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
   @Delete('purohit/service-area/:id')
   async deleteServiceArea(
     @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
+    @Query('purohitId') purohitId?: string,
   ) {
-    return this.userService.deleteServiceArea(req.user.id, id);
+    return this.userService.deleteServiceArea(
+      { id: req.user.id, role: req.user.role },
+      id,
+      purohitId ? Number(purohitId) : undefined,
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)

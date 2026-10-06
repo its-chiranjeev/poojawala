@@ -69,7 +69,8 @@ export class PurohitServiceAreaRepository extends BaseRepository<PurohitServiceA
   ) {
     const query = this.repo
       .createQueryBuilder('area')
-      .where('area.purohitId = :purohitId', { purohitId });
+      .where('area.purohitId = :purohitId', { purohitId })
+      .andWhere('area.deletedAt IS NULL');
 
     if (state && state.trim() !== '') {
       query.andWhere('area.state ILIKE :state', {

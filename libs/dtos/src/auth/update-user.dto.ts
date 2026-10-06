@@ -1,7 +1,7 @@
-import { IsEmail, IsDateString, IsOptional, IsString, IsEnum, IsArray } from 'class-validator';
+import { IsEmail, IsDateString, IsOptional, IsString, IsEnum, IsArray, IsInt } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { USER_ROLE, USER_STATUS, PUROHIT_PAYMENT_METHOD } from '@poojawala/entities';
-import { Match, parseStringArray } from './register-user.dto';
+import { Match, parseStringArray, parseIntArray } from './register-user.dto';
 
 export class UpdateUserDto {
   @IsOptional()
@@ -23,6 +23,14 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   phone?: string;
+
+  @IsOptional()
+  @IsString()
+  countryCode?: string;
+
+  @IsOptional()
+  @IsString()
+  emergencyContact?: string;
 
   @IsOptional()
   @IsEnum(USER_ROLE)
@@ -139,6 +147,48 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   upiId?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => parseIntArray(value))
+  @IsArray()
+  @IsInt({ each: true })
+  services?: number[];
+
+  @IsOptional()
+  @Transform(({ value }) => parseStringArray(value))
+  @IsArray()
+  @IsString({ each: true })
+  serviceAreas?: string[];
+
+  @IsOptional()
+  profile?: any;
+
+  @IsOptional()
+  bankAccount?: any;
+
+  @IsOptional()
+  bankAccounts?: any[];
+
+  @IsOptional()
+  addresses?: any[];
+
+  @IsOptional()
+  purohitServices?: any[];
+
+  @IsOptional()
+  verificationStatus?: any;
+
+  @IsOptional()
+  rejectionReason?: any;
+
+  @IsOptional()
+  id?: any;
+
+  @IsOptional()
+  createdAt?: any;
+
+  @IsOptional()
+  updatedAt?: any;
 }
 
 export class UpdateUserStatusDto {
