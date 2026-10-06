@@ -256,8 +256,9 @@ export class UserRepository extends BaseRepository<User> {
       )
         .leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id')
         .leftJoinAndSelect('user.serviceAreas', 'serviceAreas')
+        .leftJoinAndSelect('user.addresses', 'addresses')
         .leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id').leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId');
-    } else if (role === USER_ROLE.CUSTOMER) {
+    } else {
       qb.leftJoinAndSelect('user.addresses', 'addresses');
     }
 

@@ -9,8 +9,12 @@ import {
   JoinColumn,
   Index,
 } from 'typeorm';
-import { User } from './user.entity';
 import { BlogCategory } from './blog-category.entity';
+
+export interface BlogPostSection {
+  title: string;
+  description: string;
+}
 
 export enum BlogPostStatus {
   DRAFT = 'DRAFT',
@@ -33,19 +37,23 @@ export class BlogPost {
   @Column({ type: 'text', nullable: true })
   excerpt?: string;
 
-  @Column({ type: 'text' })
-  content!: string;
+  // TODO: BLOG_POST_SECTIONS_MIGRATION
+  // Legacy single content column retained as nullable for schema/backward compatibility.
+  // sections[] is now the single source of truth for the blog article body.
+  @Column({ type: 'text', nullable: true })
+  content?: string | null;
 
   @Column({ type: 'varchar', length: 500, nullable: true })
   coverImage?: string;
 
-  @Column({ type: 'int', nullable: true })
-  authorId?: number;
+  downloadUrl?: string | null;
 
-  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'authorId' })
-  author?: User;
+  @Column({ type: 'varchar', length: 150 })
+  authorName!: string;
 
+  // TODO: BLOG_POST_ENHANCEMENT
+  // Preserved previous mandatory category relation:
+  /*
   @Column({ type: 'int' })
   categoryId!: number;
 
@@ -54,6 +62,30 @@ export class BlogPost {
   })
   @JoinColumn({ name: 'categoryId' })
   category!: BlogCategory;
+  */
+
+  @Column({ type: 'int', nullable: true })
+  categoryId?: number | null;
+
+  @ManyToOne(() => BlogCategory, (category) => category.posts, {
+    onDelete: 'SET NULL',
+    nullable: true,
+  })
+  @JoinColumn({ name: 'categoryId' })
+  blogCategory?: BlogCategory | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  category?: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  readTime?: number | null;
+
+  @Column({
+    type: 'jsonb',
+    nullable: true,
+    default: () => "'[]'",
+  })
+  sections?: BlogPostSection[];
 
   @Column({
     type: 'enum',

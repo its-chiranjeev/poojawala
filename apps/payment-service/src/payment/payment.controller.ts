@@ -68,7 +68,7 @@ export class PaymentController {
 
   @Post('bookings/:bookingId/settle')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.CUSTOMER)
+  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
   @HttpCode(HttpStatus.OK)
   async settleBookingPayment(
     @Req() req: AuthenticatedRequest,

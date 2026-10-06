@@ -1093,6 +1093,23 @@ export class PaymentService {
       );
     }
 
+    if (user.role === USER_ROLE.PUROHIT) {
+      // Purohit must be the assigned purohit for this booking
+      const purohitProfile = await this.dataSource
+        .getRepository(PurohitProfile)
+        .findOne({ where: { userId: user.id } });
+
+      if (!purohitProfile) {
+        throw new ForbiddenException('Purohit profile not found');
+      }
+
+      if (booking.purohitId !== purohitProfile.id) {
+        throw new ForbiddenException(
+          'You are not assigned to this booking and cannot settle its payment',
+        );
+      }
+    }
+
     if (booking.status === BOOKING_STATUS.COMPLETED) {
       throw new BadRequestException(
         'Settlement is not allowed after booking is completed',
@@ -1122,6 +1139,7 @@ export class PaymentService {
       paymentOption: 'FULL',
     });
   }
+
 
   private getPaymentCustomer(
     user: User,

@@ -137,6 +137,8 @@ export class UserController {
   @UseInterceptors(
     FileFieldsInterceptor([
       { name: 'profileImage', maxCount: 1 },
+      { name: 'aadhaarDoc', maxCount: 1 },
+      { name: 'panDoc', maxCount: 1 },
       { name: 'certificate', maxCount: 1 },
       { name: 'templeAffiliationProof', maxCount: 1 },
     ]),
@@ -147,6 +149,8 @@ export class UserController {
     @UploadedFiles()
     files: {
       profileImage?: Express.Multer.File[];
+      aadhaarDoc?: Express.Multer.File[];
+      panDoc?: Express.Multer.File[];
       certificate?: Express.Multer.File[];
       templeAffiliationProof?: Express.Multer.File[];
     },
@@ -520,6 +524,10 @@ export class UserController {
   async deleteAddress(@Req() req: any, @Param('id', ParseIntPipe) id: number) {
     return this.userService.deleteAddress(req.user.id, id);
   }
+
+  // TODO: PUROHIT_VERIFICATION_RESUBMIT
+  // Resubmission is now handled through the existing Edit Profile API (PATCH /users/profile).
+  // Separate resubmit endpoint POST purohit/verification/resubmit is intentionally removed.
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.PUROHIT)

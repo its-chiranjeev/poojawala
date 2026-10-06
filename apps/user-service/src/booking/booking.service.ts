@@ -2858,12 +2858,6 @@ export class BookingService {
       );
     }
 
-    if (role === USER_ROLE.PUROHIT && nextStatus === BOOKING_STATUS.COMPLETED) {
-      throw new BadRequestException(
-        'Booking completion is handled automatically after successful customer payment.',
-      );
-    }
-
     const allowedTransitions: Partial<
       Record<BOOKING_STATUS, BOOKING_STATUS[]>
     > = {

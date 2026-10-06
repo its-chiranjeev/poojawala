@@ -28,7 +28,7 @@ export class BlogCategory {
   @Column({ type: 'int', default: 0 })
   sortOrder!: number;
 
-  @OneToMany(() => BlogPost, (post) => post.category)
+  @OneToMany(() => BlogPost, (post) => post.blogCategory)
   posts!: BlogPost[];
 
   @CreateDateColumn()

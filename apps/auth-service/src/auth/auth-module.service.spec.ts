@@ -19,6 +19,7 @@ import {
   UnauthorizedException,
   BadRequestException,
 } from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
 
 describe('AuthModuleService - Google Authentication', () => {
   let service: AuthModuleService;
@@ -31,6 +32,7 @@ describe('AuthModuleService - Google Authentication', () => {
     userRepository = {
       findByGoogleId: jest.fn(),
       findByEmail: jest.fn(),
+      findByEmailOrUsername: jest.fn(),
       findOne: jest.fn(),
       save: jest.fn((u) => Promise.resolve({ ...u, id: u.id || 101 })),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
@@ -161,7 +163,7 @@ describe('AuthModuleService - Google Authentication', () => {
 
       expect(result.isNewUser).toBe(true);
       expect(result.user.role).toBe(USER_ROLE.PUROHIT);
-      expect(result.user.status).toBe(USER_STATUS.PENDING);
+      expect(result.user.status).toBe(USER_STATUS.ACTIVE);
       expect(createdProfile).toBeDefined();
       expect(createdProfile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
     });
@@ -301,74 +303,231 @@ describe('AuthModuleService - Google Authentication', () => {
     });
   });
 
-  describe('switchIntentService', () => {
-    it('should transition a CUSTOMER to PUROHIT with PENDING status and pending verification profile', async () => {
-      const customerUser: Partial<User> = {
-        id: 42,
-        email: 'customer_to_purohit@test.com',
+  // switchIntentService endpoint is currently disabled
+
+  describe('loginService - CUSTOMER vs PUROHIT status matrix', () => {
+    const password = 'CorrectPassword123!';
+    let hashedPassword: string;
+
+    beforeAll(async () => {
+      hashedPassword = await bcrypt.hash(password, 10);
+    });
+
+    const setupMocksForLogin = (user: Partial<User>, profile?: Partial<PurohitProfile>) => {
+      const mockUser = {
+        id: user.id || 1,
+        email: user.email || 'user@test.com',
+        username: user.username || 'testuser',
+        firstName: user.firstName || 'Test',
+        lastName: user.lastName || 'User',
+        hashedPassword,
+        role: user.role || USER_ROLE.CUSTOMER,
+        status: user.status || USER_STATUS.ACTIVE,
+        tokenVersion: 1,
+        profileImage: null,
+        isAdminCreated: false,
+        ...user,
+      } as User;
+
+      userRepository.findByEmail!.mockResolvedValue(mockUser);
+      userRepository.findByEmailOrUsername!.mockResolvedValue(mockUser);
+
+      const mockProfileRepo = {
+        findOne: jest.fn().mockResolvedValue(
+          profile
+            ? {
+                id: profile.id || 10,
+                userId: user.id || 1,
+                verificationStatus: profile.verificationStatus || PUROHIT_VERIFICATION_STATUS.PENDING,
+                rejectionReason: profile.rejectionReason ?? null,
+                ...profile,
+              }
+            : null,
+        ),
+      };
+
+      dataSource.getRepository = jest.fn((entity: any) => {
+        if (entity === PurohitProfile) return mockProfileRepo;
+        return {};
+      });
+    };
+
+    // 1. CUSTOMER + ACTIVE -> login succeeds
+    it('1. CUSTOMER with status ACTIVE: login succeeds', async () => {
+      setupMocksForLogin({
+        id: 11,
+        email: 'customer.active@test.com',
         role: USER_ROLE.CUSTOMER,
         status: USER_STATUS.ACTIVE,
-        tokenVersion: 1,
-      };
-
-      userRepository.findOne!.mockResolvedValue(customerUser as User);
-
-      let savedRole: any = null;
-      let savedStatus: any = null;
-      let createdProfile: any = null;
-
-      dataSource.transaction = jest.fn(async (cb: any) => {
-        const mockUserRepo = {
-          save: jest.fn((u) => {
-            savedRole = u.role;
-            savedStatus = u.status;
-            return Promise.resolve(u);
-          }),
-        };
-        const mockProfileRepo = {
-          findOne: jest.fn().mockResolvedValue(null),
-          create: jest.fn((p) => {
-            createdProfile = p;
-            return p;
-          }),
-          save: jest.fn((p) => Promise.resolve(p)),
-        };
-        const manager = {
-          getRepository: jest.fn((entity: any) => {
-            if (entity === User) return mockUserRepo;
-            if (entity === PurohitProfile) return mockProfileRepo;
-            return {};
-          }),
-        };
-        return cb(manager);
       });
 
-      const result = await service.switchIntentService(42, { intent: USER_ROLE.PUROHIT });
+      const res = await service.loginService({
+        email: 'customer.active@test.com',
+        password,
+      });
 
-      expect(savedRole).toBe(USER_ROLE.PUROHIT);
-      expect(savedStatus).toBe(USER_STATUS.PENDING);
-      expect(createdProfile).toBeDefined();
-      expect(createdProfile.userId).toBe(42);
-      expect(createdProfile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
-      expect(result.user.id).toBe(42);
+      expect(res.message).toBe('Login successful');
+      expect(res.tokens.accessToken).toBeDefined();
+      expect(res.tokens.refreshToken).toBeDefined();
+      expect(res.user.role).toBe(USER_ROLE.CUSTOMER);
+      expect(res.user.status).toBe(USER_STATUS.ACTIVE);
     });
 
-    it('should reject switching intent to any role other than PUROHIT', async () => {
+    // 2. CUSTOMER + BLOCKED -> login fails
+    it('2. CUSTOMER with status BLOCKED: login fails', async () => {
+      setupMocksForLogin({
+        id: 12,
+        email: 'customer.blocked@test.com',
+        role: USER_ROLE.CUSTOMER,
+        status: USER_STATUS.BLOCKED,
+      });
+
       await expect(
-        service.switchIntentService(42, { intent: USER_ROLE.CUSTOMER as any }),
-      ).rejects.toThrow(BadRequestException);
+        service.loginService({
+          email: 'customer.blocked@test.com',
+          password,
+        }),
+      ).rejects.toThrow(ForbiddenException);
     });
 
-    it('should reject role switch if user is an ADMIN', async () => {
-      const adminUser: Partial<User> = {
-        id: 1,
-        role: USER_ROLE.ADMIN,
-        status: USER_STATUS.ACTIVE,
-      };
-      userRepository.findOne!.mockResolvedValue(adminUser as User);
+    // 3. CUSTOMER + REJECTED -> login fails
+    it('3. CUSTOMER with status REJECTED: login fails', async () => {
+      setupMocksForLogin({
+        id: 13,
+        email: 'customer.rejected@test.com',
+        role: USER_ROLE.CUSTOMER,
+        status: USER_STATUS.REJECTED,
+      });
 
       await expect(
-        service.switchIntentService(1, { intent: USER_ROLE.PUROHIT }),
+        service.loginService({
+          email: 'customer.rejected@test.com',
+          password,
+        }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    // 4. PUROHIT + User.status ACTIVE + verificationStatus PENDING -> login succeeds
+    it('4. PUROHIT with User.status ACTIVE and verificationStatus PENDING: login succeeds', async () => {
+      setupMocksForLogin(
+        {
+          id: 21,
+          email: 'purohit.pending@test.com',
+          role: USER_ROLE.PUROHIT,
+          status: USER_STATUS.ACTIVE,
+        },
+        {
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+          rejectionReason: undefined,
+        },
+      );
+
+      const res = await service.loginService({
+        email: 'purohit.pending@test.com',
+        password,
+      });
+
+      expect(res.message).toBe('Login successful');
+      expect(res.user.role).toBe(USER_ROLE.PUROHIT);
+      expect(res.user.status).toBe(USER_STATUS.ACTIVE);
+      expect((res.user as any).verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+    });
+
+    // 5. PUROHIT + User.status ACTIVE + verificationStatus REJECTED -> login succeeds
+    it('5. PUROHIT with User.status ACTIVE and verificationStatus REJECTED: login succeeds', async () => {
+      setupMocksForLogin(
+        {
+          id: 22,
+          email: 'purohit.rejected@test.com',
+          role: USER_ROLE.PUROHIT,
+          status: USER_STATUS.ACTIVE,
+        },
+        {
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.REJECTED,
+          rejectionReason: 'Invalid Aadhaar image blur',
+        },
+      );
+
+      const res = await service.loginService({
+        email: 'purohit.rejected@test.com',
+        password,
+      });
+
+      expect(res.message).toBe('Login successful');
+      expect(res.user.role).toBe(USER_ROLE.PUROHIT);
+      expect(res.user.status).toBe(USER_STATUS.ACTIVE);
+      expect((res.user as any).verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.REJECTED);
+      expect((res.user as any).rejectionReason).toBe('Invalid Aadhaar image blur');
+    });
+
+    // 6. PUROHIT + User.status ACTIVE + verificationStatus APPROVED -> login succeeds
+    it('6. PUROHIT with User.status ACTIVE and verificationStatus APPROVED: login succeeds', async () => {
+      setupMocksForLogin(
+        {
+          id: 23,
+          email: 'purohit.approved@test.com',
+          role: USER_ROLE.PUROHIT,
+          status: USER_STATUS.ACTIVE,
+        },
+        {
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+          rejectionReason: null as any,
+        },
+      );
+
+      const res = await service.loginService({
+        email: 'purohit.approved@test.com',
+        password,
+      });
+
+      expect(res.message).toBe('Login successful');
+      expect(res.user.role).toBe(USER_ROLE.PUROHIT);
+      expect(res.user.status).toBe(USER_STATUS.ACTIVE);
+      expect((res.user as any).verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+    });
+
+    // 7. PUROHIT + User.status BLOCKED + verificationStatus REJECTED -> login fails
+    it('7. PUROHIT with User.status BLOCKED (any verification status): login fails', async () => {
+      setupMocksForLogin(
+        {
+          id: 24,
+          email: 'purohit.blocked@test.com',
+          role: USER_ROLE.PUROHIT,
+          status: USER_STATUS.BLOCKED,
+        },
+        {
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.REJECTED,
+          rejectionReason: 'Rule violations',
+        },
+      );
+
+      await expect(
+        service.loginService({
+          email: 'purohit.blocked@test.com',
+          password,
+        }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    // 8. PUROHIT + User.status REJECTED -> login fails
+    it('8. PUROHIT with User.status REJECTED: login fails', async () => {
+      setupMocksForLogin(
+        {
+          id: 25,
+          email: 'purohit.accountrejected@test.com',
+          role: USER_ROLE.PUROHIT,
+          status: USER_STATUS.REJECTED,
+        },
+        {
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.REJECTED,
+        },
+      );
+
+      await expect(
+        service.loginService({
+          email: 'purohit.accountrejected@test.com',
+          password,
+        }),
       ).rejects.toThrow(ForbiddenException);
     });
   });

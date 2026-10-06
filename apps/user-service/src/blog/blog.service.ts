@@ -12,6 +12,7 @@ import {
   BlogPost,
   BlogCategory,
   BlogPostStatus,
+  BlogPostSection,
   ACTOR_TYPE,
   USER_ROLE,
   AUDIT_MODULE,
@@ -313,16 +314,7 @@ export class BlogService {
 
     if (isAdmin) {
       // ADMIN MODE: View DRAFT and PUBLISHED
-      qb.leftJoinAndSelect('post.category', 'category')
-        .leftJoin('post.author', 'author')
-        .addSelect([
-          'author.id',
-          'author.firstName',
-          'author.lastName',
-          'author.username',
-          'author.email',
-          'author.profileImage',
-        ])
+      qb.leftJoinAndSelect('post.blogCategory', 'blogCategory')
         .where('post.deletedAt IS NULL');
 
       if (query.status) {
@@ -339,7 +331,7 @@ export class BlogService {
 
       if (query.search && query.search.trim()) {
         qb.andWhere(
-          '(post.title ILIKE :search OR post.excerpt ILIKE :search)',
+          '(post.title ILIKE :search OR post.excerpt ILIKE :search OR post.category ILIKE :search OR post.authorName ILIKE :search)',
           { search: `%${query.search.trim()}%` },
         );
       }
@@ -348,7 +340,18 @@ export class BlogService {
 
       const total = await qb.getCount();
       qb.skip((page - 1) * limit).take(limit);
-      const data = await qb.getMany();
+      const rawPosts = await qb.getMany();
+
+      const data = await Promise.all(
+        rawPosts.map(async (post) => {
+          const downloadUrl = await this.resolveDownloadUrl(post.coverImage);
+          return {
+            ...post,
+            authorName: post.authorName,
+            downloadUrl,
+          };
+        }),
+      );
 
       return {
         data,
@@ -360,30 +363,33 @@ export class BlogService {
         },
       };
     } else {
-      // PUBLIC MODE: Strictly PUBLISHED + Active Category + Non-deleted
+      // PUBLIC MODE: Strictly PUBLISHED + (if category is present, active Category) + Non-deleted
       // NOTE: query.status is strictly ignored for public callers to protect drafts
-      qb.innerJoin(
-        'post.category',
-        'category',
-        'category.isActive = true AND category.deletedAt IS NULL',
+      qb.leftJoin(
+        'post.blogCategory',
+        'blogCategory',
+        'blogCategory.deletedAt IS NULL',
       )
-        .leftJoin('post.author', 'author')
         .select([
           'post.id',
           'post.title',
           'post.excerpt',
           'post.coverImage',
+          'post.categoryId',
+          'post.category',
+          'post.authorName',
+          'post.readTime',
+          'post.sections',
           'post.isFeatured',
           'post.publishedAt',
-          'category.id',
-          'category.name',
-          'author.id',
-          'author.firstName',
-          'author.lastName',
-          'author.profileImage',
+          'blogCategory.id',
+          'blogCategory.name',
         ])
         .where('post.status = :status', { status: BlogPostStatus.PUBLISHED })
-        .andWhere('post.deletedAt IS NULL');
+        .andWhere('post.deletedAt IS NULL')
+        .andWhere(
+          '(post.categoryId IS NULL OR (blogCategory.isActive = true AND blogCategory.deletedAt IS NULL))',
+        );
 
       if (query.categoryId) {
         qb.andWhere('post.categoryId = :categoryId', { categoryId: query.categoryId });
@@ -391,7 +397,7 @@ export class BlogService {
 
       if (query.search && query.search.trim()) {
         qb.andWhere(
-          '(post.title ILIKE :search OR post.excerpt ILIKE :search)',
+          '(post.title ILIKE :search OR post.excerpt ILIKE :search OR post.category ILIKE :search OR post.authorName ILIKE :search)',
           { search: `%${query.search.trim()}%` },
         );
       }
@@ -403,27 +409,31 @@ export class BlogService {
       qb.skip((page - 1) * limit).take(limit);
       const posts = await qb.getMany();
 
-      const data = posts.map((post) => ({
-        id: post.id,
-        title: post.title,
-        excerpt: post.excerpt,
-        coverImage: post.coverImage,
-        category: post.category
-          ? {
-              id: post.category.id,
-              name: post.category.name,
-            }
-          : null,
-        author: post.author
-          ? {
-              id: post.author.id,
-              name: `${post.author.firstName || ''} ${post.author.lastName || ''}`.trim() || 'Admin',
-              profileImage: post.author.profileImage,
-            }
-          : null,
-        isFeatured: post.isFeatured,
-        publishedAt: post.publishedAt,
-      }));
+      const data = await Promise.all(
+        posts.map(async (post) => {
+          const downloadUrl = await this.resolveDownloadUrl(post.coverImage);
+          return {
+            id: post.id,
+            title: post.title,
+            excerpt: post.excerpt,
+            coverImage: post.coverImage,
+            downloadUrl,
+            categoryId: post.categoryId ?? null,
+            category: post.category ?? null,
+            blogCategory: post.blogCategory
+              ? {
+                  id: post.blogCategory.id,
+                  name: post.blogCategory.name,
+                }
+              : null,
+            authorName: post.authorName,
+            readTime: post.readTime ?? null,
+            sections: post.sections || [],
+            isFeatured: post.isFeatured,
+            publishedAt: post.publishedAt,
+          };
+        }),
+      );
 
       return {
         data,
@@ -443,22 +453,15 @@ export class BlogService {
   async getPostById(id: number, isAdmin: boolean): Promise<any> {
     const qb = this.postRepo
       .createQueryBuilder('post')
-      .leftJoinAndSelect('post.category', 'category')
-      .leftJoin('post.author', 'author')
-      .addSelect([
-        'author.id',
-        'author.firstName',
-        'author.lastName',
-        'author.username',
-        'author.email',
-        'author.profileImage',
-      ])
+      .leftJoinAndSelect('post.blogCategory', 'blogCategory')
       .where('post.id = :id AND post.deletedAt IS NULL', { id });
 
     if (!isAdmin) {
-      // Public mode: strictly published and category must be active and non-deleted
+      // Public mode: strictly published and (if category exists) category must be active and non-deleted
       qb.andWhere('post.status = :status', { status: BlogPostStatus.PUBLISHED })
-        .andWhere('category.isActive = true AND category.deletedAt IS NULL');
+        .andWhere(
+          '(post.categoryId IS NULL OR (blogCategory.isActive = true AND blogCategory.deletedAt IS NULL))',
+        );
     }
 
     const post = await qb.getOne();
@@ -467,8 +470,14 @@ export class BlogService {
       throw new NotFoundException(`Blog post #${id} not found`);
     }
 
+    const downloadUrl = await this.resolveDownloadUrl(post.coverImage);
+
     if (isAdmin) {
-      return post;
+      return {
+        ...post,
+        authorName: post.authorName,
+        downloadUrl,
+      };
     }
 
     // Public detail shape
@@ -477,21 +486,20 @@ export class BlogService {
       title: post.title,
       excerpt: post.excerpt,
       content: post.content,
+      sections: post.sections || [],
+      readTime: post.readTime ?? null,
       coverImage: post.coverImage,
-      category: post.category
+      downloadUrl,
+      categoryId: post.categoryId ?? null,
+      category: post.category ?? null,
+      blogCategory: post.blogCategory
         ? {
-            id: post.category.id,
-            name: post.category.name,
-            description: post.category.description,
+            id: post.blogCategory.id,
+            name: post.blogCategory.name,
+            description: post.blogCategory.description,
           }
         : null,
-      author: post.author
-        ? {
-            id: post.author.id,
-            name: `${post.author.firstName || ''} ${post.author.lastName || ''}`.trim() || 'Admin',
-            profileImage: post.author.profileImage,
-          }
-        : null,
+      authorName: post.authorName,
       isFeatured: post.isFeatured,
       publishedAt: post.publishedAt,
       metaTitle: post.metaTitle,
@@ -510,15 +518,19 @@ export class BlogService {
     dto: CreateBlogPostDto,
     coverImageFile?: Express.Multer.File,
   ) {
-    // Validate category exists and is active
-    const category = await this.categoryRepo.findOne({
-      where: { id: dto.categoryId, deletedAt: IsNull() },
-    });
-    if (!category) {
-      throw new NotFoundException(`Blog category #${dto.categoryId} not found`);
-    }
-    if (!category.isActive) {
-      throw new BadRequestException(`Category "${category.name}" is inactive. Choose an active category.`);
+    let categoryId: number | null = null;
+    if (dto.categoryId != null && !isNaN(Number(dto.categoryId))) {
+      const catId = Number(dto.categoryId);
+      const category = await this.categoryRepo.findOne({
+        where: { id: catId, deletedAt: IsNull() },
+      });
+      if (!category) {
+        throw new NotFoundException(`Blog category #${catId} not found`);
+      }
+      if (!category.isActive) {
+        throw new BadRequestException(`Category "${category.name}" is inactive. Choose an active category.`);
+      }
+      categoryId = catId;
     }
 
     // Upload cover image to Vercel Blob if provided as file
@@ -527,22 +539,59 @@ export class BlogService {
       coverImageUrl = await this.uploadCoverImageToStorage('new', coverImageFile);
     }
 
-    // Content sanitization
-    const sanitizedContent = this.sanitizeContent(dto.content);
-    if (!sanitizedContent) {
-      throw new BadRequestException('Blog content cannot be empty after sanitization');
+    let sections: BlogPostSection[] = [];
+    if (dto.sections) {
+      if (typeof dto.sections === 'string') {
+        try {
+          sections = JSON.parse(dto.sections);
+        } catch {
+          throw new BadRequestException('Invalid sections JSON format');
+        }
+      } else if (Array.isArray(dto.sections)) {
+        sections = dto.sections;
+      }
+    }
+
+    sections = (sections || []).map((sec) => ({
+      title: sec.title ? this.sanitizeContent(sec.title) : '',
+      description: sec.description ? this.sanitizeContent(sec.description) : '',
+    }));
+
+    // If sections is empty but legacy content was provided, migrate into sections
+    if (sections.length === 0 && dto.content && dto.content.trim()) {
+      sections = [
+        {
+          title: dto.title ? dto.title.trim() : 'Overview',
+          description: this.sanitizeContent(dto.content),
+        },
+      ];
     }
 
     const status = dto.status || BlogPostStatus.PUBLISHED;
+    if (status === BlogPostStatus.PUBLISHED && sections.length === 0) {
+      throw new BadRequestException('Blog post cannot be published without at least one content section');
+    }
+
+    // TODO: BLOG_POST_SECTIONS_MIGRATION
+    // Legacy content column retained as optional; sections[] is the only source of truth for article body
+    const sanitizedContent = dto.content ? this.sanitizeContent(dto.content) : null;
+
+    const readTime = dto.readTime != null ? Number(dto.readTime) : null;
+    const customCategory = dto.category ? dto.category.trim() : null;
+
     const publishedAt = status === BlogPostStatus.PUBLISHED ? new Date() : null;
+    const authorName = dto.authorName.trim();
 
     const post = this.postRepo.create({
       title: dto.title.trim(),
       excerpt: dto.excerpt?.trim(),
       content: sanitizedContent,
+      sections,
+      readTime,
       coverImage: coverImageUrl,
-      authorId: adminId,
-      categoryId: dto.categoryId,
+      authorName,
+      categoryId,
+      category: customCategory,
       status,
       isFeatured: dto.isFeatured ?? false,
       publishedAt,
@@ -567,6 +616,9 @@ export class BlogService {
         status: saved.status,
         publishedAt: saved.publishedAt,
         categoryId: saved.categoryId,
+        category: saved.category,
+        authorName: saved.authorName,
+        readTime: saved.readTime,
         isFeatured: saved.isFeatured,
       },
     });
@@ -580,19 +632,10 @@ export class BlogService {
     dto: UpdateBlogPostDto,
     coverImageFile?: Express.Multer.File,
   ) {
-    // Fetch post including category and author
+    // Fetch post including category
     const post = await this.postRepo
       .createQueryBuilder('post')
-      .leftJoinAndSelect('post.category', 'category')
-      .leftJoin('post.author', 'author')
-      .addSelect([
-        'author.id',
-        'author.firstName',
-        'author.lastName',
-        'author.username',
-        'author.email',
-        'author.profileImage',
-      ])
+      .leftJoinAndSelect('post.blogCategory', 'blogCategory')
       .where('post.id = :id AND post.deletedAt IS NULL', { id })
       .getOne();
 
@@ -603,6 +646,9 @@ export class BlogService {
     const oldValue = {
       title: post.title,
       categoryId: post.categoryId,
+      category: post.category,
+      authorName: post.authorName,
+      readTime: post.readTime,
       isFeatured: post.isFeatured,
       status: post.status,
       publishedAt: post.publishedAt,
@@ -611,17 +657,49 @@ export class BlogService {
     let statusTransitionAction: 'BLOG_POST_PUBLISHED' | 'BLOG_POST_UNPUBLISHED' | null = null;
 
     if (dto.categoryId !== undefined) {
-      const category = await this.categoryRepo.findOne({
-        where: { id: dto.categoryId, deletedAt: IsNull() },
-      });
-      if (!category) {
-        throw new NotFoundException(`Blog category #${dto.categoryId} not found`);
+      if (dto.categoryId === null || (typeof dto.categoryId === 'string' && (dto.categoryId === 'null' || dto.categoryId === ''))) {
+        post.categoryId = null;
+        post.blogCategory = null;
+      } else {
+        const catId = Number(dto.categoryId);
+        const category = await this.categoryRepo.findOne({
+          where: { id: catId, deletedAt: IsNull() },
+        });
+        if (!category) {
+          throw new NotFoundException(`Blog category #${catId} not found`);
+        }
+        if (!category.isActive) {
+          throw new BadRequestException(`Category "${category.name}" is inactive`);
+        }
+        post.categoryId = catId;
+        post.blogCategory = category;
       }
-      if (!category.isActive) {
-        throw new BadRequestException(`Category "${category.name}" is inactive`);
+    }
+
+    if (dto.category !== undefined) {
+      post.category = dto.category ? dto.category.trim() : null;
+    }
+
+    if (dto.readTime !== undefined) {
+      post.readTime = dto.readTime != null ? Number(dto.readTime) : null;
+    }
+
+    if (dto.sections !== undefined) {
+      if (dto.sections === null) {
+        post.sections = [];
+      } else if (typeof dto.sections === 'string') {
+        try {
+          post.sections = JSON.parse(dto.sections);
+        } catch {
+          throw new BadRequestException('Invalid sections JSON format');
+        }
+      } else if (Array.isArray(dto.sections)) {
+        post.sections = dto.sections;
       }
-      post.categoryId = dto.categoryId;
-      post.category = category;
+      post.sections = (post.sections || []).map((sec) => ({
+        title: sec.title ? this.sanitizeContent(sec.title) : '',
+        description: sec.description ? this.sanitizeContent(sec.description) : '',
+      }));
     }
 
     if (coverImageFile && coverImageFile.buffer && coverImageFile.buffer.length > 0) {
@@ -645,11 +723,7 @@ export class BlogService {
     }
 
     if (dto.content !== undefined) {
-      const sanitized = this.sanitizeContent(dto.content);
-      if (!sanitized) {
-        throw new BadRequestException('Blog content cannot be empty');
-      }
-      post.content = sanitized;
+      post.content = dto.content ? this.sanitizeContent(dto.content) : null;
     }
 
     if (dto.isFeatured !== undefined) {
@@ -664,21 +738,33 @@ export class BlogService {
       post.metaDescription = dto.metaDescription ? dto.metaDescription.trim() : undefined;
     }
 
-    // Status transition & publishedAt management (Sections 8, 9, 10)
+    if (dto.authorName !== undefined) {
+      post.authorName = dto.authorName.trim();
+    }
+
+    // Status transition & publishedAt management (Sections 8, 9, 10, 11)
     if (dto.status !== undefined && dto.status !== post.status) {
       if (dto.status === BlogPostStatus.PUBLISHED) {
         // DRAFT -> PUBLISHED
         if (!post.title || post.title.trim() === '') {
           throw new BadRequestException('Post cannot be published without a title');
         }
-        if (!post.content || post.content.trim() === '') {
-          throw new BadRequestException('Post cannot be published without content');
+        if (!post.sections || post.sections.length === 0) {
+          throw new BadRequestException('Post cannot be published without at least one content section');
         }
-        if (!post.category) {
-          throw new BadRequestException('Post cannot be published without a valid category');
-        }
-        if (!post.category.isActive) {
-          throw new BadRequestException('Post cannot be published because its category is inactive');
+        // If a categoryId is set, ensure it exists and is active
+        if (post.categoryId != null) {
+          if (!post.blogCategory) {
+            const cat = await this.categoryRepo.findOne({
+              where: { id: post.categoryId, deletedAt: IsNull() },
+            });
+            if (!cat || !cat.isActive) {
+              throw new BadRequestException('Post cannot be published because its category is invalid or inactive');
+            }
+            post.blogCategory = cat;
+          } else if (!post.blogCategory.isActive) {
+            throw new BadRequestException('Post cannot be published because its category is inactive');
+          }
         }
         post.status = BlogPostStatus.PUBLISHED;
         post.publishedAt = new Date();
@@ -716,11 +802,14 @@ export class BlogService {
         status: saved.status,
         publishedAt: saved.publishedAt,
         categoryId: saved.categoryId,
+        category: saved.category,
+        authorName: saved.authorName,
+        readTime: saved.readTime,
         isFeatured: saved.isFeatured,
       },
     });
 
-    return this.getPostById(id, true);
+    return this.getPostById(saved.id, true);
   }
 
   async deletePost(adminId: number, id: number) {
@@ -850,5 +939,15 @@ export class BlogService {
     const rawExt = originalName.substring(lastDotIndex).toLowerCase();
     const cleanExt = rawExt.replace(/[^a-z0-9.]/g, '');
     return cleanExt || '.jpg';
+  }
+
+  private async resolveDownloadUrl(coverImage?: string | null): Promise<string | null> {
+    if (!coverImage) return null;
+    try {
+      const url = await this.s3Service.getDownloadUrl(coverImage);
+      return url || null;
+    } catch {
+      return coverImage;
+    }
   }
 }

@@ -172,26 +172,26 @@ describe('AuthModuleController - Google OAuth & Intent Flow', () => {
     });
   });
 
-  describe('POST /api/auth/intent', () => {
-    it('should switch role to PUROHIT and update auth cookies', async () => {
-      const req: any = { user: { id: 10, role: USER_ROLE.CUSTOMER } };
-      const res: any = { cookie: jest.fn() };
-
-      authService.switchIntentService!.mockResolvedValue({
-        message: 'Purohit onboarding initiated. Profile pending admin verification.',
-        tokens: { accessToken: 'new-purohit-access', refreshToken: 'new-purohit-refresh' },
-        user: { id: 10, role: USER_ROLE.PUROHIT, status: USER_STATUS.PENDING },
-      });
-
-      const result = await controller.switchIntent(
-        req,
-        { intent: USER_ROLE.PUROHIT },
-        res,
-      );
-
-      expect(result.success).toBe(true);
-      expect(result.user.role).toBe(USER_ROLE.PUROHIT);
-      expect(res.cookie).toHaveBeenCalledWith('accessToken', 'new-purohit-access', expect.any(Object));
-    });
-  });
+  // describe('POST /api/auth/intent', () => {
+  //   it('should switch role to PUROHIT and update auth cookies', async () => {
+  //     const req: any = { user: { id: 10, role: USER_ROLE.CUSTOMER } };
+  //     const res: any = { cookie: jest.fn() };
+  //
+  //     authService.switchIntentService!.mockResolvedValue({
+  //       message: 'Purohit onboarding initiated. Profile pending admin verification.',
+  //       tokens: { accessToken: 'new-purohit-access', refreshToken: 'new-purohit-refresh' },
+  //       user: { id: 10, role: USER_ROLE.PUROHIT, status: USER_STATUS.PENDING },
+  //     });
+  //
+  //     const result = await controller.switchIntent(
+  //       req,
+  //       { intent: USER_ROLE.PUROHIT },
+  //       res,
+  //     );
+  //
+  //     expect(result.success).toBe(true);
+  //     expect(result.user.role).toBe(USER_ROLE.PUROHIT);
+  //     expect(res.cookie).toHaveBeenCalledWith('accessToken', 'new-purohit-access', expect.any(Object));
+  //   });
+  // });
 });

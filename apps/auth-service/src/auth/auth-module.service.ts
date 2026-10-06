@@ -98,6 +98,24 @@ export class AuthModuleService {
       lastLoginAt: new Date(),
       hashedRefreshToken,
     });
+
+    let verificationStatus: PUROHIT_VERIFICATION_STATUS | undefined;
+    let rejectionReason: string | null | undefined;
+
+    if (user.role === USER_ROLE.PUROHIT) {
+      try {
+        const profile = await this.dataSource
+          .getRepository(PurohitProfile)
+          .findOne({ where: { userId: user.id } });
+        if (profile) {
+          verificationStatus = profile.verificationStatus;
+          rejectionReason = profile.rejectionReason ?? null;
+        }
+      } catch {
+        // Gracefully ignore profile lookup error
+      }
+    }
+
     return {
       tokens: {
         accessToken,
@@ -113,6 +131,10 @@ export class AuthModuleService {
         status: user.status,
         profileImage: user.profileImage,
         isAdminCreated: user.isAdminCreated,
+        ...(user.role === USER_ROLE.PUROHIT && {
+          verificationStatus,
+          rejectionReason,
+        }),
       },
     };
   }
@@ -273,6 +295,8 @@ export class AuthModuleService {
     }
 
     if (user.status === USER_STATUS.REJECTED) {
+      user.hashedRefreshToken = null;
+      await this.userRepository.save(user);
       throw new ForbiddenException('Your profile is Rejected By Admin');
     }
 
@@ -1142,7 +1166,7 @@ export class AuthModuleService {
           googleId: identity.sub,
           authProvider: 'GOOGLE',
           role: isPurohit ? USER_ROLE.PUROHIT : USER_ROLE.CUSTOMER,
-          status: isPurohit ? USER_STATUS.PENDING : USER_STATUS.ACTIVE,
+          status: USER_STATUS.ACTIVE,
           tokenVersion: 1,
         });
 

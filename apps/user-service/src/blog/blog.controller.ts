@@ -170,7 +170,7 @@ export class BlogController {
   @HttpCode(HttpStatus.CREATED)
   async createPost(
     @Req() req: AuthenticatedRequest,
-    @Body(new ValidationPipe({ whitelist: true })) dto: CreateBlogPostDto,
+    @Body(new ValidationPipe({ whitelist: true, transform: true })) dto: CreateBlogPostDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const adminId = req.user.id;
@@ -185,7 +185,7 @@ export class BlogController {
   async updatePost(
     @Req() req: AuthenticatedRequest,
     @Param('id', ParseIntPipe) id: number,
-    @Body(new ValidationPipe({ whitelist: true })) dto: UpdateBlogPostDto,
+    @Body(new ValidationPipe({ whitelist: true, transform: true })) dto: UpdateBlogPostDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const adminId = req.user.id;

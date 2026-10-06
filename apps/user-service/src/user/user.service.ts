@@ -207,10 +207,49 @@ export class UserService {
             ? profile.isOfflineAvailable
             : dto.isOfflineAvailable === 'true',
       });
+
+      if (dto.state !== undefined || dto.city !== undefined) {
+        const defaultArea =
+          (await this.purohitServiceAreaRepository.findOne({
+            where: { purohitId: Number(id), isDefault: true },
+          })) ||
+          (await this.purohitServiceAreaRepository.findOne({
+            where: { purohitId: Number(id) },
+            order: { createdAt: 'DESC' },
+          }));
+        if (defaultArea) {
+          await this.purohitServiceAreaRepository.update(defaultArea.id, {
+            ...(dto.state !== undefined && { state: dto.state }),
+            ...(dto.city !== undefined && { city: dto.city }),
+          });
+        }
+      }
+    } else if (user.role === USER_ROLE.CUSTOMER) {
+      if (dto.state !== undefined || dto.city !== undefined) {
+        const defaultAddress =
+          (await this.customerAddressRepository.findOne({
+            where: { customerId: Number(id), isDefault: true },
+          })) ||
+          (await this.customerAddressRepository.findOne({
+            where: { customerId: Number(id) },
+            order: { createdAt: 'DESC' },
+          }));
+        if (defaultAddress) {
+          await this.customerAddressRepository.update(defaultAddress.id, {
+            ...(dto.state !== undefined && { state: dto.state }),
+            ...(dto.city !== undefined && { city: dto.city }),
+          });
+        }
+      }
     }
 
+    const fullUser = await this.userRepository.getFullProfile(
+      Number(id),
+      user.role,
+    );
+
     const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } =
-      updatedUser!;
+      (fullUser || updatedUser || {}) as any;
     // TODO: VERCEL_BLOB_MIGRATION
     // Legacy S3 signed URL generation retained for rollback/reference.
     /*
@@ -226,6 +265,34 @@ export class UserService {
     */
     // Active Vercel Blob implementation:
     // Stored public Blob URLs or existing URLs are returned directly without generating an S3-style signed URL.
+
+    // Resolve state for user profile
+    let userState: string | null = (safeUser as any)?.state || null;
+    if (!userState) {
+      if (user.role === USER_ROLE.PUROHIT) {
+        const serviceAreas = (safeUser as any).serviceAreas;
+        if (serviceAreas && serviceAreas.length > 0) {
+          const defaultArea =
+            serviceAreas.find((a: any) => a.isDefault) || serviceAreas[0];
+          userState = defaultArea?.state || null;
+        }
+        if (!userState && (safeUser as any).profile?.state) {
+          userState = (safeUser as any).profile.state;
+        }
+      } else if (user.role === USER_ROLE.CUSTOMER) {
+        const addresses = (safeUser as any).addresses;
+        if (addresses && addresses.length > 0) {
+          const defaultAddress =
+            addresses.find((a: any) => a.isDefault) || addresses[0];
+          userState = defaultAddress?.state || null;
+        }
+      }
+    }
+    (safeUser as any).state = userState;
+    if ((safeUser as any).profile) {
+      (safeUser as any).profile.state =
+        (safeUser as any).profile.state || userState;
+    }
 
     await this.auditLogService.createAuditLog({
       actorId: adminId,
@@ -252,6 +319,8 @@ export class UserService {
     dto: UpdateUserDto,
     files: {
       profileImage?: Express.Multer.File[];
+      aadhaarDoc?: Express.Multer.File[];
+      panDoc?: Express.Multer.File[];
       certificate?: Express.Multer.File[];
       templeAffiliationProof?: Express.Multer.File[];
     },
@@ -289,6 +358,22 @@ export class UserService {
       if (oldProfileImage && this.s3Service.isVercelBlobUrl(oldProfileImage)) {
         await this.s3Service.deleteByUrl(oldProfileImage);
       }
+    }
+
+    if (files?.aadhaarDoc?.length) {
+      dto.aadhaarDoc = await this.s3Service.uploadFileHelper(
+        id,
+        'aadhaarDoc',
+        files.aadhaarDoc,
+      );
+    }
+
+    if (files?.panDoc?.length) {
+      dto.panDoc = await this.s3Service.uploadFileHelper(
+        id,
+        'panDoc',
+        files.panDoc,
+      );
     }
 
     if (files?.certificate?.length) {
@@ -357,17 +442,19 @@ export class UserService {
       }
     }
 
-    const updatedUser = await this.userRepository.getFullProfile(
-      Number(id),
-      user.role,
-    );
-
     if (user.role === USER_ROLE.PUROHIT) {
       const profile = await this.purohitProfileRepository.findByUserId(
         Number(id),
       );
 
       if (profile) {
+        // TODO: PUROHIT_VERIFICATION_RESUBMIT
+        // When a REJECTED Purohit submits an Edit Profile update, automatically transition
+        // verificationStatus from REJECTED -> PENDING and clear rejectionReason to null.
+        const isRejected =
+          profile.verificationStatus === PUROHIT_VERIFICATION_STATUS.REJECTED;
+        const previousRejectionReason = profile.rejectionReason;
+
         await this.purohitProfileRepository.update(profile.id, {
           bio: dto.bio,
           qualification: dto.qualification,
@@ -376,6 +463,8 @@ export class UserService {
           city: dto.city,
           languages: dto.languages,
           specializations: dto.specializations,
+          ...(dto.aadhaarDoc && { aadhaarDocUrl: dto.aadhaarDoc }),
+          ...(dto.panDoc && { panDocUrl: dto.panDoc }),
           ...(dto.certificate && { certificateUrl: dto.certificate }),
           ...(dto.templeAffiliationProof && {
             templeAffiliationProofUrl: dto.templeAffiliationProof,
@@ -388,7 +477,118 @@ export class UserService {
             dto.isOfflineAvailable === undefined
               ? profile.isOfflineAvailable
               : String(dto.isOfflineAvailable) === 'true',
+          ...(isRejected && {
+            verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+            rejectionReason: () => 'NULL',
+          }),
         });
+
+        await this.syncPurohitMediaDocuments(profile.id, {
+          aadhaarDocUrl: dto.aadhaarDoc,
+          panDocUrl: dto.panDoc,
+          certificateUrl: dto.certificate,
+          templeAffiliationProofUrl: dto.templeAffiliationProof,
+        });
+
+        if (isRejected) {
+          // Reset any previously rejected media documents to PENDING and clear rejectionReason
+          await this.dataSource
+            .getRepository(PurohitMedia)
+            .createQueryBuilder()
+            .update(PurohitMedia)
+            .set({
+              verificationStatus: PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING,
+              rejectionReason: () => 'NULL',
+            })
+            .where('"purohitId" = :profileId', { profileId: profile.id })
+            .andWhere('"deletedAt" IS NULL')
+            .execute();
+
+          // Reset any failed bank accounts to PENDING
+          await this.dataSource
+            .getRepository(PurohitBankAccount)
+            .createQueryBuilder()
+            .update(PurohitBankAccount)
+            .set({
+              verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
+            })
+            .where('"purohitId" = :profileId AND "verificationStatus" = :status', {
+              profileId: profile.id,
+              status: BANK_VERIFICATION_STATUS.FAILED,
+            })
+            .andWhere('"deletedAt" IS NULL')
+            .execute();
+
+          await this.auditLogService.createAuditLog({
+            actorId: Number(id),
+            actorType: ACTOR_TYPE.USER,
+            actorRole: USER_ROLE.PUROHIT,
+            module: AUDIT_MODULE.USER,
+            entity: 'PurohitProfile',
+            entityId: String(profile.id),
+            action: 'PUROHIT_VERIFICATION_RESUBMITTED',
+            message: `Purohit #${id} resubmitted profile for verification via profile update.`,
+            oldValue: {
+              verificationStatus: PUROHIT_VERIFICATION_STATUS.REJECTED,
+              rejectionReason: previousRejectionReason,
+            },
+            newValue: {
+              verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+              rejectionReason: null,
+            },
+          });
+
+          if (this.notificationService) {
+            try {
+              await this.notificationService.createNotification(
+                Number(id),
+                'Verification Resubmitted',
+                'Your profile verification request has been resubmitted and is under review.',
+                NOTIFICATION_TYPE.SYSTEM,
+                profile.id,
+                'PUROHIT_PROFILE',
+              );
+            } catch (err: any) {
+              this.logger.warn(
+                `Failed to send purohit resubmission notification: ${err?.message}`,
+              );
+            }
+          }
+        }
+      }
+
+      if (dto.state !== undefined || dto.city !== undefined) {
+        const defaultArea =
+          (await this.purohitServiceAreaRepository.findOne({
+            where: { purohitId: Number(id), isDefault: true },
+          })) ||
+          (await this.purohitServiceAreaRepository.findOne({
+            where: { purohitId: Number(id) },
+            order: { createdAt: 'DESC' },
+          }));
+        if (defaultArea) {
+          await this.purohitServiceAreaRepository.update(defaultArea.id, {
+            ...(dto.state !== undefined && { state: dto.state }),
+            ...(dto.city !== undefined && { city: dto.city }),
+          });
+        }
+      }
+    } else if (user.role === USER_ROLE.CUSTOMER) {
+      if (dto.state !== undefined || dto.city !== undefined) {
+        const defaultAddress =
+          (await this.customerAddressRepository.findOne({
+            where: { customerId: Number(id), isDefault: true },
+          })) ||
+          (await this.customerAddressRepository.findOne({
+            where: { customerId: Number(id) },
+            order: { createdAt: 'DESC' },
+          }));
+        if (defaultAddress) {
+          await this.customerAddressRepository.update(defaultAddress.id, {
+            ...(dto.state !== undefined && { state: dto.state }),
+            ...(dto.city !== undefined && { city: dto.city }),
+          });
+        }
       }
     }
 
@@ -398,7 +598,7 @@ export class UserService {
     );
 
     const { hashedPassword, hashedRefreshToken, tokenVersion, ...safeUser } =
-      updatedUser as any;
+      (fullUser || {}) as any;
     // TODO: VERCEL_BLOB_MIGRATION
     // Legacy S3 signed URL generation retained for rollback/reference.
     /*
@@ -464,6 +664,38 @@ export class UserService {
       newValue: undefined,
     });
 
+    // Resolve state for user profile
+    let userState: string | null = (safeUser as any)?.state || null;
+    if (!userState) {
+      if (user.role === USER_ROLE.PUROHIT) {
+        const serviceAreas = (safeUser as any).serviceAreas;
+        if (serviceAreas && serviceAreas.length > 0) {
+          const defaultArea =
+            serviceAreas.find((a: any) => a.isDefault) || serviceAreas[0];
+          userState = defaultArea?.state || null;
+        }
+        if (!userState && (safeUser as any).profile?.state) {
+          userState = (safeUser as any).profile.state;
+        }
+      } else if (user.role === USER_ROLE.CUSTOMER) {
+        const addresses = (safeUser as any).addresses;
+        if (addresses && addresses.length > 0) {
+          const defaultAddress =
+            addresses.find((a: any) => a.isDefault) || addresses[0];
+          userState = defaultAddress?.state || null;
+        }
+      }
+    }
+    (safeUser as any).state = userState;
+    if ((safeUser as any).profile) {
+      (safeUser as any).profile.state =
+        (safeUser as any).profile.state || userState;
+      (safeUser as any).verificationStatus =
+        (safeUser as any).profile.verificationStatus;
+      (safeUser as any).rejectionReason =
+        (safeUser as any).profile.rejectionReason ?? null;
+    }
+
     return {
       success: true,
       message: 'Profile updated successfully',
@@ -492,8 +724,8 @@ export class UserService {
 
     user.status = status;
 
-    // Logout user if blocked
-    if (status === USER_STATUS.BLOCKED) {
+    // Invalidate session if user is blocked or rejected
+    if (status === USER_STATUS.BLOCKED || status === USER_STATUS.REJECTED) {
       user.hashedRefreshToken = null;
       user.tokenVersion += 1;
     }
@@ -1366,6 +1598,8 @@ export class UserService {
           (safeUser as any).purohitServices = profile.purohitServices;
         }
         (safeUser as any).profile = profile;
+        (safeUser as any).verificationStatus = profile.verificationStatus;
+        (safeUser as any).rejectionReason = profile.rejectionReason ?? null;
       }
 
       return {
@@ -2054,6 +2288,7 @@ export class UserService {
       ],
       [PUROHIT_VERIFICATION_STATUS.REJECTED]: [
         PUROHIT_VERIFICATION_STATUS.APPROVED,
+        PUROHIT_VERIFICATION_STATUS.REJECTED,
       ],
     };
 
@@ -2079,10 +2314,11 @@ export class UserService {
     return false;
   }
 
-  private validatePurohitForApproval(
+  private validatePurohitForVerification(
     user: User,
     profile: PurohitProfile,
     media: PurohitMedia[],
+    context: 'approval' | 'resubmission' = 'approval',
   ): void {
     const requiredFields: Record<string, unknown> = {
       email: user.email,
@@ -2091,7 +2327,7 @@ export class UserService {
       // TODO: Qualification certificate is optional as per business requirements
       // 'qualification certificate': profile.certificateUrl,
       qualification: profile.qualification,
-      'experience years': profile.experienceYears,
+      experienceYears: profile.experienceYears,
       languages: profile.languages,
       specializations: profile.specializations,
       'Purohit media': media,
@@ -2108,11 +2344,23 @@ export class UserService {
     }
 
     if (missingFields.length > 0) {
+      const prefix =
+        context === 'resubmission'
+          ? 'Please complete all required profile and verification information before resubmitting. Missing:'
+          : 'Purohit cannot be approved. Missing required details:';
       throw new BadRequestException(
-        `Purohit cannot be approved. Missing required details: ${missingFields.join(', ')}`,
+        `${prefix} ${missingFields.join(', ')}`,
       );
     }
     this.validatePurohitMedia(media);
+  }
+
+  private validatePurohitForApproval(
+    user: User,
+    profile: PurohitProfile,
+    media: PurohitMedia[],
+  ): void {
+    this.validatePurohitForVerification(user, profile, media, 'approval');
   }
 
   private validatePurohitMedia(media: PurohitMedia[]): void {
@@ -2226,13 +2474,18 @@ export class UserService {
     const mediaRepository = manager.getRepository(PurohitMedia);
     const bankAccountRepository = manager.getRepository(PurohitBankAccount);
 
-    await userRepository.update(
-      { id: userId },
-      {
-        status: USER_STATUS.REJECTED,
-        rejectionReason,
-      },
-    );
+    // TODO: PUROHIT_VERIFICATION_REWORK
+    // Verification rejection must not reject/deactivate the User account.
+    // User.status remains ACTIVE while PurohitProfile.verificationStatus = REJECTED.
+    await userRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        status: USER_STATUS.ACTIVE,
+        rejectionReason: () => 'NULL',
+      })
+      .where('id = :userId', { userId })
+      .execute();
 
     await profileRepository.update(
       { id: profileId },
@@ -2416,10 +2669,9 @@ export class UserService {
           throw new BadRequestException('Invalid Purohit verification status');
       }
 
-      const userStatus =
-        dto.status === PUROHIT_VERIFICATION_STATUS.APPROVED
-          ? USER_STATUS.ACTIVE
-          : USER_STATUS.REJECTED;
+      // TODO: PUROHIT_VERIFICATION_REWORK
+      // User account status remains ACTIVE during both approval and rejection of Purohit verification.
+      const userStatus = USER_STATUS.ACTIVE;
       const mediaStatus =
         dto.status === PUROHIT_VERIFICATION_STATUS.APPROVED
           ? PUROHIT_MEDIA_VERIFICATION_STATUS.APPROVED
@@ -2508,6 +2760,55 @@ export class UserService {
         emailSent,
       },
     };
+  }
+
+  // TODO: PUROHIT_VERIFICATION_RESUBMIT
+  // Resubmission is now handled through the existing Edit Profile API (updateProfileByUser).
+  // Separate resubmit endpoint is intentionally not required.
+
+  private async syncPurohitMediaDocuments(
+    purohitProfileId: number,
+    docs: {
+      aadhaarDocUrl?: string;
+      panDocUrl?: string;
+      certificateUrl?: string;
+      templeAffiliationProofUrl?: string;
+    },
+  ): Promise<void> {
+    const mappings: Array<{ docType: string; url?: string }> = [
+      { docType: 'AADHAAR', url: docs.aadhaarDocUrl },
+      { docType: 'PAN', url: docs.panDocUrl },
+      { docType: 'CERTIFICATE', url: docs.certificateUrl },
+      { docType: 'TEMPLE_PROOF', url: docs.templeAffiliationProofUrl },
+    ];
+
+    for (const item of mappings) {
+      if (!item.url) continue;
+
+      const existingMedia = await this.purohitMediaRepository.findOne({
+        where: {
+          purohitId: purohitProfileId,
+          documentType: item.docType,
+        },
+      });
+
+      if (existingMedia) {
+        await this.purohitMediaRepository.update(existingMedia.id, {
+          mediaUrl: item.url,
+          verificationStatus: PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING,
+          rejectionReason: () => 'NULL',
+        });
+      } else {
+        const newMedia = this.purohitMediaRepository.create({
+          purohitId: purohitProfileId,
+          mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
+          documentType: item.docType,
+          mediaUrl: item.url,
+          verificationStatus: PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING,
+        });
+        await this.purohitMediaRepository.save(newMedia);
+      }
+    }
   }
 
   async createCustomerByAdmin(dto: CreateCustomerByAdminDto) {
@@ -2629,7 +2930,9 @@ export class UserService {
         role: USER_ROLE.PUROHIT,
         firstName: dto.firstName,
         lastName: dto.lastName,
-        status: USER_STATUS.PENDING,
+        // TODO: PUROHIT_VERIFICATION_REWORK
+        // User account status is ACTIVE upon creation; Purohit verification status is PENDING.
+        status: USER_STATUS.ACTIVE,
         isAdminCreated: true,
         dob: dto.dob ? new Date(dto.dob) : undefined,
       });
@@ -2962,10 +3265,9 @@ export class UserService {
               lastName: dto.lastName,
               hashedPassword: hashedPassword,
               role: otpRecord.role || USER_ROLE.CUSTOMER,
-              status:
-                otpRecord.role === USER_ROLE.PUROHIT
-                  ? USER_STATUS.PENDING
-                  : USER_STATUS.ACTIVE,
+              // TODO: PUROHIT_VERIFICATION_REWORK
+              // User account status is ACTIVE upon registration; Purohit verification status is PENDING.
+              status: USER_STATUS.ACTIVE,
             });
 
             saved = await manager.save(User, newUser);

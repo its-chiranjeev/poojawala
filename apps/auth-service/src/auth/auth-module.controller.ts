@@ -388,6 +388,52 @@ export class AuthModuleController {
         (safeUser as any).profile.purohitServices = purohitServices;
       }
     }
+
+    // Resolve state for user profile
+    let userState: string | null = (safeUser as any)?.state || null;
+    if (!userState) {
+      if (req.user?.role === USER_ROLE.PUROHIT || (safeUser as any)?.role === USER_ROLE.PUROHIT) {
+        const serviceAreas = (safeUser as any).serviceAreas;
+        if (serviceAreas && serviceAreas.length > 0) {
+          const defaultArea = serviceAreas.find((a: any) => a.isDefault) || serviceAreas[0];
+          userState = defaultArea?.state || null;
+        }
+        if (!userState && (safeUser as any).profile?.state) {
+          userState = (safeUser as any).profile.state;
+        }
+        if (!userState) {
+          const addresses = (safeUser as any).addresses;
+          if (addresses && addresses.length > 0) {
+            const defaultAddress = addresses.find((a: any) => a.isDefault) || addresses[0];
+            userState = defaultAddress?.state || null;
+          }
+        }
+      } else {
+        const addresses = (safeUser as any).addresses;
+        if (addresses && addresses.length > 0) {
+          const defaultAddress = addresses.find((a: any) => a.isDefault) || addresses[0];
+          userState = defaultAddress?.state || null;
+        }
+        if (!userState) {
+          const serviceAreas = (safeUser as any).serviceAreas;
+          if (serviceAreas && serviceAreas.length > 0) {
+            const defaultArea = serviceAreas.find((a: any) => a.isDefault) || serviceAreas[0];
+            userState = defaultArea?.state || null;
+          }
+        }
+        if (!userState && (safeUser as any).profile?.state) {
+          userState = (safeUser as any).profile.state;
+        }
+      }
+    }
+
+    (safeUser as any).state = userState;
+    if ((safeUser as any).profile) {
+      (safeUser as any).profile.state = (safeUser as any).profile.state || userState;
+      (safeUser as any).verificationStatus = (safeUser as any).profile.verificationStatus;
+      (safeUser as any).rejectionReason = (safeUser as any).profile.rejectionReason ?? null;
+    }
+
     return {
       success: true,
       statusCode: HttpStatus.OK,

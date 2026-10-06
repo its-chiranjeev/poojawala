@@ -13,6 +13,9 @@ import {
 } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
 import { S3Service } from '@poojawala/s3';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
+import { CreateBlogPostDto, UpdateBlogPostDto } from '@poojawala/dtos';
 
 describe('BlogService', () => {
   let service: BlogService;
@@ -23,6 +26,7 @@ describe('BlogService', () => {
     uploadFile: jest.Mock;
     deleteByUrl: jest.Mock;
     isVercelBlobUrl: jest.Mock;
+    getDownloadUrl: jest.Mock;
   };
 
   const mockCategory: BlogCategory = {
@@ -55,9 +59,17 @@ describe('BlogService', () => {
     excerpt: 'A simple guide to Satyanarayan Puja',
     content: '<p>Satyanarayan Puja is a holy ritual.</p>',
     coverImage: 'https://blob.vercel-storage.com/blog-images/101/pic.jpg',
-    authorId: 1,
+    authorName: 'Pt. Ramesh Sharma',
     categoryId: 1,
-    category: mockCategory,
+    blogCategory: mockCategory,
+    category: 'Puja & Rituals',
+    readTime: 5,
+    sections: [
+      {
+        title: 'Introduction',
+        description: '<p>Satyanarayan Puja is a holy ritual.</p>',
+      },
+    ],
     status: BlogPostStatus.DRAFT,
     isFeatured: false,
     publishedAt: null,
@@ -97,6 +109,7 @@ describe('BlogService', () => {
       uploadFile: jest.fn().mockResolvedValue('https://blob.vercel-storage.com/blog-images/101/new-pic.jpg'),
       deleteByUrl: jest.fn().mockResolvedValue(undefined),
       isVercelBlobUrl: jest.fn((url: string) => url?.includes('blob.vercel-storage.com')),
+      getDownloadUrl: jest.fn().mockImplementation((url: string) => Promise.resolve(url || '')),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -267,6 +280,7 @@ describe('BlogService', () => {
         title: 'New Puja Guide',
         content: '<p>Valid content</p>',
         categoryId: 1,
+        authorName: 'Pt. Ramesh Sharma',
       });
 
       expect(result).toBeDefined();
@@ -274,6 +288,7 @@ describe('BlogService', () => {
         expect.objectContaining({
           status: BlogPostStatus.PUBLISHED,
           publishedAt: expect.any(Date),
+          authorName: 'Pt. Ramesh Sharma',
         }),
       );
       expect(auditLogService.createAuditLog).toHaveBeenCalledWith(
@@ -298,6 +313,7 @@ describe('BlogService', () => {
         title: 'Draft Puja Guide',
         content: '<p>Valid content</p>',
         categoryId: 1,
+        authorName: 'Pt. Ramesh Sharma',
         status: BlogPostStatus.DRAFT,
       });
 
@@ -306,6 +322,7 @@ describe('BlogService', () => {
         expect.objectContaining({
           status: BlogPostStatus.DRAFT,
           publishedAt: null,
+          authorName: 'Pt. Ramesh Sharma',
         }),
       );
       expect(auditLogService.createAuditLog).toHaveBeenCalledWith(
@@ -321,6 +338,7 @@ describe('BlogService', () => {
           title: 'New Puja Guide',
           content: '<p>Valid content</p>',
           categoryId: 1,
+          authorName: 'Pt. Ramesh Sharma',
         }),
       ).rejects.toThrow(BadRequestException);
     });
@@ -340,18 +358,145 @@ describe('BlogService', () => {
 
       await service.createPost(1, {
         title: 'New Puja Guide',
-        content: '<p>Hello</p><script>alert("hacked")</script><img src="x" onerror="alert(1)">',
         categoryId: 1,
+        authorName: 'Pt. Ramesh Sharma',
+        sections: [
+          {
+            title: 'Section 1',
+            description: '<p>Hello</p><script>alert("hacked")</script><img src="x" onerror="alert(1)">',
+          },
+        ],
       });
 
       const createCall = postRepo.create!.mock.calls[0][0];
-      expect(createCall.content).not.toContain('<script>');
-      expect(createCall.content).not.toContain('onerror=');
-      expect(createCall.content).toContain('<p>Hello</p>');
+      expect(createCall.sections[0].description).not.toContain('<script>');
+      expect(createCall.sections[0].description).not.toContain('onerror=');
+      expect(createCall.sections[0].description).toContain('<p>Hello</p>');
+    });
+
+    it('createPost - should create blog post without categoryId (nullable categoryId)', async () => {
+      const qbMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ ...mockPost, categoryId: null, blogCategory: null }),
+      };
+      postRepo.createQueryBuilder!.mockReturnValue(qbMock);
+
+      const result = await service.createPost(1, {
+        title: 'Diwali Puja Vidhi',
+        category: 'Diwali Puja',
+        authorName: 'Pt. Ramesh Sharma',
+        readTime: 7,
+        sections: [
+          {
+            title: 'What is Diwali Puja?',
+            description: 'Diwali is the festival of lights.',
+          },
+        ],
+      });
+
+      expect(result).toBeDefined();
+      expect(postRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Diwali Puja Vidhi',
+          categoryId: null,
+          category: 'Diwali Puja',
+          authorName: 'Pt. Ramesh Sharma',
+          readTime: 7,
+          sections: expect.arrayContaining([
+            expect.objectContaining({ title: 'What is Diwali Puja?' }),
+          ]),
+        }),
+      );
+    });
+
+    it('createPost - should create blog post with both categoryId and custom category', async () => {
+      categoryRepo.findOne!.mockResolvedValue(mockCategory);
+      const qbMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(mockPost),
+      };
+      postRepo.createQueryBuilder!.mockReturnValue(qbMock);
+
+      await service.createPost(1, {
+        title: 'Satyanarayan Puja',
+        categoryId: 1,
+        category: 'Puja & Rituals',
+        authorName: 'Pt. Ramesh Sharma',
+        readTime: 5,
+        sections: [{ title: 'Intro', description: 'Description' }],
+      });
+
+      expect(postRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          categoryId: 1,
+          category: 'Puja & Rituals',
+          authorName: 'Pt. Ramesh Sharma',
+          readTime: 5,
+        }),
+      );
+    });
+
+    it('createPost - should reject publishing if sections array is empty', async () => {
+      await expect(
+        service.createPost(1, {
+          title: 'Empty Blog',
+          status: BlogPostStatus.PUBLISHED,
+          authorName: 'Pt. Ramesh Sharma',
+          sections: [],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('updatePost - update readTime, sections, categoryId, and custom category', async () => {
+      categoryRepo.findOne!.mockResolvedValue(mockCategory);
+      const qbMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(mockPost),
+      };
+      postRepo.createQueryBuilder!.mockReturnValue(qbMock);
+
+      await service.updatePost(1, 101, {
+        readTime: 12,
+        category: 'Updated Custom Category',
+        categoryId: null,
+        sections: [
+          { title: 'New Section 1', description: 'Content 1' },
+          { title: 'New Section 2', description: 'Content 2' },
+        ],
+      });
+
+      expect(postRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          readTime: 12,
+          category: 'Updated Custom Category',
+          categoryId: null,
+          sections: [
+            { title: 'New Section 1', description: 'Content 1' },
+            { title: 'New Section 2', description: 'Content 2' },
+          ],
+        }),
+      );
     });
 
     it('updatePost - status transition: DRAFT -> PUBLISHED sets publishedAt and logs BLOG_POST_PUBLISHED', async () => {
-      const draftPost = { ...mockPost, status: BlogPostStatus.DRAFT, publishedAt: null };
+      const draftPost = {
+        ...mockPost,
+        status: BlogPostStatus.DRAFT,
+        publishedAt: null,
+        sections: [{ title: 'Intro', description: 'Desc' }],
+      };
       const qbMock: any = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         leftJoin: jest.fn().mockReturnThis(),
@@ -380,6 +525,7 @@ describe('BlogService', () => {
         ...mockPost,
         status: BlogPostStatus.PUBLISHED,
         publishedAt: new Date('2026-02-01'),
+        sections: [{ title: 'Intro', description: 'Desc' }],
       };
       const qbMock: any = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
@@ -410,6 +556,7 @@ describe('BlogService', () => {
         ...mockPost,
         status: BlogPostStatus.PUBLISHED,
         publishedAt: originalPublishedAt,
+        sections: [{ title: 'Intro', description: 'Desc' }],
       };
       const qbMock: any = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
@@ -454,7 +601,6 @@ describe('BlogService', () => {
   describe('Shared Read: Blog Posts & Security Rules', () => {
     it('getPosts - public mode: only PUBLISHED and non-deleted posts are returned', async () => {
       const qbMock: any = {
-        innerJoin: jest.fn().mockReturnThis(),
         leftJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
@@ -467,6 +613,7 @@ describe('BlogService', () => {
         getMany: jest.fn().mockResolvedValue([
           {
             ...mockPost,
+            readTime: 5,
             status: BlogPostStatus.PUBLISHED,
             publishedAt: new Date(),
           },
@@ -484,11 +631,12 @@ describe('BlogService', () => {
       expect(result.data.length).toBe(1);
       // Public list should not expose full content
       expect((result.data[0] as any).content).toBeUndefined();
+      expect(result.data[0].sections).toBeDefined();
+      expect(result.data[0].readTime).toBe(5);
     });
 
     it('getPosts - security: public user cannot expose drafts using query status=DRAFT', async () => {
       const qbMock: any = {
-        innerJoin: jest.fn().mockReturnThis(),
         leftJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
@@ -569,6 +717,168 @@ describe('BlogService', () => {
 
       expect(result.id).toBe(101);
       expect(result.status).toBe(BlogPostStatus.DRAFT);
+      expect(result.downloadUrl).toBe(mockPost.coverImage);
+      expect(result.authorName).toBe('Pt. Ramesh Sharma');
+      expect((result as any).author).toBeUndefined();
+    });
+
+    it('getPostById - public mode: includes downloadUrl and authorName, does NOT include author User object', async () => {
+      const publishedPost = {
+        ...mockPost,
+        status: BlogPostStatus.PUBLISHED,
+        publishedAt: new Date(),
+        coverImage: 'https://blob.vercel-storage.com/blog-images/101/pic.jpg',
+        authorName: 'Pt. Ramesh Sharma',
+      };
+      const qbMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(publishedPost),
+      };
+      postRepo.createQueryBuilder!.mockReturnValue(qbMock);
+
+      const result = await service.getPostById(101, false);
+
+      expect(result.id).toBe(101);
+      expect(result.coverImage).toBe('https://blob.vercel-storage.com/blog-images/101/pic.jpg');
+      expect(result.downloadUrl).toBe('https://blob.vercel-storage.com/blog-images/101/pic.jpg');
+      expect(result.authorName).toBe('Pt. Ramesh Sharma');
+      expect(result.author).toBeUndefined();
+    });
+
+    it('getPosts - public mode: includes authorName and does NOT include author User object', async () => {
+      const publishedPost = {
+        ...mockPost,
+        status: BlogPostStatus.PUBLISHED,
+        publishedAt: new Date(),
+        coverImage: 'https://blob.vercel-storage.com/blog-images/101/pic.jpg',
+        authorName: 'Pt. Ramesh Sharma',
+      };
+      const qbMock: any = {
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(1),
+        getMany: jest.fn().mockResolvedValue([publishedPost]),
+      };
+      postRepo.createQueryBuilder!.mockReturnValue(qbMock);
+
+      const result = await service.getPosts(false, { page: 1, limit: 10 });
+
+      expect(result.data.length).toBe(1);
+      expect(result.data[0].authorName).toBe('Pt. Ramesh Sharma');
+      expect((result.data[0] as any).author).toBeUndefined();
+    });
+
+    it('getPosts - admin mode: includes authorName and does NOT include author User object', async () => {
+      const draftPost = {
+        ...mockPost,
+        authorName: 'Pt. Ramesh Sharma',
+      };
+      const qbMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(1),
+        getMany: jest.fn().mockResolvedValue([draftPost]),
+      };
+      postRepo.createQueryBuilder!.mockReturnValue(qbMock);
+
+      const result = await service.getPosts(true, { page: 1, limit: 10 });
+
+      expect(result.data.length).toBe(1);
+      expect(result.data[0].authorName).toBe('Pt. Ramesh Sharma');
+      expect((result.data[0] as any).author).toBeUndefined();
+    });
+
+    it('updatePost - update authorName to Acharya Amit Sharma', async () => {
+      const existingPost = {
+        ...mockPost,
+        authorName: 'Pt. Ramesh Sharma',
+      };
+      const updatedPost = {
+        ...mockPost,
+        authorName: 'Acharya Amit Sharma',
+      };
+      const qbMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(existingPost),
+      };
+      postRepo.createQueryBuilder!.mockReturnValue(qbMock);
+
+      // Subsequent getPostById call
+      const qbDetailMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(updatedPost),
+      };
+      postRepo.createQueryBuilder!.mockReturnValueOnce(qbMock).mockReturnValueOnce(qbDetailMock);
+
+      const result = await service.updatePost(1, 101, {
+        authorName: 'Acharya Amit Sharma',
+      });
+
+      expect(postRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          authorName: 'Acharya Amit Sharma',
+        }),
+      );
+      expect(result.authorName).toBe('Acharya Amit Sharma');
+      expect((result as any).author).toBeUndefined();
+    });
+  });
+
+  describe('DTO Validation: authorName', () => {
+    it('CreateBlogPostDto - rejects empty authorName', async () => {
+      const dto = plainToInstance(CreateBlogPostDto, {
+        title: 'Valid Title',
+        authorName: '',
+      });
+      const errors = await validate(dto);
+      const authorError = errors.find((e) => e.property === 'authorName');
+      expect(authorError).toBeDefined();
+    });
+
+    it('CreateBlogPostDto - rejects non-string authorName', async () => {
+      const dto = plainToInstance(CreateBlogPostDto, {
+        title: 'Valid Title',
+        authorName: 12345,
+      });
+      const errors = await validate(dto);
+      const authorError = errors.find((e) => e.property === 'authorName');
+      expect(authorError).toBeDefined();
+    });
+
+    it('CreateBlogPostDto - accepts valid authorName with titles and whitespace trimming', async () => {
+      const dto = plainToInstance(CreateBlogPostDto, {
+        title: 'Valid Title',
+        authorName: '  Pt. Ramesh Sharma  ',
+      });
+      const errors = await validate(dto);
+      const authorError = errors.find((e) => e.property === 'authorName');
+      expect(authorError).toBeUndefined();
+      expect(dto.authorName).toBe('Pt. Ramesh Sharma');
+    });
+
+    it('UpdateBlogPostDto - rejects empty string authorName if provided', async () => {
+      const dto = plainToInstance(UpdateBlogPostDto, {
+        authorName: '',
+      });
+      const errors = await validate(dto);
+      const authorError = errors.find((e) => e.property === 'authorName');
+      expect(authorError).toBeDefined();
     });
   });
 });

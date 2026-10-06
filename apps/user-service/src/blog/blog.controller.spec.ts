@@ -1,10 +1,12 @@
 jest.mock('puppeteer', () => ({}));
 
+import { ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { BlogController } from './blog.controller';
 import { BlogService } from './blog.service';
 import { JwtAuthGuard, OptionalJwtAuthGuard, RolesGuard } from '@poojawala/common';
 import { USER_ROLE, BlogPostStatus } from '@poojawala/entities';
+import { CreateBlogPostDto, UpdateBlogPostDto, BlogPostSectionDto } from '@poojawala/dtos';
 
 describe('BlogController (Consolidated Shared Read + Admin Write)', () => {
   let controller: BlogController;
@@ -211,6 +213,146 @@ describe('BlogController (Consolidated Shared Read + Admin Write)', () => {
     it('deletePost uses actual authenticated admin ID', async () => {
       await controller.deletePost(adminReq, 101);
       expect(mockBlogService.deletePost).toHaveBeenCalledWith(42, 101);
+    });
+
+    describe('Multipart DTO Transformation and Validation', () => {
+      const pipe = new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true });
+
+      it('validates multipart/form-data payload with sections string for CreateBlogPostDto', async () => {
+        const payload = {
+          title: 'ertyuijuhygfd',
+          content: 'dfghjkjhgfdsfghjk',
+          sections: '[{"title":"fghjkjhgf","description":"dfghjkjhgfdfghjhgfdfghgfdfghgfdfgfdfg"}]',
+          readTime: '2',
+          category: 'fghjkjhgf',
+          status: 'PUBLISHED',
+          isFeatured: 'true',
+          authorName: 'dfghjkjhgf',
+        };
+
+        const result = (await pipe.transform(payload, {
+          type: 'body',
+          metatype: CreateBlogPostDto,
+        })) as CreateBlogPostDto;
+
+        expect(result.readTime).toBe(2);
+        expect(result.isFeatured).toBe(true);
+        expect(Array.isArray(result.sections)).toBe(true);
+        expect(result.sections).toHaveLength(1);
+        expect(result.sections![0]).toBeInstanceOf(BlogPostSectionDto);
+        expect(result.sections![0].title).toBe('fghjkjhgf');
+        expect(result.sections![0].description).toBe('dfghjkjhgfdfghjhgfdfghgfdfghgfdfgfdfg');
+      });
+
+      it('transforms isFeatured "false" string to boolean false', async () => {
+        const payload = {
+          title: 'Valid Title Here',
+          authorName: 'Author Name',
+          isFeatured: 'false',
+        };
+
+        const result = (await pipe.transform(payload, {
+          type: 'body',
+          metatype: CreateBlogPostDto,
+        })) as CreateBlogPostDto;
+
+        expect(result.isFeatured).toBe(false);
+      });
+
+      it('accepts sections when already provided as an array', async () => {
+        const payload = {
+          title: 'Valid Title Here',
+          authorName: 'Author Name',
+          sections: [{ title: 'Required Samagri', description: 'Common puja materials include...' }],
+        };
+
+        const result = (await pipe.transform(payload, {
+          type: 'body',
+          metatype: CreateBlogPostDto,
+        })) as CreateBlogPostDto;
+
+        expect(Array.isArray(result.sections)).toBe(true);
+        expect(result.sections![0]).toBeInstanceOf(BlogPostSectionDto);
+        expect(result.sections![0].title).toBe('Required Samagri');
+      });
+
+      it('rejects invalid JSON string for sections with 400 Bad Request', async () => {
+        const payload = {
+          title: 'Valid Title Here',
+          authorName: 'Author Name',
+          sections: 'invalid-json-string',
+        };
+
+        await expect(
+          pipe.transform(payload, { type: 'body', metatype: CreateBlogPostDto }),
+        ).rejects.toThrow();
+      });
+
+      it('rejects sections that parse into a non-array with 400 Bad Request', async () => {
+        const payload = {
+          title: 'Valid Title Here',
+          authorName: 'Author Name',
+          sections: '{"title":"single-object"}',
+        };
+
+        await expect(
+          pipe.transform(payload, { type: 'body', metatype: CreateBlogPostDto }),
+        ).rejects.toThrow();
+      });
+
+      it('rejects unknown properties inside sections when forbidNonWhitelisted is enabled', async () => {
+        const payload = {
+          title: 'Valid Title Here',
+          authorName: 'Author Name',
+          sections: '[{"title":"Test","description":"Test","unknownField":"abc"}]',
+        };
+
+        await expect(
+          pipe.transform(payload, { type: 'body', metatype: CreateBlogPostDto }),
+        ).rejects.toThrow();
+      });
+
+      it('rejects section when title or description is missing', async () => {
+        const payload = {
+          title: 'Valid Title Here',
+          authorName: 'Author Name',
+          sections: '[{"title":"Only Title"}]',
+        };
+
+        await expect(
+          pipe.transform(payload, { type: 'body', metatype: CreateBlogPostDto }),
+        ).rejects.toThrow();
+      });
+
+      it('validates multipart sections string in UpdateBlogPostDto', async () => {
+        const payload = {
+          sections: '[{"title":"Updated Section","description":"Updated Description"}]',
+          isFeatured: 'true',
+          readTime: '5',
+        };
+
+        const result = (await pipe.transform(payload, {
+          type: 'body',
+          metatype: UpdateBlogPostDto,
+        })) as UpdateBlogPostDto;
+
+        expect(result.readTime).toBe(5);
+        expect(result.isFeatured).toBe(true);
+        expect(Array.isArray(result.sections)).toBe(true);
+        expect(result.sections![0]).toBeInstanceOf(BlogPostSectionDto);
+        expect(result.sections![0].title).toBe('Updated Section');
+        expect(result.sections![0].description).toBe('Updated Description');
+      });
+
+      it('rejects unknown properties in sections in UpdateBlogPostDto', async () => {
+        const payload = {
+          sections: '[{"title":"Test","description":"Test","unexpected":"123"}]',
+        };
+
+        await expect(
+          pipe.transform(payload, { type: 'body', metatype: UpdateBlogPostDto }),
+        ).rejects.toThrow();
+      });
     });
   });
 });
