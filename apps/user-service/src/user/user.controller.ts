@@ -69,7 +69,7 @@ export class InternalEmitNotificationDto {
   event?: string;
 
   @IsOptional()
-  payload?: any;
+  payload?: unknown;
 }
 
 @Controller('users')
@@ -80,6 +80,18 @@ export class UserController {
     private readonly userService: UserService,
     private readonly notificationService: NotificationService,
   ) { }
+
+  @Post('internal/emit-notification')
+  @HttpCode(HttpStatus.OK)
+  async internalEmitNotification(@Body() dto: InternalEmitNotificationDto) {
+    if (dto.rooms?.length && dto.event) {
+      const gateway = this.notificationService.getGateway();
+      if (gateway?.server) {
+        gateway.server.to(dto.rooms).emit(dto.event, dto.payload);
+      }
+    }
+    return { success: true };
+  }
 
   @Cron('0 0 */6 * * *', {
     name: 'delete-expired-otps',

@@ -273,7 +273,10 @@ describe('UserService - Purohit Verification Rework', () => {
     mockSmsService = {};
     mockConfigService = { get: jest.fn() };
     mockAuditLogService = { createAuditLog: jest.fn().mockResolvedValue(true) };
-    mockNotificationService = { createNotification: jest.fn().mockResolvedValue(true) };
+    mockNotificationService = {
+      createNotification: jest.fn().mockResolvedValue(true),
+      notifyAdmins: jest.fn().mockResolvedValue([]),
+    };
 
     // Transaction and DataSource mock
     const getMockRepo = (entity: any) => {
@@ -507,6 +510,20 @@ describe('UserService - Purohit Verification Rework', () => {
           }),
         }),
       );
+
+      // Verify Admin notification
+      expect(mockNotificationService.notifyAdmins).toHaveBeenCalledWith(
+        'Purohit Verification Resubmitted',
+        expect.stringContaining('Ramesh Sharma has updated the previously rejected profile and submitted it for Admin review'),
+        expect.anything(),
+        testProfile.id,
+        'PUROHIT_PROFILE',
+        expect.objectContaining({
+          userId: testUser.id,
+          purohitId: testProfile.id,
+          purohitName: 'Ramesh Sharma',
+        }),
+      );
     });
   });
 
@@ -533,6 +550,15 @@ describe('UserService - Purohit Verification Rework', () => {
         expect.objectContaining({
           action: 'PUROHIT_VERIFICATION_RESUBMITTED',
         }),
+      );
+      // Admin resubmission notification should NOT be triggered
+      expect(mockNotificationService.notifyAdmins).not.toHaveBeenCalledWith(
+        'Purohit Verification Resubmitted',
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
       );
     });
   });

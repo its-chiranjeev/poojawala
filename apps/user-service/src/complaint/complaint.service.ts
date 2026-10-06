@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
@@ -12,6 +12,8 @@ import { NotificationService } from '@poojawala/notification';
 
 @Injectable()
 export class ComplaintService {
+  private readonly logger = new Logger(ComplaintService.name);
+
   constructor(
     @InjectRepository(Booking)
     private readonly bookingRepository: Repository<Booking>,
@@ -30,23 +32,17 @@ export class ComplaintService {
   ) {
     this.validateComplaintFiles(files);
 
-    if (
-      [USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT].includes(user.role) &&
-      !dto.bookingId
-    ) {
-      throw new BadRequestException('Booking ID is required');
-    }
-
     const booking = dto.bookingId
       ? await this.findBookingForComplaint(dto.bookingId)
       : null;
 
     if (booking) {
       await this.validateBookingComplaintAccess(user, booking);
-    }
-
-    if (booking) {
-      await this.validateDuplicateComplaint(booking.id, user.id, dto.category);
+      await this.validateDuplicateComplaint(
+        booking.id,
+        user.id,
+        dto.category || COMPLAINT_CATEGORY.OTHER,
+      );
     }
 
     const complaintNumber = await this.generateUniqueComplaintNumber();
@@ -74,12 +70,14 @@ export class ComplaintService {
         });
       }
 
+      const category = dto.category || COMPLAINT_CATEGORY.OTHER;
+
       const complaint = this.complaintRepository.create({
         complaintNumber,
-        bookingId: booking?.id,
+        bookingId: booking ? booking.id : undefined,
         raisedById: user.id,
 
-        category: dto.category,
+        category,
         subject: dto.subject?.trim(),
         description: dto.description.trim(),
         evidenceUrls: uploadedFiles.map(({ url }) => url),
@@ -96,10 +94,81 @@ export class ComplaintService {
         entity: 'Complaint',
         entityId: String(savedComplaint.id),
         action: 'COMPLAINT_CREATED',
-        message: `User #${user.id} created complaint #${savedComplaint.id}.`,
+        message: `User #${user.id} created complaint #${savedComplaint.id}${booking ? ` for Booking #${booking.bookingNumber || booking.id}` : ' (General)'}.`,
         oldValue: undefined,
-        newValue: { category: dto.category, bookingId: booking?.id },
+        newValue: {
+          complaintId: savedComplaint.id,
+          category: savedComplaint.category,
+          bookingId: booking ? booking.id : null,
+          complaintType: booking ? 'BOOKING' : 'GENERAL',
+        },
       });
+
+      try {
+        const userName =
+          [user.firstName, user.lastName].filter(Boolean).join(' ').trim() ||
+          user.username ||
+          (user.role === USER_ROLE.PUROHIT
+            ? `Purohit #${user.id}`
+            : `Customer #${user.id}`);
+
+        const rawSubjectOrDesc =
+          dto.subject?.trim() ||
+          (dto.description.trim().length > 100
+            ? `${dto.description.trim().slice(0, 97)}...`
+            : dto.description.trim());
+
+        const subjectOrDesc = rawSubjectOrDesc.endsWith('.')
+          ? rawSubjectOrDesc
+          : `${rawSubjectOrDesc}.`;
+
+        if (booking) {
+          const bookingRef = booking.bookingNumber
+            ? `#${booking.bookingNumber}`
+            : `#${booking.id}`;
+          const adminBookingMessage = `New booking complaint received from ${userName} for Booking ${bookingRef}: ${subjectOrDesc}`;
+
+          await this.notificationService.notifyAdmins(
+            'New Booking Complaint',
+            adminBookingMessage,
+            NOTIFICATION_TYPE.BOOKING,
+            savedComplaint.id,
+            'COMPLAINT',
+            {
+              complaintId: savedComplaint.id,
+              complaintNumber: savedComplaint.complaintNumber,
+              bookingId: booking.id,
+              bookingNumber: booking.bookingNumber,
+              raisedById: user.id,
+              raisedByName: userName,
+              category: savedComplaint.category,
+            },
+          );
+        } else {
+          const adminGeneralMessage = `New general complaint received from ${userName}: ${subjectOrDesc}`;
+
+          await this.notificationService.notifyAdmins(
+            'New General Complaint',
+            adminGeneralMessage,
+            NOTIFICATION_TYPE.SYSTEM,
+            savedComplaint.id,
+            'COMPLAINT',
+            {
+              complaintId: savedComplaint.id,
+              complaintNumber: savedComplaint.complaintNumber,
+              raisedById: user.id,
+              raisedByName: userName,
+              category: savedComplaint.category,
+            },
+          );
+        }
+      } catch (notifErr: unknown) {
+        const message =
+          notifErr instanceof Error ? notifErr.message : String(notifErr);
+        this.logger.warn(
+          `Failed to send admin complaint notification: ${message}`,
+        );
+      }
 
       if (savedComplaint.evidenceUrls?.length) {
         const downloadUrls = await Promise.all(

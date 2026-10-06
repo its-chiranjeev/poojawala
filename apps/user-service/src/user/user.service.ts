@@ -548,9 +548,36 @@ export class UserService {
                 profile.id,
                 'PUROHIT_PROFILE',
               );
-            } catch (err: any) {
+
+              const firstName =
+                dto.firstName !== undefined ? dto.firstName : user.firstName;
+              const lastName =
+                dto.lastName !== undefined ? dto.lastName : user.lastName;
+              const purohitName =
+                [firstName, lastName].filter(Boolean).join(' ').trim() ||
+                dto.username ||
+                user.username ||
+                `Purohit #${id}`;
+
+              const adminResubmitMessage = `Purohit profile resubmitted for verification. ${purohitName} has updated the previously rejected profile and submitted it for Admin review.`;
+
+              await this.notificationService.notifyAdmins(
+                'Purohit Verification Resubmitted',
+                adminResubmitMessage,
+                NOTIFICATION_TYPE.SYSTEM,
+                profile.id,
+                'PUROHIT_PROFILE',
+                {
+                  userId: Number(id),
+                  purohitId: profile.id,
+                  purohitName,
+                },
+              );
+            } catch (err: unknown) {
+              const message =
+                err instanceof Error ? err.message : String(err);
               this.logger.warn(
-                `Failed to send purohit resubmission notification: ${err?.message}`,
+                `Failed to send purohit resubmission notification: ${message}`,
               );
             }
           }

@@ -39,8 +39,10 @@ export class NotificationService {
         },
         { timeout: 3000 },
       );
-    } catch (err: any) {
-      if (err?.code === 'ECONNREFUSED' && Number(primaryPort) !== 5001) {
+    } catch (err: unknown) {
+      const errCode = (err as { code?: string })?.code;
+      const message = err instanceof Error ? err.message : String(err);
+      if (errCode === 'ECONNREFUSED' && Number(primaryPort) !== 5001) {
         try {
           await axios.post(
             `http://127.0.0.1:5001/api/users/internal/emit-notification`,
@@ -53,7 +55,7 @@ export class NotificationService {
         }
       }
       this.logger.debug(
-        `Cross-service socket bridge to user-service failed: ${err?.message}`,
+        `Cross-service socket bridge to user-service failed: ${message}`,
       );
     }
   }
@@ -219,7 +221,7 @@ export class NotificationService {
         // Update unread count badge for this admin
         const unreadCount = await this.getUnreadCount(admin.id);
         this.bookingGateway.notifyUser(admin.id, 'notification:unread-count', unreadCount);
-      } catch (err: any) {
+      } catch (err: unknown) {
         // Continue to other admins if one fails
       }
     }
