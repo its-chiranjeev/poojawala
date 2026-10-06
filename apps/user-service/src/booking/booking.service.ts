@@ -488,17 +488,12 @@ export class BookingService {
           discountAmount = couponResult.discountAmount;
         }
 
-        // Purohit payout and commission are calculated using base plan (basic)
-        const purohitBasePrice =
-          service.plans?.basic?.price != null && Number(service.plans.basic.price) > 0
-            ? Number(service.plans.basic.price)
-            : bookingPrice;
-
+        // Purohit payout and commission are calculated using the selected plan's price
         const platformCommission = Number(
-          (purohitBasePrice * (commissionPercentage / 100)).toFixed(2),
+          (bookingPrice * (commissionPercentage / 100)).toFixed(2),
         );
         const purohitPayoutAmount = Number(
-          (purohitBasePrice - platformCommission).toFixed(2),
+          (bookingPrice - platformCommission).toFixed(2),
         );
         const finalAmount = Number(
           (bookingPrice - discountAmount + donationAmount).toFixed(2),
@@ -852,6 +847,46 @@ export class BookingService {
     }
   }
 
+  /**
+   * Enriches the embedded `service.plans` object on a booking response with
+   * computed `purohitPayoutAmount` and `tokenAmount` per plan, using the
+   * service's commissionPercentage and tokenPercentage.
+   */
+  private enrichBookingServicePlans(booking: any): void {
+    const service = booking?.service;
+    if (!service) return;
+
+    let plans = service.plans;
+    if (!plans || typeof plans !== 'object' || Array.isArray(plans)) return;
+    if (typeof plans === 'string') {
+      try { plans = JSON.parse(plans); } catch { return; }
+    }
+
+    const effectiveCommission =
+      service.commissionPercentage != null ? Number(service.commissionPercentage) : 10;
+    const effectiveToken =
+      service.tokenPercentage != null && Number(service.tokenPercentage) > 0
+        ? Number(service.tokenPercentage)
+        : 30;
+
+    const enrichedPlans: Record<string, any> = {};
+    for (const [key, plan] of Object.entries(plans as Record<string, any>)) {
+      if (!plan || typeof plan !== 'object') {
+        enrichedPlans[key] = plan;
+        continue;
+      }
+      const planCopy = { ...plan };
+      const planPrice = Number(planCopy.price);
+      if (Number.isFinite(planPrice) && planPrice > 0) {
+        const commission = Number(((planPrice * effectiveCommission) / 100).toFixed(2));
+        planCopy.purohitPayoutAmount = Number((planPrice - commission).toFixed(2));
+        planCopy.tokenAmount = Number(((planPrice * effectiveToken) / 100).toFixed(2));
+      }
+      enrichedPlans[key] = planCopy;
+    }
+    service.plans = enrichedPlans;
+  }
+
   async getBookings(
     user: User,
     query: BookingQueryDto,
@@ -937,6 +972,7 @@ export class BookingService {
           ? null
           : (payments.find((p) => p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) || null);
 
+      this.enrichBookingServicePlans(booking);
       return {
         ...booking,
         payments,
@@ -1001,6 +1037,7 @@ export class BookingService {
     switch (user.role) {
       case USER_ROLE.ADMIN:
         // Admin can access any booking.
+        this.enrichBookingServicePlans(booking);
         return {
           ...booking,
           bookingPayment,
@@ -1027,6 +1064,7 @@ export class BookingService {
         //   createdAtIst: this.toIstString(booking.createdAt),
         //   updatedAtIst: this.toIstString(booking.updatedAt),
         // };
+        this.enrichBookingServicePlans(booking);
         return {
           ...booking,
           payments: (booking.payments || []).filter(
@@ -1071,6 +1109,7 @@ export class BookingService {
           );
         }
 
+        this.enrichBookingServicePlans(booking);
         return {
           ...booking,
           bookingPayment,
