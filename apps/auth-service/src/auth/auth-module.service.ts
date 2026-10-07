@@ -356,7 +356,7 @@ export class AuthModuleService {
     return decodedBody;
   }
 
-  async refreshToken(refreshToken: string) {
+  async refreshToken(refreshToken: string, expectedRole?: USER_ROLE) {
     const refreshSecret =
       this.configService.get<string>('JWT_REFRESH_SECRET') ||
       this.configService.get<string>('JWT_SECRET');
@@ -368,6 +368,12 @@ export class AuthModuleService {
     try {
       // 1. Verify refresh token signature & expiration
       const payload = this.verifyJwt(refreshToken, refreshSecret);
+
+      if (expectedRole && payload.role !== expectedRole) {
+        throw new UnauthorizedException(
+          `Refresh token role '${payload.role}' does not match expected role '${expectedRole}'`,
+        );
+      }
 
       // 2. Find user
       const user = await this.userRepository.findOne({
@@ -405,6 +411,9 @@ export class AuthModuleService {
       // 6. Issue new tokens (rotation)
       return this.issueAuthTokens(user);
     } catch (e) {
+      if (e instanceof UnauthorizedException || e instanceof ForbiddenException) {
+        throw e;
+      }
       throw new UnauthorizedException('Invalid refresh token');
     }
   }

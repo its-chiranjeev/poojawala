@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fast2SMS Custom Message Tester - Poojawala</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 16px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 680px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      padding: 32px;
+    }
+
+    .header {
+      margin-bottom: 24px;
+      border-bottom: 1px solid #334155;
+      padding-bottom: 16px;
+    }
+
+    .header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .header p {
+      font-size: 14px;
+      color: #94a3b8;
+      margin-top: 6px;
+    }
+
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #3b82f6;
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .cors-banner {
+      background: rgba(234, 179, 8, 0.12);
+      border: 1px solid rgba(234, 179, 8, 0.35);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #fde047;
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+
+    .cors-banner code {
+      background: rgba(0, 0, 0, 0.4);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .mode-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      margin-bottom: 16px;
+    }
+
+    .mode-indicator .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #34d399;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-top: 4px;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    textarea {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #475569;
+      border-radius: 10px;
+      color: #f8fafc;
+      padding: 12px 14px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    textarea:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+    }
+
+    textarea {
+      min-height: 110px;
+      resize: vertical;
+      line-height: 1.5;
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      background: #2563eb;
+      color: #ffffff;
+      font-weight: 600;
+      font-size: 15px;
+      padding: 14px 20px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+    }
+
+    .btn:hover:not(:disabled) {
+      background: #1d4ed8;
+    }
+
+    .btn:active:not(:disabled) {
+      transform: scale(0.99);
+    }
+
+    .btn:disabled {
+      background: #475569;
+      cursor: not-allowed;
+      opacity: 0.8;
+    }
+
+    .response-card {
+      margin-top: 24px;
+      border-radius: 12px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      padding: 18px;
+      display: none;
+    }
+
+    .response-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .response-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #cbd5e1;
+    }
+
+    pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      color: #e2e8f0;
+      background: #020617;
+      padding: 14px;
+      border-radius: 8px;
+      overflow-x: auto;
+      border: 1px solid #1e293b;
+    }
+
+    .status-tag {
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 6px;
+    }
+
+    .status-success {
+      background: rgba(34, 197, 94, 0.2);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.4);
+    }
+
+    .status-error {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+
+    .info-box {
+      margin-top: 24px;
+      padding: 14px 16px;
+      border-radius: 10px;
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      font-size: 13px;
+      color: #93c5fd;
+      line-height: 1.5;
+    }
+
+    .info-box code {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #bfdbfe;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>
+        Fast2SMS Message Tester
+        <span class="badge">Development</span>
+      </h1>
+      <p>Send custom English messages to any 10-digit mobile number via Quick SMS.</p>
+    </div>
+
+    <!-- Mode Badge -->
+    <div id="modeBadge" class="mode-indicator" style="display: none;">
+      <span class="dot"></span>
+      <span id="modeText">Connected via Local Server (No CORS)</span>
+    </div>
+
+    <!-- CORS Helper Banner (shown if opened directly as file://) -->
+    <div id="corsBanner" class="cors-banner" style="display: none;">
+      ⚠️ <strong>Browser Security Note (CORS):</strong><br />
+      Direct browser requests to Fast2SMS are blocked by browser CORS policy. To test in browser with zero CORS, run this in terminal:<br />
+      <code>node test/sms/server.js</code> and open <strong>http://localhost:3333</strong>
+    </div>
+
+    <!-- Phone Number Input -->
+    <div class="form-group">
+      <label for="mobile">Recipient Mobile Number</label>
+      <input
+        type="text"
+        id="mobile"
+        placeholder="e.g. 9817361209 (10 digits)"
+        maxlength="10"
+        value="9817361209"
+      />
+      <p class="hint">10-digit Indian mobile number (without +91 or 0).</p>
+    </div>
+
+    <!-- Custom Message Input -->
+    <div class="form-group">
+      <label for="message">Custom Message</label>
+      <textarea
+        id="message"
+        placeholder="Type your custom message here..."
+      >Hello! This is a test message from Poojawala development server.</textarea>
+      <div class="meta-row">
+        <span id="charCount">Characters: 0</span>
+        <span id="smsCount">Credits: 1 SMS</span>
+      </div>
+    </div>
+
+    <!-- Optional API Key Input (Auto-handled when using node test/sms/server.js) -->
+    <div class="form-group" id="apiKeyGroup">
+      <label for="apiKey">Fast2SMS API Key <span style="font-weight: normal; color: #94a3b8;">(Optional if using server.js - it auto-reads from .env)</span></label>
+      <input
+        type="password"
+        id="apiKey"
+        placeholder="Leave blank to use .env key from local server, or paste key here"
+        autocomplete="off"
+      />
+    </div>
+
+    <!-- Send Button -->
+    <button class="btn" id="sendBtn">
+      Send Message
+    </button>
+
+    <!-- Response Preview -->
+    <div class="response-card" id="responseCard">
+      <div class="response-header">
+        <span class="response-title">API Response</span>
+        <span class="status-tag" id="statusBadge">SUCCESS</span>
+      </div>
+      <pre id="responseJson"></pre>
+    </div>
+
+    <div class="info-box">
+      <strong>Browser Testing Tip:</strong> Keep <code>node test/sms/server.js</code> running in terminal, then open <code>http://localhost:3333</code> in your browser for seamless testing!
+    </div>
+  </div>
+
+  <script>
+    const apiKeyInput = document.getElementById('apiKey');
+    const mobileInput = document.getElementById('mobile');
+    const messageInput = document.getElementById('message');
+    const charCountEl = document.getElementById('charCount');
+    const smsCountEl = document.getElementById('smsCount');
+    const sendBtn = document.getElementById('sendBtn');
+    const responseCard = document.getElementById('responseCard');
+    const responseJson = document.getElementById('responseJson');
+    const statusBadge = document.getElementById('statusBadge');
+    const corsBanner = document.getElementById('corsBanner');
+    const modeBadge = document.getElementById('modeBadge');
+    const modeText = document.getElementById('modeText');
+
+    const isRunningOnServer = window.location.protocol.startsWith('http');
+
+    if (isRunningOnServer) {
+      modeBadge.style.display = 'inline-flex';
+      modeText.textContent = 'Server Connected: ' + window.location.origin + ' (No CORS)';
+      corsBanner.style.display = 'none';
+    } else {
+      corsBanner.style.display = 'block';
+    }
+
+    // Load saved API key from localStorage
+    const savedKey = localStorage.getItem('fast2sms_test_api_key');
+    if (savedKey) {
+      apiKeyInput.value = savedKey;
+    }
+
+    // Auto update counts
+    function updateCounts() {
+      const len = messageInput.value.length;
+      charCountEl.textContent = `Characters: ${len}`;
+      const segments = len === 0 ? 1 : Math.ceil(len / 160);
+      smsCountEl.textContent = `Credits: ~${segments} SMS`;
+    }
+    messageInput.addEventListener('input', updateCounts);
+    updateCounts();
+
+    // Send SMS
+    sendBtn.addEventListener('click', async () => {
+      let apiKey = apiKeyInput.value.trim();
+      let mobile = mobileInput.value.trim();
+      const message = messageInput.value.trim();
+
+      // Normalize mobile number
+      mobile = mobile.replace(/[^0-9]/g, '');
+      if (mobile.startsWith('91') && mobile.length === 12) mobile = mobile.slice(2);
+      if (mobile.startsWith('0') && mobile.length === 11) mobile = mobile.slice(1);
+
+      if (mobile.length !== 10) {
+        alert('Please enter a valid 10-digit Indian mobile number.');
+        mobileInput.focus();
+        return;
+      }
+
+      if (!message) {
+        alert('Please enter a message to send.');
+        messageInput.focus();
+        return;
+      }
+
+      if (apiKey) {
+        localStorage.setItem('fast2sms_test_api_key', apiKey);
+      }
+
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Sending...';
+      responseCard.style.display = 'none';
+
+      // Decide target URL: local server proxy endpoint or direct Fast2SMS
+      const targetEndpoint = isRunningOnServer
+        ? '/api/send-sms'
+        : 'http://localhost:3333/api/send-sms';
+
+      try {
+        // Attempt 1: Call local test server (bypasses CORS completely)
+        const res = await fetch(targetEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            mobile,
+            message,
+            apiKey: apiKey || undefined,
+          }),
+        });
+
+        const data = await res.json();
+        responseCard.style.display = 'block';
+        responseJson.textContent = JSON.stringify(data, null, 2);
+
+        if (data.return) {
+          statusBadge.className = 'status-tag status-success';
+          statusBadge.textContent = 'DELIVERY INITIATED';
+        } else {
+          statusBadge.className = 'status-tag status-error';
+          statusBadge.textContent = 'FAILED';
+        }
+      } catch (err) {
+        // If local server is not running and we are on file://
+        responseCard.style.display = 'block';
+        statusBadge.className = 'status-tag status-error';
+        statusBadge.textContent = 'LOCAL SERVER NOT RUNNING';
+
+        responseJson.textContent = JSON.stringify({
+          error: 'Could not connect to local runner',
+          reason: 'Browsers block direct requests to Fast2SMS due to CORS.',
+          solution: 'Run this in your terminal:\n  node test/sms/server.js\nThen open: http://localhost:3333 in your browser.'
+        }, null, 2);
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send Message';
+      }
+    });
+  </script>
+</body>
+</html>

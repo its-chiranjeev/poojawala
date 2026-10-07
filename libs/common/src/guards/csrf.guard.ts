@@ -1,4 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable, ForbiddenException } from '@nestjs/common';
+import { USER_ROLE } from '@poojawala/entities';
+import { getRoleCookieNames, parseCookieHeader } from '../auth/auth-cookies';
 
 @Injectable()
 export class CsrfGuard implements CanActivate {
@@ -11,16 +13,42 @@ export class CsrfGuard implements CanActivate {
       return true;
     }
 
-    // Bypass CSRF check in development environment for smooth cross-origin testing
-    if (process.env.NODE_ENV !== 'production') {
+    const userRole: USER_ROLE | undefined = request.user?.role;
+    if (!userRole) {
+      throw new ForbiddenException('Authenticated user role is required for CSRF validation');
+    }
+
+    const cookieNames = getRoleCookieNames(userRole);
+    if (!cookieNames) {
+      throw new ForbiddenException(`Unknown role '${userRole}' for CSRF validation`);
+    }
+
+    const rawCookies =
+      request.cookies || (request.headers?.cookie ? parseCookieHeader(request.headers.cookie) : {});
+
+    // TODO: Legacy generic auth cookie logic retained for reference.
+    // Role-based cookies are now authoritative.
+    // const legacyCsrf = rawCookies['csrf-token'];
+
+    // Support both kebab-case (poojawala-admin-csrf-token) and camelCase (poojawalaAdminCsrfToken)
+    const roleCsrfCookie =
+      rawCookies[cookieNames.csrf] || rawCookies[cookieNames.csrfCamel];
+
+    const headerCsrfToken =
+      request.headers?.['x-csrf-token'] ||
+      request.headers?.['x-csrf'] ||
+      request.headers?.[cookieNames.csrf] ||
+      request.headers?.[cookieNames.csrfCamel.toLowerCase()];
+
+    // In development environment, allow bypass ONLY if neither CSRF header nor CSRF cookie is sent
+    // (for smooth local curl/Postman testing). If either is present, or in production/tests, strictly enforce.
+    const isProd = process.env.NODE_ENV === 'production';
+    const isTest = process.env.NODE_ENV === 'test';
+    if (!isProd && !isTest && !headerCsrfToken && !roleCsrfCookie) {
       return true;
     }
 
-    const cookies = this.parseCookies(request.headers.cookie);
-    const cookieCsrfToken = cookies['csrf-token'];
-    const headerCsrfToken = request.headers['x-csrf-token'];
-
-    if (!cookieCsrfToken || !headerCsrfToken || cookieCsrfToken !== headerCsrfToken) {
+    if (!roleCsrfCookie || !headerCsrfToken || roleCsrfCookie !== headerCsrfToken) {
       throw new ForbiddenException('Invalid or missing CSRF token');
     }
 
@@ -28,12 +56,6 @@ export class CsrfGuard implements CanActivate {
   }
 
   private parseCookies(cookieHeader?: string): Record<string, string> {
-    const list: Record<string, string> = {};
-    if (!cookieHeader) return list;
-    cookieHeader.split(';').forEach((cookie) => {
-      const parts = cookie.split('=');
-      list[parts.shift()!.trim()] = decodeURIComponent(parts.join('='));
-    });
-    return list;
+    return parseCookieHeader(cookieHeader);
   }
 }

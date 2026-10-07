@@ -190,7 +190,7 @@ export class ServiceService {
     if (typeof plans === 'string') {
       try {
         plans = JSON.parse(plans);
-      } catch {}
+      } catch { }
     }
 
     let basePrice = 0;
@@ -232,7 +232,7 @@ export class ServiceService {
     if (typeof plans === 'string') {
       try {
         plans = JSON.parse(plans);
-      } catch {}
+      } catch { }
     }
 
     if (plans && typeof plans === 'object' && !Array.isArray(plans)) {
@@ -846,7 +846,7 @@ export class ServiceService {
     // Upload new icon if provided
     if (files?.icon?.length) {
       service.iconUrl = await this.s3Service.uploadFileHelper(
-        service.slug,
+        service.name,
         'icon',
         files.icon,
       );

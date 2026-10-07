@@ -15,7 +15,16 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { AuthModuleService } from './auth-module.service';
-import { JwtAuthGuard, CsrfGuard } from '@poojawala/common';
+import {
+  JwtAuthGuard,
+  CsrfGuard,
+  ROLE_COOKIE_MAP,
+  setRoleAuthCookies,
+  clearRoleAuthCookies,
+  clearAllAuthCookies,
+  parseCookieHeader,
+  getRoleCsrfPropertyName,
+} from '@poojawala/common';
 import {
   LoginDto,
   VerifyOtpDto,
@@ -33,6 +42,16 @@ import { USER_ROLE } from '@poojawala/entities';
 import type { Response } from 'express';
 import * as crypto from 'crypto';
 import { S3Service } from '@poojawala/s3';
+
+export interface RoleAuthActionDto {
+  role?: string;
+  refreshToken?: string;
+  csrfToken?: string;
+  poojawalaCustomerCsrfToken?: string;
+  poojawalaAdminCsrfToken?: string;
+  poojawalaPurohitCsrfToken?: string;
+  [key: string]: any;
+}
 
 @Controller('auth')
 export class AuthModuleController {
@@ -59,69 +78,64 @@ export class AuthModuleController {
   //   return this.authModuleService.verifyOtpService(dto);
   // }
 
-  private setAuthCookies(res: Response, accessToken: string, refreshToken: string, csrfToken: string) {
+  private setAuthCookies(
+    res: Response,
+    accessToken: string,
+    refreshToken: string,
+    csrfToken: string,
+    role: USER_ROLE,
+  ) {
+    setRoleAuthCookies(res, { accessToken, refreshToken, csrfToken }, role);
+
+    // TODO: Legacy generic auth cookie logic retained for reference.
+    // Role-based cookies are now authoritative.
+    /*
     const isProd = process.env.NODE_ENV === 'production';
     const req = (res as any).req;
     const origin = req?.headers?.origin;
     const isCrossSite = origin && (origin.includes('192.168.') || origin.includes('10.') || origin.includes('172.') || origin.includes('localhost') || origin.includes('127.0.0.1'));
-
     const sameSite = (isCrossSite || !isProd) ? 'none' : 'lax';
     const secure = true;
-
-    const cookieOptions: any = {
-      httpOnly: true,
-      secure,
-      sameSite,
-      partitioned: Boolean(isCrossSite || !isProd),
-      path: '/',
-    };
-
-    res.cookie('accessToken', accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000, // 15 minutes
-    });
-
-    res.cookie('refreshToken', refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
-
-    res.cookie('csrf-token', csrfToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    const cookieOptions: any = { httpOnly: true, secure, sameSite, partitioned: Boolean(isCrossSite || !isProd), path: '/' };
+    res.cookie('accessToken', accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
+    res.cookie('refreshToken', refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    res.cookie('csrf-token', csrfToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    */
   }
 
-  private clearAuthCookies(res: Response) {
+  private clearAuthCookies(res: Response, role: USER_ROLE, req?: any) {
+    clearRoleAuthCookies(res, role, req || (res as any).req);
+
+    // TODO: Legacy generic auth cookie logic retained for reference.
+    // Role-based cookies are now authoritative.
+    /*
     const isProd = process.env.NODE_ENV === 'production';
     const req = (res as any).req;
     const origin = req?.headers?.origin;
     const isCrossSite = origin && (origin.includes('192.168.') || origin.includes('10.') || origin.includes('172.') || origin.includes('localhost') || origin.includes('127.0.0.1'));
-
     const sameSite = (isCrossSite || !isProd) ? 'none' : 'lax';
     const secure = true;
-
-    const cookieOptions: any = {
-      httpOnly: true,
-      secure,
-      sameSite,
-      partitioned: Boolean(isCrossSite || !isProd),
-      path: '/',
-    };
-
+    const cookieOptions: any = { httpOnly: true, secure, sameSite, partitioned: Boolean(isCrossSite || !isProd), path: '/' };
     res.clearCookie('accessToken', cookieOptions);
     res.clearCookie('refreshToken', cookieOptions);
     res.clearCookie('csrf-token', cookieOptions);
+    */
   }
 
   private parseCookies(cookieHeader?: string): Record<string, string> {
-    const list: Record<string, string> = {};
-    if (!cookieHeader) return list;
-    cookieHeader.split(';').forEach((cookie) => {
-      const parts = cookie.split('=');
-      list[parts.shift()!.trim()] = decodeURIComponent(parts.join('='));
-    });
-    return list;
+    return parseCookieHeader(cookieHeader);
+  }
+
+  private decodeJwtPayload(token: string): any | null {
+    try {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      }
+    } catch {
+      // ignore
+    }
+    return null;
   }
 
   // [EXISTING CODE]
@@ -139,7 +153,13 @@ export class AuthModuleController {
   ) {
     const result = await this.authModuleService.registerSuperAdminService(dto);
     const csrfToken = crypto.randomUUID();
-    this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
+    this.setAuthCookies(
+      res,
+      result.tokens.accessToken,
+      result.tokens.refreshToken,
+      csrfToken,
+      USER_ROLE.ADMIN,
+    );
 
     // TODO: VERCEL_BLOB_MIGRATION
     // Legacy S3 signed URL generation retained for rollback/reference.
@@ -159,7 +179,7 @@ export class AuthModuleController {
       success: true,
       statusCode: HttpStatus.CREATED,
       message: result.message,
-      csrfToken,
+      poojawalaAdminCsrfToken: csrfToken,
       user: result.user,
     };
   }
@@ -213,7 +233,13 @@ export class AuthModuleController {
   ) {
     const result = await this.authModuleService.loginService(dto);
     const csrfToken = crypto.randomUUID();
-    this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
+    this.setAuthCookies(
+      res,
+      result.tokens.accessToken,
+      result.tokens.refreshToken,
+      csrfToken,
+      result.user.role as USER_ROLE,
+    );
 
     // TODO: VERCEL_BLOB_MIGRATION
     // Legacy S3 signed URL generation retained for rollback/reference.
@@ -229,11 +255,13 @@ export class AuthModuleController {
     // Active Vercel Blob implementation:
     // Stored public Blob URLs or existing URLs are returned directly without S3 signed URL.
 
+    const roleCsrfKey = getRoleCsrfPropertyName(result.user.role);
+
     return {
       success: true,
       statusCode: HttpStatus.OK,
       message: result.message,
-      csrfToken,
+      ...(roleCsrfKey ? { [roleCsrfKey]: csrfToken } : { csrfToken }),
       user: result.user,
     };
   }
@@ -244,9 +272,101 @@ export class AuthModuleController {
   async logout(
     @Req() req: any,
     @Res({ passthrough: true }) res: Response,
+    @Body() body?: RoleAuthActionDto,
   ) {
-    await this.authModuleService.logoutService(req.user.id);
-    this.clearAuthCookies(res);
+    const cookies = req?.cookies || this.parseCookies(req?.headers?.cookie);
+
+    // 1. Extract incoming CSRF token from header, body, or query
+    const incomingCsrf = (
+      req?.headers?.['x-csrf-token'] ||
+      req?.headers?.['x-csrf'] ||
+      body?.csrfToken ||
+      req?.body?.csrfToken ||
+      (body as any)?.poojawalaCustomerCsrfToken ||
+      (body as any)?.poojawalaAdminCsrfToken ||
+      (body as any)?.poojawalaPurohitCsrfToken ||
+      req?.query?.csrfToken
+    )?.toString().trim();
+
+    // 2. Match incoming CSRF token against the cookies present in the request
+    let csrfRoleMatch: USER_ROLE | undefined;
+    if (incomingCsrf) {
+      for (const role of [USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT]) {
+        const cookieNames = ROLE_COOKIE_MAP[role];
+        const roleCookieCsrf =
+          cookies[cookieNames.csrf] || cookies[cookieNames.csrfCamel];
+        if (roleCookieCsrf && roleCookieCsrf.trim() === incomingCsrf) {
+          csrfRoleMatch = role;
+          break;
+        }
+      }
+    }
+
+    // 3. Fallback to explicit role hint if provided (body.role, header x-auth-role, query ?role)
+    const roleHint = (
+      body?.role ||
+      req?.body?.role ||
+      req?.headers?.['x-auth-role'] ||
+      req?.headers?.['x-role'] ||
+      req?.query?.role
+    )?.toString().toUpperCase();
+
+    const validRoles = [USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT];
+    const explicitRole = validRoles.includes(roleHint as USER_ROLE) ? (roleHint as USER_ROLE) : undefined;
+
+    // 4. Resolve the target role to log out:
+    // Priority: CSRF token match > Explicit role hint > Authenticated user role > Single present cookie role
+    let targetRole: USER_ROLE | undefined = csrfRoleMatch || explicitRole || (req?.user?.role as USER_ROLE);
+
+    if (!targetRole && !roleHint) {
+      const presentRoles = validRoles.filter((role) => {
+        const names = ROLE_COOKIE_MAP[role];
+        return Boolean(cookies[names.access] || cookies[names.refresh] || cookies[names.csrf]);
+      });
+      if (presentRoles.length === 1) {
+        targetRole = presentRoles[0];
+      }
+    }
+
+    // 5. Invalidate refresh token in database for the targeted user
+    try {
+      if (targetRole && req?.user?.role === targetRole && req?.user?.id) {
+        await this.authModuleService.logoutService(req.user.id);
+      } else if (targetRole) {
+        const targetCookieNames = ROLE_COOKIE_MAP[targetRole];
+        const targetRefreshToken = cookies[targetCookieNames.refresh];
+        if (targetRefreshToken) {
+          const decoded = this.decodeJwtPayload(targetRefreshToken);
+          if (decoded?.sub) {
+            await this.authModuleService.logoutService(decoded.sub);
+          }
+        } else if (req?.user?.id) {
+          await this.authModuleService.logoutService(req.user.id);
+        }
+      } else if (req?.user?.id) {
+        await this.authModuleService.logoutService(req.user.id);
+      }
+    } catch {
+      // Invalidation error should not prevent cookie clearing
+    }
+
+    // 6. Clear cookies: strictly clear ONLY the matched role's cookies
+    if (roleHint === 'ALL') {
+      this.clearAuthCookies(res, USER_ROLE.ADMIN, req);
+      this.clearAuthCookies(res, USER_ROLE.CUSTOMER, req);
+      this.clearAuthCookies(res, USER_ROLE.PUROHIT, req);
+    } else if (targetRole) {
+      this.clearAuthCookies(res, targetRole, req);
+    } else {
+      // If ambiguous, clear only roles whose cookies are actually present in the request
+      for (const role of validRoles) {
+        const names = ROLE_COOKIE_MAP[role];
+        if (cookies[names.access] || cookies[names.refresh] || cookies[names.csrf]) {
+          this.clearAuthCookies(res, role, req);
+        }
+      }
+    }
+
     return {
       success: true,
       statusCode: HttpStatus.OK,
@@ -259,37 +379,149 @@ export class AuthModuleController {
   async refresh(
     @Req() req: any,
     @Res({ passthrough: true }) res: Response,
+    @Body() body?: RoleAuthActionDto,
   ) {
-    const cookies = this.parseCookies(req.headers.cookie);
-    const refreshToken = cookies['refreshToken'];
-    if (!refreshToken) {
+    const cookies = req?.cookies || this.parseCookies(req.headers.cookie);
+
+    // TODO: Legacy generic auth cookie logic retained for reference.
+    // Role-based cookies are now authoritative.
+    // const refreshToken = cookies['refreshToken'];
+
+    const adminToken = cookies[ROLE_COOKIE_MAP[USER_ROLE.ADMIN].refresh];
+    const customerToken = cookies[ROLE_COOKIE_MAP[USER_ROLE.CUSTOMER].refresh];
+    const purohitToken = cookies[ROLE_COOKIE_MAP[USER_ROLE.PUROHIT].refresh];
+
+    const presentRefresh: { role: USER_ROLE; token: string; cookieName: string }[] = [];
+    if (adminToken) {
+      presentRefresh.push({
+        role: USER_ROLE.ADMIN,
+        token: adminToken,
+        cookieName: ROLE_COOKIE_MAP[USER_ROLE.ADMIN].refresh,
+      });
+    }
+    if (customerToken) {
+      presentRefresh.push({
+        role: USER_ROLE.CUSTOMER,
+        token: customerToken,
+        cookieName: ROLE_COOKIE_MAP[USER_ROLE.CUSTOMER].refresh,
+      });
+    }
+    if (purohitToken) {
+      presentRefresh.push({
+        role: USER_ROLE.PUROHIT,
+        token: purohitToken,
+        cookieName: ROLE_COOKIE_MAP[USER_ROLE.PUROHIT].refresh,
+      });
+    }
+
+    const directBodyToken = req.body?.refreshToken;
+    if (directBodyToken) {
+      const decoded = this.decodeJwtPayload(directBodyToken);
+      const role =
+        (decoded?.role as USER_ROLE) ||
+        (req.body?.role as USER_ROLE) ||
+        USER_ROLE.CUSTOMER;
+      const existing = presentRefresh.find((p) => p.role === role);
+      if (existing) {
+        existing.token = directBodyToken;
+      } else {
+        presentRefresh.push({
+          role,
+          token: directBodyToken,
+          cookieName: ROLE_COOKIE_MAP[role]?.refresh || 'refreshToken',
+        });
+      }
+    }
+
+    if (presentRefresh.length === 0) {
       throw new UnauthorizedException('Refresh token missing');
     }
 
-    const result = await this.authModuleService.refreshToken(refreshToken);
-    const csrfToken = crypto.randomUUID();
-    this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
+    // If a specific role is explicitly requested via body or query, honor it;
+    // otherwise refresh tokens for ALL roles present in the request.
+    const explicitRole = (req.body?.role || req.query?.role)?.toString().toUpperCase();
+    const validRoles = [USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT];
+    const targetRole = validRoles.find((r) => r === explicitRole);
 
-    // TODO: VERCEL_BLOB_MIGRATION
-    // Legacy S3 signed URL generation retained for rollback/reference.
-    /*
-    if (result.user && result.user.profileImage) {
+    const rolesToRefresh = targetRole
+      ? presentRefresh.filter((item) => item.role === targetRole)
+      : [...presentRefresh];
+
+    if (rolesToRefresh.length === 0) {
+      throw new UnauthorizedException('Refresh token missing');
+    }
+
+    const refreshedCsrfMap: Record<string, string> = {};
+    const refreshedUsers: Record<string, any> = {};
+    let primaryUser: any;
+    let anySucceeded = false;
+    let lastError: any;
+
+    for (const item of rolesToRefresh) {
       try {
-        result.user.profileImage = await this.s3Service.getDownloadUrl(result.user.profileImage);
-      } catch (e) {
-        console.error('Failed to generate pre-signed URL for profileImage:', e);
+        const result = await this.authModuleService.refreshToken(item.token, item.role);
+        const csrfToken = crypto.randomUUID();
+        this.setAuthCookies(
+          res,
+          result.tokens.accessToken,
+          result.tokens.refreshToken,
+          csrfToken,
+          item.role,
+        );
+
+        const roleCsrfKey = getRoleCsrfPropertyName(item.role);
+        if (roleCsrfKey) {
+          refreshedCsrfMap[roleCsrfKey] = csrfToken;
+        }
+
+        refreshedUsers[item.role] = result.user;
+        primaryUser = result.user;
+        anySucceeded = true;
+      } catch (err) {
+        lastError = err;
       }
     }
-    */
-    // Active Vercel Blob implementation:
-    // Stored public Blob URLs or existing URLs are returned directly without S3 signed URL.
+
+    if (!anySucceeded) {
+      throw lastError || new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    // Check if an incoming CSRF token identifies a specific dashboard role
+    const incomingCsrf = (
+      req.headers?.['x-csrf-token'] ||
+      req.headers?.['x-csrf'] ||
+      body?.csrfToken ||
+      req.body?.csrfToken ||
+      body?.poojawalaCustomerCsrfToken ||
+      body?.poojawalaAdminCsrfToken ||
+      body?.poojawalaPurohitCsrfToken ||
+      req.query?.csrfToken
+    )?.toString().trim();
+
+    let matchedRole: USER_ROLE | undefined;
+    if (incomingCsrf) {
+      for (const item of presentRefresh) {
+        const cookieNames = ROLE_COOKIE_MAP[item.role];
+        const roleCookieCsrf =
+          cookies[cookieNames.csrf] || cookies[cookieNames.csrfCamel];
+        if (roleCookieCsrf && roleCookieCsrf === incomingCsrf) {
+          matchedRole = item.role;
+          break;
+        }
+      }
+    }
+
+    const preferredRole = matchedRole || targetRole;
+    if (preferredRole && refreshedUsers[preferredRole]) {
+      primaryUser = refreshedUsers[preferredRole];
+    }
 
     return {
       success: true,
       statusCode: HttpStatus.OK,
       message: 'Tokens refreshed successfully',
-      csrfToken,
-      user: result.user,
+      ...refreshedCsrfMap,
+      // user: primaryUser,
     };
   }
 
@@ -354,7 +586,7 @@ export class AuthModuleController {
           if (typeof plans === 'string') {
             try {
               plans = JSON.parse(plans);
-            } catch {}
+            } catch { }
           }
           let basePrice = 0;
           if (plans?.basic?.price != null && Number(plans.basic.price) > 0) {
@@ -524,7 +756,13 @@ export class AuthModuleController {
       const { result, redirectUrl, csrfToken } =
         await this.authModuleService.processGoogleOAuthCallback(code, state);
 
-      this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
+      this.setAuthCookies(
+        res,
+        result.tokens.accessToken,
+        result.tokens.refreshToken,
+        csrfToken,
+        result.user.role as USER_ROLE,
+      );
       return res.redirect(redirectUrl);
     } catch (err: any) {
       const message = err.message || 'Google authentication failed';
@@ -553,7 +791,13 @@ export class AuthModuleController {
 
     const result = await this.authModuleService.handleGoogleAuth(identity, dto.role);
     const csrfToken = crypto.randomUUID();
-    this.setAuthCookies(res, result.tokens.accessToken, result.tokens.refreshToken, csrfToken);
+    this.setAuthCookies(
+      res,
+      result.tokens.accessToken,
+      result.tokens.refreshToken,
+      csrfToken,
+      result.user.role as USER_ROLE,
+    );
 
     // TODO: VERCEL_BLOB_MIGRATION
     // Legacy S3 signed URL generation retained for rollback/reference.
@@ -569,11 +813,13 @@ export class AuthModuleController {
     // Active Vercel Blob implementation:
     // Stored public Blob URLs or existing URLs are returned directly without S3 signed URL.
 
+    const roleCsrfKey = getRoleCsrfPropertyName(result.user.role);
+
     return {
       success: true,
       statusCode: HttpStatus.OK,
       message: result.message,
-      csrfToken,
+      ...(roleCsrfKey ? { [roleCsrfKey]: csrfToken } : { csrfToken }),
       user: result.user,
       isNewUser: result.isNewUser,
     };

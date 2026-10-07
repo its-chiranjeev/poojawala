@@ -15,7 +15,14 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ReviewService } from './review.service';
-import { CsrfGuard, JwtAuthGuard, RolesGuard, Roles } from '@poojawala/common';
+import {
+  CsrfGuard,
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  ROLE_COOKIE_MAP,
+  parseCookieHeader,
+} from '@poojawala/common';
 import { USER_ROLE } from '@poojawala/entities';
 
 export interface ReviewJwtPayload {
@@ -75,25 +82,22 @@ export class ReviewController {
       }
     }
 
-    // 2. Check req.cookies?.accessToken (if cookie-parser middleware is enabled)
-    if (req.cookies && typeof req.cookies.accessToken === 'string') {
-      return req.cookies.accessToken.trim();
+    // 2. Check role-specific access token cookies
+    const cookies =
+      req.cookies || (req.headers?.cookie ? parseCookieHeader(req.headers.cookie) : {});
+
+    const roleToken =
+      cookies[ROLE_COOKIE_MAP[USER_ROLE.CUSTOMER].access] ||
+      cookies[ROLE_COOKIE_MAP[USER_ROLE.PUROHIT].access] ||
+      cookies[ROLE_COOKIE_MAP[USER_ROLE.ADMIN].access];
+
+    if (roleToken && typeof roleToken === 'string') {
+      return roleToken.trim();
     }
 
-    // 3. Check Cookie header directly (e.g. Postman or browser sending Cookie: accessToken=...)
-    const cookieHeader = req.headers?.cookie;
-    if (typeof cookieHeader === 'string') {
-      const cookies = cookieHeader.split(';').reduce((acc: Record<string, string>, cookie: string) => {
-        const parts = cookie.split('=');
-        if (parts.length >= 2) {
-          acc[parts[0].trim()] = decodeURIComponent(parts.slice(1).join('=').trim());
-        }
-        return acc;
-      }, {});
-      if (cookies['accessToken']) {
-        return cookies['accessToken'].trim();
-      }
-    }
+    // TODO: Legacy generic auth cookie logic retained for reference.
+    // Role-based cookies are now authoritative.
+    // if (cookies['accessToken']) return cookies['accessToken'].trim();
 
     return null;
   }

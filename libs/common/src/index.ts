@@ -3,6 +3,7 @@ export * from './common.service';
 export * from './interceptors/response.interceptor';
 export * from './filters/global-exception.filter';
 export * from './auth/common-auth.module';
+export * from './auth/auth-cookies';
 export * from './decorators/roles.decorator';
 export * from './guards/jwtAuth.guard';
 export * from './guards/optionalJwtAuth.guard';

@@ -745,13 +745,13 @@ export class BookingRepository extends BaseRepository<Booking> {
       .createQueryBuilder('booking')
       .select('COUNT(*)', 'totalBookings')
       .addSelect(
-        `COALESCE(SUM(CASE WHEN booking.status = :completed THEN booking."finalAmount" ELSE 0 END), 0)`,
+        `COALESCE(SUM(CASE WHEN booking."paymentStatus" = :paid THEN booking."finalAmount" ELSE 0 END), 0)`,
         'totalRevenue',
       );
 
     const result = await query
       .setParameters({
-        completed: BOOKING_STATUS.COMPLETED,
+        paid: BOOKING_PAYMENT_STATUS.PAID,
       })
       .getRawOne();
 

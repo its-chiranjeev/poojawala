@@ -234,6 +234,7 @@ export class CreateServiceDto {
   @IsString()
   name!: string;
 
+  @IsOptional()
   @IsString()
   slug!: string;
 

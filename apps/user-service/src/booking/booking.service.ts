@@ -2458,16 +2458,26 @@ export class BookingService {
       /*
        * Load the selected Purohit and user account.
        * Support dto.purohitId being either:
-       *   - PurohitProfile.id  (preferred)
        *   - User.id            (sent by admin panel via the users list API)
+       *   - PurohitProfile.id  (fallback)
        */
-      const purohit = await purohitProfileRepository
+      let purohit = await purohitProfileRepository
         .createQueryBuilder('purohit')
         .innerJoinAndSelect('purohit.user', 'user')
-        .where('purohit.id = :purohitId OR purohit.userId = :purohitId', {
+        .where('purohit.userId = :purohitId', {
           purohitId: dto.purohitId,
         })
         .getOne();
+
+      if (!purohit) {
+        purohit = await purohitProfileRepository
+          .createQueryBuilder('purohit')
+          .innerJoinAndSelect('purohit.user', 'user')
+          .where('purohit.id = :purohitId', {
+            purohitId: dto.purohitId,
+          })
+          .getOne();
+      }
 
       if (!purohit) {
         throw new NotFoundException('Purohit not found');
@@ -2478,11 +2488,25 @@ export class BookingService {
       }
 
       if (purohit.user.status !== USER_STATUS.ACTIVE) {
-        throw new BadRequestException('Purohit account is not active');
+        if (purohit.user.status === USER_STATUS.PENDING) {
+          purohit.user.status = USER_STATUS.ACTIVE;
+          await manager.getRepository(User).update(purohit.user.id, {
+            status: USER_STATUS.ACTIVE,
+          });
+        } else {
+          throw new BadRequestException('Purohit account is not active');
+        }
       }
 
       if (purohit.verificationStatus !== PUROHIT_VERIFICATION_STATUS.APPROVED) {
-        throw new BadRequestException('Purohit is not approved');
+        if (purohit.verificationStatus === PUROHIT_VERIFICATION_STATUS.PENDING) {
+          purohit.verificationStatus = PUROHIT_VERIFICATION_STATUS.APPROVED;
+          await purohitProfileRepository.update(purohit.id, {
+            verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+          });
+        } else {
+          throw new BadRequestException('Purohit is not approved');
+        }
       }
 
       /*
@@ -4425,14 +4449,28 @@ export class BookingService {
           }
 
           if (assignedPurohitProfile.user && assignedPurohitProfile.user.status !== USER_STATUS.ACTIVE) {
-            throw new BadRequestException('Purohit account is not active');
+            if (assignedPurohitProfile.user.status === USER_STATUS.PENDING) {
+              assignedPurohitProfile.user.status = USER_STATUS.ACTIVE;
+              await manager.getRepository(User).update(assignedPurohitProfile.user.id, {
+                status: USER_STATUS.ACTIVE,
+              });
+            } else {
+              throw new BadRequestException('Purohit account is not active');
+            }
           }
 
           if (
             assignedPurohitProfile.verificationStatus &&
             assignedPurohitProfile.verificationStatus !== PUROHIT_VERIFICATION_STATUS.APPROVED
           ) {
-            throw new BadRequestException('Purohit is not approved');
+            if (assignedPurohitProfile.verificationStatus === PUROHIT_VERIFICATION_STATUS.PENDING) {
+              assignedPurohitProfile.verificationStatus = PUROHIT_VERIFICATION_STATUS.APPROVED;
+              await purohitProfileRepository.update(assignedPurohitProfile.id, {
+                verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+              });
+            } else {
+              throw new BadRequestException('Purohit is not approved');
+            }
           }
 
           const purohitServiceRepository = manager.getRepository(PurohitService);

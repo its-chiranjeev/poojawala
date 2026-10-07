@@ -35,8 +35,7 @@ import {
   NotificationQueryDto,
   CreateCustomerByAdminDto,
 } from '@poojawala/dtos';
-import { AuthGuard } from '@nestjs/passport';
-import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@poojawala/common';
+import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard, setRoleAuthCookies, getRoleCsrfPropertyName } from '@poojawala/common';
 import {
   UpdateUserDto,
   UpdateUserStatusDto,
@@ -133,15 +132,30 @@ export class UserController {
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   @Patch('admin/update/:id')
-  @UseInterceptors(FileInterceptor('profileImage'))
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'profileImage', maxCount: 1 },
+      { name: 'aadhaarDoc', maxCount: 1 },
+      { name: 'panDoc', maxCount: 1 },
+      { name: 'certificate', maxCount: 1 },
+      { name: 'templeAffiliationProof', maxCount: 1 },
+    ]),
+  )
   @HttpCode(HttpStatus.OK)
   async updateProfileByAdmin(
     @Req() req: any,
     @Param('id') id: string,
     @Body(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: false })) dto: UpdateUserDto,
-    @UploadedFile() file?: Express.Multer.File,
+    @UploadedFiles()
+    files?: {
+      profileImage?: Express.Multer.File[];
+      aadhaarDoc?: Express.Multer.File[];
+      panDoc?: Express.Multer.File[];
+      certificate?: Express.Multer.File[];
+      templeAffiliationProof?: Express.Multer.File[];
+    },
   ) {
-    return this.userService.updateProfileByAdmin(req.user.id, id, dto, file);
+    return this.userService.updateProfileByAdmin(req.user.id, id, dto, files);
   }
 
   @UseGuards(JwtAuthGuard, CsrfGuard)
@@ -293,13 +307,16 @@ export class UserController {
       result.tokens.accessToken,
       result.tokens.refreshToken,
       csrfToken,
+      result.user.role as USER_ROLE,
     );
+
+    const roleCsrfKey = getRoleCsrfPropertyName(result.user.role);
 
     return {
       success: true,
       statusCode: HttpStatus.CREATED,
       message: result.message,
-      csrfToken,
+      ...(roleCsrfKey ? { [roleCsrfKey]: csrfToken } : { csrfToken }),
       user: result.user,
       ...(result.address && { address: result.address }),
     };
@@ -401,43 +418,24 @@ export class UserController {
     accessToken: string,
     refreshToken: string,
     csrfToken: string,
+    role: USER_ROLE,
   ) {
+    setRoleAuthCookies(res, { accessToken, refreshToken, csrfToken }, role);
+
+    // TODO: Legacy generic auth cookie logic retained for reference.
+    // Role-based cookies are now authoritative.
+    /*
     const isProd = process.env.NODE_ENV === 'production';
     const req = (res as any).req;
     const origin = req?.headers?.origin;
-    const isCrossSite =
-      origin &&
-      (origin.includes('192.168.') ||
-        origin.includes('10.') ||
-        origin.includes('172.') ||
-        origin.includes('localhost') ||
-        origin.includes('127.0.0.1'));
-
+    const isCrossSite = origin && (origin.includes('192.168.') || origin.includes('10.') || origin.includes('172.') || origin.includes('localhost') || origin.includes('127.0.0.1'));
     const sameSite = isCrossSite || !isProd ? 'none' : 'lax';
     const secure = true;
-
-    const cookieOptions: any = {
-      httpOnly: true,
-      secure,
-      sameSite,
-      partitioned: Boolean(isCrossSite || !isProd),
-      path: '/',
-    };
-
-    res.cookie('accessToken', accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000,
-    });
-
-    res.cookie('refreshToken', refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    res.cookie('csrf-token', csrfToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    const cookieOptions: any = { httpOnly: true, secure, sameSite, partitioned: Boolean(isCrossSite || !isProd), path: '/' };
+    res.cookie('accessToken', accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
+    res.cookie('refreshToken', refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    res.cookie('csrf-token', csrfToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    */
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)

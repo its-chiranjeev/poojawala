@@ -139,7 +139,13 @@ export class UserService {
     adminId: number,
     id: string,
     dto: UpdateUserDto,
-    file?: Express.Multer.File,
+    files?: {
+      profileImage?: Express.Multer.File[];
+      aadhaarDoc?: Express.Multer.File[];
+      panDoc?: Express.Multer.File[];
+      certificate?: Express.Multer.File[];
+      templeAffiliationProof?: Express.Multer.File[];
+    } | Express.Multer.File,
   ) {
     const user = await this.userRepository.findById(id);
     if (!user) {
@@ -208,11 +214,17 @@ export class UserService {
       delete dto.confirmPassword;
     }
 
-    if (file) {
+    const profileImageFile =
+      (files as any)?.profileImage?.[0] ||
+      (files && (files as any).fieldname === 'profileImage'
+        ? (files as Express.Multer.File)
+        : undefined);
+
+    if (profileImageFile && profileImageFile.buffer && profileImageFile.buffer.length > 0) {
       const oldProfileImage = user.profileImage;
       const imageUrl = await this.s3Service.uploadProfileImage(
         id,
-        file,
+        profileImageFile,
       );
       dto.profileImage = imageUrl;
 
@@ -220,6 +232,50 @@ export class UserService {
       if (oldProfileImage && this.s3Service.isVercelBlobUrl(oldProfileImage)) {
         await this.s3Service.deleteByUrl(oldProfileImage);
       }
+    }
+
+    const aadhaarFiles = (files as any)?.aadhaarDoc?.filter(
+      (f: Express.Multer.File) => f && f.buffer && f.buffer.length > 0,
+    );
+    if (aadhaarFiles?.length) {
+      dto.aadhaarDoc = await this.s3Service.uploadFileHelper(
+        id,
+        'aadhaarDoc',
+        aadhaarFiles,
+      );
+    }
+
+    const panFiles = (files as any)?.panDoc?.filter(
+      (f: Express.Multer.File) => f && f.buffer && f.buffer.length > 0,
+    );
+    if (panFiles?.length) {
+      dto.panDoc = await this.s3Service.uploadFileHelper(
+        id,
+        'panDoc',
+        panFiles,
+      );
+    }
+
+    const certificateFiles = (files as any)?.certificate?.filter(
+      (f: Express.Multer.File) => f && f.buffer && f.buffer.length > 0,
+    );
+    if (certificateFiles?.length) {
+      dto.certificate = await this.s3Service.uploadFileHelper(
+        id,
+        'certificate',
+        certificateFiles,
+      );
+    }
+
+    const templeFiles = (files as any)?.templeAffiliationProof?.filter(
+      (f: Express.Multer.File) => f && f.buffer && f.buffer.length > 0,
+    );
+    if (templeFiles?.length) {
+      dto.templeAffiliationProof = await this.s3Service.uploadFileHelper(
+        id,
+        'templeAffiliationProof',
+        templeFiles,
+      );
     }
 
     const userPayload: Partial<User> = {
@@ -263,6 +319,11 @@ export class UserService {
       if (city !== undefined) profilePayload.city = city;
       if (languages !== undefined) profilePayload.languages = languages;
       if (specializations !== undefined) profilePayload.specializations = specializations;
+      if (dto.aadhaarDoc !== undefined) profilePayload.aadhaarDocUrl = dto.aadhaarDoc;
+      if (dto.panDoc !== undefined) profilePayload.panDocUrl = dto.panDoc;
+      if (dto.certificate !== undefined) profilePayload.certificateUrl = dto.certificate;
+      if (dto.templeAffiliationProof !== undefined)
+        profilePayload.templeAffiliationProofUrl = dto.templeAffiliationProof;
       if (isOnlineAvailable !== undefined) {
         profilePayload.isOnlineAvailable =
           isOnlineAvailable === true ||
@@ -279,6 +340,13 @@ export class UserService {
       if (Object.keys(profilePayload).length > 0) {
         await this.purohitProfileRepository.update(profile.id, profilePayload);
       }
+
+      await this.syncPurohitMediaDocuments(profile.id, {
+        aadhaarDocUrl: dto.aadhaarDoc,
+        panDocUrl: dto.panDoc,
+        certificateUrl: dto.certificate,
+        templeAffiliationProofUrl: dto.templeAffiliationProof,
+      });
 
       const stateToUpdate = dto.state !== undefined ? dto.state : dto.profile?.state;
       const cityToUpdate = dto.city !== undefined ? dto.city : dto.profile?.city;
@@ -576,6 +644,7 @@ export class UserService {
         await this.s3Service.deleteByUrl(oldProfileImage);
       }
     }
+
 
     if (files?.aadhaarDoc?.length) {
       dto.aadhaarDoc = await this.s3Service.uploadFileHelper(

@@ -61,8 +61,8 @@ export class Service {
   name!: string;
 
   @Index({ unique: true })
-  @Column({ type: 'varchar', length: 100, unique: true })
-  slug!: string;
+  @Column({ type: 'varchar', length: 100, unique: true, nullable: true })
+  slug?: string;
 
   @Column({ type: 'text', nullable: true })
   description?: string;

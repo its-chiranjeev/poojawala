@@ -12,17 +12,18 @@ import {
 import { User } from './user.entity';
 
 export enum PLATFORM_SETTING_KEY {
-  PLATFORM_NAME = 'platform_name',
-  SUPPORT_EMAIL = 'support_email',
-  SUPPORT_PHONE = 'support_phone',
-  COMMISSION_PERCENTAGE = 'commission_percentage',
-  GST_PERCENTAGE = 'gst_percentage',
-  MAINTENANCE_MODE = 'maintenance_mode',
-  PRIVACY_POLICY_URL = 'privacy_policy_url',
-  TERMS_AND_CONDITIONS_URL = 'terms_and_conditions_url',
-  FACEBOOK_URL = 'facebook_url',
-  INSTAGRAM_URL = 'instagram_url',
-  YOUTUBE_URL = 'youtube_url',
+  PLATFORM_NAME = 'PLATFORM_NAME',
+  SUPPORT_EMAIL = 'SUPPORT_EMAIL',
+  SUPPORT_PHONE = 'SUPPORT_PHONE',
+  COMMISSION_PERCENTAGE = 'COMMISSION_PERCENTAGE',
+  GST_PERCENTAGE = 'GST_PERCENTAGE',
+  MAINTENANCE_MODE = 'MAINTENANCE_MODE',
+  PRIVACY_POLICY_URL = 'PRIVACY_POLICY_URL',
+  TERMS_AND_CONDITIONS_URL = 'TERMS_AND_CONDITIONS_URL',
+  FACEBOOK_URL = 'FACEBOOK_URL',
+  INSTAGRAM_URL = 'INSTAGRAM_URL',
+  YOUTUBE_URL = 'YOUTUBE_URL',
+  ASTROLOGY_DEFAULT_PRICE = 'ASTROLOGY_DEFAULT_PRICE'
 }
 
 @Entity('platform_settings')
@@ -32,11 +33,11 @@ export class PlatformSetting {
 
   @Index({ unique: true })
   @Column({
-  type: 'enum',
-  enum: PLATFORM_SETTING_KEY,
-  unique: true,
-})
-key!: PLATFORM_SETTING_KEY;
+    type: 'enum',
+    enum: PLATFORM_SETTING_KEY,
+    unique: true,
+  })
+  key!: PLATFORM_SETTING_KEY;
 
   @Column({ type: 'text' })
   value!: string;

@@ -2303,11 +2303,11 @@ export class PaymentService {
           ? Number(razorpayPayment.amount) / 100
           : (isPaid
             ? Number(
-                payment?.amount ??
-                  (Number(booking.paidAmount) > 0
-                    ? booking.paidAmount
-                    : booking.finalAmount),
-              )
+              payment?.amount ??
+              (Number(booking.paidAmount) > 0
+                ? booking.paidAmount
+                : booking.finalAmount),
+            )
             : null));
 
     const razorpayFee =
@@ -2331,8 +2331,8 @@ export class PaymentService {
       ? (payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH
         ? 'Cash'
         : this.formatPaymentMethod(
-            razorpayPayment?.method ?? payment.paymentMethod ?? '-',
-          ))
+          razorpayPayment?.method ?? payment.paymentMethod ?? '-',
+        ))
       : (booking.paymentType === BOOKING_PAYMENT_TYPE.DEFERRED
         ? 'Pay After Service (Deferred)'
         : '-');
@@ -2358,8 +2358,8 @@ export class PaymentService {
       bookingStatus: booking.status,
       paymentId: String(
         razorpayPayment?.id ??
-          payment?.razorpayPaymentId ??
-          (payment ? String(payment.id) : '-'),
+        payment?.razorpayPaymentId ??
+        (payment ? String(payment.id) : '-'),
       ),
       orderId: String(
         razorpayPayment?.order_id ?? payment?.razorpayOrderId ?? '-',
@@ -3431,9 +3431,9 @@ export class PaymentService {
     const orderNumber = payment.order?.orderNumber ?? null;
     const linkedOrder = payment.order
       ? {
-          id: payment.order.id,
-          orderNumber: payment.order.orderNumber,
-        }
+        id: payment.order.id,
+        orderNumber: payment.order.orderNumber,
+      }
       : null;
 
     const resolvedCustomer =
@@ -5120,7 +5120,10 @@ export class PaymentService {
 
     const pendingPayoutsNumber = await bookingRepo
       .createQueryBuilder('booking')
-      .where('booking.paymentStatus = :paymentStatus', {
+      .where('booking.status = :bookingStatus', {
+        bookingStatus: BOOKING_STATUS.COMPLETED,
+      })
+      .andWhere('booking.paymentStatus = :paymentStatus', {
         paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
       })
       .andWhere('booking.purohitPayoutStatus = :payoutStatus', {
