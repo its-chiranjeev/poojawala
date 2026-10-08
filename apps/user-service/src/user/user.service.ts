@@ -2896,23 +2896,6 @@ export class UserService {
 
     if (isPrimary === true) {
       await this.purohitBankAccountRepository.clearPrimaryAccount(profile.id);
-    } else if (isPrimary === false && account.isPrimary) {
-      const allAccounts =
-        await this.purohitBankAccountRepository.findByPurohitId(profile.id);
-      const otherAccounts = allAccounts.filter((acc) => acc.id !== id);
-
-      if (otherAccounts.length === 0) {
-        throw new BadRequestException(
-          'At least one bank account must remain primary',
-        );
-      }
-
-      await this.purohitBankAccountRepository.updateAccount(
-        otherAccounts[0].id,
-        {
-          isPrimary: true,
-        },
-      );
     }
 
     const { purohitId: _ignoredPurohitId, ...updatePayload } = dto as any;

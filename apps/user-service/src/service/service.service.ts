@@ -15,6 +15,7 @@ import {
   CategoryRepository,
   PurohitServiceRepository,
   PurohitProfileRepository,
+  TempleRepository,
 } from '@poojawala/repositories';
 import { S3Service } from '@poojawala/s3';
 import {
@@ -30,7 +31,7 @@ import {
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { QueryFailedError, ILike } from 'typeorm';
-import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE, PUROHIT_VERIFICATION_STATUS, ServicePlans, ServicePlanDetails, NOTIFICATION_TYPE, ServiceCity, CATEGORY_TYPE } from '@poojawala/entities';
+import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE, PUROHIT_VERIFICATION_STATUS, ServicePlans, ServicePlanDetails, NOTIFICATION_TYPE, ServiceCity, CATEGORY_TYPE, Temple } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
 import { NotificationService } from '@poojawala/notification';
 import { EmailService } from '@poojawala/email-services';
@@ -60,11 +61,22 @@ export class ServiceService {
     private readonly PurohitServiceRepository: PurohitServiceRepository,
     private readonly PurohitProfileRepository: PurohitProfileRepository,
     private readonly auditLogService: AuditLogService,
+    private readonly templeRepository: TempleRepository,
     @Optional() private readonly notificationService?: NotificationService,
     @Optional() private readonly emailService?: EmailService,
   ) { }
 
   async findAllServices(query: GetServicesQueryDto) {
+    if (query.templeId !== undefined && query.templeId !== null && String(query.templeId).trim() !== '') {
+      const strVal = String(query.templeId).trim();
+      if (strVal.toLowerCase() !== 'all' && strVal.toLowerCase() !== 'null') {
+        const tid = Number(strVal);
+        if (!isNaN(tid)) {
+          await this.validateTempleForPublicAccess(tid);
+        }
+      }
+    }
+
     const result = await this.serviceRepository.findAllServices(query);
 
     const dataWithUrls = await Promise.all(
@@ -414,6 +426,48 @@ export class ServiceService {
     }
   }
 
+  /**
+   * Validates that a given templeId references an existing, non-deleted, and active Temple.
+   * Throws NotFoundException if not found or deleted, and BadRequestException if inactive.
+   */
+  private async validateTemple(templeId: number): Promise<Temple> {
+    const temple = await this.templeRepository.findOne({
+      where: { id: templeId },
+      withDeleted: true,
+    });
+
+    if (!temple || temple.deletedAt) {
+      throw new NotFoundException(`Temple with id ${templeId} not found`);
+    }
+
+    if (!temple.isActive) {
+      throw new BadRequestException(`Temple with id ${templeId} is inactive`);
+    }
+
+    return temple;
+  }
+
+  /**
+   * Validates that a given templeId references an existing, non-deleted, and active Temple for customer/public access.
+   * Throws NotFoundException if not found, deleted, or inactive.
+   */
+  private async validateTempleForPublicAccess(templeId: number): Promise<Temple> {
+    const temple = await this.templeRepository.findOne({
+      where: { id: templeId },
+      withDeleted: true,
+    });
+
+    if (!temple || temple.deletedAt) {
+      throw new NotFoundException(`Temple with id ${templeId} not found`);
+    }
+
+    if (!temple.isActive) {
+      throw new NotFoundException(`Temple with id ${templeId} not found`);
+    }
+
+    return temple;
+  }
+
   async createService(
     dto: CreateServiceDto,
     files: {
@@ -425,8 +479,18 @@ export class ServiceService {
       if (dto.categoryId !== undefined && dto.categoryId !== null) {
         await this.validateServiceCategory(dto.categoryId);
       }
+
+      let validatedTemple: Temple | null = null;
+      if (dto.templeId !== undefined && dto.templeId !== null) {
+        validatedTemple = await this.validateTemple(dto.templeId);
+      }
+
+      const duplicateConditions: any[] = [{ name: dto.name.trim() }];
+      if (dto.slug && dto.slug.trim()) {
+        duplicateConditions.push({ slug: dto.slug.trim() });
+      }
       const existing = await this.serviceRepository.findOne({
-        where: [{ name: dto.name }, { slug: dto.slug }],
+        where: duplicateConditions,
       });
 
       if (existing) {
@@ -493,8 +557,9 @@ export class ServiceService {
       let iconUrl: string | undefined;
 
       if (files?.icon?.length) {
+        const uploadKey = dto.slug?.trim() || adminId || 'service';
         iconUrl = await this.s3Service.uploadFileHelper(
-          dto.slug,
+          uploadKey,
           'icon',
           files.icon,
         );
@@ -518,6 +583,8 @@ export class ServiceService {
 
       const service = this.serviceRepository.create({
         ...dto,
+        slug: dto.slug?.trim() || null,
+        templeId: dto.templeId ?? null,
         cities: validCities,
         languages: dto.languages ?? [],
         benefits: dto.benefits ?? [],
@@ -536,8 +603,16 @@ export class ServiceService {
       // Explicitly guarantee values before save
       service.cities = validCities;
       service.isGlobal = resolvedIsGlobal;
+      service.templeId = dto.templeId ?? null;
+      service.slug = dto.slug?.trim() || null;
 
       const savedService = await this.serviceRepository.save(service);
+
+      (savedService as any).templeId = savedService.templeId ?? null;
+      (savedService as any).temple = validatedTemple
+        ? { id: validatedTemple.id, name: validatedTemple.name }
+        : null;
+      (savedService as any).slug = savedService.slug ?? null;
 
       if (savedService.iconUrl) {
         try {
@@ -562,7 +637,11 @@ export class ServiceService {
         action: 'SERVICE_CREATED',
         message: `Service '${savedService.name}' was created successfully.`,
         oldValue: undefined,
-        newValue: { name: savedService.name, slug: savedService.slug },
+        newValue: {
+          name: savedService.name,
+          slug: savedService.slug,
+          templeId: savedService.templeId,
+        },
       });
 
       if (this.notificationService) {
@@ -626,9 +705,9 @@ export class ServiceService {
       throw new NotFoundException('Service not found');
     }
 
-    if (dto.name) {
+    if (dto.name && dto.name.trim()) {
       const existingName = await this.serviceRepository.findOne({
-        where: { name: dto.name },
+        where: { name: dto.name.trim() },
       });
 
       if (existingName && existingName.id !== id) {
@@ -636,14 +715,19 @@ export class ServiceService {
       }
     }
 
-    if (dto.slug) {
+    if (dto.slug && dto.slug.trim()) {
       const existingSlug = await this.serviceRepository.findOne({
-        where: { slug: dto.slug },
+        where: { slug: dto.slug.trim() },
       });
 
       if (existingSlug && existingSlug.id !== id) {
         throw new ConflictException('Service with same slug already exists');
       }
+    }
+
+    let validatedTemple: Temple | null = null;
+    if (dto.templeId !== undefined && dto.templeId !== null) {
+      validatedTemple = await this.validateTemple(dto.templeId);
     }
 
     if (dto.categoryId !== undefined && dto.categoryId !== null) {
@@ -699,6 +783,9 @@ export class ServiceService {
     // const oldPriceWithSamagri = service.priceWithSamagri;
     const oldTokenPercentage = service.tokenPercentage;
     const oldPlans = service.plans;
+    const oldTempleId = service.templeId;
+    const oldTemple = service.temple;
+    const oldSlug = service.slug;
 
     if (dto.tokenPercentage !== undefined) {
       if (dto.tokenPercentage !== null) {
@@ -797,6 +884,26 @@ export class ServiceService {
       service.plans = oldPlans;
     }
 
+    // Safeguard slug and templeId against unintentional overwrites
+    if (dto.slug === undefined) {
+      service.slug = oldSlug;
+    } else if (dto.slug === null) {
+      service.slug = null;
+    } else {
+      service.slug = dto.slug.trim();
+    }
+
+    if (dto.templeId === undefined) {
+      service.templeId = oldTempleId;
+      service.temple = oldTemple;
+    } else if (dto.templeId === null) {
+      service.templeId = null;
+      service.temple = null;
+    } else {
+      service.templeId = dto.templeId;
+      service.temple = validatedTemple;
+    }
+
     // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
     /*
     if (dto.priceWithoutSamagri === undefined && !mergedPlans?.basic?.price) {
@@ -846,13 +953,28 @@ export class ServiceService {
     // Upload new icon if provided
     if (files?.icon?.length) {
       service.iconUrl = await this.s3Service.uploadFileHelper(
-        service.name,
+        service.slug || service.name || 'service',
         'icon',
         files.icon,
       );
     }
 
     const updated = await this.serviceRepository.save(service);
+
+    if (updated.templeId) {
+      if (validatedTemple) {
+        (updated as any).temple = { id: validatedTemple.id, name: validatedTemple.name };
+      } else {
+        const t = await this.templeRepository.findOne({
+          where: { id: updated.templeId },
+        });
+        (updated as any).temple = t ? { id: t.id, name: t.name } : null;
+      }
+    } else {
+      (updated as any).temple = null;
+      (updated as any).templeId = null;
+    }
+    (updated as any).slug = updated.slug ?? null;
 
     const hasBasicPlan = Boolean(dto.plans && dto.plans.basic !== undefined);
     const hasStandardPlan = Boolean(dto.plans && dto.plans.standard !== undefined);
@@ -889,6 +1011,8 @@ export class ServiceService {
     if (dto.benefits !== undefined) updatedFields.benefits = updated.benefits;
     if (dto.purohitCarryItems !== undefined) updatedFields.purohitCarryItems = updated.purohitCarryItems;
     if (dto.plans !== undefined) updatedFields.plans = updated.plans;
+    if (dto.templeId !== undefined) updatedFields.templeId = updated.templeId;
+    if (dto.slug !== undefined) updatedFields.slug = updated.slug;
     if (isBasicModified && !isStandardModified) updatedFields.plan = 'BASIC';
     if (!isBasicModified && isStandardModified) updatedFields.plan = 'STANDARD';
     if (isBasicModified && isStandardModified) updatedFields.plan = 'BASIC, STANDARD';
@@ -911,6 +1035,8 @@ export class ServiceService {
         benefits: oldBenefits,
         purohitCarryItems: oldPurohitCarryItems,
         plans: oldPlans,
+        templeId: oldTempleId,
+        slug: oldSlug,
       },
       newValue: updatedFields,
     });

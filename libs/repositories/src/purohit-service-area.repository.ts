@@ -80,7 +80,7 @@ export class PurohitServiceAreaRepository extends BaseRepository<PurohitServiceA
 
     if (search && search.trim() !== '') {
       query.andWhere(
-        '(area.addressLabel ILIKE :search OR area.streetName ILIKE :search OR area.fullAddress ILIKE :search OR area.city ILIKE :search OR area.state ILIKE :search OR area.pincode ILIKE :search)',
+        '(CAST(area.id AS TEXT) ILIKE :search OR area.addressLabel ILIKE :search OR area.streetName ILIKE :search OR area.fullAddress ILIKE :search OR area.city ILIKE :search OR area.state ILIKE :search OR area.pincode ILIKE :search)',
         { search: `%${search.trim()}%` },
       );
     }

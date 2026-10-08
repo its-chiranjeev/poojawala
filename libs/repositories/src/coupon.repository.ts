@@ -24,7 +24,7 @@ export class CouponRepository extends BaseRepository<Coupon> {
 
     if (search) {
       query.andWhere(
-        '(LOWER(coupon.code) LIKE LOWER(:search) OR LOWER(coupon.description) LIKE LOWER(:search))',
+        '(CAST(coupon.id AS TEXT) ILIKE :search OR LOWER(coupon.code) LIKE LOWER(:search) OR LOWER(coupon.description) LIKE LOWER(:search))',
         {
           search: `%${search}%`,
         },

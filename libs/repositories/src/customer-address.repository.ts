@@ -39,7 +39,7 @@ export class CustomerAddressRepository extends BaseRepository<CustomerAddress> {
 
     if (search && search.trim() !== '') {
       query.andWhere(
-        '(address.addressLabel ILIKE :search OR address.fullAddress ILIKE :search OR address.city ILIKE :search OR address.pincode ILIKE :search)',
+        '(CAST(address.id AS TEXT) ILIKE :search OR address.addressLabel ILIKE :search OR address.fullAddress ILIKE :search OR address.city ILIKE :search OR address.pincode ILIKE :search)',
         { search: `%${search.trim()}%` },
       );
     }

@@ -63,7 +63,7 @@ export class UserRepository extends BaseRepository<User> {
     if (search) {
       qb.andWhere(
         new Brackets((qb) => {
-          qb.where('LOWER(user.username) LIKE LOWER(:search)', {
+          qb.where('CAST("user"."id" AS TEXT) LIKE :search', {
             search: `%${search}%`,
           })
             .orWhere('LOWER(user.email) LIKE LOWER(:search)', {
@@ -191,26 +191,18 @@ export class UserRepository extends BaseRepository<User> {
     }
 
     if (search) {
-      const isNumber = !isNaN(Number(search));
-
-      if (isNumber) {
-        query.andWhere('user.id = :id', {
-          id: Number(search),
-        });
-      } else {
-        query.andWhere(
-          `(
-            LOWER(user.firstName) LIKE LOWER(:search)
-            OR LOWER(user.lastName) LIKE LOWER(:search)
-            OR LOWER(CONCAT(user.firstName, ' ', user.lastName)) LIKE LOWER(:search)
-            OR LOWER(user.username) LIKE LOWER(:search)
-            OR LOWER(user.email) LIKE LOWER(:search)
-          )`,
-          {
-            search: `%${search}%`,
-          },
-        );
-      }
+      query.andWhere(
+        `(
+          CAST("user"."id" AS TEXT) LIKE :search
+          OR LOWER(user.firstName) LIKE LOWER(:search)
+          OR LOWER(user.lastName) LIKE LOWER(:search)
+          OR LOWER(CONCAT(user.firstName, ' ', user.lastName)) LIKE LOWER(:search)
+          OR LOWER(user.email) LIKE LOWER(:search)
+        )`,
+        {
+          search: `%${search}%`,
+        },
+      );
     }
 
     query.orderBy('user.id', 'DESC').skip((page - 1) * limit).take(limit);
@@ -288,7 +280,7 @@ export class UserRepository extends BaseRepository<User> {
           if (typeof plans === 'string') {
             try {
               plans = JSON.parse(plans);
-            } catch {}
+            } catch { }
           }
 
 

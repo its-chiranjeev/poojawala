@@ -13,6 +13,7 @@ import {
 import { PurohitService } from './purohit-service.entity';
 import { Booking } from './booking.entity';
 import { Category } from './service-category.entity';
+import { Temple } from './temple.entity';
 
 export interface ServiceCity {
   name: string;
@@ -62,7 +63,7 @@ export class Service {
 
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 100, unique: true, nullable: true })
-  slug?: string;
+  slug?: string | null;
 
   @Column({ type: 'text', nullable: true })
   description?: string;
@@ -167,6 +168,19 @@ export class Service {
   })
   @JoinColumn({ name: 'categoryId' })
   category?: Category | null;
+
+  // Optional temple grouping for the service.
+  @Index()
+  @Column({ type: 'int', nullable: true })
+  templeId?: number | null;
+
+  @ManyToOne(() => Temple, {
+    nullable: true,
+    onDelete: 'SET NULL',
+    eager: false,
+  })
+  @JoinColumn({ name: 'templeId' })
+  temple?: Temple | null;
 
   @OneToMany(() => PurohitService, (purohitService) => purohitService.service)
   purohitServices!: PurohitService[];

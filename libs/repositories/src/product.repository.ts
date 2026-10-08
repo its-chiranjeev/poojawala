@@ -39,7 +39,7 @@ export class ProductRepository extends BaseRepository<Product> {
     }
 
     if (search && search.trim()) {
-      qb.andWhere('product.name ILIKE :search', {
+      qb.andWhere('(CAST(product.id AS TEXT) ILIKE :search OR product.name ILIKE :search)', {
         search: `%${search.trim()}%`,
       });
     }

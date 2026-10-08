@@ -68,6 +68,7 @@ export class NotificationService {
     referenceId?: number,
     referenceType?: string,
     emitSocket: boolean = true,
+    extraData?: Record<string, any>,
   ) {
     const entity = this.notificationRepository.create({
       userId,
@@ -82,8 +83,12 @@ export class NotificationService {
     const savedNotification = await this.notificationRepository.save(entity);
 
     if (emitSocket) {
+      const socketPayload = extraData
+        ? { ...savedNotification, ...extraData }
+        : savedNotification;
+
       // Emit real-time notification
-      this.bookingGateway.emitNotification(userId, savedNotification);
+      this.bookingGateway.emitNotification(userId, socketPayload);
       
       // Also broadcast unread count
       const unreadCount = await this.getUnreadCount(userId);
@@ -93,7 +98,7 @@ export class NotificationService {
       await this.bridgeSocketToUserService(
         [`user:${userId}`],
         'notification:new',
-        savedNotification,
+        socketPayload,
       );
       await this.bridgeSocketToUserService(
         [`user:${userId}`],

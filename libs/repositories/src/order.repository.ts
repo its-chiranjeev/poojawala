@@ -39,7 +39,7 @@ export class OrderRepository extends BaseRepository<Order> {
     if (query.search?.trim()) {
       const term = `%${query.search.trim()}%`;
       qb.andWhere(
-        '(order.orderNumber ILIKE :term OR order.shippingAddressSnapshot->>\'name\' ILIKE :term OR order.shippingAddressSnapshot->>\'phone\' ILIKE :term)',
+        '(CAST("order"."id" AS TEXT) ILIKE :term OR "order"."orderNumber" ILIKE :term OR "order"."shippingAddressSnapshot"->>\'name\' ILIKE :term OR "order"."shippingAddressSnapshot"->>\'phone\' ILIKE :term)',
         { term },
       );
     }

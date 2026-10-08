@@ -285,6 +285,9 @@ export class BookingService {
             where: {
               id: dto.serviceId,
             },
+            relations: {
+              temple: true,
+            },
           }),
         ]);
 
@@ -672,24 +675,24 @@ export class BookingService {
         return { savedBooking, eligiblePurohitUserIds, service };
       });
 
-      for (const purohitUserId of transactionResult.eligiblePurohitUserIds) {
-        // Emit legacy event
-        // TODO: commented out to avoid duplicate notification
-        // this.bookingGateway.notifyUser(
-        //           purohitUserId,
-        //           'create_booking',
-        //           transactionResult.savedBooking,
-        //         );
-
-        // Save persistent notification
-        await this.notificationService.createNotification(
-          purohitUserId,
-          'New Booking',
-          `You have received a new booking request (Booking B-${transactionResult.savedBooking.id}).`,
-          NOTIFICATION_TYPE.BOOKING,
-          transactionResult.savedBooking.id,
-          'BOOKING',
+      if (transactionResult.eligiblePurohitUserIds?.length) {
+        const notifData = this.buildPurohitBookingNotification(
+          transactionResult.savedBooking,
+          transactionResult.service,
+          false,
         );
+        for (const purohitUserId of transactionResult.eligiblePurohitUserIds) {
+          await this.notificationService.createNotification(
+            purohitUserId,
+            notifData.title,
+            notifData.message,
+            NOTIFICATION_TYPE.BOOKING,
+            transactionResult.savedBooking.id,
+            'BOOKING',
+            true,
+            notifData.extraData,
+          );
+        }
       }
 
       // Notify Admins about the new booking
@@ -2652,7 +2655,9 @@ export class BookingService {
         },
         relations: {
           customer: true,
-          service: true,
+          service: {
+            temple: true,
+          },
           purohit: {
             user: true,
           },
@@ -2680,19 +2685,30 @@ export class BookingService {
         'BOOKING',
       );
 
-      // TODO: commented out to avoid duplicate notification
-      // this.bookingGateway.notifyUser(dto.purohitId, 'booking_assigned_by_admin', {
-      //   message: 'Booking assigned to you by admin',
-      //   booking: assignedBooking ?? savedBooking,
-      // });
+      let serviceWithTemple = assignedBooking?.service ?? (booking as any).service;
+      if (!serviceWithTemple?.temple && serviceWithTemple?.templeId) {
+        serviceWithTemple =
+          (await manager.getRepository(Service).findOne({
+            where: { id: serviceWithTemple.id },
+            relations: { temple: true },
+          })) || serviceWithTemple;
+      }
+
+      const notifData = this.buildPurohitBookingNotification(
+        savedBooking,
+        serviceWithTemple,
+        true,
+      );
 
       await this.notificationService.createNotification(
-        dto.purohitId,
-        'Booking Assigned',
-        `Booking B-${savedBooking.id} assigned to you by admin`,
+        purohit.user.id,
+        notifData.title,
+        notifData.message,
         NOTIFICATION_TYPE.BOOKING,
         savedBooking.id,
         'BOOKING',
+        true,
+        notifData.extraData,
       );
 
       await this.auditLogService.createAuditLog(
@@ -3326,6 +3342,75 @@ export class BookingService {
     };
   }
 
+  private buildPurohitBookingNotification(
+    booking: { id: number; bookingNumber?: string },
+    service: { id: number; name: string; templeId?: number | null; temple?: { id: number; name: string } | null },
+    isManualAssignment: boolean = false,
+  ): {
+    title: string;
+    message: string;
+    extraData: {
+      bookingId: number;
+      serviceId: number;
+      templeId: number | null;
+      templeName: string | null;
+      notification: {
+        type: NOTIFICATION_TYPE;
+        title: string;
+        message: string;
+        bookingId: number;
+        serviceId: number;
+        templeId: number | null;
+        templeName: string | null;
+      };
+    };
+  } {
+    const temple = service?.temple;
+    const hasTemple = Boolean(service?.templeId && temple?.name);
+    const templeName = hasTemple ? temple!.name : null;
+    const templeId = hasTemple ? temple!.id : null;
+    const serviceName = service?.name || 'Pooja Service';
+    const bookingDisplayId = booking?.id;
+
+    let title: string;
+    let message: string;
+
+    if (hasTemple) {
+      title = 'New Temple Service Booking';
+      if (isManualAssignment) {
+        message = `Booking #${bookingDisplayId} for ${serviceName} at ${templeName} has been assigned to you. Please review the booking details.`;
+      } else {
+        message = `New booking received for ${serviceName} at ${templeName}. Please review the booking details and confirm your availability.`;
+      }
+    } else {
+      if (isManualAssignment) {
+        title = 'Booking Assigned';
+        message = `Booking #${bookingDisplayId} for ${serviceName} has been assigned to you. Please review the booking details.`;
+      } else {
+        title = 'New Booking';
+        message = `New booking received for ${serviceName}. Please review the booking details and confirm your availability.`;
+      }
+    }
+
+    const extraData = {
+      bookingId: booking.id,
+      serviceId: service?.id,
+      templeId,
+      templeName,
+      notification: {
+        type: NOTIFICATION_TYPE.BOOKING,
+        title: hasTemple ? 'New Temple Service Booking' : (isManualAssignment ? 'Booking Assigned' : 'New Service Booking'),
+        message,
+        bookingId: booking.id,
+        serviceId: service?.id,
+        templeId,
+        templeName,
+      },
+    };
+
+    return { title, message, extraData };
+  }
+
   async triggerAutoAssignment(bookingId: number): Promise<Booking> {
     return this.dataSource.transaction(async (manager) => {
       const bookingRepository = manager.getRepository(Booking);
@@ -3384,14 +3469,31 @@ export class BookingService {
           })
           .getMany();
 
+        let service = booking.service;
+        if (!service || (!service.temple && service.templeId)) {
+          service =
+            (await manager.getRepository(Service).findOne({
+              where: { id: savedBooking.serviceId },
+              relations: { temple: true },
+            })) || service;
+        }
+
+        const notifData = this.buildPurohitBookingNotification(
+          savedBooking,
+          service,
+          false,
+        );
+
         for (const profile of purohitProfiles) {
           await this.notificationService.createNotification(
             profile.userId,
-            'New Booking',
-            `You have received a new booking request (Booking B-${savedBooking.id}).`,
+            notifData.title,
+            notifData.message,
             NOTIFICATION_TYPE.BOOKING,
             savedBooking.id,
             'BOOKING',
+            true,
+            notifData.extraData,
           );
         }
       }
@@ -3641,6 +3743,12 @@ export class BookingService {
       const purohitProfileImage = purohitUser?.profileImage ?? null;
       const purohitProfileImageDownloadUrl = purohitProfileImage ? await this.s3Service.getDownloadUrl(purohitProfileImage) : null;
 
+      const temple = booking.service?.temple ?? null;
+      const templeImageUrl = temple?.imageUrl ?? null;
+      const templeDownloadUrl = templeImageUrl
+        ? await this.s3Service.getDownloadUrl(templeImageUrl)
+        : null;
+
       return {
         id: booking.id,
         bookingNumber: booking.bookingNumber,
@@ -3660,6 +3768,19 @@ export class BookingService {
           iconUrl: serviceIconUrl,
           iconDownloadUrl: serviceIconDownloadUrl,
           durationMinutes: booking.service?.durationMinutes ?? null,
+          templeId: booking.service?.templeId ?? (temple?.id ?? null),
+          temple: temple
+            ? {
+                id: temple.id,
+                name: temple.name,
+                description: temple.description ?? null,
+                imageUrl: templeDownloadUrl || temple.imageUrl || null,
+                address: temple.address ?? null,
+                city: temple.city ?? null,
+                state: temple.state ?? null,
+                isActive: temple.isActive,
+              }
+            : null,
         },
 
         customer: {
@@ -4398,6 +4519,7 @@ export class BookingService {
           }),
           serviceRepository.findOne({
             where: { id: dto.serviceId },
+            relations: { temple: true },
           }),
           addressRepository.findOne({
             where: { id: dto.customerAddressId, customerId: dto.customerId },
@@ -4760,15 +4882,31 @@ export class BookingService {
         };
       });
 
+      let adminServiceWithTemple = transactionResult.service;
+      if (!adminServiceWithTemple?.temple && adminServiceWithTemple?.templeId) {
+        adminServiceWithTemple =
+          (await this.dataSource.getRepository(Service).findOne({
+            where: { id: adminServiceWithTemple.id },
+            relations: { temple: true },
+          })) || adminServiceWithTemple;
+      }
+
       if (transactionResult.assignedPurohitUser) {
         try {
+          const notifData = this.buildPurohitBookingNotification(
+            transactionResult.savedBooking,
+            adminServiceWithTemple,
+            true,
+          );
           await this.notificationService.createNotification(
             transactionResult.assignedPurohitUser.id,
-            'Booking Assigned',
-            `Booking B-${transactionResult.savedBooking.id} assigned to you by admin`,
+            notifData.title,
+            notifData.message,
             NOTIFICATION_TYPE.BOOKING,
             transactionResult.savedBooking.id,
             'BOOKING',
+            true,
+            notifData.extraData,
           );
         } catch (err: any) {
           this.logger.warn(
@@ -4777,15 +4915,22 @@ export class BookingService {
         }
       } else {
         // Dispatch notifications to eligible Purohits
+        const notifData = this.buildPurohitBookingNotification(
+          transactionResult.savedBooking,
+          adminServiceWithTemple,
+          false,
+        );
         for (const purohitUserId of transactionResult.eligiblePurohitUserIds) {
           try {
             await this.notificationService.createNotification(
               purohitUserId,
-              'New Booking',
-              `You have received a new booking request (Booking B-${transactionResult.savedBooking.id}).`,
+              notifData.title,
+              notifData.message,
               NOTIFICATION_TYPE.BOOKING,
               transactionResult.savedBooking.id,
               'BOOKING',
+              true,
+              notifData.extraData,
             );
           } catch (err: any) {
             this.logger.warn(`Failed to notify Purohit ${purohitUserId}: ${err?.message}`);

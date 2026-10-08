@@ -75,7 +75,7 @@ export class BlogService {
 
       if (query?.search && query.search.trim()) {
         qb.andWhere(
-          '(category.name ILIKE :search OR category.description ILIKE :search)',
+          '(CAST(category.id AS TEXT) ILIKE :search OR category.name ILIKE :search OR category.description ILIKE :search)',
           { search: `%${query.search.trim()}%` },
         );
       }
@@ -331,7 +331,7 @@ export class BlogService {
 
       if (query.search && query.search.trim()) {
         qb.andWhere(
-          '(post.title ILIKE :search OR post.excerpt ILIKE :search OR post.category ILIKE :search OR post.authorName ILIKE :search)',
+          '(CAST(post.id AS TEXT) ILIKE :search OR post.title ILIKE :search OR post.excerpt ILIKE :search OR post.category ILIKE :search OR post.authorName ILIKE :search)',
           { search: `%${query.search.trim()}%` },
         );
       }
@@ -397,7 +397,7 @@ export class BlogService {
 
       if (query.search && query.search.trim()) {
         qb.andWhere(
-          '(post.title ILIKE :search OR post.excerpt ILIKE :search OR post.category ILIKE :search OR post.authorName ILIKE :search)',
+          '(CAST(post.id AS TEXT) ILIKE :search OR post.title ILIKE :search OR post.excerpt ILIKE :search OR post.category ILIKE :search OR post.authorName ILIKE :search)',
           { search: `%${query.search.trim()}%` },
         );
       }

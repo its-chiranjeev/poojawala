@@ -25,6 +25,8 @@ export class ServiceRepository extends BaseRepository<Service> {
       categoryId,
       category,
       categories,
+      templeId,
+      temple,
       city,
       language,
     } = query;
@@ -50,7 +52,9 @@ export class ServiceRepository extends BaseRepository<Service> {
 
     const qb = this.repo
       .createQueryBuilder('service')
-      .leftJoinAndSelect('service.category', 'category');
+      .leftJoinAndSelect('service.category', 'category')
+      .leftJoin('service.temple', 'temple', 'temple.deletedAt IS NULL')
+      .addSelect(['temple.id', 'temple.name']);
 
     if (parsedIsActive !== undefined) {
       qb.andWhere('service.isActive = :isActive', { isActive: parsedIsActive });
@@ -100,9 +104,42 @@ export class ServiceRepository extends BaseRepository<Service> {
       }
     }
 
+    // Filter: temple / templeId
+    // If templeId is specified, filter only by that templeId.
+    // If templeId is 'null', filter independent services (templeId IS NULL).
+    // If no temple filter is provided, return both temple-specific and independent services.
+    const rawTempleId = templeId !== undefined ? templeId : (query as any)['templeId'];
+    if (rawTempleId !== undefined && rawTempleId !== null && String(rawTempleId).trim() !== '') {
+      const strVal = String(rawTempleId).trim();
+      if (strVal.toLowerCase() === 'all') {
+        // Show all services (both independent and temple services)
+      } else if (strVal.toLowerCase() === 'null') {
+        qb.andWhere('service.templeId IS NULL');
+      } else {
+        const num = Number(strVal);
+        if (!isNaN(num)) {
+          qb.andWhere('service.templeId = :templeId', { templeId: num });
+        }
+      }
+    } else if (temple && String(temple).trim() !== '') {
+      const templeVal = String(temple).trim();
+      if (templeVal.toLowerCase() === 'all') {
+        // Show all services (both independent and temple services)
+      } else if (templeVal.toLowerCase() === 'null') {
+        qb.andWhere('service.templeId IS NULL');
+      } else {
+        const num = Number(templeVal);
+        if (!isNaN(num)) {
+          qb.andWhere('service.templeId = :templeId', { templeId: num });
+        } else {
+          qb.andWhere('LOWER(temple.name) = LOWER(:templeName)', { templeName: templeVal });
+        }
+      }
+    }
+
     if (search) {
       qb.andWhere(
-        '(service.name ILIKE :search OR service.description ILIKE :search OR category.name ILIKE :search)',
+        '(CAST(service.id AS TEXT) ILIKE :search OR service.name ILIKE :search OR service.description ILIKE :search OR category.name ILIKE :search OR temple.name ILIKE :search)',
         { search: `%${search.trim()}%` },
       );
     }
@@ -244,6 +281,9 @@ export class ServiceRepository extends BaseRepository<Service> {
         const offlineCount = offlineCountMap.get(service.id) || 0;
         return {
           ...service,
+          slug: service.slug ?? null,
+          templeId: service.templeId ?? null,
+          temple: service.temple ? { id: service.temple.id, name: service.temple.name } : null,
           cities: service.cities ?? [],
           languages: service.languages ?? [],
           benefits: service.benefits ?? [],
@@ -256,6 +296,9 @@ export class ServiceRepository extends BaseRepository<Service> {
     } else if (services && services.length > 0) {
       servicesWithBookings = services.map((service) => ({
         ...service,
+        slug: service.slug ?? null,
+        templeId: service.templeId ?? null,
+        temple: service.temple ? { id: service.temple.id, name: service.temple.name } : null,
         cities: service.cities ?? [],
         languages: service.languages ?? [],
         benefits: service.benefits ?? [],
@@ -295,11 +338,12 @@ export class ServiceRepository extends BaseRepository<Service> {
         id,
         // isActive: true,
       },
-      relations: ['category'],
+      relations: ['category', 'temple'],
       select: {
         id: true,
         name: true,
         slug: true,
+        templeId: true,
         description: true,
         cities: true,
         languages: true,
@@ -322,6 +366,10 @@ export class ServiceRepository extends BaseRepository<Service> {
         festivalEndDate: true,
         createdAt: true,
         updatedAt: true,
+        temple: {
+          id: true,
+          name: true,
+        },
       },
     });
 
@@ -367,6 +415,9 @@ export class ServiceRepository extends BaseRepository<Service> {
 
       return {
         ...service,
+        slug: service.slug ?? null,
+        templeId: service.templeId ?? null,
+        temple: service.temple ? { id: service.temple.id, name: service.temple.name } : null,
         cities: service.cities ?? [],
         languages: service.languages ?? [],
         benefits: service.benefits ?? [],

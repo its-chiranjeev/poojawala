@@ -138,15 +138,15 @@ export class BookingController {
     return this.bookingService.repeatBooking(req.user, bookingId, dto);
   }
 
-  // @Get('active')
-  // @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  // @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
-  // async getActiveBookings(
-  //   @Req() req: AuthenticatedRequest,
-  //   @Query() query: BookingQueryDto,
-  // ) {
-  //   return this.bookingService.getActiveBookings(req.user, query);
-  // }
+  @Get('active')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
+  async getActiveBookings(
+    @Req() req: AuthenticatedRequest,
+    @Query() query: BookingQueryDto,
+  ) {
+    return this.bookingService.getActiveBookings(req.user, query);
+  }
 
   @Patch(':id/respond')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)

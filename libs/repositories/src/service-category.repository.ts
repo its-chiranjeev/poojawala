@@ -60,7 +60,7 @@ export class CategoryRepository extends BaseRepository<Category> {
     // 2. Search filter (by name or description)
     if (search && search.trim() !== '') {
       qb.andWhere(
-        '(category.name ILIKE :search OR category.description ILIKE :search)',
+        '(CAST(category.id AS TEXT) ILIKE :search OR category.name ILIKE :search OR category.description ILIKE :search)',
         { search: `%${search.trim()}%` },
       );
     }

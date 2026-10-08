@@ -235,8 +235,14 @@ export class CreateServiceDto {
   name!: string;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '' || value === 'null' || value === 'undefined') {
+      return undefined;
+    }
+    return typeof value === 'string' ? value.trim() : value;
+  })
   @IsString()
-  slug!: string;
+  slug?: string;
 
   @IsOptional()
   @IsString()
@@ -392,6 +398,19 @@ export class CreateServiceDto {
   @IsInt()
   @Min(1)
   categoryId?: number;
+
+  /** Optional: assign this service to a temple. */
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '' || value === 'null' || value === 'undefined') {
+      return undefined;
+    }
+    const num = Number(value);
+    return isNaN(num) ? value : num;
+  })
+  @IsInt()
+  @Min(1)
+  templeId?: number;
 }
 export class PurohitServiceItemDto {
   @IsInt()

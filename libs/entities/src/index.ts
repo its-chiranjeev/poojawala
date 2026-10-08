@@ -30,4 +30,5 @@ export * from './order.entity';
 export * from './order-item.entity';
 export * from './blog-category.entity';
 export * from './blog-post.entity';
+export * from './temple.entity';
 

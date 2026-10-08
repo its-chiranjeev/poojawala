@@ -47,6 +47,17 @@ export class BookingRepository extends BaseRepository<Booking> {
         'customer.updatedAt',
       ])
       .leftJoinAndSelect('booking.service', 'service')
+      .leftJoin('service.temple', 'temple')
+      .addSelect([
+        'temple.id',
+        'temple.name',
+        'temple.description',
+        'temple.imageUrl',
+        'temple.address',
+        'temple.city',
+        'temple.state',
+        'temple.isActive',
+      ])
       .leftJoinAndSelect('booking.purohit', 'purohit')
       .leftJoin('purohit.user', 'purohitUser')
       .addSelect([
@@ -95,6 +106,17 @@ export class BookingRepository extends BaseRepository<Booking> {
         'customer.updatedAt',
       ])
       .leftJoinAndSelect('booking.service', 'service')
+      .leftJoin('service.temple', 'temple')
+      .addSelect([
+        'temple.id',
+        'temple.name',
+        'temple.description',
+        'temple.imageUrl',
+        'temple.address',
+        'temple.city',
+        'temple.state',
+        'temple.isActive',
+      ])
       .leftJoinAndSelect('booking.purohit', 'purohit')
       .leftJoin('purohit.user', 'purohitUser')
       .addSelect([
@@ -150,6 +172,17 @@ export class BookingRepository extends BaseRepository<Booking> {
         'customer.updatedAt',
       ])
       .leftJoinAndSelect('booking.service', 'service')
+      .leftJoin('service.temple', 'temple')
+      .addSelect([
+        'temple.id',
+        'temple.name',
+        'temple.description',
+        'temple.imageUrl',
+        'temple.address',
+        'temple.city',
+        'temple.state',
+        'temple.isActive',
+      ])
       .leftJoinAndSelect('booking.purohit', 'purohit')
       .leftJoin('purohit.user', 'purohitUser')
       .addSelect([
@@ -246,7 +279,8 @@ export class BookingRepository extends BaseRepository<Booking> {
       if (userRole === USER_ROLE.ADMIN) {
         query.andWhere(
           `(
-            booking."bookingNumber" ILIKE :search
+            CAST("booking"."id" AS TEXT) ILIKE :search
+            OR booking."bookingNumber" ILIKE :search
             OR service.name ILIKE :search
             OR customer."firstName" ILIKE :search
             OR customer."lastName" ILIKE :search
@@ -261,7 +295,8 @@ export class BookingRepository extends BaseRepository<Booking> {
       } else {
         query.andWhere(
           `(
-            booking."bookingNumber" ILIKE :search
+            CAST("booking"."id" AS TEXT) ILIKE :search
+            OR booking."bookingNumber" ILIKE :search
             OR service.name ILIKE :search
           )`,
           {
@@ -313,6 +348,17 @@ export class BookingRepository extends BaseRepository<Booking> {
         'customer.status',
       ])
       .leftJoinAndSelect('booking.service', 'service')
+      .leftJoin('service.temple', 'temple')
+      .addSelect([
+        'temple.id',
+        'temple.name',
+        'temple.description',
+        'temple.imageUrl',
+        'temple.address',
+        'temple.city',
+        'temple.state',
+        'temple.isActive',
+      ])
       .leftJoinAndSelect('booking.customerAddress', 'customerAddress')
       .where('booking.status = :status', {
         status: BOOKING_STATUS.PENDING,
@@ -388,7 +434,8 @@ export class BookingRepository extends BaseRepository<Booking> {
 
       query.andWhere(
         `(
-          booking."bookingNumber" ILIKE :search
+          CAST("booking"."id" AS TEXT) ILIKE :search
+          OR booking."bookingNumber" ILIKE :search
           OR service.name ILIKE :search
         )`,
         {
@@ -470,6 +517,7 @@ export class BookingRepository extends BaseRepository<Booking> {
       .createQueryBuilder('booking')
       .leftJoin('booking.customer', 'customer')
       .leftJoin('booking.service', 'service')
+      .leftJoin('service.temple', 'temple')
       .leftJoin('booking.customerAddress', 'customerAddress')
       .leftJoin('booking.purohit', 'purohit')
       .leftJoin('purohit.user', 'purohitUser')
@@ -504,6 +552,16 @@ export class BookingRepository extends BaseRepository<Booking> {
         'service.name',
         'service.iconUrl',
         'service.durationMinutes',
+        'service.templeId',
+
+        'temple.id',
+        'temple.name',
+        'temple.description',
+        'temple.imageUrl',
+        'temple.address',
+        'temple.city',
+        'temple.state',
+        'temple.isActive',
 
         'customerAddress.id',
         'customerAddress.addressLabel',
@@ -564,7 +622,8 @@ export class BookingRepository extends BaseRepository<Booking> {
       queryBuilder.andWhere(
         `
         (
-          booking."bookingNumber" ILIKE :search
+          CAST("booking"."id" AS TEXT) ILIKE :search
+          OR booking."bookingNumber" ILIKE :search
           OR service.name ILIKE :search
           OR customer."firstName" ILIKE :search
           OR customer."lastName" ILIKE :search

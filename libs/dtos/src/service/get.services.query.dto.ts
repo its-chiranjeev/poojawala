@@ -49,6 +49,18 @@ export class GetServicesQueryDto {
   @IsString()
   categories?: string;
 
+  /** Filter services belonging to a specific temple by ID. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  templeId?: number;
+
+  /** Filter services by temple name, ID, or 'all'. */
+  @IsOptional()
+  @IsString()
+  temple?: string;
+
   /** Filter categories containing a specific service by ID. */
   @IsOptional()
   @Type(() => Number)

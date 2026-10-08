@@ -72,7 +72,7 @@ export class CartItemRepository extends BaseRepository<CartItem> {
       .where('item.cartId = :cartId', { cartId });
 
     if (query?.search && query.search.trim() !== '') {
-      qb.andWhere('product.name ILIKE :search', {
+      qb.andWhere('(CAST(product.id AS TEXT) ILIKE :search OR product.name ILIKE :search)', {
         search: `%${query.search.trim()}%`,
       });
     }
@@ -97,7 +97,7 @@ export class CartItemRepository extends BaseRepository<CartItem> {
       .where('item.cartId = :cartId', { cartId });
 
     if (search && search.trim() !== '') {
-      qb.andWhere('product.name ILIKE :search', {
+      qb.andWhere('(CAST(product.id AS TEXT) ILIKE :search OR product.name ILIKE :search)', {
         search: `%${search.trim()}%`,
       });
     }

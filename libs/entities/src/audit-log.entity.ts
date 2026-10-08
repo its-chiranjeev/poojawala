@@ -21,6 +21,7 @@ export enum AUDIT_MODULE {
   CONTACT_US = 'CONTACT_US',
   PRODUCT = 'PRODUCT',
   BLOG = 'BLOG',
+  TEMPLE = 'TEMPLE',
 }
 
 @Entity('audit_logs')

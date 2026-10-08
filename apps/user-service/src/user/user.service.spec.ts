@@ -312,7 +312,7 @@ describe('UserService - Purohit Verification Rework', () => {
       findBankAccounts: jest.fn().mockImplementation((purohitId: number, page: number = 1, limit: number = 10, search?: string) => {
         let list = testBankAccounts.filter((b) => b.purohitId === purohitId);
         if (search) {
-          list = list.filter((b) => b.accountHolderName?.includes(search) || b.accountNumber?.includes(search));
+          list = list.filter((b) => String(b.id).includes(search) || b.accountHolderName?.includes(search) || b.accountNumber?.includes(search));
         }
         return Promise.resolve({ data: list, total: list.length });
       }),
@@ -629,10 +629,10 @@ describe('UserService - Purohit Verification Rework', () => {
             const ids: number[] = Array.isArray(raw?._value)
               ? raw._value
               : Array.isArray(raw)
-              ? raw
-              : raw !== undefined
-              ? [raw]
-              : [];
+                ? raw
+                : raw !== undefined
+                  ? [raw]
+                  : [];
             return Promise.resolve(testServices.filter((s) => ids.includes(s.id)));
           }),
         };
@@ -2600,6 +2600,198 @@ describe('UserService - Purohit Verification Rework', () => {
 
         const acc2 = testBankAccounts.find((b) => b.id === 2);
         expect(acc2.isPrimary).toBe(true);
+      });
+
+      it('18. First account added always has isPrimary=true when existingAccounts is empty', async () => {
+        testBankAccounts = [];
+
+        const res = await service.addPurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          {
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            accountNumber: '2001',
+            accountHolderName: 'First Account',
+            ifscCode: 'SBIN0001234',
+            isPrimary: false,
+          } as any,
+        );
+
+        expect(res.data.isPrimary).toBe(true);
+      });
+
+      it('19. Adding second account with isPrimary=false keeps existing primary intact and new isPrimary=false', async () => {
+        testBankAccounts = [
+          {
+            id: 1,
+            purohitId: 101,
+            accountNumber: '1001',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            accountHolderName: 'Primary Bank',
+            ifscCode: 'SBIN0001234',
+            isPrimary: true,
+          },
+        ];
+
+        const res = await service.addPurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          {
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            accountNumber: '2002',
+            accountHolderName: 'Second Account',
+            ifscCode: 'SBIN0001234',
+            isPrimary: false,
+          } as any,
+        );
+
+        expect(res.data.isPrimary).toBe(false);
+        const acc1 = testBankAccounts.find((b) => b.id === 1);
+        expect(acc1.isPrimary).toBe(true);
+      });
+
+      it('20. Adding UPI account with isPrimary=true clears existing primary BANK account', async () => {
+        testBankAccounts = [
+          {
+            id: 1,
+            purohitId: 101,
+            accountNumber: '1001',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            accountHolderName: 'Bank Primary',
+            ifscCode: 'SBIN0001234',
+            isPrimary: true,
+          },
+        ];
+
+        const res = await service.addPurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          {
+            paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
+            upiId: 'user@upi',
+            isPrimary: true,
+          } as any,
+        );
+
+        expect(res.data.isPrimary).toBe(true);
+        expect(res.data.paymentMethod).toBe(PUROHIT_PAYMENT_METHOD.UPI);
+        const bankAcc = testBankAccounts.find((b) => b.id === 1);
+        expect(bankAcc.isPrimary).toBe(false);
+
+        // Exactly one primary account exists across BANK and UPI
+        const primaryCount = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary).length;
+        expect(primaryCount).toBe(1);
+      });
+
+      it('21. Adding BANK account with isPrimary=true clears existing primary UPI account', async () => {
+        testBankAccounts = [
+          {
+            id: 1,
+            purohitId: 101,
+            upiId: 'primary@upi',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
+            isPrimary: true,
+          },
+        ];
+
+        const res = await service.addPurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          {
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            accountNumber: '3001',
+            accountHolderName: 'Bank Primary',
+            ifscCode: 'SBIN0001234',
+            isPrimary: true,
+          } as any,
+        );
+
+        expect(res.data.isPrimary).toBe(true);
+        expect(res.data.paymentMethod).toBe(PUROHIT_PAYMENT_METHOD.BANK);
+        const upiAcc = testBankAccounts.find((b) => b.id === 1);
+        expect(upiAcc.isPrimary).toBe(false);
+
+        const primaryCount = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary).length;
+        expect(primaryCount).toBe(1);
+      });
+
+      it('22. PATCH UPI account to isPrimary=true clears primary BANK account', async () => {
+        testBankAccounts = [
+          {
+            id: 1,
+            purohitId: 101,
+            accountNumber: '1001',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            accountHolderName: 'Bank Primary',
+            ifscCode: 'SBIN0001234',
+            isPrimary: true,
+          },
+          {
+            id: 2,
+            purohitId: 101,
+            upiId: 'secondary@upi',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
+            isPrimary: false,
+          },
+        ];
+
+        const res = await service.updatePurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          2,
+          { isPrimary: true } as any,
+        );
+
+        expect(res.data.isPrimary).toBe(true);
+        const bankAcc = testBankAccounts.find((b) => b.id === 1);
+        expect(bankAcc.isPrimary).toBe(false);
+
+        const primaryCount = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary).length;
+        expect(primaryCount).toBe(1);
+      });
+
+      it('23. PATCH account to isPrimary=false successfully sets false without throwing error', async () => {
+        testBankAccounts = [
+          {
+            id: 1,
+            purohitId: 101,
+            accountNumber: '1001',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            accountHolderName: 'Bank Primary',
+            ifscCode: 'SBIN0001234',
+            isPrimary: true,
+          },
+        ];
+
+        const res = await service.updatePurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          1,
+          { isPrimary: false } as any,
+        );
+
+        expect(res.data.isPrimary).toBe(false);
+        const acc1 = testBankAccounts.find((b) => b.id === 1);
+        expect(acc1.isPrimary).toBe(false);
+      });
+
+      it('24. Admin search Purohit bank accounts by ID', async () => {
+        testBankAccounts = [
+          {
+            id: 42,
+            purohitId: 101,
+            accountNumber: '100142',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            accountHolderName: 'Bank FortyTwo',
+            isPrimary: true,
+          },
+        ];
+
+        const res = await service.getPurohitBankAccounts(
+          { id: testAdmin.id, role: USER_ROLE.ADMIN },
+          1,
+          10,
+          '42',
+          testUser.id,
+        );
+
+        expect(res.success).toBe(true);
+        expect(res.data.length).toBe(1);
+        expect(res.data[0].id).toBe(42);
       });
     });
   });

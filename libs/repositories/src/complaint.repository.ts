@@ -163,7 +163,8 @@ export class ComplaintRepository extends BaseRepository<Complaint> {
 
       query.andWhere(
         `(
-          complaint."complaintNumber" ILIKE :search
+          CAST(complaint.id AS TEXT) ILIKE :search
+          OR complaint."complaintNumber" ILIKE :search
           OR complaint.subject ILIKE :search
           OR complaint.description ILIKE :search
           OR booking."bookingNumber" ILIKE :search

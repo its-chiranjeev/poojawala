@@ -32,7 +32,7 @@ export class PurohitBankAccountRepository extends BaseRepository<PurohitBankAcco
 
     if (search) {
       query.andWhere(
-        '(account.accountHolderName ILIKE :search OR account.accountNumber ILIKE :search OR account.ifscCode ILIKE :search OR account.bankName ILIKE :search OR account.upiId ILIKE :search)',
+        '(CAST(account.id AS TEXT) ILIKE :search OR account.accountHolderName ILIKE :search OR account.accountNumber ILIKE :search OR account.ifscCode ILIKE :search OR account.bankName ILIKE :search OR account.upiId ILIKE :search)',
         { search: `%${search}%` },
       );
     }

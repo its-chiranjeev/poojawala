@@ -32,8 +32,14 @@ export class UpdateServiceDto {
   name?: string;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === 'undefined') return undefined;
+    if (value === null || value === 'null' || value === '') return null;
+    return typeof value === 'string' ? value.trim() : value;
+  })
+  @ValidateIf((obj, val) => val !== null && val !== undefined)
   @IsString()
-  slug?: string;
+  slug?: string | null;
 
   @IsOptional()
   @IsString()
@@ -181,6 +187,19 @@ export class UpdateServiceDto {
   @IsInt()
   @Min(1)
   categoryId?: number | null;
+
+  /** Optional: assign, re-assign (positive int), or remove (null) temple relationship. */
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === 'undefined') return undefined;
+    if (value === null || value === 'null' || value === '') return null;
+    const num = Number(value);
+    return isNaN(num) ? value : num;
+  })
+  @ValidateIf((obj, val) => val !== null && val !== undefined)
+  @IsInt()
+  @Min(1)
+  templeId?: number | null;
 }
 
 

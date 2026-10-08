@@ -458,7 +458,8 @@ export class PaymentRepository extends BaseRepository<Payment> {
     if (normalizedSearch) {
       filterQuery.andWhere(
         `(
-        "booking"."bookingNumber" ILIKE :search
+        CAST("payment"."id" AS TEXT) ILIKE :search
+        OR "booking"."bookingNumber" ILIKE :search
         OR "service"."name" ILIKE :search
         OR "payment"."razorpayPaymentId" ILIKE :search
         OR "payment"."razorpayOrderId" ILIKE :search
@@ -735,7 +736,8 @@ export class PaymentRepository extends BaseRepository<Payment> {
     if (normalizedSearch) {
       query.andWhere(
         `(
-        "booking"."bookingNumber" ILIKE :search
+        CAST("payment"."id" AS TEXT) ILIKE :search
+        OR "booking"."bookingNumber" ILIKE :search
         OR "linkedBooking"."bookingNumber" ILIKE :search
         OR "service"."name" ILIKE :search
         OR "linkedService"."name" ILIKE :search
