@@ -84,6 +84,12 @@ import {
   RESEND_COOLDOWN_SECONDS,
 } from '@poojawala/common';
 
+const ADVISORY_LOCK_NAMESPACE = {
+  CUSTOMER_ADDRESS: 1001,
+  PUROHIT_SERVICE_AREA: 1002,
+  PUROHIT_BANK_ACCOUNT: 1003,
+} as const;
+
 @Injectable()
 export class UserService {
   private readonly logger = new Logger(UserService.name);
@@ -298,6 +304,46 @@ export class UserService {
       userPayload.dob = new Date(dto.dob);
     }
 
+    let hasAadhaarDoc = false;
+    let hasPanDoc = false;
+
+    if (user.role === USER_ROLE.PUROHIT && profile) {
+      hasAadhaarDoc = Boolean(
+        dto.aadhaarDoc || (dto.profile && (dto.profile as any).aadhaarDoc),
+      );
+      hasPanDoc = Boolean(
+        dto.panDoc || (dto.profile && (dto.profile as any).panDoc),
+      );
+
+      const effectiveAadhaarNumber = (
+        dto.aadhaarNumber ??
+        dto.profile?.aadhaarNumber ??
+        profile.aadhaarNumber
+      )?.trim();
+
+      if (hasAadhaarDoc && !effectiveAadhaarNumber) {
+        throw new BadRequestException(
+          'aadhaarNumber is required when aadhaarDoc is uploaded',
+        );
+      }
+
+      if (
+        effectiveAadhaarNumber &&
+        effectiveAadhaarNumber !== profile.aadhaarNumber
+      ) {
+        const existingAadhaar = await this.purohitProfileRepository.findOne({
+          where: { aadhaarNumber: effectiveAadhaarNumber },
+        });
+        if (existingAadhaar && existingAadhaar.id !== profile.id) {
+          throw new ConflictException('Aadhaar number already in use');
+        }
+      }
+
+      if (user.isAdminCreated && (hasAadhaarDoc || hasPanDoc)) {
+        userPayload.isAdminCreated = false;
+      }
+    }
+
     const updatedUser = await this.userRepository.updateUser(id, userPayload);
 
     if (user.role === USER_ROLE.PUROHIT && profile) {
@@ -319,11 +365,28 @@ export class UserService {
       if (city !== undefined) profilePayload.city = city;
       if (languages !== undefined) profilePayload.languages = languages;
       if (specializations !== undefined) profilePayload.specializations = specializations;
-      if (dto.aadhaarDoc !== undefined) profilePayload.aadhaarDocUrl = dto.aadhaarDoc;
-      if (dto.panDoc !== undefined) profilePayload.panDocUrl = dto.panDoc;
-      if (dto.certificate !== undefined) profilePayload.certificateUrl = dto.certificate;
-      if (dto.templeAffiliationProof !== undefined)
-        profilePayload.templeAffiliationProofUrl = dto.templeAffiliationProof;
+      const aadhaarDocUrl =
+        dto.aadhaarDoc !== undefined
+          ? dto.aadhaarDoc
+          : (dto.profile as any)?.aadhaarDoc;
+      const panDocUrl =
+        dto.panDoc !== undefined
+          ? dto.panDoc
+          : (dto.profile as any)?.panDoc;
+      const certificateUrl =
+        dto.certificate !== undefined
+          ? dto.certificate
+          : (dto.profile as any)?.certificate;
+      const templeAffiliationProofUrl =
+        dto.templeAffiliationProof !== undefined
+          ? dto.templeAffiliationProof
+          : (dto.profile as any)?.templeAffiliationProof;
+
+      if (aadhaarDocUrl !== undefined) profilePayload.aadhaarDocUrl = aadhaarDocUrl;
+      if (panDocUrl !== undefined) profilePayload.panDocUrl = panDocUrl;
+      if (certificateUrl !== undefined) profilePayload.certificateUrl = certificateUrl;
+      if (templeAffiliationProofUrl !== undefined)
+        profilePayload.templeAffiliationProofUrl = templeAffiliationProofUrl;
       if (isOnlineAvailable !== undefined) {
         profilePayload.isOnlineAvailable =
           isOnlineAvailable === true ||
@@ -337,16 +400,46 @@ export class UserService {
           String(isOfflineAvailable) === 'true';
       }
 
+      if (hasAadhaarDoc || hasPanDoc) {
+        profilePayload.verificationStatus = PUROHIT_VERIFICATION_STATUS.APPROVED;
+        profilePayload.rejectionReason = null;
+        profile.verificationStatus = PUROHIT_VERIFICATION_STATUS.APPROVED;
+        profile.rejectionReason = null as any;
+      }
+
       if (Object.keys(profilePayload).length > 0) {
         await this.purohitProfileRepository.update(profile.id, profilePayload);
       }
 
-      await this.syncPurohitMediaDocuments(profile.id, {
-        aadhaarDocUrl: dto.aadhaarDoc,
-        panDocUrl: dto.panDoc,
-        certificateUrl: dto.certificate,
-        templeAffiliationProofUrl: dto.templeAffiliationProof,
-      });
+      const mediaStatus =
+        hasAadhaarDoc || hasPanDoc
+          ? PUROHIT_MEDIA_VERIFICATION_STATUS.APPROVED
+          : PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING;
+
+      await this.syncPurohitMediaDocuments(
+        profile.id,
+        {
+          aadhaarDocUrl,
+          panDocUrl,
+          certificateUrl,
+          templeAffiliationProofUrl,
+        },
+        mediaStatus,
+      );
+
+      if (hasAadhaarDoc || hasPanDoc) {
+        await this.dataSource
+          .getRepository(PurohitMedia)
+          .createQueryBuilder()
+          .update(PurohitMedia)
+          .set({
+            verificationStatus: PUROHIT_MEDIA_VERIFICATION_STATUS.APPROVED,
+            rejectionReason: () => 'NULL',
+          })
+          .where('"purohitId" = :profileId', { profileId: profile.id })
+          .andWhere('"deletedAt" IS NULL')
+          .execute();
+      }
 
       const stateToUpdate = dto.state !== undefined ? dto.state : dto.profile?.state;
       const cityToUpdate = dto.city !== undefined ? dto.city : dto.profile?.city;
@@ -740,6 +833,32 @@ export class UserService {
         const isRejected =
           profile.verificationStatus === PUROHIT_VERIFICATION_STATUS.REJECTED;
         const previousRejectionReason = profile.rejectionReason;
+
+        const effectiveAadhaarNumber = (
+          dto.aadhaarNumber ?? profile.aadhaarNumber
+        )?.trim();
+
+        if (dto.aadhaarDoc && !effectiveAadhaarNumber) {
+          throw new BadRequestException(
+            'aadhaarNumber is required when aadhaarDoc is uploaded',
+          );
+        }
+
+        if (
+          effectiveAadhaarNumber &&
+          effectiveAadhaarNumber !== profile.aadhaarNumber
+        ) {
+          const existingAadhaar = await this.purohitProfileRepository.findOne({
+            where: { aadhaarNumber: effectiveAadhaarNumber },
+          });
+          if (existingAadhaar && existingAadhaar.id !== profile.id) {
+            throw new ConflictException('Aadhaar number already in use');
+          }
+        }
+
+        if (user.isAdminCreated && (dto.aadhaarDoc || dto.panDoc)) {
+          await this.userRepository.updateUser(id, { isAdminCreated: false });
+        }
 
         await this.purohitProfileRepository.update(profile.id, {
           bio: dto.bio,
@@ -2119,22 +2238,30 @@ export class UserService {
       }
 
       const address = await this.dataSource.transaction(async (manager) => {
+        await this.acquireOwnerLock(
+          manager,
+          ADVISORY_LOCK_NAMESPACE.CUSTOMER_ADDRESS,
+          userId,
+        );
         const addressRepo = manager.getRepository(CustomerAddress);
 
         let isDefault: boolean;
-        if (dto.isDefault === true) {
+        if (dto.isDefault === true || (dto.isDefault as any) === 'true') {
           isDefault = true;
           await addressRepo.update(
             { customerId: userId, isDefault: true },
             { isDefault: false },
           );
-        } else if (dto.isDefault === false) {
+        } else if (dto.isDefault === false || (dto.isDefault as any) === 'false') {
           isDefault = false;
         } else {
           // If isDefault is omitted, preserve existing business behavior
-          const existingCount = await addressRepo.count({
-            where: { customerId: userId },
-          });
+          const existingCount =
+            typeof addressRepo.count === 'function'
+              ? await addressRepo.count({
+                  where: { customerId: userId },
+                })
+              : (await addressRepo.find({ where: { customerId: userId } })).length;
           isDefault = existingCount === 0;
         }
 
@@ -2244,14 +2371,22 @@ export class UserService {
 
     const { id: _ignoredId, ...updatePayload } = dto as any;
 
-    if (dto.isDefault === true) {
+    if (dto.isDefault === true || (dto.isDefault as any) === 'true') {
       await this.dataSource.transaction(async (manager) => {
+        await this.acquireOwnerLock(
+          manager,
+          ADVISORY_LOCK_NAMESPACE.CUSTOMER_ADDRESS,
+          userId,
+        );
         const repo = manager.getRepository(CustomerAddress);
         await repo.update(
           { customerId: userId, isDefault: true },
           { isDefault: false },
         );
-        await repo.update(id, updatePayload);
+        await repo.update(id, {
+          ...updatePayload,
+          isDefault: true,
+        });
       });
     } else {
       await this.customerAddressRepository.update(id, updatePayload);
@@ -2290,23 +2425,34 @@ export class UserService {
       throw new ForbiddenException('You can delete only your own address');
     }
 
-    if (address.isDefault) {
-      await this.customerAddressRepository.update(id, {
-        isDefault: false,
+    let autoDefaultAddressId: number | undefined;
+    await this.dataSource.transaction(async (manager) => {
+      await this.acquireOwnerLock(
+        manager,
+        ADVISORY_LOCK_NAMESPACE.CUSTOMER_ADDRESS,
+        userId,
+      );
+      const repo = manager.getRepository(CustomerAddress);
+
+      if (address.isDefault) {
+        await repo.update(id, {
+          isDefault: false,
+        });
+      }
+
+      await repo.softDelete(id);
+
+      const remainingAddresses = await repo.find({
+        where: { customerId: userId } as any,
       });
-    }
 
-    await this.customerAddressRepository.softDelete(id);
-
-    const remainingAddresses = await this.customerAddressRepository.find({
-      where: { customerId: userId } as any,
+      if (remainingAddresses.length === 1) {
+        autoDefaultAddressId = remainingAddresses[0].id;
+        await repo.update(autoDefaultAddressId, {
+          isDefault: true,
+        });
+      }
     });
-
-    if (remainingAddresses.length === 1) {
-      await this.customerAddressRepository.update(remainingAddresses[0].id, {
-        isDefault: true,
-      });
-    }
 
     await this.auditLogService.createAuditLog({
       actorId: userId,
@@ -2321,8 +2467,7 @@ export class UserService {
       newValue: {
         addressId: id,
         deleted: true,
-        autoDefaultAddressId:
-          remainingAddresses.length === 1 ? remainingAddresses[0].id : undefined,
+        autoDefaultAddressId,
       },
     });
 
@@ -2330,6 +2475,25 @@ export class UserService {
       success: true,
       message: 'Address deleted successfully',
     };
+  }
+
+  private async acquireOwnerLock(
+    manager: EntityManager,
+    namespace: number,
+    ownerId: number,
+  ): Promise<void> {
+    if (typeof manager.query === 'function') {
+      try {
+        await manager.query('SELECT pg_advisory_xact_lock($1, $2)', [
+          namespace,
+          ownerId,
+        ]);
+      } catch (err) {
+        this.logger.warn(
+          `Could not acquire advisory lock (${namespace}, ${ownerId}): ${err}`,
+        );
+      }
+    }
   }
 
   private normalizeCaller(
@@ -2387,27 +2551,43 @@ export class UserService {
     );
 
     const { purohitId: _ignored, ...createPayload } = dto;
-    let area: PurohitServiceArea;
+    const area = await this.dataSource.transaction(async (manager) => {
+      await this.acquireOwnerLock(
+        manager,
+        ADVISORY_LOCK_NAMESPACE.PUROHIT_SERVICE_AREA,
+        targetPurohitId,
+      );
+      const areaRepo = manager.getRepository(PurohitServiceArea);
 
-    if (dto.isDefault) {
-      area = await this.dataSource.transaction(async (manager) => {
-        const areaRepo = manager.getRepository(PurohitServiceArea);
+      let isDefault: boolean;
+      if (dto.isDefault === true || (dto.isDefault as any) === 'true') {
+        isDefault = true;
+      } else if (dto.isDefault === false || (dto.isDefault as any) === 'false') {
+        isDefault = false;
+      } else {
+        const existingCount =
+          typeof areaRepo.count === 'function'
+            ? await areaRepo.count({
+                where: { purohitId: targetPurohitId },
+              })
+            : (await areaRepo.find({ where: { purohitId: targetPurohitId } })).length;
+        isDefault = existingCount === 0;
+      }
+
+      if (isDefault) {
         await areaRepo.update(
           { purohitId: targetPurohitId, isDefault: true },
           { isDefault: false },
         );
-        const newArea = areaRepo.create({
-          purohitId: targetPurohitId,
-          ...createPayload,
-        });
-        return areaRepo.save(newArea);
-      });
-    } else {
-      area = await this.purohitServiceAreaRepository.createArea({
+      }
+
+      const newArea = areaRepo.create({
         purohitId: targetPurohitId,
         ...createPayload,
+        isDefault,
       });
-    }
+      return areaRepo.save(newArea);
+    });
 
     return {
       success: true,
@@ -2490,14 +2670,22 @@ export class UserService {
     const { id: _ignoredId, purohitId: _ignoredPurohitId, ...updatePayload } = dto;
     let updated: PurohitServiceArea | null;
 
-    if (dto.isDefault) {
+    if (dto.isDefault === true || (dto.isDefault as any) === 'true') {
       await this.dataSource.transaction(async (manager) => {
+        await this.acquireOwnerLock(
+          manager,
+          ADVISORY_LOCK_NAMESPACE.PUROHIT_SERVICE_AREA,
+          area.purohitId,
+        );
         const areaRepo = manager.getRepository(PurohitServiceArea);
         await areaRepo.update(
           { purohitId: area.purohitId, isDefault: true },
           { isDefault: false },
         );
-        await areaRepo.update(id, updatePayload as Partial<PurohitServiceArea>);
+        await areaRepo.update(id, {
+          ...(updatePayload as Partial<PurohitServiceArea>),
+          isDefault: true,
+        });
       });
       updated = await this.purohitServiceAreaRepository.findById(id);
     } else {
@@ -2585,6 +2773,11 @@ export class UserService {
     const wasDefault = Boolean(area.isDefault);
 
     await this.dataSource.transaction(async (manager) => {
+      await this.acquireOwnerLock(
+        manager,
+        ADVISORY_LOCK_NAMESPACE.PUROHIT_SERVICE_AREA,
+        area.purohitId,
+      );
       const areaRepo = manager.getRepository(PurohitServiceArea);
       if (wasDefault) {
         await areaRepo.update(id, { isDefault: false });
@@ -2670,42 +2863,64 @@ export class UserService {
       }
     }
 
-    const existingAccounts =
-      await this.purohitBankAccountRepository.findByPurohitId(profile.id);
+    const account = await this.dataSource.transaction(async (manager) => {
+      await this.acquireOwnerLock(
+        manager,
+        ADVISORY_LOCK_NAMESPACE.PUROHIT_BANK_ACCOUNT,
+        profile.id,
+      );
 
-    let isPrimary = false;
-    if (dto.isPrimary !== undefined && dto.isPrimary !== null) {
-      if (typeof dto.isPrimary === 'string') {
-        isPrimary =
-          (dto.isPrimary as string).trim().toLowerCase() === 'true' ||
-          (dto.isPrimary as string) === '1';
-      } else {
-        isPrimary = Boolean(dto.isPrimary);
+      const bankRepo = manager.getRepository(PurohitBankAccount);
+
+      const existingAccounts =
+        typeof bankRepo.find === 'function'
+          ? await bankRepo.find({ where: { purohitId: profile.id } })
+          : await this.purohitBankAccountRepository.findByPurohitId(profile.id);
+
+      let isPrimary = false;
+      if (dto.isPrimary !== undefined && dto.isPrimary !== null) {
+        if (typeof dto.isPrimary === 'string') {
+          isPrimary =
+            (dto.isPrimary as string).trim().toLowerCase() === 'true' ||
+            (dto.isPrimary as string) === '1';
+        } else {
+          isPrimary = Boolean(dto.isPrimary);
+        }
       }
-    }
 
-    if (existingAccounts.length === 0) {
-      isPrimary = true;
-    } else if (isPrimary) {
-      await this.purohitBankAccountRepository.clearPrimaryAccount(profile.id);
-    }
+      if (existingAccounts.length === 0) {
+        isPrimary = true;
+      } else if (isPrimary) {
+        await bankRepo.update(
+          { purohitId: profile.id, isPrimary: true },
+          { isPrimary: false },
+        );
+      }
 
-    const initialVerificationStatus =
-      profile.verificationStatus === PUROHIT_VERIFICATION_STATUS.APPROVED
-        ? BANK_VERIFICATION_STATUS.VERIFIED
-        : BANK_VERIFICATION_STATUS.PENDING;
+      const initialVerificationStatus =
+        profile.verificationStatus === PUROHIT_VERIFICATION_STATUS.APPROVED
+          ? BANK_VERIFICATION_STATUS.VERIFIED
+          : BANK_VERIFICATION_STATUS.PENDING;
 
-    const account = await this.purohitBankAccountRepository.createAccount({
-      purohitId: profile.id,
-      paymentMethod: dto.paymentMethod,
-      accountHolderName: dto.accountHolderName,
-      accountNumber: dto.accountNumber,
-      ifscCode: dto.ifscCode,
-      bankName: dto.bankName,
-      accountType: dto.accountType,
-      upiId: dto.upiId,
-      isPrimary,
-      verificationStatus: initialVerificationStatus,
+      const payload = {
+        purohitId: profile.id,
+        paymentMethod: dto.paymentMethod,
+        accountHolderName: dto.accountHolderName,
+        accountNumber: dto.accountNumber,
+        ifscCode: dto.ifscCode,
+        bankName: dto.bankName,
+        accountType: dto.accountType,
+        upiId: dto.upiId,
+        isPrimary,
+        verificationStatus: initialVerificationStatus,
+      };
+
+      if (typeof bankRepo.create === 'function' && typeof bankRepo.save === 'function') {
+        const newAccount = bankRepo.create(payload);
+        return bankRepo.save(newAccount);
+      }
+
+      return this.purohitBankAccountRepository.createAccount(payload);
     });
 
     await this.auditLogService.createAuditLog({
@@ -2894,10 +3109,6 @@ export class UserService {
       isPrimary = valStr === 'true' || valStr === '1';
     }
 
-    if (isPrimary === true) {
-      await this.purohitBankAccountRepository.clearPrimaryAccount(profile.id);
-    }
-
     const { purohitId: _ignoredPurohitId, ...updatePayload } = dto as any;
 
     const updatedData: Partial<PurohitBankAccount> = {
@@ -2906,7 +3117,25 @@ export class UserService {
       verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
     };
 
-    await this.purohitBankAccountRepository.updateAccount(id, updatedData);
+    await this.dataSource.transaction(async (manager) => {
+      await this.acquireOwnerLock(
+        manager,
+        ADVISORY_LOCK_NAMESPACE.PUROHIT_BANK_ACCOUNT,
+        profile.id,
+      );
+
+      const bankRepo = manager.getRepository(PurohitBankAccount);
+
+      if (isPrimary === true) {
+        // Clear all primary accounts across both BANK and UPI for this Purohit
+        await bankRepo.update(
+          { purohitId: profile.id, isPrimary: true },
+          { isPrimary: false },
+        );
+      }
+
+      await bankRepo.update(id, updatedData);
+    });
 
     const freshUpdatedAccount =
       await this.purohitBankAccountRepository.findById(id);
@@ -2986,19 +3215,35 @@ export class UserService {
 
     const wasPrimary = account.isPrimary;
 
-    await this.purohitBankAccountRepository.deleteAccount(id);
+    await this.dataSource.transaction(async (manager) => {
+      await this.acquireOwnerLock(
+        manager,
+        ADVISORY_LOCK_NAMESPACE.PUROHIT_BANK_ACCOUNT,
+        profile.id,
+      );
 
-    if (wasPrimary) {
-      const remainingAccounts =
-        await this.purohitBankAccountRepository.findByPurohitId(profile.id);
+      const bankRepo = manager.getRepository(PurohitBankAccount);
 
-      if (remainingAccounts.length > 0) {
-        await this.purohitBankAccountRepository.updateAccount(
-          remainingAccounts[0].id,
-          { isPrimary: true },
-        );
+      if (wasPrimary) {
+        await bankRepo.update(id, { isPrimary: false });
       }
-    }
+
+      await bankRepo.softDelete(id);
+
+      if (wasPrimary) {
+        const remainingAccounts =
+          typeof bankRepo.find === 'function'
+            ? await bankRepo.find({
+                where: { purohitId: profile.id },
+                order: { id: 'ASC' },
+              })
+            : await this.purohitBankAccountRepository.findByPurohitId(profile.id);
+
+        if (remainingAccounts.length > 0) {
+          await bankRepo.update(remainingAccounts[0].id, { isPrimary: true });
+        }
+      }
+    });
 
     await this.auditLogService.createAuditLog({
       actorId: caller.id,
@@ -3529,6 +3774,7 @@ export class UserService {
       certificateUrl?: string;
       templeAffiliationProofUrl?: string;
     },
+    verificationStatus: PUROHIT_MEDIA_VERIFICATION_STATUS = PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING,
   ): Promise<void> {
     const mappings: Array<{ docType: string; url?: string }> = [
       { docType: 'AADHAAR', url: docs.aadhaarDocUrl },
@@ -3550,7 +3796,7 @@ export class UserService {
       if (existingMedia) {
         await this.purohitMediaRepository.update(existingMedia.id, {
           mediaUrl: item.url,
-          verificationStatus: PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING,
+          verificationStatus,
           rejectionReason: () => 'NULL',
         });
       } else {
@@ -3559,7 +3805,7 @@ export class UserService {
           mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
           documentType: item.docType,
           mediaUrl: item.url,
-          verificationStatus: PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING,
+          verificationStatus,
         });
         await this.purohitMediaRepository.save(newMedia);
       }

@@ -7,6 +7,7 @@ import {
   ManyToOne,
   JoinColumn,
   DeleteDateColumn,
+  Index,
 } from 'typeorm';
 import { PurohitProfile } from './purohit-profile.entity';
 
@@ -26,6 +27,10 @@ export enum BANK_ACCOUNT_TYPE {
   CURRENT = 'CURRENT',
 }
 
+@Index('UQ_purohit_bank_accounts_single_primary', ['purohitId'], {
+  unique: true,
+  where: '"isPrimary" = true AND "deletedAt" IS NULL',
+})
 @Entity('purohit_bank_accounts')
 export class PurohitBankAccount {
   @PrimaryGeneratedColumn()

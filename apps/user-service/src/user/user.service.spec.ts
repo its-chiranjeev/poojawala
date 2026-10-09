@@ -389,6 +389,11 @@ describe('UserService - Purohit Verification Rework', () => {
       }),
     };
     mockPurohitServiceAreaRepo = {
+      count: jest.fn().mockImplementation(({ where }: any) => {
+        return Promise.resolve(
+          testServiceAreas.filter((a) => a.purohitId === where?.purohitId && !a.deletedAt).length,
+        );
+      }),
       find: jest.fn().mockImplementation(({ where }: any) => {
         return Promise.resolve(
           testServiceAreas.filter((a) => a.purohitId === where?.purohitId && !a.deletedAt),
@@ -607,6 +612,40 @@ describe('UserService - Purohit Verification Rework', () => {
       }
       if (entity === PurohitBankAccount) {
         return {
+          find: jest.fn().mockImplementation(({ where, order }: any) => {
+            let filtered = testBankAccounts.filter(
+              (b) => (!where?.purohitId || b.purohitId === where.purohitId) && !b.deletedAt,
+            );
+            if (order?.id === 'ASC') {
+              filtered = [...filtered].sort((a, b) => a.id - b.id);
+            }
+            return Promise.resolve(filtered);
+          }),
+          update: jest.fn().mockImplementation((criteria: any, payload: any) => {
+            testBankAccounts.forEach((b) => {
+              if (typeof criteria === 'number' && b.id !== criteria) return;
+              if (criteria.purohitId && b.purohitId !== criteria.purohitId) return;
+              if (criteria.isPrimary !== undefined && b.isPrimary !== criteria.isPrimary) return;
+              if (criteria.id && b.id !== criteria.id) return;
+              Object.assign(b, payload);
+            });
+            return Promise.resolve({ affected: 1 });
+          }),
+          create: jest.fn().mockImplementation((d: any) => ({
+            id: d.id || testBankAccounts.length + 10,
+            ...d,
+          })),
+          save: jest.fn().mockImplementation((acc: any) => {
+            const entity = { id: acc.id || testBankAccounts.length + 10, ...acc };
+            testBankAccounts.push(entity);
+            return Promise.resolve(entity);
+          }),
+          softDelete: jest.fn().mockImplementation((id: number) => {
+            const found = testBankAccounts.find((b) => b.id === id);
+            if (found) found.deletedAt = new Date();
+            testBankAccounts = testBankAccounts.filter((b) => b.id !== id);
+            return Promise.resolve({ affected: 1 });
+          }),
           createQueryBuilder: () => {
             const builder: any = {
               update: () => builder,
@@ -652,6 +691,11 @@ describe('UserService - Purohit Verification Rework', () => {
       }
       if (entity === PurohitServiceArea) {
         return {
+          count: jest.fn().mockImplementation(({ where }: any) => {
+            return Promise.resolve(
+              testServiceAreas.filter((a) => a.purohitId === where?.purohitId && !a.deletedAt).length,
+            );
+          }),
           update: jest.fn().mockImplementation((criteria: any, payload: any) => {
             testServiceAreas.forEach((a) => {
               if (typeof criteria === 'number' && a.id !== criteria) return;
@@ -697,6 +741,7 @@ describe('UserService - Purohit Verification Rework', () => {
           }),
           update: jest.fn().mockImplementation((criteria: any, payload: any) => {
             testAddresses.forEach((a) => {
+              if (typeof criteria === 'number' && a.id !== criteria) return;
               if (criteria.customerId && a.customerId !== criteria.customerId) return;
               if (criteria.isDefault !== undefined && a.isDefault !== criteria.isDefault) return;
               if (criteria.id && a.id !== criteria.id) return;
@@ -712,6 +757,18 @@ describe('UserService - Purohit Verification Rework', () => {
             const entity = { id: ca.id || Math.floor(Math.random() * 1000) + 1, ...ca };
             testAddresses.push(entity);
             return Promise.resolve(entity);
+          }),
+          softDelete: jest.fn().mockImplementation((id: number) => {
+            const item = testAddresses.find((a) => a.id === id);
+            if (item) item.deletedAt = new Date();
+            return Promise.resolve({ affected: 1 });
+          }),
+          find: jest.fn().mockImplementation(({ where }: any) => {
+            return Promise.resolve(
+              testAddresses.filter(
+                (a) => (!where?.customerId || a.customerId === where.customerId) && !a.deletedAt,
+              ),
+            );
           }),
           findOne: jest.fn().mockImplementation(({ where }: any) => {
             const found = testAddresses.find(
@@ -1374,11 +1431,9 @@ describe('UserService - Purohit Verification Rework', () => {
       } as unknown as User;
 
       mockUserRepo.findById.mockImplementation((id: any) => {
-        if (Number(id) === customerId) return Promise.resolve(customerUser);
-        if (Number(id) === 102) return Promise.resolve({ ...customerUser, id: 102 });
-        if (Number(id) === 103) return Promise.resolve({ ...customerUser, id: 103 });
         if (Number(id) === testUser.id) return Promise.resolve(testUser);
         if (Number(id) === testAdmin.id) return Promise.resolve(testAdmin);
+        if (Number(id) > 0) return Promise.resolve({ ...customerUser, id: Number(id) });
         return Promise.resolve(null);
       });
     });
@@ -1580,6 +1635,72 @@ describe('UserService - Purohit Verification Rework', () => {
       expect(defaultAddresses.length).toBeLessThanOrEqual(1);
       expect(defaultAddresses.length).toBe(1);
     });
+
+    it('Test 19 — Update address to isDefault=true unsets previous default', async () => {
+      testAddresses = [
+        { id: 10, customerId: 104, addressLabel: 'A1', fullAddress: 'Addr 1', city: 'Delhi', pincode: '110001', isDefault: true } as any,
+        { id: 11, customerId: 104, addressLabel: 'A2', fullAddress: 'Addr 2', city: 'Delhi', pincode: '110001', isDefault: false } as any,
+      ];
+
+      const res = await service.updateAddress(104, 11, { isDefault: true });
+
+      expect(res.success).toBe(true);
+      const addr10 = testAddresses.find((a) => a.id === 10);
+      const addr11 = testAddresses.find((a) => a.id === 11);
+      expect(addr10?.isDefault).toBe(false);
+      expect(addr11?.isDefault).toBe(true);
+      const defaults = testAddresses.filter((a) => a.customerId === 104 && a.isDefault);
+      expect(defaults).toHaveLength(1);
+    });
+
+    it('Test 20 — Update unrelated fields on address does not alter isDefault status', async () => {
+      testAddresses = [
+        { id: 20, customerId: 105, addressLabel: 'Original', fullAddress: 'Addr 1', city: 'Delhi', pincode: '110001', isDefault: true } as any,
+      ];
+
+      const res = await service.updateAddress(105, 20, { addressLabel: 'Renamed' });
+
+      expect(res.success).toBe(true);
+      const addr20 = testAddresses.find((a) => a.id === 20);
+      expect(addr20?.addressLabel).toBe('Renamed');
+      expect(addr20?.isDefault).toBe(true);
+    });
+
+    it('Test 21 — Explicit isDefault=false on first address preserves false', async () => {
+      testAddresses = [];
+
+      const res = await service.addAddress(106, {
+        addressLabel: 'First Non-Default',
+        fullAddress: 'Addr 1',
+        city: 'Delhi',
+        state: 'Delhi',
+        pincode: '110001',
+        venueType: 'HOME' as any,
+        isDefault: false,
+      });
+
+      expect(res.success).toBe(true);
+      expect(res.data.isDefault).toBe(false);
+      const defaults = testAddresses.filter((a) => a.customerId === 106 && a.isDefault);
+      expect(defaults).toHaveLength(0);
+    });
+
+    it('Test 22 — Deleting default address promotes remaining address when exactly 1 remains', async () => {
+      testAddresses = [
+        { id: 30, customerId: 107, addressLabel: 'Default To Delete', fullAddress: 'Addr 1', city: 'Delhi', pincode: '110001', isDefault: true } as any,
+        { id: 31, customerId: 107, addressLabel: 'Secondary', fullAddress: 'Addr 2', city: 'Delhi', pincode: '110001', isDefault: false } as any,
+      ];
+
+      const res = await service.deleteAddress(107, 30);
+
+      expect(res.success).toBe(true);
+      const addr30 = testAddresses.find((a) => a.id === 30);
+      const addr31 = testAddresses.find((a) => a.id === 31);
+      expect(addr30?.deletedAt).toBeDefined();
+      expect(addr31?.isDefault).toBe(true);
+      const defaults = testAddresses.filter((a) => a.customerId === 107 && !a.deletedAt && a.isDefault);
+      expect(defaults).toHaveLength(1);
+    });
   });
 
   // =========================================================================
@@ -1777,6 +1898,92 @@ describe('UserService - Purohit Verification Rework', () => {
 
       expect(result.success).toBe(true);
       expect(result.data.profile.city).toBe('Varanasi');
+    });
+
+    it('admin update purohit profile fails if aadhaarDoc is uploaded without aadhaarNumber', async () => {
+      delete testProfile.aadhaarNumber;
+      await expect(
+        service.updateProfileByAdmin(
+          testAdmin.id,
+          String(testUser.id),
+          { aadhaarDoc: 'https://s3.amazonaws.com/aadhaar.pdf' } as any,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('admin update purohit profile sets isAdminCreated to false, and profile & media verificationStatus to APPROVED when aadhaarDoc and aadhaarNumber are uploaded', async () => {
+      testUser.isAdminCreated = true;
+      testProfile.verificationStatus = PUROHIT_VERIFICATION_STATUS.PENDING;
+      testMedia.forEach((m) => (m.verificationStatus = PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING));
+
+      const result = await service.updateProfileByAdmin(
+        testAdmin.id,
+        String(testUser.id),
+        {
+          aadhaarDoc: 'https://s3.amazonaws.com/aadhaar.pdf',
+          aadhaarNumber: '123456789012',
+        } as any,
+      );
+
+      expect(result.success).toBe(true);
+      expect(testUser.isAdminCreated).toBe(false);
+      expect(testProfile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+      expect(testMedia.every((m) => m.verificationStatus === PUROHIT_MEDIA_VERIFICATION_STATUS.APPROVED)).toBe(true);
+    });
+
+    it('admin update purohit profile sets isAdminCreated to false, and profile & media verificationStatus to APPROVED when panDoc is uploaded without panNumber', async () => {
+      testUser.isAdminCreated = true;
+      testProfile.verificationStatus = PUROHIT_VERIFICATION_STATUS.PENDING;
+      testMedia.forEach((m) => (m.verificationStatus = PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING));
+
+      const result = await service.updateProfileByAdmin(
+        testAdmin.id,
+        String(testUser.id),
+        {
+          panDoc: 'https://s3.amazonaws.com/pan.pdf',
+        } as any,
+      );
+
+      expect(result.success).toBe(true);
+      expect(testUser.isAdminCreated).toBe(false);
+      expect(testProfile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+      expect(testMedia.every((m) => m.verificationStatus === PUROHIT_MEDIA_VERIFICATION_STATUS.APPROVED)).toBe(true);
+    });
+
+    it('admin update purohit profile does not change verificationStatus to APPROVED when neither aadhaarDoc nor panDoc is uploaded', async () => {
+      testProfile.verificationStatus = PUROHIT_VERIFICATION_STATUS.PENDING;
+      testMedia.forEach((m) => (m.verificationStatus = PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING));
+
+      const result = await service.updateProfileByAdmin(
+        testAdmin.id,
+        String(testUser.id),
+        {
+          bio: 'Updated bio',
+        } as any,
+      );
+
+      expect(result.success).toBe(true);
+      expect(testProfile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+      expect(testMedia.every((m) => m.verificationStatus === PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING)).toBe(true);
+    });
+
+    it('purohit self update does not set verificationStatus or media to APPROVED when uploading aadhaarDoc or panDoc', async () => {
+      testProfile.verificationStatus = PUROHIT_VERIFICATION_STATUS.PENDING;
+      testMedia.forEach((m) => (m.verificationStatus = PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING));
+
+      const result = await service.updateProfileByUser(
+        String(testUser.id),
+        {
+          aadhaarDoc: 'https://s3.amazonaws.com/aadhaar.pdf',
+          aadhaarNumber: '123456789012',
+          panDoc: 'https://s3.amazonaws.com/pan.pdf',
+        } as any,
+        {} as any,
+      );
+
+      expect(result.success).toBe(true);
+      expect(testProfile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+      expect(testMedia.every((m) => m.verificationStatus === PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING)).toBe(true);
     });
   });
 
@@ -2182,6 +2389,91 @@ describe('UserService - Purohit Verification Rework', () => {
         expect(res.data[1].id).toBe(102);
         // Oldest area last
         expect(res.data[2].id).toBe(101);
+      });
+
+      it('22. Adding second service area with isDefault=false preserves previous default and leaves new as false', async () => {
+        expect(area1.isDefault).toBe(true);
+
+        const dto = {
+          addressLabel: 'Non Default Area',
+          streetName: 'MG Road',
+          fullAddress: 'MG Road Delhi',
+          city: 'Delhi',
+          state: 'Delhi',
+          pincode: '110001',
+          isDefault: false,
+        };
+
+        const res = await service.addServiceArea(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          dto as any,
+        );
+
+        expect(res.data.isDefault).toBe(false);
+        expect(area1.isDefault).toBe(true);
+      });
+
+      it('23. First service area added when empty automatically gets isDefault=true when omitted', async () => {
+        testServiceAreas = [];
+
+        const dto = {
+          addressLabel: 'First Area',
+          streetName: 'First St',
+          fullAddress: 'First St Delhi',
+          city: 'Delhi',
+          state: 'Delhi',
+          pincode: '110001',
+        };
+
+        const res = await service.addServiceArea(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          dto as any,
+        );
+
+        expect(res.data.isDefault).toBe(true);
+        const defaults = testServiceAreas.filter(
+          (a) => a.purohitId === testUser.id && !a.deletedAt && a.isDefault,
+        );
+        expect(defaults).toHaveLength(1);
+      });
+
+      it('24. Explicit isDefault=false on first service area preserves false', async () => {
+        testServiceAreas = [];
+
+        const dto = {
+          addressLabel: 'First Non-Default Area',
+          streetName: 'First St',
+          fullAddress: 'First St Delhi',
+          city: 'Delhi',
+          state: 'Delhi',
+          pincode: '110001',
+          isDefault: false,
+        };
+
+        const res = await service.addServiceArea(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          dto as any,
+        );
+
+        expect(res.data.isDefault).toBe(false);
+        const defaults = testServiceAreas.filter(
+          (a) => a.purohitId === testUser.id && !a.deletedAt && a.isDefault,
+        );
+        expect(defaults).toHaveLength(0);
+      });
+
+      it('25. Updating service area unrelated field preserves default', async () => {
+        expect(area1.isDefault).toBe(true);
+
+        const res = await service.updateServiceArea(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          1,
+          { addressLabel: 'Updated Label' } as any,
+        );
+
+        expect(res.success).toBe(true);
+        expect(area1.addressLabel).toBe('Updated Label');
+        expect(area1.isDefault).toBe(true);
       });
     });
 
@@ -2792,6 +3084,165 @@ describe('UserService - Purohit Verification Rework', () => {
         expect(res.success).toBe(true);
         expect(res.data.length).toBe(1);
         expect(res.data[0].id).toBe(42);
+      });
+
+      it('25. Creating a primary UPI account unsets the previous primary UPI account', async () => {
+        testBankAccounts = [
+          {
+            id: 1,
+            purohitId: 101,
+            upiId: 'first@upi',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
+            isPrimary: true,
+          },
+        ];
+
+        const res = await service.addPurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          {
+            paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
+            upiId: 'second@upi',
+            isPrimary: true,
+          } as any,
+        );
+
+        expect(res.data.isPrimary).toBe(true);
+        const acc1 = testBankAccounts.find((b) => b.id === 1);
+        expect(acc1.isPrimary).toBe(false);
+        const primaries = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary);
+        expect(primaries).toHaveLength(1);
+      });
+
+      it('26. Selecting a bank account as primary via update unsets the primary UPI account', async () => {
+        testBankAccounts = [
+          {
+            id: 1,
+            purohitId: 101,
+            upiId: 'upi@primary',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
+            isPrimary: true,
+          },
+          {
+            id: 2,
+            purohitId: 101,
+            accountNumber: '999888777',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            isPrimary: false,
+          },
+        ];
+
+        const res = await service.updatePurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          2,
+          { isPrimary: true } as any,
+        );
+
+        expect(res.success).toBe(true);
+        const upiAcc = testBankAccounts.find((b) => b.id === 1);
+        const bankAcc = testBankAccounts.find((b) => b.id === 2);
+        expect(upiAcc.isPrimary).toBe(false);
+        expect(bankAcc.isPrimary).toBe(true);
+        const primaries = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary);
+        expect(primaries).toHaveLength(1);
+      });
+
+      it('27. Updating unrelated account details (e.g. bankName) preserves existing primary method', async () => {
+        testBankAccounts = [
+          {
+            id: 1,
+            purohitId: 101,
+            accountNumber: '111222333',
+            bankName: 'HDFC',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            isPrimary: true,
+          },
+        ];
+
+        const res = await service.updatePurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          1,
+          { bankName: 'HDFC Bank Ltd' } as any,
+        );
+
+        expect(res.success).toBe(true);
+        const acc = testBankAccounts.find((b) => b.id === 1);
+        expect(acc.bankName).toBe('HDFC Bank Ltd');
+        expect(acc.isPrimary).toBe(true);
+      });
+
+      it('28. Admin update setting isPrimary=true unsets previous primary across BANK and UPI', async () => {
+        testBankAccounts = [
+          {
+            id: 1,
+            purohitId: 101,
+            upiId: 'purohit@upi',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
+            isPrimary: true,
+          },
+          {
+            id: 2,
+            purohitId: 101,
+            accountNumber: '444555666',
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            isPrimary: false,
+          },
+        ];
+
+        const res = await service.updatePurohitBankAccount(
+          { id: testAdmin.id, role: USER_ROLE.ADMIN },
+          2,
+          { isPrimary: true } as any,
+          testUser.id,
+        );
+
+        expect(res.success).toBe(true);
+        const upiAcc = testBankAccounts.find((b) => b.id === 1);
+        const bankAcc = testBankAccounts.find((b) => b.id === 2);
+        expect(upiAcc.isPrimary).toBe(false);
+        expect(bankAcc.isPrimary).toBe(true);
+        const primaries = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary);
+        expect(primaries).toHaveLength(1);
+      });
+
+      it('29. Combined invariant: at most one primary payout method exists across all bank and UPI accounts', async () => {
+        testBankAccounts = [];
+
+        // Add 1st account (bank) -> becomes primary
+        await service.addPurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          {
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            accountNumber: '111',
+            accountHolderName: 'A1',
+            ifscCode: 'IFSC001',
+          } as any,
+        );
+
+        // Add 2nd account (UPI) -> not primary
+        await service.addPurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          {
+            paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
+            upiId: 'u1@upi',
+            isPrimary: false,
+          } as any,
+        );
+
+        // Add 3rd account (bank) -> not primary
+        await service.addPurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          {
+            paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+            accountNumber: '333',
+            accountHolderName: 'A3',
+            ifscCode: 'IFSC001',
+            isPrimary: false,
+          } as any,
+        );
+
+        const primaries = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary);
+        expect(primaries).toHaveLength(1);
+        expect(primaries[0].paymentMethod).toBe(PUROHIT_PAYMENT_METHOD.BANK);
       });
     });
   });

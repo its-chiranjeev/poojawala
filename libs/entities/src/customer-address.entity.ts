@@ -8,6 +8,7 @@ import {
   OneToMany,
   JoinColumn,
   DeleteDateColumn,
+  Index,
 } from 'typeorm';
 import { User } from './user.entity';
 import { Booking } from './booking.entity';
@@ -18,6 +19,10 @@ export enum VENUE_TYPE {
   ONLINE = 'ONLINE',
 }
 
+@Index('UQ_customer_addresses_single_default', ['customerId'], {
+  unique: true,
+  where: '"isDefault" = true AND "deletedAt" IS NULL',
+})
 @Entity('customer_addresses')
 export class CustomerAddress {
   @PrimaryGeneratedColumn()

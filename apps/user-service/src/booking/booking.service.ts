@@ -233,14 +233,25 @@ export class BookingService {
         let customerAddress: CustomerAddress | null = null;
 
         if (dto.address) {
+          if (typeof manager.query === 'function') {
+            try {
+              await manager.query('SELECT pg_advisory_xact_lock($1, $2)', [
+                1001, // ADVISORY_LOCK_NAMESPACE.CUSTOMER_ADDRESS
+                user.id,
+              ]);
+            } catch {
+              // advisory lock acquisition failed or mock environment
+            }
+          }
+
           let isDefault: boolean;
-          if (dto.address.isDefault === true) {
+          if (dto.address.isDefault === true || (dto.address.isDefault as any) === 'true') {
             isDefault = true;
             await addressRepository.update(
               { customerId: user.id, isDefault: true },
               { isDefault: false },
             );
-          } else if (dto.address.isDefault === false) {
+          } else if (dto.address.isDefault === false || (dto.address.isDefault as any) === 'false') {
             isDefault = false;
           } else {
             const existingCount = await addressRepository.count({

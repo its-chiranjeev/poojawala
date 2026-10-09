@@ -7,9 +7,14 @@ import {
   JoinColumn,
   UpdateDateColumn,
   DeleteDateColumn,
+  Index,
 } from 'typeorm';
 import { User } from './user.entity';
 
+@Index('UQ_purohit_service_areas_single_default', ['purohitId'], {
+  unique: true,
+  where: '"isDefault" = true AND "deletedAt" IS NULL',
+})
 @Entity('purohit_service_areas')
 export class PurohitServiceArea {
   @PrimaryGeneratedColumn()
