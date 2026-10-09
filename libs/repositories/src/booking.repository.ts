@@ -280,13 +280,20 @@ export class BookingRepository extends BaseRepository<Booking> {
         query.andWhere(
           `(
             CAST("booking"."id" AS TEXT) ILIKE :search
-            OR booking."bookingNumber" ILIKE :search
-            OR service.name ILIKE :search
-            OR customer."firstName" ILIKE :search
-            OR customer."lastName" ILIKE :search
-            OR customer.username ILIKE :search
-            OR customer.email ILIKE :search
-            OR customer.phone ILIKE :search
+            OR "booking"."bookingNumber" ILIKE :search
+            OR "service"."name" ILIKE :search
+            OR "customer"."firstName" ILIKE :search
+            OR "customer"."lastName" ILIKE :search
+            OR CONCAT("customer"."firstName", ' ', "customer"."lastName") ILIKE :search
+            OR "customer"."username" ILIKE :search
+            OR "customer"."email" ILIKE :search
+            OR "customer"."phone" ILIKE :search
+            OR "purohitUser"."firstName" ILIKE :search
+            OR "purohitUser"."lastName" ILIKE :search
+            OR CONCAT("purohitUser"."firstName", ' ', "purohitUser"."lastName") ILIKE :search
+            OR "purohitUser"."username" ILIKE :search
+            OR "purohitUser"."email" ILIKE :search
+            OR "purohitUser"."phone" ILIKE :search
           )`,
           {
             search: `%${normalizedSearch}%`,
@@ -296,8 +303,14 @@ export class BookingRepository extends BaseRepository<Booking> {
         query.andWhere(
           `(
             CAST("booking"."id" AS TEXT) ILIKE :search
-            OR booking."bookingNumber" ILIKE :search
-            OR service.name ILIKE :search
+            OR "booking"."bookingNumber" ILIKE :search
+            OR "service"."name" ILIKE :search
+            OR "customer"."firstName" ILIKE :search
+            OR "customer"."lastName" ILIKE :search
+            OR CONCAT("customer"."firstName", ' ', "customer"."lastName") ILIKE :search
+            OR "purohitUser"."firstName" ILIKE :search
+            OR "purohitUser"."lastName" ILIKE :search
+            OR CONCAT("purohitUser"."firstName", ' ', "purohitUser"."lastName") ILIKE :search
           )`,
           {
             search: `%${normalizedSearch}%`,
@@ -435,8 +448,11 @@ export class BookingRepository extends BaseRepository<Booking> {
       query.andWhere(
         `(
           CAST("booking"."id" AS TEXT) ILIKE :search
-          OR booking."bookingNumber" ILIKE :search
-          OR service.name ILIKE :search
+          OR "booking"."bookingNumber" ILIKE :search
+          OR "service"."name" ILIKE :search
+          OR "customer"."firstName" ILIKE :search
+          OR "customer"."lastName" ILIKE :search
+          OR CONCAT("customer"."firstName", ' ', "customer"."lastName") ILIKE :search
         )`,
         {
           search: `%${normalizedSearch}%`,
@@ -623,12 +639,14 @@ export class BookingRepository extends BaseRepository<Booking> {
         `
         (
           CAST("booking"."id" AS TEXT) ILIKE :search
-          OR booking."bookingNumber" ILIKE :search
-          OR service.name ILIKE :search
-          OR customer."firstName" ILIKE :search
-          OR customer."lastName" ILIKE :search
-          OR purohitUser."firstName" ILIKE :search
-          OR purohitUser."lastName" ILIKE :search
+          OR "booking"."bookingNumber" ILIKE :search
+          OR "service"."name" ILIKE :search
+          OR "customer"."firstName" ILIKE :search
+          OR "customer"."lastName" ILIKE :search
+          OR CONCAT("customer"."firstName", ' ', "customer"."lastName") ILIKE :search
+          OR "purohitUser"."firstName" ILIKE :search
+          OR "purohitUser"."lastName" ILIKE :search
+          OR CONCAT("purohitUser"."firstName", ' ', "purohitUser"."lastName") ILIKE :search
         )
         `,
         {

@@ -169,8 +169,9 @@ export class ComplaintRepository extends BaseRepository<Complaint> {
           OR complaint.description ILIKE :search
           OR booking."bookingNumber" ILIKE :search
           OR service.name ILIKE :search
-          OR raisedBy."firstName" ILIKE :search
-          OR raisedBy."lastName" ILIKE :search
+          OR "raisedBy"."firstName" ILIKE :search
+          OR "raisedBy"."lastName" ILIKE :search
+          OR CONCAT("raisedBy"."firstName", ' ', "raisedBy"."lastName") ILIKE :search
         )`,
         {
           search,

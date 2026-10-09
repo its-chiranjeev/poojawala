@@ -75,6 +75,9 @@ export class UserRepository extends BaseRepository<User> {
             .orWhere('LOWER(user.lastName) LIKE LOWER(:search)', {
               search: `%${search}%`,
             })
+            .orWhere('LOWER(CONCAT(user.firstName, \' \', user.lastName)) LIKE LOWER(:search)', {
+              search: `%${search}%`,
+            })
             .orWhere('user.phone LIKE :search', {
               search: `%${search}%`,
             });

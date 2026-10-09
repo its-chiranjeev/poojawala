@@ -722,7 +722,7 @@ export class PaymentRepository extends BaseRepository<Payment> {
     if (purohitId) {
       query.andWhere(
         `(
-        purohitUser.id = :purohitId
+        "purohitUser"."id" = :purohitId
         OR payment."payeeId" = :purohitId
       )`,
         {
@@ -744,11 +744,17 @@ export class PaymentRepository extends BaseRepository<Payment> {
 
         OR "customer"."firstName" ILIKE :search
         OR "customer"."lastName" ILIKE :search
+        OR CONCAT("customer"."firstName", ' ', "customer"."lastName") ILIKE :search
         OR "customer"."email" ILIKE :search
         OR "customer"."phone" ILIKE :search
 
+        OR "orderCustomer"."firstName" ILIKE :search
+        OR "orderCustomer"."lastName" ILIKE :search
+        OR CONCAT("orderCustomer"."firstName", ' ', "orderCustomer"."lastName") ILIKE :search
+
         OR "purohitUser"."firstName" ILIKE :search
         OR "purohitUser"."lastName" ILIKE :search
+        OR CONCAT("purohitUser"."firstName", ' ', "purohitUser"."lastName") ILIKE :search
         OR "purohitUser"."email" ILIKE :search
         OR "purohitUser"."phone" ILIKE :search
 
