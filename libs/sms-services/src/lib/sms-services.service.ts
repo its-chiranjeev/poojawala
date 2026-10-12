@@ -91,6 +91,7 @@ export class SmsService {
    */
   async sendOtpViaFast2sms(mobile: string, otp: string): Promise<void> {
     // Strip any leading +91 or 0 to get the bare 10-digit number.
+    throw new Error('Test');
     const normalizedMobile = this.normalizeMobileForFast2sms(mobile);
 
     this.logger.log(
@@ -213,7 +214,7 @@ export class SmsService {
 
   async sendSms(to: string, message: string) {
     const phoneNumber = to.startsWith('+') ? to : `+91${to}`;
-
+    throw new Error('Test');
     try {
       const response = await this.twilioClient.messages.create({
         body: message,
