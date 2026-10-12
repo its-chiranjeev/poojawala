@@ -94,6 +94,7 @@ export class TempleRepository extends BaseRepository<Temple> {
         'service.slug',
         'service.description',
         'service.isActive',
+        'service.plans'
       ])
       .where('service.templeId = :templeId', { templeId })
       .andWhere('service.deletedAt IS NULL')

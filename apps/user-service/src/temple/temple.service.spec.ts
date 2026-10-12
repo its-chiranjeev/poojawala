@@ -366,6 +366,7 @@ describe('TempleService', () => {
         slug: 'kalka-mata-special-puja',
         description: 'Special devotional puja',
         isActive: true,
+        plans: null,
       });
       expect(result.data.services[0].temple).toBeUndefined(); // shallow, not circular!
       expect(result.data.services[1]).toEqual({
@@ -374,6 +375,7 @@ describe('TempleService', () => {
         slug: null,
         description: 'Sankalp puja',
         isActive: true,
+        plans: null,
       });
     });
 

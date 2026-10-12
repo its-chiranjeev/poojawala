@@ -11,7 +11,7 @@ export class TempleService {
     private readonly templeRepository: TempleRepository,
     private readonly auditLogService: AuditLogService,
     private readonly s3Service: S3Service,
-  ) {}
+  ) { }
 
   private formatTempleResponse(temple: Temple, downloadUrl: string | null, services?: any[]) {
     const formatted: any = {
@@ -36,6 +36,7 @@ export class TempleService {
         slug: s.slug ?? null,
         description: s.description ?? null,
         isActive: s.isActive,
+        plans: s.plans ?? null,
       }));
     }
 
