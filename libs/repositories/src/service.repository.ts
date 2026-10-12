@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
-import { Service, Booking, PurohitService } from '@poojawala/entities';
+import { Service, Booking, PurohitService, Payment } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
 
@@ -31,7 +31,7 @@ export class ServiceRepository extends BaseRepository<Service> {
       language,
     } = query;
     console.log("=== API REQUEST RECEIVED ===");
-    console.log("Original query object:", query);
+    // console.log("Original query object:", query);
 
     let parsedIsActive: boolean | undefined = undefined;
     if (isActive !== undefined) {
@@ -444,6 +444,32 @@ export class ServiceRepository extends BaseRepository<Service> {
     */
 
     return null;
+  }
+
+  async hasBookingsOrPayments(serviceId: number): Promise<{ hasBookings: boolean; hasPayments: boolean }> {
+    const bookingCount = await this.repo.manager
+      .createQueryBuilder(Booking, 'booking')
+      .withDeleted()
+      .where('booking.serviceId = :serviceId', { serviceId })
+      .getCount();
+
+    let paymentCount = 0;
+    if (bookingCount > 0) {
+      paymentCount = await this.repo.manager
+        .createQueryBuilder(Payment, 'payment')
+        .innerJoin('payment.booking', 'booking')
+        .where('booking.serviceId = :serviceId', { serviceId })
+        .getCount();
+    }
+
+    return {
+      hasBookings: bookingCount > 0,
+      hasPayments: paymentCount > 0,
+    };
+  }
+
+  async softRemove(service: Service): Promise<Service> {
+    return this.repo.softRemove(service);
   }
 
   async remove(service: Service): Promise<Service> {

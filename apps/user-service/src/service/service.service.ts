@@ -1125,7 +1125,21 @@ export class ServiceService {
     }
 
     try {
-      await this.serviceRepository.remove(service);
+      const { hasBookings, hasPayments } =
+        await this.serviceRepository.hasBookingsOrPayments(id);
+
+      let isSoftDeleted = false;
+
+      if (hasBookings || hasPayments) {
+        // Soft delete: deactivate service and mark deletedAt
+        service.isActive = false;
+        await this.serviceRepository.save(service);
+        await this.serviceRepository.softRemove(service);
+        isSoftDeleted = true;
+      } else {
+        // Hard delete: permanently remove when no booking or payment exists
+        await this.serviceRepository.remove(service);
+      }
 
       // TODO: SERVICE_MESSAGE_IMPROVEMENT
       // Old message retained for reference; replaced with plan-aware message.
@@ -1137,24 +1151,28 @@ export class ServiceService {
         module: AUDIT_MODULE.SERVICE,
         entity: 'Service',
         entityId: String(id),
-        action: 'SERVICE_DELETED',
-        message: `Service '${service.name}' was deleted successfully.`,
+        action: isSoftDeleted ? 'SERVICE_SOFT_DELETED' : 'SERVICE_DELETED',
+        message: isSoftDeleted
+          ? `Service '${service.name}' had existing bookings/payments and was soft-deleted.`
+          : `Service '${service.name}' was deleted successfully.`,
         oldValue: undefined,
-        newValue: { deleted: true },
+        newValue: { deleted: true, softDelete: isSoftDeleted },
       });
 
       if (this.notificationService) {
         try {
           await this.notificationService.notifyAdmins(
-            'Service Deleted',
-            `Service '${service.name}' was deleted successfully.`,
+            isSoftDeleted ? 'Service Soft-Deleted' : 'Service Deleted',
+            isSoftDeleted
+              ? `Service '${service.name}' had existing records and was soft-deleted.`
+              : `Service '${service.name}' was deleted successfully.`,
             NOTIFICATION_TYPE.SYSTEM,
             id,
             'SERVICE',
             {
               serviceId: id,
               serviceName: service.name,
-              action: 'DELETED',
+              action: isSoftDeleted ? 'SOFT_DELETED' : 'DELETED',
             },
           );
         } catch (err: any) {
@@ -1162,12 +1180,12 @@ export class ServiceService {
         }
       }
 
-      // TODO: SERVICE_MESSAGE_IMPROVEMENT
-      // Old message retained for reference; replaced with plan-aware message.
-      // message: 'Service deleted successfully',
       return {
         success: true,
-        message: `Service '${service.name}' was deleted successfully.`,
+        message: isSoftDeleted
+          ? `Service '${service.name}' has existing booking or payment records and was soft-deleted successfully.`
+          : `Service '${service.name}' was deleted successfully.`,
+        isSoftDeleted,
       };
     } catch (error) {
       if (
