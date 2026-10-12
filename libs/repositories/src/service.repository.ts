@@ -161,7 +161,7 @@ export class ServiceRepository extends BaseRepository<Service> {
 
     if (search) {
       qb.andWhere(
-        '(CAST(service.id AS TEXT) ILIKE :search OR service.name ILIKE :search OR service.description ILIKE :search OR category.name ILIKE :search OR temple.name ILIKE :search)',
+        '(CAST(service.id AS TEXT) ILIKE :search OR service.name ILIKE :search OR category.name ILIKE :search OR temple.name ILIKE :search)',
         { search: `%${search.trim()}%` },
       );
     }
