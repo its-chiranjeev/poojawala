@@ -27,6 +27,7 @@ export class ServiceRepository extends BaseRepository<Service> {
       categories,
       templeId,
       temple,
+      includeTemple,
       city,
       language,
     } = query;
@@ -48,6 +49,17 @@ export class ServiceRepository extends BaseRepository<Service> {
     let parsedIsGlobal: boolean | undefined = undefined;
     if (isGlobal !== undefined) {
       parsedIsGlobal = String(isGlobal) === 'true';
+    }
+
+    let parsedIncludeTemple: boolean | undefined = undefined;
+    const rawIncludeTemple = includeTemple !== undefined ? includeTemple : (query as any)['includeTemple'];
+    if (rawIncludeTemple !== undefined && rawIncludeTemple !== null && String(rawIncludeTemple).trim() !== '') {
+      const strVal = String(rawIncludeTemple).trim().toLowerCase();
+      if (strVal === 'true' || strVal === '1') {
+        parsedIncludeTemple = true;
+      } else if (strVal === 'false' || strVal === '0') {
+        parsedIncludeTemple = false;
+      }
     }
 
     const qb = this.repo
@@ -135,6 +147,16 @@ export class ServiceRepository extends BaseRepository<Service> {
           qb.andWhere('LOWER(temple.name) = LOWER(:templeName)', { templeName: templeVal });
         }
       }
+    }
+
+    // Filter: includeTemple
+    // true  -> return services with non-null templeId
+    // false -> return services with null templeId
+    // not given -> as it is
+    if (parsedIncludeTemple === true) {
+      qb.andWhere('service.templeId IS NOT NULL');
+    } else if (parsedIncludeTemple === false) {
+      qb.andWhere('service.templeId IS NULL');
     }
 
     if (search) {

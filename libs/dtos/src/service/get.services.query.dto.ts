@@ -61,6 +61,16 @@ export class GetServicesQueryDto {
   @IsString()
   temple?: string;
 
+  /**
+   * Filter services by temple association:
+   * 'true': return services with non-null templeId (temple-linked services).
+   * 'false': return services with null templeId (independent services).
+   * When omitted: return services as-is without filtering by templeId presence.
+   */
+  @IsOptional()
+  @IsString()
+  includeTemple?: string;
+
   /** Filter categories containing a specific service by ID. */
   @IsOptional()
   @Type(() => Number)

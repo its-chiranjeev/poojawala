@@ -98,6 +98,9 @@ export class ServiceController {
     if (query.isActive === undefined && (req as any).query.isActive !== undefined) {
       query.isActive = (req as any).query.isActive;
     }
+    if (query.includeTemple === undefined && (req as any).query.includeTemple !== undefined) {
+      query.includeTemple = (req as any).query.includeTemple;
+    }
     return this.serviceService.findAllServices(query);
   }
 
