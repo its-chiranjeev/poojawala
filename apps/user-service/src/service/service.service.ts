@@ -66,7 +66,7 @@ export class ServiceService {
     @Optional() private readonly emailService?: EmailService,
   ) { }
 
-  async findAllServices(query: GetServicesQueryDto) {
+  async findAllServices(query: GetServicesQueryDto, isAdmin: boolean = false) {
     if (query.templeId !== undefined && query.templeId !== null && String(query.templeId).trim() !== '') {
       const strVal = String(query.templeId).trim();
       if (strVal.toLowerCase() !== 'all' && strVal.toLowerCase() !== 'null') {
@@ -77,7 +77,7 @@ export class ServiceService {
       }
     }
 
-    const result = await this.serviceRepository.findAllServices(query);
+    const result = await this.serviceRepository.findAllServices(query, isAdmin);
 
     const dataWithUrls = await Promise.all(
       result.data.map(async (service: any) => {
@@ -581,6 +581,20 @@ export class ServiceService {
       // Final condition: agar service main city h toh isGlobal = false, agar ek bhi city nahi h toh isGlobal = true
       const resolvedIsGlobal = validCities.length === 0;
 
+      // Availability modes (isOnline, isOffline):
+      // Require at least one availability mode to be true.
+      // Defaults: isOnline = false, isOffline = true for backward compatibility.
+      const resolvedIsOnline = dto.isOnline !== undefined
+        ? Boolean(dto.isOnline)
+        : false;
+      const resolvedIsOffline = dto.isOffline !== undefined
+        ? Boolean(dto.isOffline)
+        : (!dto.isOnline);
+
+      if (!resolvedIsOnline && !resolvedIsOffline) {
+        throw new BadRequestException('Service must be available either online, offline, or both.');
+      }
+
       const service = this.serviceRepository.create({
         ...dto,
         slug: dto.slug?.trim() || null,
@@ -597,12 +611,16 @@ export class ServiceService {
         iconUrl,
         isActive: dto.isActive ?? true,
         isGlobal: resolvedIsGlobal,
+        isOnline: resolvedIsOnline,
+        isOffline: resolvedIsOffline,
         isUpcomingFestival: dto.isUpcomingFestival ?? false,
       });
 
       // Explicitly guarantee values before save
       service.cities = validCities;
       service.isGlobal = resolvedIsGlobal;
+      service.isOnline = resolvedIsOnline;
+      service.isOffline = resolvedIsOffline;
       service.templeId = dto.templeId ?? null;
       service.slug = dto.slug?.trim() || null;
 
@@ -875,7 +893,24 @@ export class ServiceService {
       };
     }
 
+    // Resolve availability flags (isOnline, isOffline):
+    // Support partial updates: if only one flag is supplied, preserve the other flag's existing value.
+    // Validate the final resulting state so both flags cannot become false.
+    const finalIsOnline = dto.isOnline !== undefined
+      ? Boolean(dto.isOnline)
+      : (service.isOnline ?? false);
+    const finalIsOffline = dto.isOffline !== undefined
+      ? Boolean(dto.isOffline)
+      : (service.isOffline ?? true);
+
+    if (!finalIsOnline && !finalIsOffline) {
+      throw new BadRequestException('Service must be available either online, offline, or both.');
+    }
+
     Object.assign(service, dto);
+
+    service.isOnline = finalIsOnline;
+    service.isOffline = finalIsOffline;
 
     // Safeguard plans and pricing fields against unintentional overwrites
     if (mergedPlans !== undefined) {

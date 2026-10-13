@@ -666,6 +666,43 @@ export class AuthModuleController {
       (safeUser as any).rejectionReason = (safeUser as any).profile.rejectionReason ?? null;
     }
 
+    if (Array.isArray((safeUser as any).addresses)) {
+      (safeUser as any).addresses = (safeUser as any).addresses
+        .filter((a: any) => !a.deletedAt)
+        .sort((a: any, b: any) => {
+          const aDefault = a.isDefault ? 1 : 0;
+          const bDefault = b.isDefault ? 1 : 0;
+          if (aDefault !== bDefault) return bDefault - aDefault;
+          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return timeB - timeA;
+        });
+    }
+    if (Array.isArray((safeUser as any).serviceAreas)) {
+      (safeUser as any).serviceAreas = (safeUser as any).serviceAreas
+        .filter((a: any) => !a.deletedAt)
+        .sort((a: any, b: any) => {
+          const aDefault = a.isDefault ? 1 : 0;
+          const bDefault = b.isDefault ? 1 : 0;
+          if (aDefault !== bDefault) return bDefault - aDefault;
+          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return timeB - timeA;
+        });
+    }
+    if (Array.isArray((safeUser as any).bankAccounts)) {
+      (safeUser as any).bankAccounts = (safeUser as any).bankAccounts
+        .filter((a: any) => !a.deletedAt)
+        .sort((a: any, b: any) => {
+          const aPrimary = a.isPrimary ? 1 : 0;
+          const bPrimary = b.isPrimary ? 1 : 0;
+          if (aPrimary !== bPrimary) return bPrimary - aPrimary;
+          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return timeB - timeA;
+        });
+    }
+
     return {
       success: true,
       statusCode: HttpStatus.OK,

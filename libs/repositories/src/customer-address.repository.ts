@@ -55,4 +55,14 @@ export class CustomerAddressRepository extends BaseRepository<CustomerAddress> {
 
     return { data, total };
   }
+
+  async findByCustomerId(customerId: number): Promise<CustomerAddress[]> {
+    return this.repo.find({
+      where: { customerId },
+      order: {
+        isDefault: 'DESC',
+        createdAt: 'DESC',
+      },
+    });
+  }
 }

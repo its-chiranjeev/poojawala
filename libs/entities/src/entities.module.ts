@@ -77,4 +77,4 @@ import { ServiceFeature } from './service-feature.entity';
     TypeOrmModule, // VERY IMPORTANT
   ],
 })
-export class EntitiesModule {}
+export class EntitiesModule { }

@@ -32,6 +32,16 @@ export class GetServicesQueryDto {
   @IsString()
   isGlobal?: string;
 
+  /** Filter by online availability (true = offered online, false = not online). */
+  @IsOptional()
+  @IsString()
+  isOnline?: string;
+
+  /** Filter by offline availability (true = offered offline, false = not offline). */
+  @IsOptional()
+  @IsString()
+  isOffline?: string;
+
   /** Filter services belonging to a specific category by ID. */
   @IsOptional()
   @Type(() => Number)

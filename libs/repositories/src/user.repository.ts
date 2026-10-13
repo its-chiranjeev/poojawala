@@ -260,9 +260,15 @@ export class UserRepository extends BaseRepository<User> {
         .leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL')
         .leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id AND purohitServices.deletedAt IS NULL').leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId')
         .addOrderBy('serviceAreas.isDefault', 'DESC')
-        .addOrderBy('serviceAreas.createdAt', 'DESC');
+        .addOrderBy('serviceAreas.createdAt', 'DESC')
+        .addOrderBy('bankAccounts.isPrimary', 'DESC')
+        .addOrderBy('bankAccounts.createdAt', 'DESC')
+        .addOrderBy('addresses.isDefault', 'DESC')
+        .addOrderBy('addresses.createdAt', 'DESC');
     } else {
-      qb.leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL');
+      qb.leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL')
+        .addOrderBy('addresses.isDefault', 'DESC')
+        .addOrderBy('addresses.createdAt', 'DESC');
     }
 
     const user = await qb.getOne();

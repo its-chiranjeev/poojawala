@@ -17,7 +17,7 @@ import {
   Request
 } from '@nestjs/common';
 import { ServiceService } from './service.service';
-import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard } from '@poojawala/common';
+import { JwtAuthGuard, Roles, RolesGuard, CsrfGuard, OptionalJwtAuthGuard } from '@poojawala/common';
 import { USER_ROLE } from '@poojawala/entities';
 import { CreateServiceDto, CreatePurohitServiceDto, CreateCategoryDto, UpdateCategoryDto } from '@poojawala/dtos/service/create.service.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
@@ -94,6 +94,7 @@ export class ServiceController {
 
 
   @Get()
+  @UseGuards(OptionalJwtAuthGuard)
   async findAllServices(@Req() req: Request, @Query() query: GetServicesQueryDto) {
     if (query.isActive === undefined && (req as any).query.isActive !== undefined) {
       query.isActive = (req as any).query.isActive;
@@ -101,7 +102,11 @@ export class ServiceController {
     if (query.includeTemple === undefined && (req as any).query.includeTemple !== undefined) {
       query.includeTemple = (req as any).query.includeTemple;
     }
-    return this.serviceService.findAllServices(query);
+    const isAdmin =
+      (req as any).user?.role === USER_ROLE.ADMIN ||
+      (query as any).isAdmin === true ||
+      (query as any).isAdmin === 'true';
+    return this.serviceService.findAllServices(query, isAdmin);
   }
 
   @Patch(':id/status')
