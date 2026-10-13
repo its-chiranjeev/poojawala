@@ -148,6 +148,19 @@ export class Service {
   @Column({ type: 'boolean', default: true })
   isGlobal!: boolean;
 
+  /**
+   * Availability modes:
+   * isOnline = true  → Service is offered online.
+   * isOffline = true → Service is offered offline (in-person).
+   * Both true: available online and offline.
+   * Both false: rejected at API level.
+   */
+  @Column({ type: 'boolean', default: false })
+  isOnline!: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  isOffline!: boolean;
+
   @Column({ type: 'boolean', default: false })
   isUpcomingFestival!: boolean;
 

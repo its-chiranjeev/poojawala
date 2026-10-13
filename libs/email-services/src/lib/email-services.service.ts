@@ -435,11 +435,11 @@ export class EmailService {
         rows,
         ...(data.totalAmount !== undefined
           ? {
-              totalRow: {
-                label: 'Booking Amount',
-                value: `₹${data.totalAmount}`,
-              },
-            }
+            totalRow: {
+              label: 'Booking Amount',
+              value: `₹${data.totalAmount}`,
+            },
+          }
           : {}),
       },
       highlight: {

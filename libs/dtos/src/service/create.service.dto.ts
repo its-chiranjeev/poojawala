@@ -368,6 +368,28 @@ export class CreateServiceDto {
   @IsBoolean()
   isActive?: boolean;
 
+  @IsOptional()
+  @Transform(({ obj, value }) => {
+    const raw = obj?.isOnline !== undefined ? obj.isOnline : value;
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    if (raw === 'true' || raw === true) return true;
+    if (raw === 'false' || raw === false) return false;
+    return raw;
+  })
+  @IsBoolean({ message: 'isOnline must be a boolean' })
+  isOnline?: boolean;
+
+  @IsOptional()
+  @Transform(({ obj, value }) => {
+    const raw = obj?.isOffline !== undefined ? obj.isOffline : value;
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    if (raw === 'true' || raw === true) return true;
+    if (raw === 'false' || raw === false) return false;
+    return raw;
+  })
+  @IsBoolean({ message: 'isOffline must be a boolean' })
+  isOffline?: boolean;
+
   // NOTE: isGlobal is NOT exposed in the DTO.
   // It is always auto-derived in the service:
   //   isGlobal = true  → cities array is empty (available everywhere)

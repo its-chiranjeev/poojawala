@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, Repository } from 'typeorm';
+import { Brackets, ILike, Repository } from 'typeorm';
 import { Service, Booking, PurohitService, Payment } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
@@ -14,7 +14,7 @@ export class ServiceRepository extends BaseRepository<Service> {
     super(repo);
   }
 
-  async findAllServices(query: GetServicesQueryDto) {
+  async findAllServices(query: GetServicesQueryDto, isAdmin: boolean = false) {
     const {
       page = 1,
       limit = 10,
@@ -68,8 +68,28 @@ export class ServiceRepository extends BaseRepository<Service> {
       .leftJoin('service.temple', 'temple', 'temple.deletedAt IS NULL')
       .addSelect(['temple.id', 'temple.name']);
 
+    let parsedIsOnline: boolean | undefined = undefined;
+    if (query.isOnline !== undefined && query.isOnline !== null && String(query.isOnline).trim() !== '') {
+      parsedIsOnline = String(query.isOnline).trim().toLowerCase() === 'true';
+    }
+
+    let parsedIsOffline: boolean | undefined = undefined;
+    if (query.isOffline !== undefined && query.isOffline !== null && String(query.isOffline).trim() !== '') {
+      parsedIsOffline = String(query.isOffline).trim().toLowerCase() === 'true';
+    }
+
     if (parsedIsActive !== undefined) {
       qb.andWhere('service.isActive = :isActive', { isActive: parsedIsActive });
+    } else if (!isAdmin) {
+      qb.andWhere('service.isActive = :isActive', { isActive: true });
+    }
+
+    if (parsedIsOnline !== undefined) {
+      qb.andWhere('service.isOnline = :isOnline', { isOnline: parsedIsOnline });
+    }
+
+    if (parsedIsOffline !== undefined) {
+      qb.andWhere('service.isOffline = :isOffline', { isOffline: parsedIsOffline });
     }
 
     if (parsedIsUpcomingFestival !== undefined) {
@@ -180,10 +200,9 @@ export class ServiceRepository extends BaseRepository<Service> {
       );
     }
     */
-    // Production inclusive city filter:
-    // When a city is provided, returns BOTH:
-    // 1. Services specifically available in requested city (using JSONB containment @> and case-insensitive check)
-    // 2. Services marked as GLOBAL (isGlobal = true, available everywhere)
+    // TODO: Deprecated inclusive city filter without service.isOnline global availability.
+    // Retained for backward reference:
+    /*
     const normalizedCity = city ? city.trim() : undefined;
     if (normalizedCity && normalizedCity !== '') {
       const cityFilterJson = JSON.stringify([{ name: normalizedCity }]);
@@ -205,6 +224,62 @@ export class ServiceRepository extends BaseRepository<Service> {
         },
       );
     }
+    */
+    // Production inclusive city & online filter:
+    // When a city filter IS provided:
+    // Include:
+    // - Online services available globally (isOnline = true)
+    // - Offline services whose configured cities match the requested city (isOffline = true and matches city or has no city restrictions)
+    // When NO city filter is provided:
+    // All eligible services are returned without restricting by isOnline or isOffline.
+    const normalizedCity = city ? city.trim() : undefined;
+    if (normalizedCity && normalizedCity !== '') {
+      const cityFilterJson = JSON.stringify([{ name: normalizedCity }]);
+      qb.andWhere(
+        new Brackets((cityQb) => {
+          cityQb
+            .where('service.isOnline = true')
+            .orWhere(
+              new Brackets((offlineQb) => {
+                offlineQb
+                  .where('(service.isOffline = true OR service.isOffline IS NULL)')
+                  .andWhere(
+                    new Brackets((cityMatchQb) => {
+                      cityMatchQb
+                        .where('service.isGlobal = true')
+                        .orWhere('service.cities IS NULL')
+                        .orWhere("service.cities = '[]'::jsonb")
+                        .orWhere(
+                          "(jsonb_typeof(service.cities) = 'array' AND jsonb_array_length(service.cities) = 0)",
+                        )
+                        .orWhere('service.cities @> :cityFilter::jsonb')
+                        .orWhere(
+                          `(
+                            jsonb_typeof(service.cities) = 'array'
+                            AND EXISTS (
+                              SELECT 1 FROM jsonb_array_elements(service.cities) AS c
+                              WHERE LOWER(TRIM(c->>'name')) = LOWER(TRIM(:city))
+                            )
+                          )`,
+                        );
+                    }),
+                  );
+              }),
+            );
+        }),
+        {
+          city: normalizedCity,
+          cityFilter: cityFilterJson,
+        },
+      );
+    }
+    // TODO: Deprecated online-only restriction when no city parameter is provided.
+    // Retained for reference:
+    /*
+    else if (!isAdmin && parsedIsOnline === undefined) {
+      qb.andWhere('service.isOnline = true');
+    }
+    */
 
     if (language) {
       qb.andWhere(
@@ -383,6 +458,9 @@ export class ServiceRepository extends BaseRepository<Service> {
         durationMinutes: true,
         requiresVenue: true,
         isActive: true,
+        isGlobal: true,
+        isOnline: true,
+        isOffline: true,
         isUpcomingFestival: true,
         festivalStartDate: true,
         festivalEndDate: true,

@@ -2310,8 +2310,8 @@ export class UserService {
           const existingCount =
             typeof addressRepo.count === 'function'
               ? await addressRepo.count({
-                  where: { customerId: userId },
-                })
+                where: { customerId: userId },
+              })
               : (await addressRepo.find({ where: { customerId: userId } })).length;
           isDefault = existingCount === 0;
         }
@@ -2638,8 +2638,8 @@ export class UserService {
         const existingCount =
           typeof areaRepo.count === 'function'
             ? await areaRepo.count({
-                where: { purohitId: targetPurohitId },
-              })
+              where: { purohitId: targetPurohitId },
+            })
             : (await areaRepo.find({ where: { purohitId: targetPurohitId } })).length;
         isDefault = existingCount === 0;
       }
@@ -3310,9 +3310,9 @@ export class UserService {
         const remainingAccounts =
           typeof bankRepo.find === 'function'
             ? await bankRepo.find({
-                where: { purohitId: profile.id },
-                order: { id: 'ASC' },
-              })
+              where: { purohitId: profile.id },
+              order: { id: 'ASC' },
+            })
             : await this.purohitBankAccountRepository.findByPurohitId(profile.id);
 
         if (remainingAccounts.length > 0) {
