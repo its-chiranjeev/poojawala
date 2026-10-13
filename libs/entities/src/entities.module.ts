@@ -33,6 +33,7 @@ import { Category } from './service-category.entity';
 import { BlogPost } from './blog-post.entity';
 import { BlogCategory } from './blog-category.entity';
 import { Temple } from './temple.entity';
+import { ServiceFeature } from './service-feature.entity';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { Temple } from './temple.entity';
       BlogPost,
       BlogCategory,
       Temple,
+      ServiceFeature,
     ]),
   ],
   providers: [EntitiesService],

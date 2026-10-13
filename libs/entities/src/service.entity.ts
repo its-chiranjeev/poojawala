@@ -14,6 +14,7 @@ import { PurohitService } from './purohit-service.entity';
 import { Booking } from './booking.entity';
 import { Category } from './service-category.entity';
 import { Temple } from './temple.entity';
+import { ServiceFeature } from './service-feature.entity';
 
 export interface ServiceCity {
   name: string;
@@ -187,6 +188,9 @@ export class Service {
 
   @OneToMany(() => Booking, (booking) => booking.service)
   bookings!: Booking[];
+
+  @OneToMany(() => ServiceFeature, (serviceFeature) => serviceFeature.service)
+  serviceFeatures!: ServiceFeature[];
 
   @CreateDateColumn()
   createdAt!: Date;

@@ -26,6 +26,7 @@ import { CartItemRepository } from './cart-item.repository';
 import { BookingProductRepository } from './booking-product.repository';
 import { OrderRepository } from './order.repository';
 import { TempleRepository } from './temple.repository';
+import { ServiceFeatureRepository } from './service-feature.repository';
 
 @Module({
   imports: [EntitiesModule],
@@ -56,6 +57,7 @@ import { TempleRepository } from './temple.repository';
     BookingProductRepository,
     OrderRepository,
     TempleRepository,
+    ServiceFeatureRepository,
   ],
   exports: [
     RepositoriesService,
@@ -84,6 +86,7 @@ import { TempleRepository } from './temple.repository';
     BookingProductRepository,
     OrderRepository,
     TempleRepository,
+    ServiceFeatureRepository,
   ],
 })
 export class RepositoriesModule { }
