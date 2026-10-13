@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, ILike, Repository } from 'typeorm';
 import { Service, Booking, PurohitService, Payment } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
-import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
+import { GetServicesQueryDto } from '@poojawala/dtos';
 
 @Injectable()
 export class ServiceRepository extends BaseRepository<Service> {
