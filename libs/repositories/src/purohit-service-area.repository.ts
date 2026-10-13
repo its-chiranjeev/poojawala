@@ -23,6 +23,15 @@ export class PurohitServiceAreaRepository extends BaseRepository<PurohitServiceA
   async createArea(
     payload: Partial<PurohitServiceArea>,
   ): Promise<PurohitServiceArea> {
+    const isSettingDefault =
+      payload.isDefault === true ||
+      (payload.isDefault as any) === 'true' ||
+      (payload.isDefault as any) === 1 ||
+      (payload.isDefault as any) === '1';
+
+    if (isSettingDefault && payload.purohitId) {
+      await this.clearDefaultAddress(payload.purohitId);
+    }
     const area = this.repo.create(payload);
     return this.repo.save(area);
   }
@@ -34,6 +43,18 @@ export class PurohitServiceAreaRepository extends BaseRepository<PurohitServiceA
   }
 
   async updateArea(id: number, payload: Partial<PurohitServiceArea>) {
+    const isSettingDefault =
+      payload.isDefault === true ||
+      (payload.isDefault as any) === 'true' ||
+      (payload.isDefault as any) === 1 ||
+      (payload.isDefault as any) === '1';
+
+    if (isSettingDefault) {
+      const area = await this.findById(id);
+      if (area && area.purohitId) {
+        await this.clearDefaultAddress(area.purohitId);
+      }
+    }
     await this.repo.update(id, payload);
     return this.findById(id);
   }

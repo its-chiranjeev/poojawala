@@ -16,7 +16,10 @@ export class PurohitBankAccountRepository extends BaseRepository<PurohitBankAcco
   async findByPurohitId(purohitId: number) {
     return this.repo.find({
       where: { purohitId },
-      order: { id: 'ASC' },
+      order: {
+        isPrimary: 'DESC',
+        createdAt: 'DESC',
+      },
     });
   }
 

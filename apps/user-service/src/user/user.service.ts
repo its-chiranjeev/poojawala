@@ -666,10 +666,13 @@ export class UserService {
     }
 
     if (Array.isArray(safeUser.addresses)) {
-      safeUser.addresses = safeUser.addresses.filter((a: any) => !a.deletedAt);
+      safeUser.addresses = this.sortCustomerAddresses(safeUser.addresses);
     }
     if (Array.isArray(safeUser.serviceAreas)) {
       safeUser.serviceAreas = this.sortServiceAreas(safeUser.serviceAreas);
+    }
+    if (Array.isArray((safeUser as any).bankAccounts)) {
+      (safeUser as any).bankAccounts = this.sortBankAccounts((safeUser as any).bankAccounts);
     }
 
     await this.auditLogService.createAuditLog({
@@ -1126,6 +1129,16 @@ export class UserService {
         (safeUser as any).profile.verificationStatus;
       (safeUser as any).rejectionReason =
         (safeUser as any).profile.rejectionReason ?? null;
+    }
+
+    if (Array.isArray(safeUser.addresses)) {
+      safeUser.addresses = this.sortCustomerAddresses(safeUser.addresses);
+    }
+    if (Array.isArray(safeUser.serviceAreas)) {
+      safeUser.serviceAreas = this.sortServiceAreas(safeUser.serviceAreas);
+    }
+    if (Array.isArray((safeUser as any).bankAccounts)) {
+      (safeUser as any).bankAccounts = this.sortBankAccounts((safeUser as any).bankAccounts);
     }
 
     return {
@@ -1598,6 +1611,38 @@ export class UserService {
       });
   }
 
+  private sortCustomerAddresses(addresses: any[]): any[] {
+    if (!Array.isArray(addresses)) return [];
+    return addresses
+      .filter((a: any) => !a.deletedAt)
+      .sort((a: any, b: any) => {
+        const aDefault = a.isDefault ? 1 : 0;
+        const bDefault = b.isDefault ? 1 : 0;
+        if (aDefault !== bDefault) {
+          return bDefault - aDefault;
+        }
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
+  }
+
+  private sortBankAccounts(accounts: any[]): any[] {
+    if (!Array.isArray(accounts)) return [];
+    return accounts
+      .filter((a: any) => !a.deletedAt)
+      .sort((a: any, b: any) => {
+        const aPrimary = a.isPrimary ? 1 : 0;
+        const bPrimary = b.isPrimary ? 1 : 0;
+        if (aPrimary !== bPrimary) {
+          return bPrimary - aPrimary;
+        }
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
+  }
+
   async getAllUsers(query: GetAllUsersDto) {
     const { users, total } = await this.userRepository.getAllUsers(query);
 
@@ -1704,10 +1749,13 @@ export class UserService {
         }
 
         if (Array.isArray(safeUser.addresses)) {
-          safeUser.addresses = safeUser.addresses.filter((a: any) => !a.deletedAt);
+          safeUser.addresses = this.sortCustomerAddresses(safeUser.addresses);
         }
         if (Array.isArray(safeUser.serviceAreas)) {
           safeUser.serviceAreas = this.sortServiceAreas(safeUser.serviceAreas);
+        }
+        if (Array.isArray((safeUser as any).bankAccounts)) {
+          (safeUser as any).bankAccounts = this.sortBankAccounts((safeUser as any).bankAccounts);
         }
 
         return safeUser;
@@ -2208,10 +2256,13 @@ export class UserService {
       }
 
       if (Array.isArray(safeUser.addresses)) {
-        safeUser.addresses = safeUser.addresses.filter((a: any) => !a.deletedAt);
+        safeUser.addresses = this.sortCustomerAddresses(safeUser.addresses);
       }
       if (Array.isArray(safeUser.serviceAreas)) {
         safeUser.serviceAreas = this.sortServiceAreas(safeUser.serviceAreas);
+      }
+      if (Array.isArray((safeUser as any).bankAccounts)) {
+        (safeUser as any).bankAccounts = this.sortBankAccounts((safeUser as any).bankAccounts);
       }
 
       return {
@@ -2326,7 +2377,7 @@ export class UserService {
     return {
       success: true,
       message: 'Addresses fetched successfully',
-      data,
+      data: this.sortCustomerAddresses(data),
       pagination: {
         total,
         page,
@@ -2518,7 +2569,16 @@ export class UserService {
         throw new BadRequestException('purohitId is required for admin');
       }
 
-      const user = await this.userRepository.findById(requestedPurohitId);
+      let user = await this.userRepository.findById(requestedPurohitId);
+      if (!user || user.role !== USER_ROLE.PUROHIT) {
+        const profile = await this.purohitProfileRepository.findOne({
+          where: { id: requestedPurohitId },
+        });
+        if (profile) {
+          user = await this.userRepository.findById(profile.userId);
+        }
+      }
+
       if (!user || user.role !== USER_ROLE.PUROHIT) {
         throw new NotFoundException('Purohit not found');
       }
@@ -2560,9 +2620,19 @@ export class UserService {
       const areaRepo = manager.getRepository(PurohitServiceArea);
 
       let isDefault: boolean;
-      if (dto.isDefault === true || (dto.isDefault as any) === 'true') {
+      if (
+        dto.isDefault === true ||
+        (dto.isDefault as any) === 'true' ||
+        (dto.isDefault as any) === 1 ||
+        (dto.isDefault as any) === '1'
+      ) {
         isDefault = true;
-      } else if (dto.isDefault === false || (dto.isDefault as any) === 'false') {
+      } else if (
+        dto.isDefault === false ||
+        (dto.isDefault as any) === 'false' ||
+        (dto.isDefault as any) === 0 ||
+        (dto.isDefault as any) === '0'
+      ) {
         isDefault = false;
       } else {
         const existingCount =
@@ -2670,7 +2740,13 @@ export class UserService {
     const { id: _ignoredId, purohitId: _ignoredPurohitId, ...updatePayload } = dto;
     let updated: PurohitServiceArea | null;
 
-    if (dto.isDefault === true || (dto.isDefault as any) === 'true') {
+    const isSettingDefault =
+      dto.isDefault === true ||
+      (dto.isDefault as any) === 'true' ||
+      (dto.isDefault as any) === 1 ||
+      (dto.isDefault as any) === '1';
+
+    if (isSettingDefault) {
       await this.dataSource.transaction(async (manager) => {
         await this.acquireOwnerLock(
           manager,
@@ -2979,7 +3055,7 @@ export class UserService {
     return {
       success: true,
       message: 'Bank accounts fetched successfully',
-      data,
+      data: this.sortBankAccounts(data),
       pagination: {
         total,
         page,

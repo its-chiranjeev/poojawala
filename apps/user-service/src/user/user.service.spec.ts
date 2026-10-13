@@ -2475,6 +2475,22 @@ describe('UserService - Purohit Verification Rework', () => {
         expect(area1.addressLabel).toBe('Updated Label');
         expect(area1.isDefault).toBe(true);
       });
+
+      it('26. Admin update setting isDefault=true unsets previous default service area', async () => {
+        expect(area1.isDefault).toBe(true);
+        expect(area2.isDefault).toBe(false);
+
+        const res = await service.updateServiceArea(
+          { id: 999, role: USER_ROLE.ADMIN },
+          2,
+          { isDefault: true } as any,
+          testUser.id,
+        );
+
+        expect(res.success).toBe(true);
+        expect(area1.isDefault).toBe(false);
+        expect(area2.isDefault).toBe(true);
+      });
     });
 
     describe('Controller Decorator and Authorization Guard Verification', () => {
