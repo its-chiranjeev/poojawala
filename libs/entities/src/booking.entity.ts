@@ -169,6 +169,9 @@ export class Booking {
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   finalAmount?: number;
 
+  @Column({ type: 'jsonb', nullable: true })
+  priceBreakDown?: Record<string, any> | null;
+
   // Snapshot of effective token percentage at booking creation (e.g. 30)
   @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
   tokenPercentage?: number | null;

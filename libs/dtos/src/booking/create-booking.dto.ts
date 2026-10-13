@@ -12,6 +12,7 @@ import {
   Min,
   IsIn,
   ValidateNested,
+  IsArray,
 } from 'class-validator';
 import { SERVICE_PLAN } from '@poojawala/entities';
 import { CreateCustomerAddressDto } from '../user/add-customer-address.dto';
@@ -84,4 +85,11 @@ export class CreateBookingDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.toUpperCase() : value))
   @IsEnum(BOOKING_PAYMENT_OPTION, { message: 'paymentOption must be either TOKEN or FULL' })
   paymentOption?: BOOKING_PAYMENT_OPTION;
+
+  @IsOptional()
+  @IsArray()
+  @Type(() => Number)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  featureIds?: number[];
 }

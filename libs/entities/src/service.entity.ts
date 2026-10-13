@@ -42,10 +42,9 @@ export interface ServicePlanDetails {
   tokenAmount?: number;
   basicPurohitPayoutAmount?: number;
   standardPurohitPayoutAmount?: number;
-  // TODO: Previously named items, renamed to features per requirement
-  // items?: Record<string, any>;
-  features?: Record<string, any>;
-  [featureKey: string]: ServicePlanFeatureValue | undefined;
+  // Features can be array of feature objects or legacy record
+  features?: any;
+  [featureKey: string]: any;
 }
 
 export interface ServicePlans {

@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ServiceController } from './service.controller';
 import { ServiceService } from './service.service';
-import { Service, Category, Temple } from '@poojawala/entities';
+import { Service, Category, Temple, ServiceFeature } from '@poojawala/entities';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   ServiceRepository,
@@ -9,6 +9,7 @@ import {
   PurohitServiceRepository,
   PurohitProfileRepository,
   TempleRepository,
+  ServiceFeatureRepository,
 } from '@poojawala/repositories';
 import { S3Module } from '@poojawala/s3';
 import { PurohitService } from '@poojawala/entities';
@@ -19,7 +20,14 @@ import { EmailServicesModule } from '@poojawala/email-services';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Service, Category, PurohitService, PurohitProfile, Temple]),
+    TypeOrmModule.forFeature([
+      Service,
+      Category,
+      PurohitService,
+      PurohitProfile,
+      Temple,
+      ServiceFeature,
+    ]),
     S3Module,
     CommonModule,
     NotificationModule,
@@ -33,6 +41,7 @@ import { EmailServicesModule } from '@poojawala/email-services';
     PurohitServiceRepository,
     PurohitProfileRepository,
     TempleRepository,
+    ServiceFeatureRepository,
   ],
 })
 export class ServiceModule {}

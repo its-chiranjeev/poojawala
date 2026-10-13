@@ -6,6 +6,7 @@ import {
   PurohitServiceRepository,
   PurohitProfileRepository,
   TempleRepository,
+  ServiceFeatureRepository,
 } from '@poojawala/repositories';
 import { S3Service } from '@poojawala/s3';
 import { AuditLogService } from '@poojawala/common';
@@ -25,6 +26,7 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
   let mockPurohitServiceRepo: any;
   let mockPurohitProfileRepo: any;
   let mockAuditLogService: any;
+  let mockServiceFeatureRepo: any;
 
   const sampleTemple: Temple = {
     id: 10,
@@ -156,6 +158,11 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
     mockPurohitProfileRepo = {};
     mockAuditLogService = {
       createAuditLog: jest.fn().mockResolvedValue(undefined),
+    mockServiceFeatureRepo = {
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
+      create: jest.fn((data) => ({ ...data })),
+      save: jest.fn().mockResolvedValue([]),
+      findByServiceId: jest.fn().mockResolvedValue([]),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -168,6 +175,7 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
         { provide: PurohitServiceRepository, useValue: mockPurohitServiceRepo },
         { provide: PurohitProfileRepository, useValue: mockPurohitProfileRepo },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: ServiceFeatureRepository, useValue: mockServiceFeatureRepo },
       ],
     }).compile();
 

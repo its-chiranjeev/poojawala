@@ -45,6 +45,8 @@ import {
   PAYMENT_TYPE,
   CUSTOMER_PAYMENT_METHOD,
   PAYMENT_STATUS,
+  ServiceFeature,
+  SERVICE_FEATURE_TYPE,
 } from '@poojawala/entities';
 import { BookingRepository } from '@poojawala/repositories';
 import {
@@ -79,6 +81,8 @@ export interface CreateBookingResponse {
   paymentStatus: BOOKING_PAYMENT_STATUS;
   paymentId: number | string | null;
   paymentUrl: string | null;
+  finalAmount?: number | null;
+  priceBreakDown?: Record<string, any> | null;
 }
 
 export interface CreateBookingByAdminResponse {
@@ -91,6 +95,8 @@ export interface CreateBookingByAdminResponse {
   paymentId: null;
   paymentUrl: null;
   purohitId?: number | null;
+  finalAmount?: number | null;
+  priceBreakDown?: Record<string, any> | null;
 }
 
 interface CouponCalculationResult {
@@ -519,6 +525,65 @@ export class BookingService {
           );
         }
 
+        // Validate optional features and compute their total
+        const selectedFeaturesList: {
+          id: number;
+          title: string;
+          type: string;
+          amount: number;
+        }[] = [];
+        let featuresTotal = 0;
+
+        if (Array.isArray(dto.featureIds) && dto.featureIds.length > 0) {
+          const uniqueFeatureIds = [...new Set(dto.featureIds)];
+          const featureRepository = manager.getRepository(ServiceFeature);
+
+          const foundFeatures = await featureRepository
+            .createQueryBuilder('f')
+            .where('f.id IN (:...ids)', { ids: uniqueFeatureIds })
+            .andWhere('f.deletedAt IS NULL')
+            .andWhere('f.isActive = :isActive', { isActive: true })
+            .getMany();
+
+          if (foundFeatures.length !== uniqueFeatureIds.length) {
+            throw new BadRequestException(
+              'One or more selected features do not exist or are inactive',
+            );
+          }
+
+          for (const feat of foundFeatures) {
+            if (feat.serviceId !== service.id) {
+              throw new BadRequestException(
+                `Feature "${feat.title}" (ID: ${feat.id}) does not belong to service "${service.name}"`,
+              );
+            }
+
+            if (String(feat.plan).toUpperCase() !== String(selectedPlan).toUpperCase()) {
+              throw new BadRequestException(
+                `Feature "${feat.title}" (ID: ${feat.id}) is for ${feat.plan} plan, but ${selectedPlan} plan was selected`,
+              );
+            }
+
+            if (feat.type !== SERVICE_FEATURE_TYPE.PRICE) {
+              throw new BadRequestException(
+                `Feature "${feat.title}" (ID: ${feat.id}) cannot be selected as an add-on. Only features with type PRICE can be added to a booking`,
+              );
+            }
+
+            const featAmount = Number(feat.value) || 0;
+            featuresTotal += featAmount;
+
+            selectedFeaturesList.push({
+              id: feat.id,
+              title: feat.title,
+              type: feat.type,
+              amount: featAmount,
+            });
+          }
+        }
+
+        const totalServicePrice = Number((bookingPrice + featuresTotal).toFixed(2));
+
         let appliedCoupon: Coupon | null = null;
         let discountAmount = 0;
 
@@ -528,22 +593,22 @@ export class BookingService {
             customer.id,
             service.id,
             couponCode,
-            bookingPrice, // Use resolved fixed service price
+            totalServicePrice,
           );
 
           appliedCoupon = couponResult.coupon;
           discountAmount = couponResult.discountAmount;
         }
 
-        // Purohit payout and commission are calculated using the selected plan's price
+        // Purohit payout and commission are calculated using total service price (base + features)
         const platformCommission = Number(
-          (bookingPrice * (commissionPercentage / 100)).toFixed(2),
+          (totalServicePrice * (commissionPercentage / 100)).toFixed(2),
         );
         const purohitPayoutAmount = Number(
-          (bookingPrice - platformCommission).toFixed(2),
+          (totalServicePrice - platformCommission).toFixed(2),
         );
         const finalAmount = Number(
-          (bookingPrice - discountAmount + donationAmount).toFixed(2),
+          (totalServicePrice - discountAmount + donationAmount).toFixed(2),
         );
 
         // Effective Token Percentage: defaults to 30 if null or not set on service
@@ -557,6 +622,22 @@ export class BookingService {
         );
         const paidAmount = 0.0;
         const remainingAmount = finalAmount;
+
+        const priceBreakDown = {
+          basePrice: bookingPrice,
+          selectedFeatures: selectedFeaturesList,
+          featuresTotal: Number(featuresTotal.toFixed(2)),
+          subtotal: totalServicePrice,
+          commissionPercentage,
+          platformCommission,
+          purohitPayoutAmount,
+          discountAmount,
+          donationAmount,
+          finalAmount,
+          tokenPercentage: effectiveTokenPercentage,
+          tokenAmount,
+          remainingAmount,
+        };
 
         const bookingNumber =
           await this.generateUniqueBookingNumber(bookingRepository);
@@ -574,9 +655,7 @@ export class BookingService {
           customFields: dto.customFields ?? undefined,
           commissionPercentage,
           plan: selectedPlan,
-          // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
-          // samagriIncluded: dto.samagriIncluded ?? false,
-          servicePrice: bookingPrice,
+          servicePrice: totalServicePrice,
           platformCommission,
           purohitPayoutAmount,
           couponCode: appliedCoupon?.code ?? undefined,
@@ -587,6 +666,7 @@ export class BookingService {
           tokenAmount,
           paidAmount,
           remainingAmount,
+          priceBreakDown,
           status: BOOKING_STATUS.PENDING,
           paymentType: BOOKING_PAYMENT_TYPE.TOKEN,
           paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
@@ -871,6 +951,8 @@ export class BookingService {
         paymentStatus: transactionResult.savedBooking.paymentStatus,
         paymentId: existingPaymentId,
         paymentUrl: existingPaymentUrl,
+        finalAmount: Number(transactionResult.savedBooking.finalAmount),
+        priceBreakDown: transactionResult.savedBooking.priceBreakDown ?? null,
       };
 
       return bookingData;
@@ -4736,6 +4818,65 @@ export class BookingService {
           );
         }
 
+        // Validate optional features and compute their total
+        const selectedFeaturesList: {
+          id: number;
+          title: string;
+          type: string;
+          amount: number;
+        }[] = [];
+        let featuresTotal = 0;
+
+        if (Array.isArray(dto.featureIds) && dto.featureIds.length > 0) {
+          const uniqueFeatureIds = [...new Set(dto.featureIds)];
+          const featureRepository = manager.getRepository(ServiceFeature);
+
+          const foundFeatures = await featureRepository
+            .createQueryBuilder('f')
+            .where('f.id IN (:...ids)', { ids: uniqueFeatureIds })
+            .andWhere('f.deletedAt IS NULL')
+            .andWhere('f.isActive = :isActive', { isActive: true })
+            .getMany();
+
+          if (foundFeatures.length !== uniqueFeatureIds.length) {
+            throw new BadRequestException(
+              'One or more selected features do not exist or are inactive',
+            );
+          }
+
+          for (const feat of foundFeatures) {
+            if (feat.serviceId !== service.id) {
+              throw new BadRequestException(
+                `Feature "${feat.title}" (ID: ${feat.id}) does not belong to service "${service.name}"`,
+              );
+            }
+
+            if (String(feat.plan).toUpperCase() !== String(selectedPlan).toUpperCase()) {
+              throw new BadRequestException(
+                `Feature "${feat.title}" (ID: ${feat.id}) is for ${feat.plan} plan, but ${selectedPlan} plan was selected`,
+              );
+            }
+
+            if (feat.type !== SERVICE_FEATURE_TYPE.PRICE) {
+              throw new BadRequestException(
+                `Feature "${feat.title}" (ID: ${feat.id}) cannot be selected as an add-on. Only features with type PRICE can be added to a booking`,
+              );
+            }
+
+            const featAmount = Number(feat.value) || 0;
+            featuresTotal += featAmount;
+
+            selectedFeaturesList.push({
+              id: feat.id,
+              title: feat.title,
+              type: feat.type,
+              amount: featAmount,
+            });
+          }
+        }
+
+        const totalServicePrice = Number((bookingPrice + featuresTotal).toFixed(2));
+
         let appliedCoupon: Coupon | null = null;
         let discountAmount = 0;
 
@@ -4745,7 +4886,7 @@ export class BookingService {
             customer.id,
             service.id,
             dto.couponCode.trim().toUpperCase(),
-            bookingPrice,
+            totalServicePrice,
           );
           appliedCoupon = couponResult.coupon;
           discountAmount = couponResult.discountAmount;
@@ -4753,8 +4894,8 @@ export class BookingService {
 
         const purohitBasePrice =
           service.plans?.basic?.price != null && Number(service.plans.basic.price) > 0
-            ? Number(service.plans.basic.price)
-            : bookingPrice;
+            ? Number(service.plans.basic.price) + featuresTotal
+            : totalServicePrice;
 
         const platformCommission = Number(
           (purohitBasePrice * (commissionPercentage / 100)).toFixed(2),
@@ -4764,7 +4905,7 @@ export class BookingService {
         );
 
         const finalAmount = Number(
-          (bookingPrice - discountAmount + donationAmount).toFixed(2),
+          (totalServicePrice - discountAmount + donationAmount).toFixed(2),
         );
 
         // TOKEN PAYMENT BYPASS FOR ADMIN-CREATED BOOKINGS:
@@ -4773,6 +4914,22 @@ export class BookingService {
         const tokenAmount = null;
         const paidAmount = 0.0;
         const remainingAmount = finalAmount;
+
+        const priceBreakDown = {
+          basePrice: bookingPrice,
+          selectedFeatures: selectedFeaturesList,
+          featuresTotal: Number(featuresTotal.toFixed(2)),
+          subtotal: totalServicePrice,
+          commissionPercentage,
+          platformCommission,
+          purohitPayoutAmount,
+          discountAmount,
+          donationAmount,
+          finalAmount,
+          tokenPercentage: null,
+          tokenAmount: null,
+          remainingAmount: finalAmount,
+        };
 
         const bookingNumber =
           await this.generateUniqueBookingNumber(bookingRepository);
@@ -4793,7 +4950,7 @@ export class BookingService {
           },
           commissionPercentage,
           plan: selectedPlan,
-          servicePrice: bookingPrice,
+          servicePrice: totalServicePrice,
           platformCommission,
           purohitPayoutAmount,
           couponCode: appliedCoupon?.code ?? undefined,
@@ -4804,6 +4961,7 @@ export class BookingService {
           tokenAmount,
           paidAmount,
           remainingAmount,
+          priceBreakDown,
           // TODO: Deprecated. Admin-created bookings previously always required manual assignment and NOT_REQUIRED status:
           // status: BOOKING_STATUS.CONFIRMED,
           // paymentStatus: BOOKING_PAYMENT_STATUS.NOT_REQUIRED,
@@ -5062,6 +5220,8 @@ export class BookingService {
         paymentId: null,
         paymentUrl: null,
         purohitId: transactionResult.savedBooking.purohitId ?? null,
+        finalAmount: Number(transactionResult.savedBooking.finalAmount),
+        priceBreakDown: transactionResult.savedBooking.priceBreakDown ?? null,
       };
 
       return responseData;

@@ -16,6 +16,7 @@ import {
   PurohitServiceRepository,
   PurohitProfileRepository,
   TempleRepository,
+  ServiceFeatureRepository,
 } from '@poojawala/repositories';
 import { S3Service } from '@poojawala/s3';
 import {
@@ -31,7 +32,20 @@ import {
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { QueryFailedError, ILike } from 'typeorm';
-import { USER_ROLE, AUDIT_MODULE, ACTOR_TYPE, PUROHIT_VERIFICATION_STATUS, ServicePlans, ServicePlanDetails, NOTIFICATION_TYPE, ServiceCity, CATEGORY_TYPE, Temple } from '@poojawala/entities';
+import {
+  USER_ROLE,
+  AUDIT_MODULE,
+  ACTOR_TYPE,
+  PUROHIT_VERIFICATION_STATUS,
+  ServicePlans,
+  ServicePlanDetails,
+  NOTIFICATION_TYPE,
+  ServiceCity,
+  CATEGORY_TYPE,
+  Temple,
+  SERVICE_FEATURE_PLAN,
+  SERVICE_FEATURE_TYPE,
+} from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
 import { NotificationService } from '@poojawala/notification';
 import { EmailService } from '@poojawala/email-services';
@@ -62,6 +76,7 @@ export class ServiceService {
     private readonly PurohitProfileRepository: PurohitProfileRepository,
     private readonly auditLogService: AuditLogService,
     private readonly templeRepository: TempleRepository,
+    private readonly serviceFeatureRepository: ServiceFeatureRepository,
     @Optional() private readonly notificationService?: NotificationService,
     @Optional() private readonly emailService?: EmailService,
   ) { }
@@ -113,6 +128,46 @@ export class ServiceService {
         totalPages: result.totalPages,
       },
     };
+  }
+
+  private async syncServiceFeatures(
+    serviceId: number,
+    plan: SERVICE_FEATURE_PLAN,
+    rawFeatures: any[],
+  ) {
+    if (!Array.isArray(rawFeatures)) return;
+
+    // Delete existing features for this service and plan
+    await this.serviceFeatureRepository.delete({
+      serviceId,
+      plan,
+    } as any);
+
+    if (rawFeatures.length === 0) return;
+
+    const featureEntities = rawFeatures.map((item) => {
+      const typeStr = item.type ? String(item.type).trim().toUpperCase() : 'NORMAL';
+      const type =
+        typeStr === 'PRICE'
+          ? SERVICE_FEATURE_TYPE.PRICE
+          : SERVICE_FEATURE_TYPE.NORMAL;
+      const value =
+        item.value !== undefined && item.value !== null
+          ? String(item.value)
+          : 'true';
+
+      return this.serviceFeatureRepository.create({
+        serviceId,
+        plan,
+        title: item.title ? String(item.title).trim() : '',
+        description: item.description ? String(item.description).trim() : null,
+        type,
+        value,
+        isActive: item.isActive !== undefined ? Boolean(item.isActive) : true,
+      });
+    });
+
+    await this.serviceFeatureRepository.save(featureEntities as any);
   }
 
   private validatePlanItem(
@@ -506,6 +561,18 @@ export class ServiceService {
       }
       const resolvedPlans = this.validatePlans(dto.plans);
 
+      const basicFeaturesToSync = Array.isArray((resolvedPlans.basic as any).features)
+        ? (resolvedPlans.basic as any).features
+        : undefined;
+      const standardFeaturesToSync = Array.isArray((resolvedPlans.standard as any).features)
+        ? (resolvedPlans.standard as any).features
+        : undefined;
+
+      delete (resolvedPlans.basic as any).features;
+      delete (resolvedPlans.basic as any).items;
+      delete (resolvedPlans.standard as any).features;
+      delete (resolvedPlans.standard as any).items;
+
       // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
       /*
       if (
@@ -625,6 +692,22 @@ export class ServiceService {
       service.slug = dto.slug?.trim() || null;
 
       const savedService = await this.serviceRepository.save(service);
+
+      if (basicFeaturesToSync) {
+        await this.syncServiceFeatures(
+          savedService.id,
+          SERVICE_FEATURE_PLAN.BASIC,
+          basicFeaturesToSync,
+        );
+      }
+      if (standardFeaturesToSync) {
+        await this.syncServiceFeatures(
+          savedService.id,
+          SERVICE_FEATURE_PLAN.STANDARD,
+          standardFeaturesToSync,
+        );
+      }
+      (savedService as any).serviceFeatures = await this.serviceFeatureRepository.findByServiceId(savedService.id);
 
       (savedService as any).templeId = savedService.templeId ?? null;
       (savedService as any).temple = validatedTemple
@@ -817,6 +900,8 @@ export class ServiceService {
       }
     }
 
+    let basicFeaturesToSync: any[] | undefined = undefined;
+    let standardFeaturesToSync: any[] | undefined = undefined;
     let mergedPlans: ServicePlans | undefined = undefined;
     if (dto.plans !== undefined) {
       if (!dto.plans || typeof dto.plans !== 'object' || Array.isArray(dto.plans)) {
@@ -845,6 +930,12 @@ export class ServiceService {
         ? { ...currentPlans.standard }
         : { price: 0 };
 
+      // Ensure features are removed from existing plans if previously stored
+      delete (newBasic as any).features;
+      delete (newBasic as any).items;
+      delete (newStandard as any).features;
+      delete (newStandard as any).items;
+
       if (dto.plans.basic !== undefined) {
         const validatedBasic = this.validatePlanItem('basic', dto.plans.basic, true);
         const resolvedPrice =
@@ -852,16 +943,25 @@ export class ServiceService {
             ? Number(validatedBasic.price)
             : (currentPlans.basic?.price ?? 0);
 
-        // Filter out any keys explicitly set to null/undefined or replace with new plan features
-        const cleanBasicFeatures: Record<string, unknown> = {};
+        if (Array.isArray((validatedBasic as any).features)) {
+          basicFeaturesToSync = (validatedBasic as any).features;
+        }
+
+        // Filter out features/items and null/undefined values: only store pricing in plan object
+        const cleanBasicPricing: Record<string, unknown> = {};
         for (const [key, val] of Object.entries(validatedBasic)) {
-          if (val !== null && val !== undefined) {
-            cleanBasicFeatures[key] = val;
+          if (
+            val !== null &&
+            val !== undefined &&
+            key !== 'features' &&
+            key !== 'items'
+          ) {
+            cleanBasicPricing[key] = val;
           }
         }
 
         newBasic = {
-          ...cleanBasicFeatures,
+          ...cleanBasicPricing,
           price: resolvedPrice,
         };
       }
@@ -873,16 +973,25 @@ export class ServiceService {
             ? Number(validatedStandard.price)
             : (currentPlans.standard?.price ?? 0);
 
-        // Filter out any keys explicitly set to null/undefined or replace with new plan features
-        const cleanStandardFeatures: Record<string, unknown> = {};
+        if (Array.isArray((validatedStandard as any).features)) {
+          standardFeaturesToSync = (validatedStandard as any).features;
+        }
+
+        // Filter out features/items and null/undefined values: only store pricing in plan object
+        const cleanStandardPricing: Record<string, unknown> = {};
         for (const [key, val] of Object.entries(validatedStandard)) {
-          if (val !== null && val !== undefined) {
-            cleanStandardFeatures[key] = val;
+          if (
+            val !== null &&
+            val !== undefined &&
+            key !== 'features' &&
+            key !== 'items'
+          ) {
+            cleanStandardPricing[key] = val;
           }
         }
 
         newStandard = {
-          ...cleanStandardFeatures,
+          ...cleanStandardPricing,
           price: resolvedPrice,
         };
       }
@@ -995,6 +1104,22 @@ export class ServiceService {
     }
 
     const updated = await this.serviceRepository.save(service);
+
+    if (basicFeaturesToSync !== undefined) {
+      await this.syncServiceFeatures(
+        updated.id,
+        SERVICE_FEATURE_PLAN.BASIC,
+        basicFeaturesToSync,
+      );
+    }
+
+    if (standardFeaturesToSync !== undefined) {
+      await this.syncServiceFeatures(
+        updated.id,
+        SERVICE_FEATURE_PLAN.STANDARD,
+        standardFeaturesToSync,
+      );
+    }
 
     if (updated.templeId) {
       if (validatedTemple) {
@@ -1111,6 +1236,7 @@ export class ServiceService {
     // Top-level purohitPayoutAmount removed from response.
     // (updated as any).purohitPayoutAmount = this.computePurohitPayoutAmount(updated);
     this.enrichServicePlansAndToken(updated);
+    (updated as any).serviceFeatures = await this.serviceFeatureRepository.findByServiceId(updated.id);
 
     // TODO: SERVICE_MESSAGE_IMPROVEMENT
     // Old message retained for reference; replaced with plan-aware message.
@@ -1142,6 +1268,7 @@ export class ServiceService {
     // Top-level purohitPayoutAmount removed from response.
     // (service as any).purohitPayoutAmount = this.computePurohitPayoutAmount(service);
     this.enrichServicePlansAndToken(service);
+    (service as any).serviceFeatures = await this.serviceFeatureRepository.findByServiceId(id);
 
     return {
       success: true,
