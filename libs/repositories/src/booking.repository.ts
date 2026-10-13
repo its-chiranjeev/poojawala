@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
-import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, BOOKING_PAYMENT_TYPE, USER_ROLE, ASSIGNMENT_TYPE, PAYMENT_TYPE } from '@poojawala/entities';
+import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, BOOKING_PAYMENT_TYPE, USER_ROLE, ASSIGNMENT_TYPE, PAYMENT_TYPE, PAYMENT_STATUS } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 interface FindBookingsByRoleOptions {
@@ -822,19 +822,54 @@ export class BookingRepository extends BaseRepository<Booking> {
       .createQueryBuilder('booking')
       .select('COUNT(*)', 'totalBookings')
       .addSelect(
-        `COALESCE(SUM(CASE WHEN booking."paymentStatus" = :paid THEN booking."finalAmount" ELSE 0 END), 0)`,
+        `COALESCE(
+          SUM(
+            CASE 
+              WHEN booking."paymentStatus" IN (:...eligiblePaymentStatuses)
+              THEN GREATEST(
+                0,
+                COALESCE(
+                  NULLIF(booking."paidAmount", 0),
+                  CASE 
+                    WHEN booking."paymentStatus" = :paid AND booking.status != :cancelled 
+                    THEN booking."finalAmount" 
+                    ELSE 0 
+                  END,
+                  0
+                ) - COALESCE(
+                  (SELECT SUM(rf.amount) 
+                   FROM payments rf 
+                   WHERE rf."bookingId" = booking.id 
+                     AND rf."paymentType" = :refundType 
+                     AND rf.status = :refundSuccessStatus),
+                  0
+                )
+              )
+              ELSE 0 
+            END
+          ), 
+          0
+        )`,
         'totalRevenue',
       );
 
     const result = await query
       .setParameters({
+        cancelled: BOOKING_STATUS.CANCELLED,
+        eligiblePaymentStatuses: [
+          BOOKING_PAYMENT_STATUS.PAID,
+          BOOKING_PAYMENT_STATUS.PARTIAL,
+          BOOKING_PAYMENT_STATUS.PARTIALLY_REFUNDED,
+        ],
         paid: BOOKING_PAYMENT_STATUS.PAID,
+        refundType: PAYMENT_TYPE.CUSTOMER_REFUND,
+        refundSuccessStatus: PAYMENT_STATUS.SUCCESS,
       })
       .getRawOne();
 
     return {
-      totalBookings: Number(result.totalBookings) || 0,
-      totalRevenue: Number(result.totalRevenue) || 0,
+      totalBookings: Number(result?.totalBookings) || 0,
+      totalRevenue: Number(Number(result?.totalRevenue || 0).toFixed(2)),
     };
   }
 }

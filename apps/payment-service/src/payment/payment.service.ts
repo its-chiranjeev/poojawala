@@ -5104,18 +5104,57 @@ export class PaymentService {
 
     const { totalRevenue } = await bookingRepo
       .createQueryBuilder('booking')
-      .select('SUM(booking.finalAmount)', 'totalRevenue')
-      .where('booking.paymentStatus = :status', {
-        status: BOOKING_PAYMENT_STATUS.PAID,
+      .select(
+        `COALESCE(
+          SUM(
+            CASE 
+              WHEN booking."paymentStatus" IN (:...eligiblePaymentStatuses)
+              THEN GREATEST(
+                0,
+                COALESCE(
+                  NULLIF(booking."paidAmount", 0),
+                  CASE 
+                    WHEN booking."paymentStatus" = :paid AND booking.status != :cancelled 
+                    THEN booking."finalAmount" 
+                    ELSE 0 
+                  END,
+                  0
+                ) - COALESCE(
+                  (SELECT SUM(rf.amount) 
+                   FROM payments rf 
+                   WHERE rf."bookingId" = booking.id 
+                     AND rf."paymentType" = :refundType 
+                     AND rf.status = :refundSuccessStatus),
+                  0
+                )
+              )
+              ELSE 0 
+            END
+          ), 
+          0
+        )`,
+        'totalRevenue',
+      )
+      .setParameters({
+        cancelled: BOOKING_STATUS.CANCELLED,
+        eligiblePaymentStatuses: [
+          BOOKING_PAYMENT_STATUS.PAID,
+          BOOKING_PAYMENT_STATUS.PARTIAL,
+          BOOKING_PAYMENT_STATUS.PARTIALLY_REFUNDED,
+        ],
+        paid: BOOKING_PAYMENT_STATUS.PAID,
+        refundType: PAYMENT_TYPE.CUSTOMER_REFUND,
+        refundSuccessStatus: PAYMENT_STATUS.SUCCESS,
       })
       .getRawOne();
 
     const { purohitPayoutsAmount } = await bookingRepo
       .createQueryBuilder('booking')
-      .select('SUM(booking.purohitPayoutAmount)', 'purohitPayoutsAmount')
+      .select('COALESCE(SUM(booking.purohitPayoutAmount), 0)', 'purohitPayoutsAmount')
       .where('booking.purohitPayoutStatus = :status', {
         status: BOOKING_PAYMENT_STATUS.PAID,
       })
+      .andWhere('booking.purohitId IS NOT NULL')
       .getRawOne();
 
     const pendingPayoutsNumber = await bookingRepo
@@ -5126,6 +5165,10 @@ export class PaymentService {
       .andWhere('booking.paymentStatus = :paymentStatus', {
         paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
       })
+      .andWhere(
+        '(booking.remainingAmount <= 0 OR booking.remainingAmount IS NULL)',
+      )
+      .andWhere('booking.purohitPayoutAmount > 0')
       .andWhere('booking.purohitPayoutStatus = :payoutStatus', {
         payoutStatus: BOOKING_PAYMENT_STATUS.PENDING,
       })
@@ -5141,10 +5184,10 @@ export class PaymentService {
       .getCount();
 
     return {
-      totalRevenue: Number(totalRevenue) || 0,
-      purohitPayoutsAmount: Number(purohitPayoutsAmount) || 0,
-      pendingPayoutsNumber,
-      successfulPayoutsNumber,
+      totalRevenue: Number(Number(totalRevenue || 0).toFixed(2)),
+      purohitPayoutsAmount: Number(Number(purohitPayoutsAmount || 0).toFixed(2)),
+      pendingPayoutsNumber: Number(pendingPayoutsNumber) || 0,
+      successfulPayoutsNumber: Number(successfulPayoutsNumber) || 0,
     };
   }
 
