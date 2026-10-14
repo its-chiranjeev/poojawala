@@ -301,6 +301,18 @@ export class CreateServiceDto {
    * Configurable service plans: exactly 'basic' and 'standard'.
    */
   @IsDefined({ message: 'plans is required' })
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return undefined;
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  })
   @IsObject({ message: 'plans must be an object' })
   plans!: ServicePlans;
 

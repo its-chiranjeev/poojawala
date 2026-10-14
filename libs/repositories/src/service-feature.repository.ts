@@ -30,6 +30,17 @@ export class ServiceFeatureRepository extends BaseRepository<ServiceFeature> {
     return qb.orderBy('feature.id', 'ASC').getMany();
   }
 
+  async findByServiceIds(serviceIds: number[]): Promise<ServiceFeature[]> {
+    if (!serviceIds || serviceIds.length === 0) return [];
+    return this.repo
+      .createQueryBuilder('feature')
+      .where('feature.serviceId IN (:...serviceIds)', { serviceIds })
+      .andWhere('feature.deletedAt IS NULL')
+      .andWhere('feature.isActive = :isActive', { isActive: true })
+      .orderBy('feature.id', 'ASC')
+      .getMany();
+  }
+
   async softDeleteByServiceId(serviceId: number) {
     return this.repo.softDelete({ serviceId });
   }

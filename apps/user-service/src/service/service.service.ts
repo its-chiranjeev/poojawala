@@ -95,6 +95,23 @@ export class ServiceService {
 
     const result = await this.serviceRepository.findAllServices(query, isAdmin);
 
+    const serviceIds = (result.data || []).map((s: any) => s.id).filter(Boolean);
+    const featuresByServiceId = new Map<number, any[]>();
+
+    if (serviceIds.length > 0 && this.serviceFeatureRepository) {
+      try {
+        const allFeatures = await this.serviceFeatureRepository.findByServiceIds(serviceIds);
+
+        for (const feat of allFeatures || []) {
+          const list = featuresByServiceId.get(feat.serviceId) || [];
+          list.push(feat);
+          featuresByServiceId.set(feat.serviceId, list);
+        }
+      } catch (err) {
+        console.error('Failed to batch load service features:', err);
+      }
+    }
+
     const dataWithUrls = await Promise.all(
       result.data.map(async (service: any) => {
         let iconDownloadurl: string | null = null;
@@ -109,11 +126,9 @@ export class ServiceService {
         }
 
         (service as any).iconDownloadurl = iconDownloadurl;
-        // TODO: PLAN_BASED_PUROHIT_PAYOUT
-        // Top-level purohitPayoutAmount removed from response. Plan-specific payout
-        // is now inside each plan object (e.g. plans.basic.basicPurohitPayoutAmount).
-        // (service as any).purohitPayoutAmount = this.computePurohitPayoutAmount(service);
-        this.enrichServicePlansAndToken(service);
+        const serviceFeatures = featuresByServiceId.get(service.id) || [];
+        this.enrichServicePlansAndToken(service, serviceFeatures);
+        delete (service as any).serviceFeatures;
         return service;
       }),
     );
@@ -282,7 +297,7 @@ export class ServiceService {
     return Number((basePrice - platformCommission).toFixed(2));
   }
 
-  private enrichServicePlansAndToken(service: any) {
+  private enrichServicePlansAndToken(service: any, serviceFeatures?: any[]) {
     if (!service) return service;
 
     const effectiveTokenPercentage =
@@ -305,6 +320,9 @@ export class ServiceService {
 
     if (plans && typeof plans === 'object' && !Array.isArray(plans)) {
       const enrichedPlans: Record<string, any> = { ...plans };
+      const allFeatures = Array.isArray(serviceFeatures)
+        ? serviceFeatures
+        : (Array.isArray(service.serviceFeatures) ? service.serviceFeatures : []);
 
       for (const [key, plan] of Object.entries(plans)) {
         if (plan && typeof plan === 'object' && !Array.isArray(plan)) {
@@ -342,57 +360,57 @@ export class ServiceService {
             }
           }
 
-          // ── All other plan features go into `features` sub-object ───────
+          // ── Features for this plan from service_features table ───────
           const pricingKeys = new Set(['price', 'tokenAmount', `${key}PurohitPayoutAmount`]);
-          // TODO: Previously named items, renamed to features per requirement
-          // const items: Record<string, any> = {};
-          // for (const [featureKey, featureValue] of Object.entries(rawPlanRecord)) {
-          //   if (!pricingKeys.has(featureKey)) {
-          //     items[featureKey] = featureValue;
-          //   }
-          // }
-          // if (Object.keys(items).length > 0) {
-          //   structuredPlan.items = items;
-          // }
-          const features: Record<string, any> = {};
-          // Unpack nested features or legacy items if already structured
-          if (
-            rawPlanRecord.features &&
-            typeof rawPlanRecord.features === 'object' &&
-            !Array.isArray(rawPlanRecord.features)
-          ) {
-            Object.assign(features, rawPlanRecord.features);
-          }
-          if (
-            rawPlanRecord.items &&
-            typeof rawPlanRecord.items === 'object' &&
-            !Array.isArray(rawPlanRecord.items)
-          ) {
-            Object.assign(features, rawPlanRecord.items);
-          }
-          // Gather any flat feature keys
-          for (const [featureKey, featureValue] of Object.entries(rawPlanRecord)) {
+          const planDbFeatures = allFeatures.filter(
+            (f: any) => String(f.plan).toLowerCase() === key.toLowerCase(),
+          );
+
+          if (planDbFeatures.length > 0) {
+            structuredPlan.features = planDbFeatures;
+          } else if (Array.isArray(rawPlanRecord.features) && rawPlanRecord.features.length > 0) {
+            structuredPlan.features = rawPlanRecord.features;
+          } else {
+            const features: Record<string, any> = {};
+            // Unpack nested features or legacy items if already structured
             if (
-              !pricingKeys.has(featureKey) &&
-              featureKey !== 'features' &&
-              featureKey !== 'items'
+              rawPlanRecord.features &&
+              typeof rawPlanRecord.features === 'object' &&
+              !Array.isArray(rawPlanRecord.features)
             ) {
-              features[featureKey] = featureValue;
+              Object.assign(features, rawPlanRecord.features);
             }
-          }
-          if (Object.keys(features).length > 0) {
-            structuredPlan.features = features;
-            // Backward compatibility: attach non-enumerable properties so legacy
-            // code/tests accessing plan[key] continue to work while JSON output
-            // cleanly contains only { price, tokenAmount, payout, features: {...} }
-            for (const [featKey, featVal] of Object.entries(features)) {
-              if (!(featKey in structuredPlan)) {
-                Object.defineProperty(structuredPlan, featKey, {
-                  value: featVal,
-                  enumerable: false,
-                  writable: true,
-                  configurable: true,
-                });
+            if (
+              rawPlanRecord.items &&
+              typeof rawPlanRecord.items === 'object' &&
+              !Array.isArray(rawPlanRecord.items)
+            ) {
+              Object.assign(features, rawPlanRecord.items);
+            }
+            // Gather any flat feature keys
+            for (const [featureKey, featureValue] of Object.entries(rawPlanRecord)) {
+              if (
+                !pricingKeys.has(featureKey) &&
+                featureKey !== 'features' &&
+                featureKey !== 'items'
+              ) {
+                features[featureKey] = featureValue;
+              }
+            }
+            if (Object.keys(features).length > 0) {
+              structuredPlan.features = features;
+              // Backward compatibility: attach non-enumerable properties so legacy
+              // code/tests accessing plan[key] continue to work while JSON output
+              // cleanly contains only { price, tokenAmount, payout, features: {...} }
+              for (const [featKey, featVal] of Object.entries(features)) {
+                if (!(featKey in structuredPlan)) {
+                  Object.defineProperty(structuredPlan, featKey, {
+                    value: featVal,
+                    enumerable: false,
+                    writable: true,
+                    configurable: true,
+                  });
+                }
               }
             }
           }
@@ -719,7 +737,7 @@ export class ServiceService {
           standardFeaturesToSync,
         );
       }
-      (savedService as any).serviceFeatures = await this.serviceFeatureRepository.findByServiceId(savedService.id);
+      const createdFeatures = await this.serviceFeatureRepository.findByServiceId(savedService.id);
 
       (savedService as any).templeId = savedService.templeId ?? null;
       (savedService as any).temple = validatedTemple
@@ -779,7 +797,8 @@ export class ServiceService {
       // TODO: PLAN_BASED_PUROHIT_PAYOUT
       // Top-level purohitPayoutAmount removed from response.
       // (savedService as any).purohitPayoutAmount = this.computePurohitPayoutAmount(savedService);
-      this.enrichServicePlansAndToken(savedService);
+      this.enrichServicePlansAndToken(savedService, createdFeatures);
+      delete (savedService as any).serviceFeatures;
 
       // TODO: SERVICE_MESSAGE_IMPROVEMENT
       // Old message retained for reference; replaced with plan-aware message.
@@ -1272,11 +1291,9 @@ export class ServiceService {
       }
     }
 
-    // TODO: PLAN_BASED_PUROHIT_PAYOUT
-    // Top-level purohitPayoutAmount removed from response.
-    // (updated as any).purohitPayoutAmount = this.computePurohitPayoutAmount(updated);
-    this.enrichServicePlansAndToken(updated);
-    (updated as any).serviceFeatures = await this.serviceFeatureRepository.findByServiceId(updated.id);
+    const updatedFeatures = await this.serviceFeatureRepository.findByServiceId(updated.id);
+    this.enrichServicePlansAndToken(updated, updatedFeatures);
+    delete (updated as any).serviceFeatures;
 
     // TODO: SERVICE_MESSAGE_IMPROVEMENT
     // Old message retained for reference; replaced with plan-aware message.
@@ -1304,11 +1321,9 @@ export class ServiceService {
       }
     }
     (service as any).iconDownloadurl = iconDownloadurl;
-    // TODO: PLAN_BASED_PUROHIT_PAYOUT
-    // Top-level purohitPayoutAmount removed from response.
-    // (service as any).purohitPayoutAmount = this.computePurohitPayoutAmount(service);
-    this.enrichServicePlansAndToken(service);
-    (service as any).serviceFeatures = await this.serviceFeatureRepository.findByServiceId(id);
+    const serviceFeatures = await this.serviceFeatureRepository.findByServiceId(id);
+    this.enrichServicePlansAndToken(service, serviceFeatures);
+    delete (service as any).serviceFeatures;
 
     return {
       success: true,

@@ -365,6 +365,8 @@ describe('TempleService', () => {
         name: 'Kalka Mata Special Puja',
         slug: 'kalka-mata-special-puja',
         description: 'Special devotional puja',
+        iconUrl: null,
+        iconDownloadurl: null,
         isActive: true,
         plans: null,
       });
@@ -374,6 +376,8 @@ describe('TempleService', () => {
         name: 'Kalka Ji Mandir Sankalp Puja',
         slug: null,
         description: 'Sankalp puja',
+        iconUrl: null,
+        iconDownloadurl: null,
         isActive: true,
         plans: null,
       });

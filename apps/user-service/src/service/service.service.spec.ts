@@ -139,6 +139,8 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
       findOne: jest.fn(),
       findAllServices: jest.fn(),
       findById: jest.fn(),
+      getMaxSortOrder: jest.fn().mockResolvedValue(0),
+      shiftSortOrdersUp: jest.fn().mockResolvedValue(undefined),
     };
 
     mockCategoryRepo = {
@@ -158,11 +160,13 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
     mockPurohitProfileRepo = {};
     mockAuditLogService = {
       createAuditLog: jest.fn().mockResolvedValue(undefined),
+    };
     mockServiceFeatureRepo = {
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
       create: jest.fn((data) => ({ ...data })),
       save: jest.fn().mockResolvedValue([]),
       findByServiceId: jest.fn().mockResolvedValue([]),
+      findByServiceIds: jest.fn().mockResolvedValue([]),
     };
 
     const module: TestingModule = await Test.createTestingModule({

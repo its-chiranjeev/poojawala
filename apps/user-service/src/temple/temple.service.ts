@@ -35,12 +35,119 @@ export class TempleService {
         name: s.name,
         slug: s.slug ?? null,
         description: s.description ?? null,
+        iconUrl: s.iconUrl ?? null,
+        iconDownloadurl: s.iconDownloadurl ?? null,
         isActive: s.isActive,
         plans: s.plans ?? null,
       }));
     }
 
     return formatted;
+  }
+
+  private enrichServicePlansAndToken(service: any, serviceFeatures?: any[]) {
+    if (!service || !service.plans) return null;
+
+    const effectiveTokenPercentage =
+      service.tokenPercentage != null && Number(service.tokenPercentage) > 0
+        ? Number(service.tokenPercentage)
+        : 30;
+
+    const effectiveCommissionPercentage =
+      service.commissionPercentage != null
+        ? Number(service.commissionPercentage)
+        : 10;
+
+    let plans = service.plans;
+    if (typeof plans === 'string') {
+      try {
+        plans = JSON.parse(plans);
+      } catch { }
+    }
+
+    if (plans && typeof plans === 'object' && !Array.isArray(plans)) {
+      const enrichedPlans: Record<string, any> = { ...plans };
+      const allFeatures = Array.isArray(serviceFeatures) ? serviceFeatures : [];
+
+      for (const [key, plan] of Object.entries(plans)) {
+        if (plan && typeof plan === 'object' && !Array.isArray(plan)) {
+          const rawPlanRecord = { ...(plan as any) };
+
+          const structuredPlan: Record<string, any> = {};
+
+          if (
+            rawPlanRecord.price != null &&
+            !isNaN(Number(rawPlanRecord.price)) &&
+            Number(rawPlanRecord.price) > 0
+          ) {
+            const planPrice = Number(rawPlanRecord.price);
+            structuredPlan.price = planPrice;
+
+            const tokenAmount = Number(
+              ((planPrice * effectiveTokenPercentage) / 100).toFixed(2),
+            );
+            structuredPlan.tokenAmount = tokenAmount;
+
+            const planPayoutFieldKey = `${key}PurohitPayoutAmount`;
+            const platformCommission = Number(
+              ((planPrice * effectiveCommissionPercentage) / 100).toFixed(2),
+            );
+            structuredPlan[planPayoutFieldKey] = Number(
+              (planPrice - platformCommission).toFixed(2),
+            );
+          } else {
+            if (rawPlanRecord.price != null) {
+              structuredPlan.price = rawPlanRecord.price;
+            }
+          }
+
+          const pricingKeys = new Set(['price', 'tokenAmount', `${key}PurohitPayoutAmount`]);
+          const planDbFeatures = allFeatures.filter(
+            (f: any) => String(f.plan).toLowerCase() === key.toLowerCase(),
+          );
+
+          if (planDbFeatures.length > 0) {
+            structuredPlan.features = planDbFeatures;
+          } else if (Array.isArray(rawPlanRecord.features) && rawPlanRecord.features.length > 0) {
+            structuredPlan.features = rawPlanRecord.features;
+          } else {
+            const features: Record<string, any> = {};
+            if (
+              rawPlanRecord.features &&
+              typeof rawPlanRecord.features === 'object' &&
+              !Array.isArray(rawPlanRecord.features)
+            ) {
+              Object.assign(features, rawPlanRecord.features);
+            }
+            if (
+              rawPlanRecord.items &&
+              typeof rawPlanRecord.items === 'object' &&
+              !Array.isArray(rawPlanRecord.items)
+            ) {
+              Object.assign(features, rawPlanRecord.items);
+            }
+            for (const [featureKey, featureValue] of Object.entries(rawPlanRecord)) {
+              if (
+                !pricingKeys.has(featureKey) &&
+                featureKey !== 'features' &&
+                featureKey !== 'items'
+              ) {
+                features[featureKey] = featureValue;
+              }
+            }
+            if (Object.keys(features).length > 0) {
+              structuredPlan.features = features;
+            }
+          }
+
+          enrichedPlans[key] = structuredPlan;
+        }
+      }
+
+      return enrichedPlans;
+    }
+
+    return plans;
   }
 
   async createTemple(
@@ -299,11 +406,63 @@ export class TempleService {
 
     const services = await this.templeRepository.findActiveServicesByTempleId(id);
 
+    let enrichedServices: any[] | undefined = undefined;
+    if (services !== undefined && Array.isArray(services)) {
+      const serviceIds = services.map((s) => s.id).filter(Boolean);
+      const featuresByServiceId = new Map<number, any[]>();
+      if (
+        serviceIds.length > 0 &&
+        typeof this.templeRepository.findFeaturesByServiceIds === 'function'
+      ) {
+        try {
+          const allFeatures =
+            await this.templeRepository.findFeaturesByServiceIds(serviceIds);
+          for (const feat of allFeatures || []) {
+            const list = featuresByServiceId.get(feat.serviceId) || [];
+            list.push(feat);
+            featuresByServiceId.set(feat.serviceId, list);
+          }
+        } catch (e) {
+          console.error(
+            'Failed to load service features for temple services:',
+            e,
+          );
+        }
+      }
+
+      enrichedServices = await Promise.all(
+        services.map(async (s) => {
+          let iconDownloadurl: string | null = null;
+          if (s.iconUrl) {
+            try {
+              iconDownloadurl = await this.s3Service.getDownloadUrl(s.iconUrl);
+            } catch {
+              iconDownloadurl = s.iconUrl;
+            }
+          }
+
+          const features = featuresByServiceId.get(s.id) || [];
+          const plans = this.enrichServicePlansAndToken(s, features);
+
+          return {
+            id: s.id,
+            name: s.name,
+            slug: s.slug ?? null,
+            description: s.description ?? null,
+            iconUrl: s.iconUrl ?? null,
+            iconDownloadurl: iconDownloadurl ?? null,
+            isActive: s.isActive,
+            plans: plans ?? null,
+          };
+        }),
+      );
+    }
+
     return {
       success: true,
       statusCode: 200,
       message: 'Temple fetched successfully',
-      data: this.formatTempleResponse(temple, downloadUrl, services),
+      data: this.formatTempleResponse(temple, downloadUrl, enrichedServices),
     };
   }
 }

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Temple, Service } from '@poojawala/entities';
+import { Temple, Service, ServiceFeature } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 import { GetTemplesQueryDto } from '@poojawala/dtos';
 
@@ -93,13 +93,27 @@ export class TempleRepository extends BaseRepository<Temple> {
         'service.name',
         'service.slug',
         'service.description',
+        'service.iconUrl',
+        'service.tokenPercentage',
+        'service.commissionPercentage',
         'service.isActive',
-        'service.plans'
+        'service.plans',
       ])
       .where('service.templeId = :templeId', { templeId })
       .andWhere('service.deletedAt IS NULL')
       .andWhere('service.isActive = :isActive', { isActive: true })
       .orderBy('service.createdAt', 'DESC')
+      .getMany();
+  }
+
+  async findFeaturesByServiceIds(serviceIds: number[]): Promise<ServiceFeature[]> {
+    if (!serviceIds || serviceIds.length === 0) return [];
+    return this.repo.manager
+      .createQueryBuilder(ServiceFeature, 'feature')
+      .where('feature.serviceId IN (:...serviceIds)', { serviceIds })
+      .andWhere('feature.deletedAt IS NULL')
+      .andWhere('feature.isActive = :isActive', { isActive: true })
+      .orderBy('feature.id', 'ASC')
       .getMany();
   }
 }

@@ -98,6 +98,18 @@ export class UpdateServiceDto {
    * Configurable service plans: partial update of 'basic' and/or 'standard'.
    */
   @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return undefined;
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  })
   @IsObject({ message: 'plans must be an object' })
   plans?: Partial<ServicePlans>;
 
