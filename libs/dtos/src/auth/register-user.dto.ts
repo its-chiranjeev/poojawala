@@ -193,7 +193,6 @@ export class RegisterNormalUserDto {
     return typeof value === 'string' ? value.replace(/[\s-]/g, '') : value;
   })
   @IsString()
-  @IsAadhaar()
   aadhaarNumber?: string;
 
   @IsOptional()
