@@ -126,6 +126,7 @@ export class ServiceService {
         }
 
         (service as any).iconDownloadurl = iconDownloadurl;
+        (service as any).sortOrder = Number(service.sortOrder ?? 0);
         const serviceFeatures = featuresByServiceId.get(service.id) || [];
         this.enrichServicePlansAndToken(service, serviceFeatures);
         delete (service as any).serviceFeatures;
@@ -1321,6 +1322,7 @@ export class ServiceService {
       }
     }
     (service as any).iconDownloadurl = iconDownloadurl;
+    (service as any).sortOrder = Number(service.sortOrder ?? 0);
     const serviceFeatures = await this.serviceFeatureRepository.findByServiceId(id);
     this.enrichServicePlansAndToken(service, serviceFeatures);
     delete (service as any).serviceFeatures;
@@ -1821,6 +1823,24 @@ export class ServiceService {
         );
       } catch (e) {
         console.error('Failed to generate pre-signed URL for icon:', e);
+      }
+    }
+
+    if (purohitService.service) {
+      const sortOrder = Number(purohitService.service.sortOrder ?? 0);
+      (purohitService.service as any).sortOrder = sortOrder;
+      (purohitService as any).sortOrder = sortOrder;
+
+      if (purohitService.service.id && this.serviceFeatureRepository) {
+        try {
+          const features = await this.serviceFeatureRepository.findByServiceId(
+            purohitService.service.id,
+          );
+          this.enrichServicePlansAndToken(purohitService.service, features);
+          delete (purohitService.service as any).serviceFeatures;
+        } catch (err) {
+          console.error('Failed to load features for purohit service:', err);
+        }
       }
     }
 

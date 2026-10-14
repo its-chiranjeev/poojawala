@@ -386,6 +386,7 @@ export class ServiceRepository extends BaseRepository<Service> {
           languages: service.languages ?? [],
           benefits: service.benefits ?? [],
           purohitCarryItems: service.purohitCarryItems ?? [],
+          sortOrder: Number(service.sortOrder ?? 0),
           totalBookings: countMap.get(service.id) || 0,
           onlinepurohitCount: onlineCount,
           offlinepurohitCount: offlineCount,
@@ -401,6 +402,7 @@ export class ServiceRepository extends BaseRepository<Service> {
         languages: service.languages ?? [],
         benefits: service.benefits ?? [],
         purohitCarryItems: service.purohitCarryItems ?? [],
+        sortOrder: Number(service.sortOrder ?? 0),
       }));
     }
 
@@ -467,6 +469,7 @@ export class ServiceRepository extends BaseRepository<Service> {
         festivalEndDate: true,
         createdAt: true,
         updatedAt: true,
+        sortOrder: true,
         temple: {
           id: true,
           name: true,
