@@ -323,6 +323,8 @@ export class EmailService {
     bookingId: string;
     customerName: string;
     customerPhone: string;
+    customerEmail?: string;
+    bookingMode?: string;
     serviceName: string;
     servicePlan?: string;
     planName?: string;
@@ -335,36 +337,54 @@ export class EmailService {
     bookingStatus: string;
     specialInstructions?: string;
   }): Promise<void> {
+    const isOnline = data.bookingMode === 'ONLINE';
     const effectivePlan = data.planName || data.servicePlan;
     const planText = effectivePlan ? ` - ${effectivePlan} Plan` : '';
 
-    // TODO: SERVICE_MESSAGE_IMPROVEMENT
-    // Old message retained for reference; replaced with plan-aware message.
-    // preheaderText: `New Booking #${data.bookingId} assigned to you!`,
-    // emailMessage: `A new sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong> has been assigned to you. Please review the details below.`,
-    const preheaderText = `New Booking #${data.bookingId} (${data.serviceName}${planText}) assigned to you!`;
-    const emailMessage = `A new sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong>${effectivePlan ? ` (<strong>${this.escapeHtml(effectivePlan)} Plan</strong>)` : ''} has been assigned to you. Please review the details below.`;
+    const preheaderText = isOnline
+      ? `New Online Booking #${data.bookingId} (${data.serviceName}${planText}) assigned to you!`
+      : `New Booking #${data.bookingId} (${data.serviceName}${planText}) assigned to you!`;
+
+    const emailMessage = isOnline
+      ? `A new online sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong>${effectivePlan ? ` (<strong>${this.escapeHtml(effectivePlan)} Plan</strong>)` : ''} has been assigned to you. Please review the devotee contact details below and connect with the customer to coordinate the online session.`
+      : `A new sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong>${effectivePlan ? ` (<strong>${this.escapeHtml(effectivePlan)} Plan</strong>)` : ''} has been assigned to you. Please review the details below.`;
+
+    const statusBadge = isOnline ? 'Online Booking Assigned' : 'New Booking Assigned';
+
+    const defaultHighlight = isOnline
+      ? {
+          title: 'Online Pooja Guidelines',
+          text: 'This is an online pooja session. Please connect with the devotee in advance using their contact details to coordinate the video/audio call link and necessary preparations.',
+        }
+      : {
+          title: 'Purohit Guidelines',
+          text: 'Please arrive at the venue in traditional Vedic attire at least 15 minutes before the scheduled time with the necessary pooja samagri.',
+        };
+
+    const detailsRows: { label: string; value: string }[] = [
+      { label: 'Booking ID', value: `#${data.bookingId}` },
+      { label: 'Pooja Service', value: data.serviceName },
+      ...(effectivePlan ? [{ label: 'Service Plan', value: `${effectivePlan} Plan` }] : []),
+      ...(data.bookingMode ? [{ label: 'Mode', value: isOnline ? 'Online (Worldwide)' : 'Offline (In-Person)' }] : []),
+      { label: 'Date', value: data.bookingDate },
+      { label: 'Time', value: data.bookingTime },
+      { label: 'Pooja Location', value: data.bookingAddress },
+      { label: 'Devotee Name', value: data.customerName },
+      { label: 'Devotee Phone', value: data.customerPhone },
+      ...(data.customerEmail ? [{ label: 'Devotee Email', value: data.customerEmail }] : []),
+      { label: 'Total Booking Value', value: `₹${data.totalAmount}` },
+      { label: 'Payment Status', value: data.paymentStatus },
+      { label: 'Booking Status', value: data.bookingStatus },
+    ];
 
     const html = renderPoojawalaEmail({
-      statusBadge: 'New Booking Assigned',
+      statusBadge,
       userName: data.purohitName || 'Purohit',
       preheaderText,
       emailMessage,
       detailsTable: {
         title: 'Booking & Devotee Details',
-        rows: [
-          { label: 'Booking ID', value: `#${data.bookingId}` },
-          { label: 'Pooja Service', value: data.serviceName },
-          ...(effectivePlan ? [{ label: 'Service Plan', value: `${effectivePlan} Plan` }] : []),
-          { label: 'Date', value: data.bookingDate },
-          { label: 'Time', value: data.bookingTime },
-          { label: 'Pooja Location', value: data.bookingAddress },
-          { label: 'Devotee Name', value: data.customerName },
-          { label: 'Devotee Phone', value: data.customerPhone },
-          { label: 'Total Booking Value', value: `₹${data.totalAmount}` },
-          { label: 'Payment Status', value: data.paymentStatus },
-          { label: 'Booking Status', value: data.bookingStatus },
-        ],
+        rows: detailsRows,
         totalRow: {
           label: 'Your Payout',
           value: `₹${data.purohitPayoutAmount}`,
@@ -372,18 +392,15 @@ export class EmailService {
       },
       highlight: data.specialInstructions
         ? {
-          title: 'Devotee Instructions',
-          text: data.specialInstructions,
-        }
-        : {
-          title: 'Purohit Guidelines',
-          text: 'Please arrive at the venue in traditional Vedic attire at least 15 minutes before the scheduled time with the necessary pooja samagri.',
-        },
+            title: 'Devotee Instructions',
+            text: data.specialInstructions,
+          }
+        : defaultHighlight,
     });
 
     await this.sendMail({
       to: data.email,
-      subject: `New Booking Assigned - Poojawala | Booking #${data.bookingId}`,
+      subject: `${isOnline ? 'Online Booking' : 'New Booking'} Assigned - Poojawala | Booking #${data.bookingId}`,
       html,
     });
   }

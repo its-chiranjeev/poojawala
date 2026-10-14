@@ -2421,33 +2421,43 @@ export class BookingService {
           );
 
           const b = acceptedBooking ?? savedBooking;
-          const customerEmail = acceptedBooking?.customer?.email;
-          if (customerEmail) {
+          const isOnlineBooking =
+            (b.bookingMode as string) === BOOKING_MODE.ONLINE ||
+            (b.bookingMode as string) === 'ONLINE';
+
+          const customerName = acceptedBooking?.customer?.firstName
+            ? `${acceptedBooking.customer.firstName} ${acceptedBooking.customer.lastName || ''}`.trim()
+            : 'Devotee';
+          const customerPhone = acceptedBooking?.customer?.phone || 'N/A';
+          const customerEmail = acceptedBooking?.customer?.email || 'N/A';
+          const purohitUser = acceptedBooking?.purohit?.user ?? user;
+          const purohitName = purohitUser?.firstName
+            ? `${purohitUser.firstName} ${purohitUser.lastName || ''}`.trim()
+            : 'Assigned Purohit';
+          const purohitPhone = purohitUser?.phone;
+          const purohitEmail = purohitUser?.email || user.email;
+          const address = acceptedBooking?.customerAddress;
+          const addressString = isOnlineBooking
+            ? 'Online Video / Audio Call'
+            : address
+              ? `${address.fullAddress || ''}, ${address.city || ''} - ${address.pincode || ''}`
+              : 'As registered in booking';
+
+          const istString = this.toIstString(b.scheduledAt);
+          const splitDateIst = istString ? istString.split(', ') : [];
+          const bookingDate = splitDateIst.length > 0 ? splitDateIst[0] : (b.scheduledAt ? new Date(b.scheduledAt).toLocaleDateString() : 'Scheduled Date');
+          const bookingTime = splitDateIst.length > 1 ? splitDateIst[1] : (b.scheduledAt ? new Date(b.scheduledAt).toLocaleTimeString() : 'Scheduled Time');
+          const bookingRef = b.bookingNumber || `B-${b.id}`;
+          const serviceName = acceptedBooking?.service?.name || 'Vedic Pooja';
+
+          if (customerEmail && customerEmail !== 'N/A') {
             try {
-              const customerName = acceptedBooking?.customer?.firstName
-                ? `${acceptedBooking.customer.firstName} ${acceptedBooking.customer.lastName || ''}`.trim()
-                : 'Devotee';
-              const purohitUser = acceptedBooking?.purohit?.user;
-              const purohitName = purohitUser?.firstName
-                ? `${purohitUser.firstName} ${purohitUser.lastName || ''}`.trim()
-                : 'Assigned Purohit';
-              const purohitPhone = purohitUser?.phone;
-              const address = acceptedBooking?.customerAddress;
-              const addressString = address
-                ? `${address.fullAddress || ''}, ${address.city || ''} - ${address.pincode || ''}`
-                : 'As registered in booking';
-
-              const istString = this.toIstString(b.scheduledAt);
-              const splitDateIst = istString ? istString.split(', ') : [];
-              const bookingDate = splitDateIst.length > 0 ? splitDateIst[0] : (b.scheduledAt ? new Date(b.scheduledAt).toLocaleDateString() : 'Scheduled Date');
-              const bookingTime = splitDateIst.length > 1 ? splitDateIst[1] : (b.scheduledAt ? new Date(b.scheduledAt).toLocaleTimeString() : 'Scheduled Time');
-
-              this.logger.log(`[BookingEmail] Sending booking accepted email to customer for booking ${b.bookingNumber || `B-${b.id}`}...`);
+              this.logger.log(`[BookingEmail] Sending booking accepted email to customer for booking ${bookingRef}...`);
               await this.emailService.sendCustomerBookingAcceptedEmail({
                 email: customerEmail,
                 customerName,
-                bookingId: b.bookingNumber || `B-${b.id}`,
-                serviceName: acceptedBooking?.service?.name || 'Vedic Pooja',
+                bookingId: bookingRef,
+                serviceName,
                 servicePlan: acceptedBooking?.plan ? String(acceptedBooking.plan) : undefined,
                 planName: acceptedBooking?.plan ? String(acceptedBooking.plan) : undefined,
                 bookingDate,
@@ -2458,14 +2468,61 @@ export class BookingService {
                 totalAmount: Number(b.finalAmount) || 0,
                 bookingStatus: b.status,
               });
-              this.logger.log(`[BookingEmail] Customer booking accepted email sent successfully for booking ${b.bookingNumber || `B-${b.id}`}.`);
+              this.logger.log(`[BookingEmail] Customer booking accepted email sent successfully for booking ${bookingRef}.`);
             } catch (emailErr) {
-              this.logger.error(`[BookingEmail] Failed to send customer booking accepted email for booking ${b.bookingNumber || `B-${b.id}`}`, emailErr instanceof Error ? emailErr.stack : String(emailErr));
+              this.logger.error(`[BookingEmail] Failed to send customer booking accepted email for booking ${bookingRef}`, emailErr instanceof Error ? emailErr.stack : String(emailErr));
             }
           }
 
+          if (isOnlineBooking) {
+            // Notify Purohit with customer contact details and scheduled time for the online booking
+            try {
+              await this.notificationService.createNotification(
+                user.id,
+                'Online Booking Details',
+                `You have accepted online booking #${bookingRef} for ${serviceName} scheduled on ${bookingDate} at ${bookingTime}. Customer: ${customerName}, Phone: ${customerPhone}${customerEmail !== 'N/A' ? `, Email: ${customerEmail}` : ''}. Please connect and coordinate with the customer correspondingly.`,
+                NOTIFICATION_TYPE.BOOKING_STATUS,
+                savedBooking.id,
+                'BOOKING',
+              );
+            } catch (notifErr) {
+              this.logger.error(`[BookingNotification] Failed to send online booking notification to purohit for booking ${bookingRef}`, notifErr instanceof Error ? notifErr.stack : String(notifErr));
+            }
+
+            if (purohitEmail) {
+              try {
+                await this.emailService.sendPurohitBookingAssignmentEmail({
+                  email: purohitEmail,
+                  purohitName,
+                  bookingId: bookingRef,
+                  customerName,
+                  customerPhone,
+                  customerEmail: customerEmail !== 'N/A' ? customerEmail : undefined,
+                  bookingMode: b.bookingMode,
+                  serviceName,
+                  servicePlan: acceptedBooking?.plan ? String(acceptedBooking.plan) : undefined,
+                  planName: acceptedBooking?.plan ? String(acceptedBooking.plan) : undefined,
+                  bookingDate,
+                  bookingTime,
+                  bookingAddress: 'Online Video / Audio Call',
+                  totalAmount: Number(b.finalAmount) || 0,
+                  purohitPayoutAmount: Number(b.purohitPayoutAmount) || 0,
+                  paymentStatus: b.paymentStatus || 'PAID',
+                  bookingStatus: b.status,
+                  specialInstructions: b.specialInstructions,
+                });
+              } catch (purohitEmailErr) {
+                this.logger.error(`[BookingEmail] Failed to send online booking email to purohit for booking ${bookingRef}`, purohitEmailErr instanceof Error ? purohitEmailErr.stack : String(purohitEmailErr));
+              }
+            }
+          }
+
+          const responseMessage = isOnlineBooking
+            ? `Online booking #${bookingRef} accepted successfully. Customer: ${customerName}, Phone: ${customerPhone}${customerEmail !== 'N/A' ? `, Email: ${customerEmail}` : ''}, Scheduled on ${bookingDate} at ${bookingTime}. Please connect with the customer to coordinate the online session.`
+            : 'Booking accepted successfully';
+
           return {
-            message: 'Booking accepted successfully',
+            message: responseMessage,
             booking: acceptedBooking ?? savedBooking,
           };
         }
@@ -5204,7 +5261,12 @@ export class BookingService {
       } = transactionResult;
 
       const customerName = customer.firstName || 'Customer';
-      const addressString = customerAddress
+      const isOnlineBooking =
+        (b.bookingMode as string) === 'ONLINE' ||
+        (b.bookingMode as string) === BOOKING_MODE.ONLINE;
+      const addressString = isOnlineBooking
+        ? 'Online Video / Audio Call'
+        : customerAddress
         ? `${customerAddress.fullAddress}, ${customerAddress.city} - ${customerAddress.pincode}`
         : 'Online';
       const scheduledDateStr = b.scheduledAt
@@ -5258,6 +5320,8 @@ export class BookingService {
             bookingId: b.bookingNumber,
             customerName,
             customerPhone: customer.phone || 'N/A',
+            customerEmail: customer.email || undefined,
+            bookingMode: b.bookingMode,
             serviceName: service.name,
             servicePlan: b.plan ? String(b.plan) : undefined,
             planName: b.plan ? String(b.plan) : undefined,
