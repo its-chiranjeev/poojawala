@@ -37,6 +37,7 @@ import {
   AUDIT_MODULE,
   ACTOR_TYPE,
   PUROHIT_VERIFICATION_STATUS,
+  Service,
   ServicePlans,
   ServicePlanDetails,
   NOTIFICATION_TYPE,
@@ -662,6 +663,15 @@ export class ServiceService {
         throw new BadRequestException('Service must be available either online, offline, or both.');
       }
 
+      let finalSortOrder: number;
+      if (dto.sortOrder != null && Number(dto.sortOrder) > 0) {
+        finalSortOrder = Number(dto.sortOrder);
+        await this.serviceRepository.shiftSortOrdersUp(finalSortOrder);
+      } else {
+        const maxOrder = await this.serviceRepository.getMaxSortOrder();
+        finalSortOrder = maxOrder + 1;
+      }
+
       const service = this.serviceRepository.create({
         ...dto,
         slug: dto.slug?.trim() || null,
@@ -681,6 +691,7 @@ export class ServiceService {
         isOnline: resolvedIsOnline,
         isOffline: resolvedIsOffline,
         isUpcomingFestival: dto.isUpcomingFestival ?? false,
+        sortOrder: finalSortOrder,
       });
 
       // Explicitly guarantee values before save
@@ -690,6 +701,7 @@ export class ServiceService {
       service.isOffline = resolvedIsOffline;
       service.templeId = dto.templeId ?? null;
       service.slug = dto.slug?.trim() || null;
+      service.sortOrder = finalSortOrder;
 
       const savedService = await this.serviceRepository.save(service);
 
@@ -887,6 +899,7 @@ export class ServiceService {
     const oldTempleId = service.templeId;
     const oldTemple = service.temple;
     const oldSlug = service.slug;
+    const oldSortOrder = service.sortOrder;
 
     if (dto.tokenPercentage !== undefined) {
       if (dto.tokenPercentage !== null) {
@@ -1016,7 +1029,34 @@ export class ServiceService {
       throw new BadRequestException('Service must be available either online, offline, or both.');
     }
 
+    if (dto.sortOrder !== undefined && dto.sortOrder !== null) {
+      const newSortOrder = Number(dto.sortOrder);
+      if (newSortOrder !== oldSortOrder) {
+        if (oldSortOrder != null && oldSortOrder > 0) {
+          if (newSortOrder < oldSortOrder) {
+            // Service moved up (e.g., from 10 to 2):
+            // All services in [newSortOrder, oldSortOrder - 1] shift +1 (e.g., 2 -> 3, 3 -> 4, etc.)
+            await this.serviceRepository.shiftSortOrdersUp(newSortOrder, oldSortOrder, service.id);
+          } else if (newSortOrder > oldSortOrder) {
+            // Service moved down (e.g., from 2 to 10):
+            // All services in [oldSortOrder + 1, newSortOrder] shift -1 (e.g., 3 -> 2, 4 -> 3, etc.)
+            await this.serviceRepository.shiftSortOrdersDown(oldSortOrder, newSortOrder, service.id);
+          }
+        } else if (newSortOrder > 0) {
+          // Previously had sortOrder 0 or unassigned, now assigned positive newSortOrder:
+          // Shift all services >= newSortOrder by +1
+          await this.serviceRepository.shiftSortOrdersUp(newSortOrder, undefined, service.id);
+        }
+
+        service.sortOrder = newSortOrder;
+      }
+    }
+
     Object.assign(service, dto);
+
+    if (dto.sortOrder !== undefined && dto.sortOrder !== null) {
+      service.sortOrder = Number(dto.sortOrder);
+    }
 
     service.isOnline = finalIsOnline;
     service.isOffline = finalIsOffline;

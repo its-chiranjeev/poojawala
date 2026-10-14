@@ -433,6 +433,12 @@ export class CreateServiceDto {
   @IsInt()
   @Min(1)
   templeId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  sortOrder?: number;
 }
 export class PurohitServiceItemDto {
   @IsInt()

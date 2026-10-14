@@ -170,6 +170,9 @@ export class Service {
   @Column({ type: 'timestamp', nullable: true, default: null })
   festivalEndDate?: Date | null;
 
+  @Column({ type: 'int', default: 0 })
+  sortOrder!: number;
+
   // Optional category grouping for the service.
   @Column({ type: 'int', nullable: true })
   categoryId?: number | null;

@@ -291,7 +291,8 @@ export class ServiceRepository extends BaseRepository<Service> {
       );
     }
 
-    qb.orderBy('service.createdAt', 'DESC')
+    qb.orderBy('service.sortOrder', 'ASC', 'NULLS LAST')
+      .addOrderBy('service.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -574,5 +575,48 @@ export class ServiceRepository extends BaseRepository<Service> {
 
   async remove(service: Service): Promise<Service> {
     return this.repo.remove(service);
+  }
+
+  async getMaxSortOrder(): Promise<number> {
+    const result = await this.repo
+      .createQueryBuilder('service')
+      .select('MAX(service.sortOrder)', 'max')
+      .where('service.deletedAt IS NULL')
+      .getRawOne();
+    return result?.max != null ? parseInt(result.max, 10) || 0 : 0;
+  }
+
+  async shiftSortOrdersUp(fromOrder: number, toOrder?: number, excludeServiceId?: number): Promise<void> {
+    const qb = this.repo
+      .createQueryBuilder()
+      .update(Service)
+      .set({ sortOrder: () => '"sortOrder" + 1' })
+      .where('"deletedAt" IS NULL')
+      .andWhere('"sortOrder" >= :fromOrder', { fromOrder });
+
+    if (toOrder !== undefined) {
+      qb.andWhere('"sortOrder" < :toOrder', { toOrder });
+    }
+    if (excludeServiceId !== undefined) {
+      qb.andWhere('id != :excludeServiceId', { excludeServiceId });
+    }
+    await qb.execute();
+  }
+
+  async shiftSortOrdersDown(fromOrder: number, toOrder: number, excludeServiceId?: number): Promise<void> {
+    const qb = this.repo
+      .createQueryBuilder()
+      .update(Service)
+      .set({ sortOrder: () => '"sortOrder" - 1' })
+      .where('"deletedAt" IS NULL')
+      .andWhere('"sortOrder" > :fromOrder AND "sortOrder" <= :toOrder', {
+        fromOrder,
+        toOrder,
+      });
+
+    if (excludeServiceId !== undefined) {
+      qb.andWhere('id != :excludeServiceId', { excludeServiceId });
+    }
+    await qb.execute();
   }
 }

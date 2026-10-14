@@ -1,6 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
-import { Booking, BOOKING_STATUS, PurohitProfile, PurohitServiceArea, PUROHIT_VERIFICATION_STATUS, USER_ROLE, USER_STATUS, CustomerAddress } from '@poojawala/entities';
+import {
+  Booking,
+  BOOKING_MODE,
+  BOOKING_STATUS,
+  PurohitProfile,
+  PurohitServiceArea,
+  PUROHIT_VERIFICATION_STATUS,
+  USER_ROLE,
+  USER_STATUS,
+  CustomerAddress,
+} from '@poojawala/entities';
 
 @Injectable()
 export class AssignmentService {
@@ -12,52 +22,46 @@ export class AssignmentService {
     booking: Booking,
     excludedPurohitProfileIds: number[] = [],
   ): Promise<number[]> {
+    const isOnline = booking.bookingMode === BOOKING_MODE.ONLINE || (booking.bookingMode as string) === 'ONLINE';
     const purohitProfileRepository = manager.getRepository(PurohitProfile);
-    let customerLocation = this.getCustomerCoordinates(booking);
 
-    if (!customerLocation && booking.customerAddressId) {
-      const address = await manager.getRepository(CustomerAddress).findOne({
-        where: { id: booking.customerAddressId },
-        select: ['latitude', 'longitude', 'city'],
-      });
-      if (address && address.latitude != null && address.longitude != null) {
-        const lat = Number(address.latitude);
-        const lon = Number(address.longitude);
-        if (
-          Number.isFinite(lat) &&
-          Number.isFinite(lon) &&
-          lat >= -90 &&
-          lat <= 90 &&
-          lon >= -180 &&
-          lon <= 180
-        ) {
-          customerLocation = { latitude: lat, longitude: lon };
+    let customerLatitude: number | undefined;
+    let customerLongitude: number | undefined;
+
+    if (!isOnline) {
+      let customerLocation = this.getCustomerCoordinates(booking);
+
+      if (!customerLocation && booking.customerAddressId) {
+        const address = await manager.getRepository(CustomerAddress).findOne({
+          where: { id: booking.customerAddressId },
+          select: ['latitude', 'longitude', 'city'],
+        });
+        if (address && address.latitude != null && address.longitude != null) {
+          const lat = Number(address.latitude);
+          const lon = Number(address.longitude);
+          if (
+            Number.isFinite(lat) &&
+            Number.isFinite(lon) &&
+            lat >= -90 &&
+            lat <= 90 &&
+            lon >= -180 &&
+            lon <= 180
+          ) {
+            customerLocation = { latitude: lat, longitude: lon };
+          }
         }
       }
+
+      if (!customerLocation) {
+        this.logger.warn(
+          `Booking ${booking.id || 'new'} does not contain valid customer coordinates`,
+        );
+        return [];
+      }
+
+      customerLatitude = customerLocation.latitude;
+      customerLongitude = customerLocation.longitude;
     }
-
-    if (!customerLocation) {
-      this.logger.warn(
-        `Booking ${booking.id || 'new'} does not contain valid customer coordinates`,
-      );
-      return [];
-    }
-
-    let bookingCity = (
-      booking.customerAddress?.city ||
-      (booking.addressSnapshot as any)?.city ||
-      ''
-    ).trim();
-
-    if (!bookingCity && booking.customerAddressId) {
-      const address = await manager.getRepository(CustomerAddress).findOne({
-        where: { id: booking.customerAddressId },
-        select: ['city'],
-      });
-      bookingCity = address?.city?.trim() || '';
-    }
-
-    const { latitude: customerLatitude, longitude: customerLongitude } = customerLocation;
 
     const conflictStart = new Date(
       booking.scheduledAt.getTime() - this.conflictWindowMinutes * 60 * 1000,
@@ -82,30 +86,17 @@ export class AssignmentService {
           isServiceActive: true,
         },
       )
-      .innerJoin(
-        PurohitServiceArea,
-        'service_area',
-        `
-          service_area.purohitId = purohit_user.id
-        `,
-      )
       .where('profile.verificationStatus = :verificationStatus', {
         verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
-      })
-      .andWhere('profile.isOfflineAvailable = :isOfflineAvailable', {
-        isOfflineAvailable: true,
       })
       .andWhere('purohit_user.role = :purohitRole', {
         purohitRole: USER_ROLE.PUROHIT,
       })
       .andWhere('purohit_user.status = :purohitStatus', {
         purohitStatus: USER_STATUS.ACTIVE,
-      })
-      .andWhere('service_area.latitude IS NOT NULL')
-      .andWhere('service_area.longitude IS NOT NULL')
-      .andWhere('service_area.deletedAt IS NULL');
+      });
 
-    if (booking.bookingMode === 'ONLINE') {
+    if (isOnline) {
       candidateQueryBuilder
         .andWhere('profile.isOnlineAvailable = :isOnlineAvailable', {
           isOnlineAvailable: true,
@@ -113,30 +104,37 @@ export class AssignmentService {
         .andWhere('purohit_service.isOnline = :isOnline', { isOnline: true });
     } else {
       candidateQueryBuilder
+        .innerJoin(
+          PurohitServiceArea,
+          'service_area',
+          `
+            service_area.purohitId = purohit_user.id
+          `,
+        )
         .andWhere('profile.isOfflineAvailable = :isOfflineAvailable', {
           isOfflineAvailable: true,
         })
-        .andWhere('purohit_service.isOffline = :isOffline', { isOffline: true });
+        .andWhere('purohit_service.isOffline = :isOffline', { isOffline: true })
+        .andWhere('service_area.latitude IS NOT NULL')
+        .andWhere('service_area.longitude IS NOT NULL')
+        .andWhere('service_area.deletedAt IS NULL')
+        .andWhere(
+          `(2 * :earthRadiusKm * ASIN(
+            SQRT(
+              LEAST(1.0, GREATEST(0.0,
+                POWER(SIN(RADIANS(CAST(service_area.latitude AS float) - :customerLat) / 2), 2) +
+                COS(RADIANS(:customerLat)) * COS(RADIANS(CAST(service_area.latitude AS float))) *
+                POWER(SIN(RADIANS(CAST(service_area.longitude AS float) - :customerLon) / 2), 2)
+              ))
+            )
+          )) <= CAST(COALESCE(service_area."serviceRadiusKm", 10) AS float)`,
+          {
+            earthRadiusKm,
+            customerLat: customerLatitude,
+            customerLon: customerLongitude,
+          },
+        );
     }
-
-    // Haversine distance formula: calculates great-circle distance between customer address and purohit service area
-    // Purohit is eligible if distance is within their configured serviceRadiusKm
-    candidateQueryBuilder.andWhere(
-      `(2 * :earthRadiusKm * ASIN(
-        SQRT(
-          LEAST(1.0, GREATEST(0.0,
-            POWER(SIN(RADIANS(CAST(service_area.latitude AS float) - :customerLat) / 2), 2) +
-            COS(RADIANS(:customerLat)) * COS(RADIANS(CAST(service_area.latitude AS float))) *
-            POWER(SIN(RADIANS(CAST(service_area.longitude AS float) - :customerLon) / 2), 2)
-          ))
-        )
-      )) <= CAST(COALESCE(service_area."serviceRadiusKm", 10) AS float)`,
-      {
-        earthRadiusKm,
-        customerLat: customerLatitude,
-        customerLon: customerLongitude,
-      },
-    );
 
     if (excludedPurohitProfileIds.length > 0) {
       candidateQueryBuilder.andWhere('profile.id NOT IN (:...excludedIds)', {

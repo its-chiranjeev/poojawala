@@ -222,6 +222,12 @@ export class UpdateServiceDto {
   @IsInt()
   @Min(1)
   templeId?: number | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  sortOrder?: number;
 }
 
 

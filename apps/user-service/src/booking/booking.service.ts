@@ -284,9 +284,11 @@ export class BookingService {
           });
         }
 
-        if (!dto.customerAddressId && !customerAddress) {
+        const isOnlineBooking = dto.bookingMode === 'ONLINE';
+
+        if (!isOnlineBooking && !dto.customerAddressId && !customerAddress) {
           throw new BadRequestException(
-            'Customer address is required for booking',
+            'Customer address is required for offline booking',
           );
         }
 
@@ -322,68 +324,83 @@ export class BookingService {
           throw new BadRequestException('Service is currently inactive');
         }
 
-        if (!customerAddress) {
-          throw new NotFoundException(
-            'Customer address not found or does not belong to you',
-          );
+        if (isOnlineBooking && !service.isOnline) {
+          throw new BadRequestException('This service is not available for online booking');
         }
 
-        // Validate Service is available in customer address booking city
-        const bookingCity = customerAddress.city?.trim();
-        if (!bookingCity) {
-          throw new BadRequestException(
-            'Selected customer address does not contain a valid city',
-          );
+        if (!isOnlineBooking && !service.isOffline) {
+          throw new BadRequestException('This service is not available for offline booking');
         }
 
-        if (!service.isGlobal) {
-          const serviceCities = Array.isArray(service.cities) ? service.cities : [];
-          const normalizedBookingCity = normalizeCityName(bookingCity);
-          const isCityAvailable = serviceCities.some(
-            (c) => normalizeCityName(c.name) === normalizedBookingCity,
-          );
+        let customerPincode: string | undefined = undefined;
 
-          if (!isCityAvailable) {
-            throw new BadRequestException(
-              'Selected service is not available in the booking city.',
+        if (!isOnlineBooking) {
+          if (!customerAddress) {
+            throw new NotFoundException(
+              'Customer address not found or does not belong to you',
             );
           }
-        }
 
-        const customerPincode = customerAddress.pincode?.trim();
+          // Validate Service is available in customer address booking city
+          const bookingCity = customerAddress.city?.trim();
+          if (!bookingCity) {
+            throw new BadRequestException(
+              'Selected customer address does not contain a valid city',
+            );
+          }
 
-        if (!customerPincode) {
-          throw new BadRequestException(
-            'A valid pincode is required in the selected customer address',
-          );
-        }
+          if (!service.isGlobal) {
+            const serviceCities = Array.isArray(service.cities) ? service.cities : [];
+            const normalizedBookingCity = normalizeCityName(bookingCity);
+            const isCityAvailable = serviceCities.some(
+              (c) => normalizeCityName(c.name) === normalizedBookingCity,
+            );
 
-        /*
-         * Coordinates are now especially
-         * important because AssignmentService
-         * uses Haversine distance.
-         */
-        const customerLatitude = Number(customerAddress.latitude);
-        const customerLongitude = Number(customerAddress.longitude);
+            if (!isCityAvailable) {
+              throw new BadRequestException(
+                'Selected service is not available in the booking city.',
+              );
+            }
+          }
 
-        if (
-          !Number.isFinite(customerLatitude) ||
-          customerLatitude < -90 ||
-          customerLatitude > 90
-        ) {
-          throw new BadRequestException(
-            'Selected customer address does not have a valid latitude',
-          );
-        }
+          customerPincode = customerAddress.pincode?.trim();
 
-        if (
-          !Number.isFinite(customerLongitude) ||
-          customerLongitude < -180 ||
-          customerLongitude > 180
-        ) {
-          throw new BadRequestException(
-            'Selected customer address does not have a valid longitude',
-          );
+          if (!customerPincode) {
+            throw new BadRequestException(
+              'A valid pincode is required in the selected customer address',
+            );
+          }
+
+          /*
+           * Coordinates are now especially
+           * important because AssignmentService
+           * uses Haversine distance.
+           */
+          const customerLatitude = Number(customerAddress.latitude);
+          const customerLongitude = Number(customerAddress.longitude);
+
+          if (
+            !Number.isFinite(customerLatitude) ||
+            customerLatitude < -90 ||
+            customerLatitude > 90
+          ) {
+            throw new BadRequestException(
+              'Selected customer address does not have a valid latitude',
+            );
+          }
+
+          if (
+            !Number.isFinite(customerLongitude) ||
+            customerLongitude < -180 ||
+            customerLongitude > 180
+          ) {
+            throw new BadRequestException(
+              'Selected customer address does not have a valid longitude',
+            );
+          }
+        } else if (customerAddress) {
+          // ONLINE booking: address is optional, city validation does not apply (worldwide)
+          customerPincode = customerAddress.pincode?.trim() || undefined;
         }
 
         /*
@@ -646,9 +663,9 @@ export class BookingService {
           bookingNumber,
           customerId: customer.id,
           serviceId: service.id,
-          customerAddressId: customerAddress.id,
-          addressSnapshot: this.createAddressSnapshot(customerAddress),
-          customerPincode,
+          customerAddressId: customerAddress ? customerAddress.id : undefined,
+          addressSnapshot: customerAddress ? this.createAddressSnapshot(customerAddress) : undefined,
+          customerPincode: customerPincode || undefined,
           bookingMode: dto.bookingMode as BOOKING_MODE,
           scheduledAt,
           specialInstructions: dto.specialInstructions?.trim() || undefined,
@@ -668,7 +685,10 @@ export class BookingService {
           remainingAmount,
           priceBreakDown,
           status: BOOKING_STATUS.PENDING,
-          paymentType: BOOKING_PAYMENT_TYPE.TOKEN,
+          paymentType:
+            dto.paymentOption === BOOKING_PAYMENT_TYPE.FULL || (dto.paymentOption as any) === 'FULL'
+              ? BOOKING_PAYMENT_TYPE.FULL
+              : BOOKING_PAYMENT_TYPE.TOKEN,
           paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
           assignmentType: ASSIGNMENT_TYPE.AUTO,
         });
@@ -2139,8 +2159,9 @@ export class BookingService {
   }
 
   private createAddressSnapshot(
-    address: CustomerAddress,
-  ): Record<string, unknown> {
+    address: CustomerAddress | null | undefined,
+  ): Record<string, unknown> | undefined {
+    if (!address) return undefined;
     return {
       id: address.id,
       addressLine1:
@@ -2667,46 +2688,54 @@ export class BookingService {
           );
         }
 
-        if (
-          booking.bookingMode === BOOKING_MODE.OFFLINE &&
-          !purohit.isOfflineAvailable
-        ) {
+        if (booking.bookingMode === BOOKING_MODE.OFFLINE) {
+          if (!purohit.isOfflineAvailable) {
+            throw new BadRequestException(
+              'Selected Purohit is not available for offline bookings',
+            );
+          }
+
+          const purohitServiceAreaRepository = manager.getRepository(PurohitServiceArea);
+          const serviceAreas = await purohitServiceAreaRepository.find({
+            where: { purohitId: purohit.userId },
+          });
+
+          if (!serviceAreas.length) {
+            throw new BadRequestException(
+              'Selected Purohit does not have a valid service area configured',
+            );
+          }
+
+          const bookingCity = (
+            booking.customerAddress?.city ||
+            (booking.addressSnapshot as any)?.city ||
+            ''
+          ).trim();
+
+          const normalizedBookingCity = normalizeCityName(bookingCity);
+          const servesCity = serviceAreas.some(
+            (area) => normalizeCityName(area.city) === normalizedBookingCity,
+          );
+
+          if (!servesCity) {
+            throw new BadRequestException(
+              'Selected Purohit does not serve the customer booking city',
+            );
+          }
+
           throw new BadRequestException(
-            'Selected Purohit is not available for offline bookings',
+            "Customer location is outside the selected Purohit's service area radius",
+          );
+        } else {
+          if (!purohit.isOnlineAvailable) {
+            throw new BadRequestException(
+              'Selected Purohit is not available for online bookings',
+            );
+          }
+          throw new BadRequestException(
+            'Selected Purohit is not eligible for this online booking',
           );
         }
-
-        const purohitServiceAreaRepository = manager.getRepository(PurohitServiceArea);
-        const serviceAreas = await purohitServiceAreaRepository.find({
-          where: { purohitId: purohit.userId },
-        });
-
-        if (!serviceAreas.length) {
-          throw new BadRequestException(
-            'Selected Purohit does not have a valid service area configured',
-          );
-        }
-
-        const bookingCity = (
-          booking.customerAddress?.city ||
-          (booking.addressSnapshot as any)?.city ||
-          ''
-        ).trim();
-
-        const normalizedBookingCity = normalizeCityName(bookingCity);
-        const servesCity = serviceAreas.some(
-          (area) => normalizeCityName(area.city) === normalizedBookingCity,
-        );
-
-        if (!servesCity) {
-          throw new BadRequestException(
-            'Selected Purohit does not serve the customer booking city',
-          );
-        }
-
-        throw new BadRequestException(
-          "Customer location is outside the selected Purohit's service area radius",
-        );
       }
       if (booking.servicePrice != null) {
         // Fixed pricing model: booking price and financial breakdown are snapshotted at booking creation.
@@ -2917,7 +2946,7 @@ export class BookingService {
 
       await this.validateStatusUpdateAccess(user, booking);
 
-      this.validateStatusTransition(booking.status, dto.status, user.role);
+      this.validateStatusTransition(booking, dto.status, user.role);
 
       this.validatePaymentForStatusChange(booking, dto.status);
 
@@ -3035,39 +3064,69 @@ export class BookingService {
     booking: Booking,
     nextStatus: BOOKING_STATUS,
   ): void {
-    const paymentRequiredStatuses: BOOKING_STATUS[] = [
-      BOOKING_STATUS.COMPLETED,
-    ];
+    if (nextStatus === BOOKING_STATUS.COMPLETED) {
+      if (booking.status !== BOOKING_STATUS.ONGOING) {
+        throw new BadRequestException(
+          'Booking must be in ONGOING status before it can be marked as COMPLETED',
+        );
+      }
 
-    if (
-      paymentRequiredStatuses.includes(nextStatus) &&
-      (booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID || Number(booking.remainingAmount) > 0)
-    ) {
-      throw new BadRequestException(
-        `Payment must be completed before changing booking status to ${nextStatus}`,
-      );
+      const isFullyPaid =
+        booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID &&
+        Number(booking.remainingAmount || 0) <= 0;
+
+      if (booking.paymentType === BOOKING_PAYMENT_TYPE.FULL) {
+        if (!isFullyPaid) {
+          throw new BadRequestException(
+            'Full payment has not been received. Full payment is required before completing the booking',
+          );
+        }
+      } else {
+        // TOKEN or other payment type: must complete the full payment
+        if (!isFullyPaid) {
+          throw new BadRequestException(
+            'Remaining payment is pending. Please complete the full payment before marking the booking as COMPLETED',
+          );
+        }
+      }
     }
   }
 
   private validateStatusTransition(
-    currentStatus: BOOKING_STATUS,
+    booking: Booking,
     nextStatus: BOOKING_STATUS,
     role: USER_ROLE,
   ): void {
     if (role === USER_ROLE.ADMIN) {
       return;
     }
-    if (currentStatus === BOOKING_STATUS.ARRIVED && nextStatus === BOOKING_STATUS.ONGOING) {
+
+    const currentStatus = booking.status;
+    const isOnline =
+      booking.bookingMode === BOOKING_MODE.ONLINE ||
+      (booking.bookingMode as string) === 'ONLINE';
+
+    // For offline bookings, ARRIVED -> ONGOING requires start OTP verification
+    if (
+      !isOnline &&
+      currentStatus === BOOKING_STATUS.ARRIVED &&
+      nextStatus === BOOKING_STATUS.ONGOING
+    ) {
       throw new BadRequestException(
-        'Start OTP verification is required to change status to ONGOING',
+        'Start OTP verification is required to change status to ONGOING for offline bookings',
       );
     }
 
     const allowedTransitions: Partial<
       Record<BOOKING_STATUS, BOOKING_STATUS[]>
     > = {
-      [BOOKING_STATUS.ACCEPTED]: [BOOKING_STATUS.ENROUTE],
-      [BOOKING_STATUS.ENROUTE]: [BOOKING_STATUS.ARRIVED],
+      [BOOKING_STATUS.ACCEPTED]: isOnline
+        ? [BOOKING_STATUS.ENROUTE, BOOKING_STATUS.ARRIVED, BOOKING_STATUS.ONGOING]
+        : [BOOKING_STATUS.ENROUTE],
+      [BOOKING_STATUS.ENROUTE]: isOnline
+        ? [BOOKING_STATUS.ARRIVED, BOOKING_STATUS.ONGOING]
+        : [BOOKING_STATUS.ARRIVED],
+      [BOOKING_STATUS.ARRIVED]: isOnline ? [BOOKING_STATUS.ONGOING] : [],
       [BOOKING_STATUS.ONGOING]: [BOOKING_STATUS.COMPLETED],
     };
 
@@ -3864,15 +3923,15 @@ export class BookingService {
           templeId: booking.service?.templeId ?? (temple?.id ?? null),
           temple: temple
             ? {
-                id: temple.id,
-                name: temple.name,
-                description: temple.description ?? null,
-                imageUrl: templeDownloadUrl || temple.imageUrl || null,
-                address: temple.address ?? null,
-                city: temple.city ?? null,
-                state: temple.state ?? null,
-                isActive: temple.isActive,
-              }
+              id: temple.id,
+              name: temple.name,
+              description: temple.description ?? null,
+              imageUrl: templeDownloadUrl || temple.imageUrl || null,
+              address: temple.address ?? null,
+              city: temple.city ?? null,
+              state: temple.state ?? null,
+              isActive: temple.isActive,
+            }
             : null,
         },
 
@@ -4606,6 +4665,8 @@ export class BookingService {
         const addressRepository = manager.getRepository(CustomerAddress);
         const bookingRepository = manager.getRepository(Booking);
 
+        const isOnlineAdminBooking = dto.bookingMode === 'ONLINE';
+
         const [customer, service, customerAddress] = await Promise.all([
           userRepository.findOne({
             where: { id: dto.customerId, role: USER_ROLE.CUSTOMER },
@@ -4614,9 +4675,11 @@ export class BookingService {
             where: { id: dto.serviceId },
             relations: { temple: true },
           }),
-          addressRepository.findOne({
-            where: { id: dto.customerAddressId, customerId: dto.customerId },
-          }),
+          dto.customerAddressId
+            ? addressRepository.findOne({
+              where: { id: dto.customerAddressId, customerId: dto.customerId },
+            })
+            : Promise.resolve(null),
         ]);
 
         if (!customer) {
@@ -4631,8 +4694,16 @@ export class BookingService {
           throw new BadRequestException('Service is currently inactive');
         }
 
-        if (!customerAddress) {
-          throw new NotFoundException('Customer address not found');
+        if (isOnlineAdminBooking && !service.isOnline) {
+          throw new BadRequestException('This service is not available for online booking');
+        }
+
+        if (!isOnlineAdminBooking && !service.isOffline) {
+          throw new BadRequestException('This service is not available for offline booking');
+        }
+
+        if (!isOnlineAdminBooking && !customerAddress) {
+          throw new NotFoundException('Customer address is required for offline booking');
         }
 
         const purohitProfileRepository = manager.getRepository(PurohitProfile);
@@ -4710,25 +4781,27 @@ export class BookingService {
             }));
         }
 
-        // Validate Service availability in the booking city
-        const bookingCity = customerAddress.city?.trim();
-        if (!bookingCity) {
-          throw new BadRequestException(
-            'Selected customer address does not contain a valid city',
-          );
-        }
-
-        if (!service.isGlobal) {
-          const serviceCities = Array.isArray(service.cities) ? service.cities : [];
-          const normalizedBookingCity = normalizeCityName(bookingCity);
-          const isCityAvailable = serviceCities.some(
-            (c) => normalizeCityName(c.name) === normalizedBookingCity,
-          );
-
-          if (!isCityAvailable) {
+        if (!isOnlineAdminBooking && customerAddress) {
+          // Validate Service availability in the booking city for offline booking
+          const bookingCity = customerAddress.city?.trim();
+          if (!bookingCity) {
             throw new BadRequestException(
-              'Selected service is not available in the booking city.',
+              'Selected customer address does not contain a valid city',
             );
+          }
+
+          if (!service.isGlobal) {
+            const serviceCities = Array.isArray(service.cities) ? service.cities : [];
+            const normalizedBookingCity = normalizeCityName(bookingCity);
+            const isCityAvailable = serviceCities.some(
+              (c) => normalizeCityName(c.name) === normalizedBookingCity,
+            );
+
+            if (!isCityAvailable) {
+              throw new BadRequestException(
+                'Selected service is not available in the booking city.',
+              );
+            }
           }
         }
 
@@ -4938,9 +5011,9 @@ export class BookingService {
           bookingNumber,
           customerId: customer.id,
           serviceId: service.id,
-          customerAddressId: customerAddress.id,
-          addressSnapshot: this.createAddressSnapshot(customerAddress),
-          customerPincode: customerAddress.pincode?.trim() || '',
+          customerAddressId: customerAddress ? customerAddress.id : undefined,
+          addressSnapshot: customerAddress ? this.createAddressSnapshot(customerAddress) : undefined,
+          customerPincode: customerAddress?.pincode?.trim() || undefined,
           bookingMode: dto.bookingMode as BOOKING_MODE,
           scheduledAt,
           specialInstructions: dto.specialInstructions?.trim() || undefined,
@@ -5131,7 +5204,9 @@ export class BookingService {
       } = transactionResult;
 
       const customerName = customer.firstName || 'Customer';
-      const addressString = `${customerAddress.fullAddress}, ${customerAddress.city} - ${customerAddress.pincode}`;
+      const addressString = customerAddress
+        ? `${customerAddress.fullAddress}, ${customerAddress.city} - ${customerAddress.pincode}`
+        : 'Online';
       const scheduledDateStr = b.scheduledAt
         ? new Date(b.scheduledAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
         : 'Scheduled Date';

@@ -13,14 +13,10 @@ import {
   IsIn,
   ValidateNested,
   IsArray,
+  IsNotEmpty,
 } from 'class-validator';
-import { SERVICE_PLAN } from '@poojawala/entities';
+import { BOOKING_PAYMENT_TYPE, SERVICE_PLAN } from '@poojawala/entities';
 import { CreateCustomerAddressDto } from '../user/add-customer-address.dto';
-
-export enum BOOKING_PAYMENT_OPTION {
-  TOKEN = 'TOKEN',
-  FULL = 'FULL',
-}
 
 export class CreateBookingDto {
   @Type(() => Number)
@@ -81,10 +77,12 @@ export class CreateBookingDto {
   @Min(0)
   donationAmount?: number;
 
-  @IsOptional()
+  @IsNotEmpty()
   @Transform(({ value }) => (typeof value === 'string' ? value.toUpperCase() : value))
-  @IsEnum(BOOKING_PAYMENT_OPTION, { message: 'paymentOption must be either TOKEN or FULL' })
-  paymentOption?: BOOKING_PAYMENT_OPTION;
+  @IsIn([BOOKING_PAYMENT_TYPE.TOKEN, BOOKING_PAYMENT_TYPE.FULL], {
+    message: 'paymentOption must be either TOKEN or FULL',
+  })
+  paymentOption?: BOOKING_PAYMENT_TYPE.TOKEN | BOOKING_PAYMENT_TYPE.FULL;
 
   @IsOptional()
   @IsArray()
