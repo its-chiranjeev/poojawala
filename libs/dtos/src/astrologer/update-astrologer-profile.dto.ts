@@ -66,6 +66,11 @@ export class UpdateAstrologerProfileDto {
   city?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  state?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)

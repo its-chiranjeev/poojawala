@@ -79,6 +79,9 @@ export class PurohitProfile {
   @Column({ type: 'varchar', length: 100, nullable: true })
   city?: string;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  state?: string;
+
   @Column({ type: 'decimal', precision: 2, scale: 1, default: 0.0 })
   avgRating!: number;
 

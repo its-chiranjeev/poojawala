@@ -54,4 +54,14 @@ export class CreatePurohitByAdminDto {
     @IsArray()
     @IsString({ each: true })
     serviceAreas?: string[];
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    city?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    state?: string;
 }

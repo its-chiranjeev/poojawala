@@ -452,6 +452,7 @@ export class UserService {
       const experienceYears = dto.experienceYears !== undefined ? dto.experienceYears : dto.profile?.experienceYears;
       const aadhaarNumber = dto.aadhaarNumber !== undefined ? dto.aadhaarNumber : dto.profile?.aadhaarNumber;
       const city = dto.city !== undefined ? dto.city : dto.profile?.city;
+      const state = dto.state !== undefined ? dto.state : dto.profile?.state;
       const languages = dto.languages !== undefined ? dto.languages : dto.profile?.languages;
       const specializations = dto.specializations !== undefined ? dto.specializations : dto.profile?.specializations;
       const isOnlineAvailable = dto.isOnlineAvailable !== undefined ? dto.isOnlineAvailable : dto.profile?.isOnlineAvailable;
@@ -463,6 +464,7 @@ export class UserService {
       if (experienceYears !== undefined) profilePayload.experienceYears = Number(experienceYears);
       if (aadhaarNumber !== undefined) profilePayload.aadhaarNumber = aadhaarNumber;
       if (city !== undefined) profilePayload.city = city;
+      if (state !== undefined) profilePayload.state = state;
       if (languages !== undefined) profilePayload.languages = languages;
       if (specializations !== undefined) profilePayload.specializations = specializations;
       const aadhaarDocUrl =
@@ -720,6 +722,7 @@ export class UserService {
           ? dto.aadhaarNumber
           : dto.profile?.aadhaarNumber;
       const city = dto.city !== undefined ? dto.city : dto.profile?.city;
+      const state = dto.state !== undefined ? dto.state : dto.profile?.state;
       const languages =
         dto.languages !== undefined
           ? dto.languages
@@ -772,6 +775,7 @@ export class UserService {
       }
       if (aadhaarNumber !== undefined) profilePayload.aadhaarNumber = aadhaarNumber;
       if (city !== undefined) profilePayload.city = city;
+      if (state !== undefined) profilePayload.state = state;
       if (languages !== undefined) {
         profilePayload.languages = parseStringArray(languages) || languages;
       }
@@ -1041,6 +1045,7 @@ export class UserService {
       const profilePayload: any = {};
       if (dto.languages !== undefined) profilePayload.languages = dto.languages;
       if (dto.city !== undefined) profilePayload.city = dto.city;
+      if (dto.state !== undefined) profilePayload.state = dto.state;
       if (dto.specializations !== undefined)
         profilePayload.specializations = dto.specializations;
       if (dto.bio !== undefined) profilePayload.bio = dto.bio;
@@ -1325,6 +1330,7 @@ export class UserService {
       }
       if (dto.aadhaarNumber !== undefined) profilePayload.aadhaarNumber = dto.aadhaarNumber;
       if (dto.city !== undefined) profilePayload.city = dto.city;
+      if (dto.state !== undefined) profilePayload.state = dto.state;
       if (dto.languages !== undefined) {
         profilePayload.languages = parseStringArray(dto.languages) || dto.languages;
       }
@@ -4579,6 +4585,8 @@ export class UserService {
 
       const profile = manager.create(PurohitProfile, {
         userId: savedUser.id,
+        city: dto.city?.trim(),
+        state: dto.state?.trim(),
         verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
       });
       const savedProfile = await manager.save(profile);
@@ -4749,6 +4757,7 @@ export class UserService {
         specializations: dto.specializations,
         specification: dto.specification?.trim(),
         city: dto.city?.trim(),
+        state: dto.state?.trim(),
         ratePerMinute: ratePerMin,
         commissionPrice,
         aadhaarNumber: dto.aadhaarNumber,
@@ -5230,6 +5239,7 @@ export class UserService {
                 templeAffiliationProofUrl:
                   templeAffiliationProofUrl || profile.templeAffiliationProofUrl,
                 city: dto.city ?? profile.city,
+                state: dto.state ?? profile.state,
                 languages: dto.languages ?? profile.languages,
                 specializations: dto.specializations ?? profile.specializations,
                 isOnlineAvailable:
@@ -5254,6 +5264,7 @@ export class UserService {
                 certificateUrl,
                 templeAffiliationProofUrl,
                 city: dto.city,
+                state: dto.state,
                 languages: dto.languages,
                 specializations: dto.specializations,
                 isOnlineAvailable,
@@ -5356,6 +5367,7 @@ export class UserService {
                 panDocUrl: panDocUrl || astrologerProfile.panDocUrl,
                 certificateUrl: certificateUrl || astrologerProfile.certificateUrl,
                 city: dto.city ?? astrologerProfile.city,
+                state: dto.state ?? astrologerProfile.state,
                 languages: dto.languages ?? astrologerProfile.languages,
                 specializations: dto.specializations ?? astrologerProfile.specializations,
                 specification: dto.specification ?? astrologerProfile.specification,
@@ -5373,6 +5385,7 @@ export class UserService {
                 panDocUrl,
                 certificateUrl,
                 city: dto.city,
+                state: dto.state,
                 languages: dto.languages,
                 specializations: dto.specializations,
                 specification: dto.specification,

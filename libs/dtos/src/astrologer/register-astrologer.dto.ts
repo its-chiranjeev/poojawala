@@ -101,6 +101,11 @@ export class RegisterAstrologerDto {
   @MaxLength(100)
   city?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  state?: string;
+
   /** Per minute consultation rate (e.g. ₹15.00/min) */
   @IsOptional()
   @Type(() => Number)

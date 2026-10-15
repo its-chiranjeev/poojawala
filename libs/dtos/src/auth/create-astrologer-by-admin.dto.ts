@@ -93,6 +93,11 @@ export class CreateAstrologerByAdminDto {
   city?: string;
 
   @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  state?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
