@@ -75,11 +75,23 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
           let selected: { role: USER_ROLE; token: string; cookieName: string } | null = null;
 
           if (present.length === 1) {
+            const incomingCsrf =
+              request.headers?.['x-csrf-token'] ||
+              request.headers?.['x-csrf'];
+
+            if (incomingCsrf) {
+              const cookieNames = ROLE_COOKIE_MAP[present[0].role];
+              const cookieCsrf =
+                rawCookies[cookieNames.csrf] || rawCookies[cookieNames.csrfCamel];
+              if (cookieCsrf && cookieCsrf !== incomingCsrf) {
+                throw new UnauthorizedException('Invalid CSRF token for active session');
+              }
+            }
+
             selected = present[0];
           } else {
+            // Multiple role cookies exist in browser (e.g. Admin & Customer open in same browser).
             // Priority 1: Check incoming x-csrf-token against each role's CSRF cookie.
-            // When Admin & Customer dashboards are both open in the same browser, each dashboard
-            // sends its own role's x-csrf-token header with requests.
             const incomingCsrf =
               request.headers?.['x-csrf-token'] ||
               request.headers?.['x-csrf'];
@@ -94,11 +106,11 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
 
               if (csrfMatch) {
                 selected = csrfMatch;
+              } else {
+                throw new UnauthorizedException('Invalid CSRF token for active sessions');
               }
-            }
-
-            // Priority 2: Check for explicit role hint header (e.g. x-auth-role or x-role)
-            if (!selected) {
+            } else {
+              // Priority 2: Check for explicit role hint header (e.g. x-auth-role or x-role)
               const roleHint = (
                 request.headers?.['x-auth-role'] || request.headers?.['x-role']
               )?.toString().toUpperCase();
@@ -109,31 +121,22 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
                   selected = match;
                 }
               }
-            }
 
-            // Priority 3: Check route roles attached by JwtAuthGuard (_routeRoles)
-            if (!selected && Array.isArray(request._routeRoles) && request._routeRoles.length > 0) {
-              const matches = present.filter((item) => request._routeRoles.includes(item.role));
-              if (matches.length === 1) {
-                selected = matches[0];
+              // Priority 3: Check route roles attached by JwtAuthGuard (_routeRoles)
+              if (!selected && Array.isArray(request._routeRoles) && request._routeRoles.length > 0) {
+                const matches = present.filter((item) => request._routeRoles.includes(item.role));
+                if (matches.length === 1) {
+                  selected = matches[0];
+                }
               }
-            }
 
-            // Priority 4: Fallback to the newest active token (latest iat)
-            if (!selected) {
-              const decodeTokenIat = (token: string): number => {
-                try {
-                  const parts = token.split('.');
-                  if (parts.length === 3) {
-                    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-                    return payload.iat || 0;
-                  }
-                } catch {}
-                return 0;
-              };
-
-              const sorted = [...present].sort((a, b) => decodeTokenIat(b.token) - decodeTokenIat(a.token));
-              selected = sorted[0];
+              // If still not selected, do NOT silently fall back to latest iat.
+              // Strictly require a valid matching x-csrf-token to prevent session ambiguity.
+              if (!selected) {
+                throw new UnauthorizedException(
+                  'Multiple active sessions detected. A valid x-csrf-token header matching your active session is required',
+                );
+              }
             }
           }
 
