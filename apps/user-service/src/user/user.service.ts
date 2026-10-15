@@ -2666,15 +2666,15 @@ export class UserService {
 
       const { city: userCity, state: userState } = this.resolveUserCityAndState(safeUser);
       if ((safeUser as any).profile) {
-          (safeUser as any).profile = this.formatProfileWithCityAndState(
-            (safeUser as any).profile,
-            userCity,
-            userState,
-          );
-          if (safeUser.role === USER_ROLE.ASTROLOGER) {
-            (safeUser as any).astrologerProfile = (safeUser as any).profile;
-          }
-          delete (safeUser as any).city;
+        (safeUser as any).profile = this.formatProfileWithCityAndState(
+          (safeUser as any).profile,
+          userCity,
+          userState,
+        );
+        if (safeUser.role === USER_ROLE.ASTROLOGER) {
+          (safeUser as any).astrologerProfile = (safeUser as any).profile;
+        }
+        delete (safeUser as any).city;
         delete (safeUser as any).state;
         delete (safeUser as any).purohitServices;
       } else {
