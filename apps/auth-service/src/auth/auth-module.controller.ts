@@ -651,6 +651,9 @@ export class AuthModuleController {
       (safeUser as any).verificationStatus = (safeUser as any).profile.verificationStatus;
       (safeUser as any).rejectionReason = (safeUser as any).profile.rejectionReason ?? null;
     }
+    if ((safeUser as any).astrologerProfile) {
+      (safeUser as any).astrologerProfile.state = (safeUser as any).astrologerProfile.state || userState;
+    }
 
     if (Array.isArray((safeUser as any).addresses)) {
       (safeUser as any).addresses = (safeUser as any).addresses

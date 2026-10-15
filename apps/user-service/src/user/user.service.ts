@@ -2447,6 +2447,7 @@ export class UserService {
           languages: user.profile?.languages,
           specialization: user.profile?.specializations,
           city: user.profile?.city,
+          state: user.profile?.state ?? null,
           purohitService,
         };
       }),
@@ -2567,6 +2568,7 @@ export class UserService {
         verificationStatus: profile?.verificationStatus,
         rejectionReason: profile?.rejectionReason,
         city: profile?.city,
+        state: profile?.state ?? null,
         status: user.status,
         isActive: user.status === USER_STATUS.ACTIVE,
         isonlineAvailable: profile?.isOnlineAvailable,
