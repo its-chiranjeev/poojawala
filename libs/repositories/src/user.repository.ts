@@ -54,12 +54,29 @@ export class UserRepository extends BaseRepository<User> {
     const { page, limit, search, role, status, sortBy, order } = query;
 
     const qb = this.repo.createQueryBuilder('user');
-    qb.leftJoinAndMapOne('user.profile', 'purohit_profiles', 'profile', 'profile.userId = user.id');
-    qb.leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id');
-    qb.leftJoinAndSelect('user.serviceAreas', 'serviceAreas', 'serviceAreas.deletedAt IS NULL');
-    qb.leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL');
-    qb.leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id AND purohitServices.deletedAt IS NULL');
-    qb.leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId');
+    const isAstrologer = (role as any) === USER_ROLE.ASTROLOGER;
+    const isPurohit = (role as any) === USER_ROLE.PUROHIT;
+
+    if (isAstrologer) {
+      qb.leftJoinAndMapOne('user.profile', 'astrologer_profiles', 'profile', 'profile.userId = user.id');
+      qb.leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL');
+    } else if (isPurohit) {
+      qb.leftJoinAndMapOne('user.profile', 'purohit_profiles', 'profile', 'profile.userId = user.id');
+      qb.leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id');
+      qb.leftJoinAndSelect('user.serviceAreas', 'serviceAreas', 'serviceAreas.deletedAt IS NULL');
+      qb.leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL');
+      qb.leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id AND purohitServices.deletedAt IS NULL');
+      qb.leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId');
+    } else {
+      qb.leftJoinAndMapOne('user.profile', 'purohit_profiles', 'profile', 'profile.userId = user.id');
+      qb.leftJoinAndMapOne('user.astrologerProfile', 'astrologer_profiles', 'astrologerProfile', 'astrologerProfile.userId = user.id');
+      qb.leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id');
+      qb.leftJoinAndSelect('user.serviceAreas', 'serviceAreas', 'serviceAreas.deletedAt IS NULL');
+      qb.leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL');
+      qb.leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id AND purohitServices.deletedAt IS NULL');
+      qb.leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId');
+    }
+
     if (search) {
       qb.andWhere(
         new Brackets((qb) => {
@@ -93,19 +110,19 @@ export class UserRepository extends BaseRepository<User> {
       qb.andWhere('user.status = :status', { status });
     }
 
-    if (query.verificationStatus && role === 'PUROHIT') {
+    if (query.verificationStatus && (isPurohit || isAstrologer)) {
       qb.andWhere('profile.verificationStatus = :verificationStatus', {
         verificationStatus: query.verificationStatus,
       });
     }
 
-    if (query.isOfflineAvailable !== undefined && role === 'PUROHIT') {
+    if (query.isOfflineAvailable !== undefined && isPurohit) {
       qb.andWhere('profile.isOfflineAvailable = :isOfflineAvailable', {
         isOfflineAvailable: query.isOfflineAvailable,
       });
     }
 
-    if (query.isOnlineAvailable !== undefined && role === 'PUROHIT') {
+    if (query.isOnlineAvailable !== undefined && isPurohit) {
       qb.andWhere('profile.isOnlineAvailable = :isOnlineAvailable', {
         isOnlineAvailable: query.isOnlineAvailable,
       });
@@ -115,7 +132,8 @@ export class UserRepository extends BaseRepository<User> {
       qb.andWhere(
         new Brackets((qb) => {
           qb.where('LOWER(serviceAreas.city) LIKE LOWER(:city) AND serviceAreas.isDefault = true', { city: `%${query.city}%` })
-            .orWhere('LOWER(addresses.city) LIKE LOWER(:city)', { city: `%${query.city}%` });
+            .orWhere('LOWER(addresses.city) LIKE LOWER(:city)', { city: `%${query.city}%` })
+            .orWhere('LOWER(profile.city) LIKE LOWER(:city)', { city: `%${query.city}%` });
         })
       );
     }
@@ -135,6 +153,9 @@ export class UserRepository extends BaseRepository<User> {
     for (const u of users) {
       if (u.role === USER_ROLE.PUROHIT) {
         this.enrichPurohitServicesPayout(u);
+      } else if (u.role === USER_ROLE.ASTROLOGER && (u as any).astrologerProfile && !(u as any).profile) {
+        (u as any).profile = (u as any).astrologerProfile;
+        delete (u as any).astrologerProfile;
       }
     }
 
@@ -263,6 +284,16 @@ export class UserRepository extends BaseRepository<User> {
         .addOrderBy('serviceAreas.createdAt', 'DESC')
         .addOrderBy('bankAccounts.isPrimary', 'DESC')
         .addOrderBy('bankAccounts.createdAt', 'DESC')
+        .addOrderBy('addresses.isDefault', 'DESC')
+        .addOrderBy('addresses.createdAt', 'DESC');
+    } else if (role === USER_ROLE.ASTROLOGER) {
+      qb.leftJoinAndMapOne(
+        'user.profile',
+        'astrologer_profiles',
+        'profile',
+        'profile.userId = user.id',
+      )
+        .leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL')
         .addOrderBy('addresses.isDefault', 'DESC')
         .addOrderBy('addresses.createdAt', 'DESC');
     } else {

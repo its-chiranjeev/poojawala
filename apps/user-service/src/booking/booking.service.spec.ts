@@ -21,6 +21,8 @@ import {
   PurohitProfile,
   PurohitService,
   PUROHIT_VERIFICATION_STATUS,
+  AstrologerProfile,
+  BOOKING_TYPE,
 } from '@poojawala/entities';
 
 describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Service Plans (Scenarios 1-35)', () => {
@@ -1936,4 +1938,128 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       expect(totalPaid2).toBe(820);
     });
   });
+
+  describe('createAstrologyBooking — Astrology Booking API', () => {
+    let mockAstrologerProfileRepo: any;
+
+    beforeEach(() => {
+      mockAstrologerProfileRepo = {
+        findOne: jest.fn().mockResolvedValue({
+          id: 99,
+          userId: 42,
+          commissionPrice: 200,
+          user: { id: 42, firstName: 'Pandit', lastName: 'Jyotish' },
+        }),
+      };
+
+      const originalGetRepo = mockEntityManager.getRepository;
+      mockEntityManager.getRepository = jest.fn().mockImplementation((entity) => {
+        if (entity === AstrologerProfile) return mockAstrologerProfileRepo;
+        return originalGetRepo(entity);
+      });
+    });
+
+    it('queries AstrologerProfile by userId (dto.astrologerId is userId) and creates booking with price from commissionPrice', async () => {
+      const scheduledDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+      const res = await bookingService.createAstrologyBooking(mockCustomerUser, {
+        astrologerId: 42,
+        scheduledAt: scheduledDate,
+      });
+
+      expect(mockAstrologerProfileRepo.findOne).toHaveBeenCalledWith({
+        where: { userId: 42 },
+        relations: { user: true },
+      });
+
+      expect(mockBookingRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bookingType: BOOKING_TYPE.ASTROLOGY,
+          bookingMode: BOOKING_MODE.ONLINE,
+          customerId: mockCustomerUser.id,
+          astrologerId: 42,
+          servicePrice: 200,
+          finalAmount: 200,
+          paymentType: BOOKING_PAYMENT_TYPE.TOKEN,
+        }),
+      );
+
+      expect(res.paymentUrl).toBe('https://rzp.io/i/testlink');
+    });
+
+    it('throws NotFoundException if astrologer profile not found by userId', async () => {
+      mockAstrologerProfileRepo.findOne.mockResolvedValue(null);
+      const scheduledDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+
+      await expect(
+        bookingService.createAstrologyBooking(mockCustomerUser, {
+          astrologerId: 999,
+          scheduledAt: scheduledDate,
+        }),
+      ).rejects.toThrow('Astrologer not found');
+    });
+
+    it('allows assigned astrologer to update status from ACCEPTED to COMPLETED when paymentStatus is PAID', async () => {
+      const astrologerUser = {
+        id: 42,
+        role: USER_ROLE.ASTROLOGER,
+      } as User;
+
+      const astrologyBooking = {
+        id: 501,
+        bookingNumber: 'B-501',
+        bookingType: BOOKING_TYPE.ASTROLOGY,
+        astrologerId: 42,
+        customerId: 1,
+        status: BOOKING_STATUS.ACCEPTED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+        paidAmount: 200,
+        finalAmount: 200,
+        remainingAmount: 0,
+      } as Booking;
+
+      mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        setLock: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(astrologyBooking),
+      });
+
+      const res = await bookingService.updateBookingStatus(astrologerUser, 501, {
+        status: BOOKING_STATUS.COMPLETED,
+      });
+
+      expect(res.booking.status).toBe(BOOKING_STATUS.COMPLETED);
+    });
+
+    it('rejects status update to COMPLETED if paymentStatus is not PAID for astrology booking', async () => {
+      const astrologerUser = {
+        id: 42,
+        role: USER_ROLE.ASTROLOGER,
+      } as User;
+
+      const unpaidAstrologyBooking = {
+        id: 502,
+        bookingType: BOOKING_TYPE.ASTROLOGY,
+        astrologerId: 42,
+        customerId: 1,
+        status: BOOKING_STATUS.ACCEPTED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+        paidAmount: 0,
+        finalAmount: 200,
+        remainingAmount: 200,
+      } as Booking;
+
+      mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        setLock: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(unpaidAstrologyBooking),
+      });
+
+      await expect(
+        bookingService.updateBookingStatus(astrologerUser, 502, {
+          status: BOOKING_STATUS.COMPLETED,
+        }),
+      ).rejects.toThrow('Payment has not been completed');
+    });
+  });
 });
+

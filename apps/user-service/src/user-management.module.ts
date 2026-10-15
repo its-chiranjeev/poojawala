@@ -15,6 +15,7 @@ import { CartModule } from './cart/cart.module';
 import { OrderModule } from './order/order.module';
 import { BlogModule } from './blog/blog.module';
 import { TempleModule } from './temple/temple.module';
+import { AstrologerModule } from './astrologer/astrologer.module';
 
 import { DatabaseModule } from '@poojawala/database';
 import { EntitiesModule } from '@poojawala/entities';
@@ -43,6 +44,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     AuditLogModule,
     BlogModule,
     TempleModule,
+    AstrologerModule,
   ],
   controllers: [UserManagementController],
   providers: [UserManagementService],

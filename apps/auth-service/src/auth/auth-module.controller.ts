@@ -285,13 +285,14 @@ export class AuthModuleController {
       (body as any)?.poojawalaCustomerCsrfToken ||
       (body as any)?.poojawalaAdminCsrfToken ||
       (body as any)?.poojawalaPurohitCsrfToken ||
+      (body as any)?.poojawalaAstrologerCsrfToken ||
       req?.query?.csrfToken
     )?.toString().trim();
 
     // 2. Match incoming CSRF token against the cookies present in the request
     let csrfRoleMatch: USER_ROLE | undefined;
     if (incomingCsrf) {
-      for (const role of [USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT]) {
+      for (const role of Object.values(USER_ROLE)) {
         const cookieNames = ROLE_COOKIE_MAP[role];
         const roleCookieCsrf =
           cookies[cookieNames.csrf] || cookies[cookieNames.csrfCamel];
@@ -311,7 +312,7 @@ export class AuthModuleController {
       req?.query?.role
     )?.toString().toUpperCase();
 
-    const validRoles = [USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT];
+    const validRoles = Object.values(USER_ROLE);
     const explicitRole = validRoles.includes(roleHint as USER_ROLE) ? (roleHint as USER_ROLE) : undefined;
 
     // 4. Resolve the target role to log out:
@@ -352,9 +353,9 @@ export class AuthModuleController {
 
     // 6. Clear cookies: strictly clear ONLY the matched role's cookies
     if (roleHint === 'ALL') {
-      this.clearAuthCookies(res, USER_ROLE.ADMIN, req);
-      this.clearAuthCookies(res, USER_ROLE.CUSTOMER, req);
-      this.clearAuthCookies(res, USER_ROLE.PUROHIT, req);
+      for (const role of Object.values(USER_ROLE)) {
+        this.clearAuthCookies(res, role, req);
+      }
     } else if (targetRole) {
       this.clearAuthCookies(res, targetRole, req);
     } else {
@@ -387,31 +388,16 @@ export class AuthModuleController {
     // Role-based cookies are now authoritative.
     // const refreshToken = cookies['refreshToken'];
 
-    const adminToken = cookies[ROLE_COOKIE_MAP[USER_ROLE.ADMIN].refresh];
-    const customerToken = cookies[ROLE_COOKIE_MAP[USER_ROLE.CUSTOMER].refresh];
-    const purohitToken = cookies[ROLE_COOKIE_MAP[USER_ROLE.PUROHIT].refresh];
-
     const presentRefresh: { role: USER_ROLE; token: string; cookieName: string }[] = [];
-    if (adminToken) {
-      presentRefresh.push({
-        role: USER_ROLE.ADMIN,
-        token: adminToken,
-        cookieName: ROLE_COOKIE_MAP[USER_ROLE.ADMIN].refresh,
-      });
-    }
-    if (customerToken) {
-      presentRefresh.push({
-        role: USER_ROLE.CUSTOMER,
-        token: customerToken,
-        cookieName: ROLE_COOKIE_MAP[USER_ROLE.CUSTOMER].refresh,
-      });
-    }
-    if (purohitToken) {
-      presentRefresh.push({
-        role: USER_ROLE.PUROHIT,
-        token: purohitToken,
-        cookieName: ROLE_COOKIE_MAP[USER_ROLE.PUROHIT].refresh,
-      });
+    for (const [roleKey, roleCookies] of Object.entries(ROLE_COOKIE_MAP)) {
+      const token = cookies[roleCookies.refresh] || cookies[roleCookies.refreshCamel];
+      if (token) {
+        presentRefresh.push({
+          role: roleKey as USER_ROLE,
+          token,
+          cookieName: roleCookies.refresh,
+        });
+      }
     }
 
     const directBodyToken = req.body?.refreshToken;
@@ -440,7 +426,7 @@ export class AuthModuleController {
     // If a specific role is explicitly requested via body or query, honor it;
     // otherwise refresh tokens for ALL roles present in the request.
     const explicitRole = (req.body?.role || req.query?.role)?.toString().toUpperCase();
-    const validRoles = [USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT];
+    const validRoles = Object.values(USER_ROLE);
     const targetRole = validRoles.find((r) => r === explicitRole);
 
     const rolesToRefresh = targetRole

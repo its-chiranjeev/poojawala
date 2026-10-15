@@ -13,6 +13,7 @@ export * from './booking/booking-query.dto';
 export * from './booking/cancel-booking.dto';
 export * from './booking/create-booking-by-admin.dto';
 export * from './booking/create-booking.dto';
+export * from './booking/create-astrology-booking.dto';
 export * from './booking/repeat-booking.dto';
 export * from './booking/respond-booking.dto';
 export * from './booking/update-booking-status.dto';
@@ -78,4 +79,5 @@ export * from './temple/get-temples-query.dto';
 export * from './service/create.service.dto';
 export * from './service/update.service.dto';
 export * from './service/get.services.query.dto';
+export * from './astrologer';
 

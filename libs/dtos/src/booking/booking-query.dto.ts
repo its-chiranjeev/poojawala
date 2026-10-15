@@ -1,6 +1,6 @@
 import { Type, Transform } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
-import { BOOKING_STATUS, BOOKING_PAYMENT_STATUS } from '@poojawala/entities';
+import { BOOKING_STATUS, BOOKING_PAYMENT_STATUS, BOOKING_TYPE } from '@poojawala/entities';
 
 export class BookingQueryDto {
   @IsOptional()
@@ -78,4 +78,20 @@ export class BookingQueryDto {
     message: 'Purohit payout status must be a valid booking payment status',
   })
   purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      if (value.includes(',')) {
+        return value.split(',').map(v => v.trim());
+      }
+      return value.trim();
+    }
+    return value;
+  })
+  @IsEnum(BOOKING_TYPE, {
+    each: true,
+    message: 'Booking type must be a valid booking type',
+  })
+  bookingType?: BOOKING_TYPE | BOOKING_TYPE[];
 }

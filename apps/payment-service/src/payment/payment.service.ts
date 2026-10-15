@@ -17,6 +17,7 @@ import { DataSource, EntityManager, FindOptionsWhere, In } from 'typeorm';
 
 import {
   Booking,
+  BOOKING_TYPE,
   BOOKING_PAYMENT_STATUS,
   BOOKING_STATUS,
   BookingProduct,
@@ -946,12 +947,15 @@ export class PaymentService {
           ? CUSTOMER_PAYMENT_METHOD.ONLINE
           : CUSTOMER_PAYMENT_METHOD.CASH;
 
+      const isAstrology = booking.bookingType === BOOKING_TYPE.ASTROLOGY;
       const payment = paymentRepository.create({
-        paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+        paymentType: isAstrology
+          ? PAYMENT_TYPE.ASTROLOGY_PAYMENT
+          : PAYMENT_TYPE.BOOKING_PAYMENT,
         bookingId: booking.id,
         createdById: user.id,
         payerId: booking.customerId,
-        payeeId: booking.purohit?.userId,
+        payeeId: booking.purohit?.userId || (booking as any).astrologer?.userId,
         amount,
         currency: 'INR',
         status: PAYMENT_STATUS.PENDING,
@@ -1797,7 +1801,8 @@ export class PaymentService {
 
     if (
       !payment ||
-      (payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT &&
+      ((payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT ||
+        payment.paymentType === PAYMENT_TYPE.ASTROLOGY_PAYMENT) &&
         !payment.razorpayPaymentLinkId?.trim()) ||
       (user.role === USER_ROLE.CUSTOMER &&
         payment.status === PAYMENT_STATUS.CREATED)
@@ -1905,7 +1910,8 @@ export class PaymentService {
         }
       }
       return (
-        payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
+        (payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT &&
+          payment.paymentType !== PAYMENT_TYPE.ASTROLOGY_PAYMENT) ||
         Boolean(payment.razorpayPaymentLinkId?.trim()) ||
         payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH
       );
@@ -4383,7 +4389,10 @@ export class PaymentService {
       await manager.save(Payment, payment);
 
       const bookingId = payment.bookingId ?? payment.booking?.id;
-      if (bookingId && payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT) {
+      const isBookingOrAstrology =
+        payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT ||
+        payment.paymentType === PAYMENT_TYPE.ASTROLOGY_PAYMENT;
+      if (bookingId && isBookingOrAstrology) {
         const booking = await manager.getRepository(Booking).findOne({
           where: { id: bookingId },
           lock: { mode: 'pessimistic_write' },
@@ -4394,7 +4403,10 @@ export class PaymentService {
           const successfulPayments = await manager.getRepository(Payment).find({
             where: {
               bookingId: booking.id,
-              paymentType: PAYMENT_TYPE.BOOKING_PAYMENT,
+              paymentType: In([
+                PAYMENT_TYPE.BOOKING_PAYMENT,
+                PAYMENT_TYPE.ASTROLOGY_PAYMENT,
+              ]),
               status: PAYMENT_STATUS.SUCCESS,
             },
           });
@@ -4432,10 +4444,17 @@ export class PaymentService {
             if (booking.status === BOOKING_STATUS.ONGOING) {
               booking.status = BOOKING_STATUS.COMPLETED;
               booking.completionConfirmedAt = new Date();
+            } else if (
+              booking.bookingType === BOOKING_TYPE.ASTROLOGY &&
+              booking.status === BOOKING_STATUS.PENDING
+            ) {
+              booking.status = BOOKING_STATUS.ACCEPTED;
             }
 
-            // Create real PUROHIT_PAYOUT record when booking is fully paid
-            await this.ensurePurohitPendingPayout(manager, booking);
+            if (booking.bookingType !== BOOKING_TYPE.ASTROLOGY) {
+              // Create real PUROHIT_PAYOUT record when booking is fully paid
+              await this.ensurePurohitPendingPayout(manager, booking);
+            }
           } else if (totalPaid >= tokenAmount) {
             booking.paymentStatus = BOOKING_PAYMENT_STATUS.PARTIAL;
           } else {
@@ -4443,14 +4462,9 @@ export class PaymentService {
           }
 
           // TOKEN PAYMENT GATE: Trigger AUTO assignment only when token (or full) payment is confirmed (or deferred for admin)
-          // TODO: Deprecated. Admin-created bookings now use DEFERRED payment type instead of NOT_REQUIRED status.
-          // const isEligibleForAssignment =
-          //   (booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
-          //     booking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL ||
-          //     booking.paymentStatus === BOOKING_PAYMENT_STATUS.NOT_REQUIRED) &&
-          //   booking.status === BOOKING_STATUS.PENDING &&
-          //   !booking.purohitId;
+          // For astrology bookings, astrologer is already assigned, skip purohit assignment
           const isEligibleForAssignment =
+            booking.bookingType !== BOOKING_TYPE.ASTROLOGY &&
             (booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
               booking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL ||
               booking.paymentType === BOOKING_PAYMENT_TYPE.DEFERRED) &&
@@ -4722,7 +4736,11 @@ export class PaymentService {
       }
     }
 
-    if (payment.booking && payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT) {
+    const isBookingOrAstrology =
+      payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT ||
+      payment.paymentType === PAYMENT_TYPE.ASTROLOGY_PAYMENT;
+
+    if (payment.booking && isBookingOrAstrology) {
       const remaining = Number(payment.booking.remainingAmount ?? 0);
       const notificationMsg =
         remaining > 0

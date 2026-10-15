@@ -24,6 +24,7 @@ import {
   ASSIGNMENT_TYPE,
   Booking,
   BOOKING_MODE,
+  BOOKING_TYPE,
   BOOKING_PAYMENT_STATUS,
   BOOKING_PAYMENT_TYPE,
   BOOKING_STATUS,
@@ -47,6 +48,7 @@ import {
   PAYMENT_STATUS,
   ServiceFeature,
   SERVICE_FEATURE_TYPE,
+  AstrologerProfile,
 } from '@poojawala/entities';
 import { BookingRepository } from '@poojawala/repositories';
 import {
@@ -55,6 +57,7 @@ import {
   CancelBookingDto,
   CreateBookingByAdminDto,
   CreateBookingDto,
+  CreateAstrologyBookingDto,
   PUROHIT_BOOKING_ACTION,
   RespondBookingDto,
   UpdateBookingDto,
@@ -996,6 +999,313 @@ export class BookingService {
     }
   }
 
+  async createAstrologyBooking(
+    user: User,
+    dto: CreateAstrologyBookingDto,
+  ): Promise<CreateBookingResponse> {
+    if (user.role !== USER_ROLE.CUSTOMER) {
+      throw new ForbiddenException('Only customers can create bookings');
+    }
+
+    const minimumLeadTimeMinutes = 120;
+    const maximumAdvanceDays = 180;
+
+    const scheduledAt = new Date(dto.scheduledAt);
+
+    if (Number.isNaN(scheduledAt.getTime())) {
+      throw new BadRequestException('Invalid scheduled date and time');
+    }
+
+    const minimumScheduledAt = new Date(
+      Date.now() + minimumLeadTimeMinutes * 60 * 1000,
+    );
+
+    if (scheduledAt < minimumScheduledAt) {
+      throw new BadRequestException(
+        `Booking must be scheduled at least ${minimumLeadTimeMinutes} minutes in advance`,
+      );
+    }
+
+    const maximumScheduledAt = new Date(
+      Date.now() + maximumAdvanceDays * 24 * 60 * 60 * 1000,
+    );
+
+    if (scheduledAt > maximumScheduledAt) {
+      throw new BadRequestException(
+        `Booking cannot be scheduled more than ${maximumAdvanceDays} days in advance`,
+      );
+    }
+
+    try {
+      const transactionResult = await this.dataSource.transaction(async (manager) => {
+        const astrologerRepository = manager.getRepository(AstrologerProfile);
+        const bookingRepository = manager.getRepository(Booking);
+
+        const astrologer = await astrologerRepository.findOne({
+          where: { userId: dto.astrologerId },
+          relations: { user: true },
+        });
+
+        if (!astrologer) {
+          throw new NotFoundException('Astrologer not found');
+        }
+
+        const duplicateLockKey = [
+          user.id,
+          dto.astrologerId,
+          scheduledAt.toISOString(),
+        ].join(':');
+
+        if (typeof manager.query === 'function') {
+          try {
+            await manager.query(
+              `
+                SELECT pg_advisory_xact_lock(
+                  hashtext($1)
+                )
+              `,
+              [duplicateLockKey],
+            );
+          } catch {
+            // advisory lock acquisition failed or mock environment
+          }
+        }
+
+        const activeBookingStatuses = [
+          BOOKING_STATUS.PENDING,
+          BOOKING_STATUS.ACCEPTED,
+          BOOKING_STATUS.ENROUTE,
+          BOOKING_STATUS.ARRIVED,
+          BOOKING_STATUS.ONGOING,
+        ];
+
+        const duplicateBookingExists = await bookingRepository
+          .createQueryBuilder('booking')
+          .where('booking.customerId = :customerId', {
+            customerId: user.id,
+          })
+          .andWhere('booking.astrologerId = :astrologerId', {
+            astrologerId: dto.astrologerId,
+          })
+          .andWhere('booking.scheduledAt = :scheduledAt', {
+            scheduledAt,
+          })
+          .andWhere('booking.status IN (:...statuses)', {
+            statuses: activeBookingStatuses,
+          })
+          .getExists();
+
+        if (duplicateBookingExists) {
+          throw new ConflictException(
+            'An active booking for this astrologer and scheduled time already exists',
+          );
+        }
+
+        const bookingPrice =
+          astrologer.commissionPrice != null && Number(astrologer.commissionPrice) > 0
+            ? Number(astrologer.commissionPrice)
+            : 50.0;
+        const totalServicePrice = Number(bookingPrice.toFixed(2));
+        const finalAmount = totalServicePrice;
+        const tokenAmount = finalAmount;
+        const paidAmount = 0.0;
+        const remainingAmount = finalAmount;
+
+        const priceBreakDown = {
+          basePrice: bookingPrice,
+          subtotal: totalServicePrice,
+          commissionPrice: bookingPrice,
+          platformCommission: bookingPrice,
+          discountAmount: 0,
+          donationAmount: 0,
+          finalAmount,
+          tokenPercentage: 100,
+          tokenAmount,
+          remainingAmount,
+        };
+
+        const bookingNumber =
+          await this.generateUniqueBookingNumber(bookingRepository);
+
+        const booking = bookingRepository.create({
+          bookingNumber,
+          bookingType: BOOKING_TYPE.ASTROLOGY,
+          bookingMode: BOOKING_MODE.ONLINE,
+          customerId: user.id,
+          astrologerId: dto.astrologerId,
+          scheduledAt,
+          commissionPercentage: 0,
+          platformCommission: bookingPrice,
+          servicePrice: totalServicePrice,
+          discountAmount: 0,
+          donationAmount: 0,
+          finalAmount,
+          tokenPercentage: 100,
+          tokenAmount,
+          paidAmount,
+          remainingAmount,
+          priceBreakDown,
+          status: BOOKING_STATUS.PENDING,
+          paymentType: BOOKING_PAYMENT_TYPE.TOKEN,
+          paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+          assignmentType: ASSIGNMENT_TYPE.MANUAL,
+          filteredPurohitIds: [],
+        });
+
+        const savedBooking = await bookingRepository.save(booking);
+
+        await this.auditLogService.createAuditLog(
+          {
+            actorId: user.id,
+            actorType: ACTOR_TYPE.USER,
+            actorRole: user.role,
+            module: AUDIT_MODULE.BOOKING,
+            entity: 'Booking',
+            entityId: String(savedBooking.id),
+            action: 'ASTROLOGY_BOOKING_CREATED',
+            message: `Customer created Astrology Booking ${savedBooking.bookingNumber || savedBooking.id}.`,
+            oldValue: undefined,
+            newValue: {
+              status: savedBooking.status,
+              paymentStatus: savedBooking.paymentStatus,
+              astrologerId: savedBooking.astrologerId,
+              scheduledAt: savedBooking.scheduledAt,
+              bookingType: savedBooking.bookingType,
+            },
+          },
+          manager,
+        );
+
+        return { savedBooking, astrologer };
+      });
+
+      if (this.notificationService) {
+        try {
+          const customerName =
+            [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+            user.phone ||
+            'Customer';
+          const scheduledDateStr = transactionResult.savedBooking.scheduledAt
+            ? new Date(
+              transactionResult.savedBooking.scheduledAt,
+            ).toLocaleString('en-IN', {
+              timeZone: 'Asia/Kolkata',
+            })
+            : 'Scheduled Date';
+          const bookingDisplayId =
+            transactionResult.savedBooking.bookingNumber ||
+            `B-${transactionResult.savedBooking.id}`;
+
+          const adminBookingMessage = `New Astrology booking ${bookingDisplayId} created by ${customerName}. Scheduled at: ${scheduledDateStr}. Total: ₹${transactionResult.savedBooking.finalAmount}.`;
+
+          await this.notificationService.notifyAdmins(
+            'New Astrology Booking Request',
+            adminBookingMessage,
+            NOTIFICATION_TYPE.BOOKING,
+            transactionResult.savedBooking.id,
+            'BOOKING',
+            {
+              bookingId: transactionResult.savedBooking.id,
+              bookingNumber: transactionResult.savedBooking.bookingNumber,
+              customerId: user.id,
+              customerName,
+              astrologerId: transactionResult.savedBooking.astrologerId,
+              finalAmount: transactionResult.savedBooking.finalAmount,
+              status: transactionResult.savedBooking.status,
+              scheduledAt: transactionResult.savedBooking.scheduledAt,
+              bookingType: BOOKING_TYPE.ASTROLOGY,
+            },
+          );
+
+          if (transactionResult.astrologer.userId) {
+            await this.notificationService.createNotification(
+              transactionResult.astrologer.userId,
+              'New Astrology Consultation Scheduled',
+              `A new astrology consultation (${bookingDisplayId}) has been scheduled by ${customerName} for ${scheduledDateStr}.`,
+              NOTIFICATION_TYPE.BOOKING,
+              transactionResult.savedBooking.id,
+              'BOOKING',
+              true,
+              {
+                bookingId: transactionResult.savedBooking.id,
+                bookingNumber: transactionResult.savedBooking.bookingNumber,
+                scheduledAt: transactionResult.savedBooking.scheduledAt,
+              },
+            );
+          }
+        } catch (err: any) {
+          this.logger.warn(
+            `Failed to notify for new astrology booking: ${err?.message}`,
+          );
+        }
+      }
+
+      let paymentLinkRes: any = null;
+      let paymentFailureReason: string | null = null;
+
+      if (!this.paymentService) {
+        paymentFailureReason = 'PaymentService is not injected or available in BookingService';
+        this.logger.error(
+          `[Booking #${transactionResult.savedBooking.id}] ❌ ${paymentFailureReason}. Cannot generate payment URL.`,
+        );
+      } else {
+        try {
+          paymentLinkRes = await this.paymentService.createBookingPaymentLink(user, {
+            bookingId: transactionResult.savedBooking.id,
+            paymentOption: 'TOKEN',
+          });
+        } catch (err: any) {
+          const errorMsg =
+            err?.response?.message ||
+            err?.error?.description ||
+            err?.response?.data?.message ||
+            err?.message ||
+            String(err);
+          paymentFailureReason = errorMsg;
+
+          this.logger.error(
+            `[Booking #${transactionResult.savedBooking.id}] ❌ Failed to create payment link for astrology booking #${transactionResult.savedBooking.bookingNumber}: ${errorMsg}`,
+            err?.stack,
+          );
+        }
+      }
+
+      const existingPaymentId = paymentLinkRes?.paymentId ?? null;
+      const existingPaymentUrl = paymentLinkRes?.paymentUrl ?? null;
+
+      const bookingData: CreateBookingResponse = {
+        bookingId: transactionResult.savedBooking.id,
+        bookingNumber: transactionResult.savedBooking.bookingNumber,
+        status: transactionResult.savedBooking.status,
+        paymentType: transactionResult.savedBooking.paymentType ?? BOOKING_PAYMENT_TYPE.TOKEN,
+        paymentStatus: transactionResult.savedBooking.paymentStatus,
+        paymentId: existingPaymentId,
+        paymentUrl: existingPaymentUrl,
+        finalAmount: Number(transactionResult.savedBooking.finalAmount),
+        priceBreakDown: transactionResult.savedBooking.priceBreakDown ?? null,
+      };
+
+      return bookingData;
+    } catch (error) {
+      if (
+        error instanceof QueryFailedError &&
+        (
+          error as QueryFailedError & {
+            driverError?: {
+              code?: string;
+            };
+          }
+        ).driverError?.code === '23505'
+      ) {
+        throw new ConflictException(
+          'An active booking for this astrologer and scheduled time already exists',
+        );
+      }
+
+      throw error;
+    }
+  }
+
   /**
    * Enriches the embedded `service.plans` object on a booking response with
    * computed `purohitPayoutAmount` and `tokenAmount` per plan, using the
@@ -1055,7 +1365,8 @@ export class BookingService {
     if (
       user.role !== USER_ROLE.ADMIN &&
       user.role !== USER_ROLE.CUSTOMER &&
-      user.role !== USER_ROLE.PUROHIT
+      user.role !== USER_ROLE.PUROHIT &&
+      user.role !== USER_ROLE.ASTROLOGER
     ) {
       throw new ForbiddenException('You are not allowed to access bookings');
     }
@@ -1083,6 +1394,7 @@ export class BookingService {
         status,
         bookingPaymentStatus: query.bookingPaymentStatus,
         purohitPayoutStatus: query.purohitPayoutStatus,
+        bookingType: query.bookingType,
         search,
       },
     );
@@ -1122,8 +1434,15 @@ export class BookingService {
           : (payments.find((p) => p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) || null);
 
       this.enrichBookingServicePlans(booking);
+      const astrologerProfile =
+        booking.astrologerProfile ||
+        booking.astrologer?.astrologerProfile ||
+        null;
+
       return {
         ...booking,
+        astrologer: booking.astrologer || null,
+        astrologerProfile,
         payments,
         bookingPayment,
         purohitPayout,
@@ -1183,12 +1502,19 @@ export class BookingService {
       (p) => p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT
     ) || null;
 
+    const astrologerProfile =
+      booking.astrologerProfile ||
+      booking.astrologer?.astrologerProfile ||
+      null;
+
     switch (user.role) {
       case USER_ROLE.ADMIN:
         // Admin can access any booking.
         this.enrichBookingServicePlans(booking);
         return {
           ...booking,
+          astrologer: booking.astrologer || null,
+          astrologerProfile,
           bookingPayment,
           purohitPayout,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
@@ -1204,18 +1530,11 @@ export class BookingService {
           );
         }
 
-        // TODO: Old customer return including purohitPayout
-        // return {
-        //   ...booking,
-        //   bookingPayment,
-        //   purohitPayout,
-        //   scheduledAtIst: this.toIstString(booking.scheduledAt),
-        //   createdAtIst: this.toIstString(booking.createdAt),
-        //   updatedAtIst: this.toIstString(booking.updatedAt),
-        // };
         this.enrichBookingServicePlans(booking);
         return {
           ...booking,
+          astrologer: booking.astrologer || null,
+          astrologerProfile,
           payments: (booking.payments || []).filter(
             (p) =>
               p.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
@@ -1261,8 +1580,32 @@ export class BookingService {
         this.enrichBookingServicePlans(booking);
         return {
           ...booking,
+          astrologer: booking.astrologer || null,
+          astrologerProfile,
           bookingPayment,
           purohitPayout,
+          scheduledAtIst: this.toIstString(booking.scheduledAt),
+          createdAtIst: this.toIstString(booking.createdAt),
+          updatedAtIst: this.toIstString(booking.updatedAt),
+        };
+      }
+
+      case USER_ROLE.ASTROLOGER: {
+        if (booking.astrologerId !== user.id) {
+          throw new ForbiddenException(
+            'You are not allowed to access this booking',
+          );
+        }
+
+        this.enrichBookingServicePlans(booking);
+        return {
+          ...booking,
+          astrologer: booking.astrologer || null,
+          astrologerProfile,
+          bookingPayment,
+          purohitPayout: null,
+          purohitPayoutStatus: null,
+          purohitPayoutAmount: null,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),
@@ -3034,7 +3377,7 @@ export class BookingService {
         'BOOKING',
       );
 
-      // Also notify purohit if assigned
+      // Also notify purohit or astrologer if assigned
       if (updatedBooking.purohitId) {
         const purohitUserId = await this.getPurohitUserIdFromProfileId(manager, updatedBooking.purohitId);
         if (purohitUserId) {
@@ -3047,6 +3390,15 @@ export class BookingService {
             'BOOKING',
           );
         }
+      } else if (updatedBooking.astrologerId) {
+        await this.notificationService.createNotification(
+          updatedBooking.astrologerId,
+          'Booking Status Updated',
+          `Astrology Booking ${updatedBooking.bookingNumber || `B-${updatedBooking.id}`} status has been updated to ${updatedBooking.status}.`,
+          NOTIFICATION_TYPE.BOOKING_STATUS,
+          updatedBooking.id,
+          'BOOKING',
+        );
       }
 
       await this.auditLogService.createAuditLog(
@@ -3072,10 +3424,13 @@ export class BookingService {
             const customerName = completedBooking.customer.firstName
               ? `${completedBooking.customer.firstName} ${completedBooking.customer.lastName || ''}`.trim()
               : 'Devotee';
-            const purohitUser = completedBooking.purohit?.user;
+            const isAstrology = completedBooking.bookingType === BOOKING_TYPE.ASTROLOGY;
+            const purohitUser = isAstrology
+              ? completedBooking.astrologer
+              : completedBooking.purohit?.user;
             const purohitName = purohitUser?.firstName
               ? `${purohitUser.firstName} ${purohitUser.lastName || ''}`.trim()
-              : 'Assigned Purohit';
+              : (isAstrology ? 'Astrologer' : 'Assigned Purohit');
             const istString = this.toIstString(completedBooking.scheduledAt);
             const splitDateIst = istString ? istString.split(', ') : [];
             const bookingDate = splitDateIst.length > 0 ? splitDateIst[0] : (completedBooking.scheduledAt ? new Date(completedBooking.scheduledAt).toLocaleDateString() : 'Scheduled Date');
@@ -3086,7 +3441,7 @@ export class BookingService {
               email: completedBooking.customer.email,
               customerName,
               bookingId: completedBooking.bookingNumber || `B-${completedBooking.id}`,
-              serviceName: completedBooking.service?.name || 'Vedic Pooja',
+              serviceName: completedBooking.service?.name || (isAstrology ? 'Astrology Consultation' : 'Vedic Pooja'),
               servicePlan: completedBooking.plan ? String(completedBooking.plan) : undefined,
               planName: completedBooking.plan ? String(completedBooking.plan) : undefined,
               bookingDate,
@@ -3122,7 +3477,13 @@ export class BookingService {
     nextStatus: BOOKING_STATUS,
   ): void {
     if (nextStatus === BOOKING_STATUS.COMPLETED) {
-      if (booking.status !== BOOKING_STATUS.ONGOING) {
+      if (booking.bookingType === BOOKING_TYPE.ASTROLOGY) {
+        if (booking.status !== BOOKING_STATUS.ACCEPTED) {
+          throw new BadRequestException(
+            'Astrology booking must be in ACCEPTED status before it can be marked as COMPLETED',
+          );
+        }
+      } else if (booking.status !== BOOKING_STATUS.ONGOING) {
         throw new BadRequestException(
           'Booking must be in ONGOING status before it can be marked as COMPLETED',
         );
@@ -3132,7 +3493,13 @@ export class BookingService {
         booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID &&
         Number(booking.remainingAmount || 0) <= 0;
 
-      if (booking.paymentType === BOOKING_PAYMENT_TYPE.FULL) {
+      if (booking.bookingType === BOOKING_TYPE.ASTROLOGY) {
+        if (!isFullyPaid) {
+          throw new BadRequestException(
+            'Payment has not been completed. Booking payment status must be PAID before marking as COMPLETED',
+          );
+        }
+      } else if (booking.paymentType === BOOKING_PAYMENT_TYPE.FULL) {
         if (!isFullyPaid) {
           throw new BadRequestException(
             'Full payment has not been received. Full payment is required before completing the booking',
@@ -3159,6 +3526,25 @@ export class BookingService {
     }
 
     const currentStatus = booking.status;
+
+    if (booking.bookingType === BOOKING_TYPE.ASTROLOGY) {
+      const allowedAstrologyTransitions: Partial<
+        Record<BOOKING_STATUS, BOOKING_STATUS[]>
+      > = {
+        [BOOKING_STATUS.PENDING]: [BOOKING_STATUS.ACCEPTED, BOOKING_STATUS.CANCELLED],
+        [BOOKING_STATUS.ACCEPTED]: [BOOKING_STATUS.COMPLETED, BOOKING_STATUS.CANCELLED],
+      };
+
+      const allowedNextStatuses = allowedAstrologyTransitions[currentStatus] ?? [];
+
+      if (!allowedNextStatuses.includes(nextStatus)) {
+        throw new BadRequestException(
+          `Astrology booking status cannot be changed from ${currentStatus} to ${nextStatus}`,
+        );
+      }
+      return;
+    }
+
     const isOnline =
       booking.bookingMode === BOOKING_MODE.ONLINE ||
       (booking.bookingMode as string) === 'ONLINE';
@@ -3207,6 +3593,17 @@ export class BookingService {
       case USER_ROLE.PUROHIT:
         await this.validateAssignedPurohit(user.id, booking);
         return;
+
+      case USER_ROLE.ASTROLOGER:
+        if (
+          booking.bookingType === BOOKING_TYPE.ASTROLOGY &&
+          booking.astrologerId === user.id
+        ) {
+          return;
+        }
+        throw new ForbiddenException(
+          'You are not the assigned astrologer for this booking',
+        );
 
       default:
         throw new ForbiddenException(
@@ -3679,7 +4076,7 @@ export class BookingService {
           .getMany();
 
         let service = booking.service;
-        if (!service || (!service.temple && service.templeId)) {
+        if ((!service || (!service.temple && service.templeId)) && savedBooking.serviceId) {
           service =
             (await manager.getRepository(Service).findOne({
               where: { id: savedBooking.serviceId },
@@ -3687,23 +4084,25 @@ export class BookingService {
             })) || service;
         }
 
-        const notifData = this.buildPurohitBookingNotification(
-          savedBooking,
-          service,
-          false,
-        );
-
-        for (const profile of purohitProfiles) {
-          await this.notificationService.createNotification(
-            profile.userId,
-            notifData.title,
-            notifData.message,
-            NOTIFICATION_TYPE.BOOKING,
-            savedBooking.id,
-            'BOOKING',
-            true,
-            notifData.extraData,
+        if (service) {
+          const notifData = this.buildPurohitBookingNotification(
+            savedBooking,
+            service,
+            false,
           );
+
+          for (const profile of purohitProfiles) {
+            await this.notificationService.createNotification(
+              profile.userId,
+              notifData.title,
+              notifData.message,
+              NOTIFICATION_TYPE.BOOKING,
+              savedBooking.id,
+              'BOOKING',
+              true,
+              notifData.extraData,
+            );
+          }
         }
       }
 
@@ -5267,8 +5666,8 @@ export class BookingService {
       const addressString = isOnlineBooking
         ? 'Online Video / Audio Call'
         : customerAddress
-        ? `${customerAddress.fullAddress}, ${customerAddress.city} - ${customerAddress.pincode}`
-        : 'Online';
+          ? `${customerAddress.fullAddress}, ${customerAddress.city} - ${customerAddress.pincode}`
+          : 'Online';
       const scheduledDateStr = b.scheduledAt
         ? new Date(b.scheduledAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
         : 'Scheduled Date';

@@ -34,6 +34,7 @@ import { BlogPost } from './blog-post.entity';
 import { BlogCategory } from './blog-category.entity';
 import { Temple } from './temple.entity';
 import { ServiceFeature } from './service-feature.entity';
+import { AstrologerProfile } from './astrologer-profile.entity';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { ServiceFeature } from './service-feature.entity';
       BlogCategory,
       Temple,
       ServiceFeature,
+      AstrologerProfile,
     ]),
   ],
   providers: [EntitiesService],

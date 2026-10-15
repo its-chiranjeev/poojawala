@@ -30,6 +30,7 @@ import {
   PurohitMedia,
   PurohitProfile,
   PurohitServiceArea,
+  AstrologerProfile,
   User,
   USER_ROLE,
   USER_STATUS,
@@ -41,6 +42,7 @@ import {
   Order,
   ORDER_STATUS,
   ORDER_PAYMENT_STATUS,
+  PLATFORM_SETTING_KEY,
 } from '@poojawala/entities';
 import { NotificationService } from '@poojawala/notification';
 import {
@@ -205,6 +207,7 @@ export class UserService {
     }
 
     let profile: PurohitProfile | null = null;
+    let astrologerProfile: AstrologerProfile | null = null;
     let uniqueServiceIds: number[] | undefined;
     let uniqueAreaNames: string[] | undefined;
 
@@ -256,6 +259,19 @@ export class UserService {
         uniqueAreaNames = Array.from(
           new Set(parsedAreas.map((a) => String(a).trim()).filter(Boolean)),
         );
+      }
+    } else if (user.role === USER_ROLE.ASTROLOGER) {
+      const astrologerRepo = this.dataSource.getRepository(AstrologerProfile);
+      astrologerProfile = await astrologerRepo.findOne({
+        where: { userId: Number(id) },
+      });
+
+      if (!astrologerProfile) {
+        astrologerProfile = astrologerRepo.create({
+          userId: Number(id),
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+        });
+        astrologerProfile = await astrologerRepo.save(astrologerProfile);
       }
     }
 
@@ -381,6 +397,42 @@ export class UserService {
           where: { aadhaarNumber: effectiveAadhaarNumber },
         });
         if (existingAadhaar && existingAadhaar.id !== profile.id) {
+          throw new ConflictException('Aadhaar number already in use');
+        }
+      }
+
+      if (user.isAdminCreated && (hasAadhaarDoc || hasPanDoc)) {
+        userPayload.isAdminCreated = false;
+      }
+    } else if (user.role === USER_ROLE.ASTROLOGER && astrologerProfile) {
+      hasAadhaarDoc = Boolean(
+        dto.aadhaarDoc || (dto.profile && (dto.profile as any).aadhaarDoc),
+      );
+      hasPanDoc = Boolean(
+        dto.panDoc || (dto.profile && (dto.profile as any).panDoc),
+      );
+
+      const effectiveAadhaarNumber = (
+        dto.aadhaarNumber ??
+        dto.profile?.aadhaarNumber ??
+        astrologerProfile.aadhaarNumber
+      )?.trim();
+
+      if (hasAadhaarDoc && !effectiveAadhaarNumber) {
+        throw new BadRequestException(
+          'aadhaarNumber is required when aadhaarDoc is uploaded',
+        );
+      }
+
+      if (
+        effectiveAadhaarNumber &&
+        effectiveAadhaarNumber !== astrologerProfile.aadhaarNumber
+      ) {
+        const astrologerRepo = this.dataSource.getRepository(AstrologerProfile);
+        const existingAadhaar = await astrologerRepo.findOne({
+          where: { aadhaarNumber: effectiveAadhaarNumber },
+        });
+        if (existingAadhaar && existingAadhaar.id !== astrologerProfile.id) {
           throw new ConflictException('Aadhaar number already in use');
         }
       }
@@ -651,6 +703,110 @@ export class UserService {
           }
         }
       }
+    } else if (user.role === USER_ROLE.ASTROLOGER && astrologerProfile) {
+      const bio = dto.bio !== undefined ? dto.bio : dto.profile?.bio;
+      const qualification =
+        dto.qualification !== undefined
+          ? dto.qualification
+          : dto.profile?.qualification;
+      const experienceYears =
+        dto.experienceYears !== undefined
+          ? dto.experienceYears
+          : dto.profile?.experienceYears;
+      const aadhaarNumber =
+        dto.aadhaarNumber !== undefined
+          ? dto.aadhaarNumber
+          : dto.profile?.aadhaarNumber;
+      const city = dto.city !== undefined ? dto.city : dto.profile?.city;
+      const languages =
+        dto.languages !== undefined
+          ? dto.languages
+          : dto.profile?.languages;
+      const specializations =
+        dto.specializations !== undefined
+          ? dto.specializations
+          : dto.profile?.specializations;
+      const specification =
+        dto.specification !== undefined
+          ? dto.specification
+          : dto.profile?.specification;
+      const ratePerMinute =
+        dto.ratePerMinute !== undefined
+          ? dto.ratePerMinute
+          : dto.profile?.ratePerMinute;
+      const commissionPrice =
+        dto.commissionPrice !== undefined
+          ? dto.commissionPrice
+          : dto.profile?.commissionPrice;
+      const verificationStatus =
+        dto.verificationStatus !== undefined
+          ? dto.verificationStatus
+          : dto.profile?.verificationStatus;
+      const rejectionReason =
+        dto.rejectionReason !== undefined
+          ? dto.rejectionReason
+          : dto.profile?.rejectionReason;
+
+      const aadhaarDocUrl =
+        dto.aadhaarDoc !== undefined
+          ? dto.aadhaarDoc
+          : (dto.profile as any)?.aadhaarDoc;
+      const panDocUrl =
+        dto.panDoc !== undefined
+          ? dto.panDoc
+          : (dto.profile as any)?.panDoc;
+      const certificateUrl =
+        dto.certificate !== undefined
+          ? dto.certificate
+          : (dto.profile as any)?.certificate;
+
+      const profilePayload: Partial<AstrologerProfile> = {};
+      if (bio !== undefined) profilePayload.bio = bio;
+      if (qualification !== undefined) {
+        profilePayload.qualification = parseStringArray(qualification) || qualification;
+      }
+      if (experienceYears !== undefined && experienceYears !== null && experienceYears !== '') {
+        profilePayload.experienceYears = Number(experienceYears);
+      }
+      if (aadhaarNumber !== undefined) profilePayload.aadhaarNumber = aadhaarNumber;
+      if (city !== undefined) profilePayload.city = city;
+      if (languages !== undefined) {
+        profilePayload.languages = parseStringArray(languages) || languages;
+      }
+      if (specializations !== undefined) {
+        profilePayload.specializations = parseStringArray(specializations) || specializations;
+      }
+      if (specification !== undefined) profilePayload.specification = specification;
+
+      if (ratePerMinute !== undefined && ratePerMinute !== null && ratePerMinute !== '') {
+        profilePayload.ratePerMinute = Number(ratePerMinute);
+      }
+      if (commissionPrice !== undefined && commissionPrice !== null && commissionPrice !== '') {
+        profilePayload.commissionPrice = Number(commissionPrice);
+      }
+
+      if (aadhaarDocUrl !== undefined) profilePayload.aadhaarDocUrl = aadhaarDocUrl;
+      if (panDocUrl !== undefined) profilePayload.panDocUrl = panDocUrl;
+      if (certificateUrl !== undefined) profilePayload.certificateUrl = certificateUrl;
+
+      if (verificationStatus !== undefined) {
+        profilePayload.verificationStatus = verificationStatus;
+        if (verificationStatus === PUROHIT_VERIFICATION_STATUS.APPROVED) {
+          profilePayload.rejectionReason = null as any;
+        } else if (rejectionReason !== undefined) {
+          profilePayload.rejectionReason = rejectionReason;
+        }
+      } else if (hasAadhaarDoc || hasPanDoc) {
+        profilePayload.verificationStatus = PUROHIT_VERIFICATION_STATUS.APPROVED;
+        profilePayload.rejectionReason = null as any;
+      } else if (rejectionReason !== undefined) {
+        profilePayload.rejectionReason = rejectionReason;
+      }
+
+      if (Object.keys(profilePayload).length > 0) {
+        const astrologerRepo = this.dataSource.getRepository(AstrologerProfile);
+        await astrologerRepo.update(astrologerProfile.id, profilePayload as any);
+      }
     } else if (user.role === USER_ROLE.CUSTOMER) {
       const stateToUpdate = dto.state !== undefined ? dto.state : dto.profile?.state;
       const cityToUpdate = dto.city !== undefined ? dto.city : dto.profile?.city;
@@ -698,11 +854,52 @@ export class UserService {
     // Resolve city and state for user profile
     const { city: userCity, state: userState } = this.resolveUserCityAndState(safeUser);
     if ((safeUser as any).profile) {
+      const profile = { ...(safeUser as any).profile };
+      if (profile.aadhaarDocUrl) {
+        profile.aadhaarDocDownloadUrl =
+          await this.s3Service.getAttachmentDownloadUrl(
+            profile.aadhaarDocUrl,
+          );
+        profile.aadhaarDocUrl = await this.s3Service.getDownloadUrl(
+          profile.aadhaarDocUrl,
+        );
+      }
+      if (profile.panDocUrl) {
+        profile.panDocDownloadUrl =
+          await this.s3Service.getAttachmentDownloadUrl(profile.panDocUrl);
+        profile.panDocUrl = await this.s3Service.getDownloadUrl(
+          profile.panDocUrl,
+        );
+      }
+      if (profile.certificateUrl) {
+        profile.certificateDownloadUrl =
+          await this.s3Service.getAttachmentDownloadUrl(
+            profile.certificateUrl,
+          );
+        profile.certificateUrl = await this.s3Service.getDownloadUrl(
+          profile.certificateUrl,
+        );
+      }
+      if (profile.templeAffiliationProofUrl) {
+        profile.templeAffiliationProofDownloadUrl =
+          await this.s3Service.getAttachmentDownloadUrl(
+            profile.templeAffiliationProofUrl,
+          );
+        profile.templeAffiliationProofUrl =
+          await this.s3Service.getDownloadUrl(
+            profile.templeAffiliationProofUrl,
+          );
+      }
       (safeUser as any).profile = this.formatProfileWithCityAndState(
-        (safeUser as any).profile,
+        profile,
         userCity,
         userState,
       );
+      if (safeUser.role === USER_ROLE.ASTROLOGER) {
+        (safeUser as any).astrologerProfile = (safeUser as any).profile;
+      }
+      (safeUser as any).verificationStatus = profile.verificationStatus;
+      (safeUser as any).rejectionReason = profile.rejectionReason ?? null;
       delete (safeUser as any).city;
       delete (safeUser as any).state;
       delete (safeUser as any).purohitServices;
@@ -761,10 +958,11 @@ export class UserService {
       throw new BadRequestException('Phone number cannot be updated');
     }
 
-    // Normal users cannot change their role or status
+    // Normal users cannot change their role, status, or commissionPrice
     if (user.role !== USER_ROLE.ADMIN) {
       delete dto.role;
       delete dto.status;
+      delete dto.commissionPrice;
     }
 
     if (dto.password) {
@@ -1071,6 +1269,145 @@ export class UserService {
           });
         }
       }
+    } else if (user.role === USER_ROLE.ASTROLOGER) {
+      const astrologerRepo = this.dataSource.getRepository(AstrologerProfile);
+      let astrologerProfile = await astrologerRepo.findOne({
+        where: { userId: Number(id) },
+      });
+
+      if (!astrologerProfile) {
+        astrologerProfile = astrologerRepo.create({
+          userId: Number(id),
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+        });
+        astrologerProfile = await astrologerRepo.save(astrologerProfile);
+      }
+
+      const isRejected =
+        astrologerProfile.verificationStatus === PUROHIT_VERIFICATION_STATUS.REJECTED;
+      const previousRejectionReason = astrologerProfile.rejectionReason;
+
+      const effectiveAadhaarNumber = (
+        dto.aadhaarNumber ?? astrologerProfile.aadhaarNumber
+      )?.trim();
+
+      if (dto.aadhaarDoc && !effectiveAadhaarNumber) {
+        throw new BadRequestException(
+          'aadhaarNumber is required when aadhaarDoc is uploaded',
+        );
+      }
+
+      if (
+        effectiveAadhaarNumber &&
+        effectiveAadhaarNumber !== astrologerProfile.aadhaarNumber
+      ) {
+        const existingAadhaar = await astrologerRepo.findOne({
+          where: { aadhaarNumber: effectiveAadhaarNumber },
+        });
+        if (existingAadhaar && existingAadhaar.id !== astrologerProfile.id) {
+          throw new ConflictException('Aadhaar number already in use');
+        }
+      }
+
+      if (user.isAdminCreated && (dto.aadhaarDoc || dto.panDoc)) {
+        await this.userRepository.updateUser(id, { isAdminCreated: false });
+      }
+
+      const profilePayload: Partial<AstrologerProfile> = {};
+      if (dto.bio !== undefined) profilePayload.bio = dto.bio;
+      if (dto.qualification !== undefined) {
+        profilePayload.qualification = parseStringArray(dto.qualification) || dto.qualification;
+      }
+      if (dto.experienceYears !== undefined && dto.experienceYears !== null && (dto.experienceYears as any) !== '') {
+        profilePayload.experienceYears = Number(dto.experienceYears);
+      }
+      if (dto.aadhaarNumber !== undefined) profilePayload.aadhaarNumber = dto.aadhaarNumber;
+      if (dto.city !== undefined) profilePayload.city = dto.city;
+      if (dto.languages !== undefined) {
+        profilePayload.languages = parseStringArray(dto.languages) || dto.languages;
+      }
+      if (dto.specializations !== undefined) {
+        profilePayload.specializations = parseStringArray(dto.specializations) || dto.specializations;
+      }
+      if (dto.specification !== undefined) profilePayload.specification = dto.specification;
+      if (dto.ratePerMinute !== undefined && dto.ratePerMinute !== null && (dto.ratePerMinute as any) !== '') {
+        profilePayload.ratePerMinute = Number(dto.ratePerMinute);
+      }
+
+      if (dto.aadhaarDoc !== undefined) profilePayload.aadhaarDocUrl = dto.aadhaarDoc;
+      if (dto.panDoc !== undefined) profilePayload.panDocUrl = dto.panDoc;
+      if (dto.certificate !== undefined) profilePayload.certificateUrl = dto.certificate;
+
+      if (isRejected) {
+        profilePayload.verificationStatus = PUROHIT_VERIFICATION_STATUS.PENDING;
+        profilePayload.rejectionReason = null as any;
+      }
+
+      if (Object.keys(profilePayload).length > 0) {
+        await astrologerRepo.update(astrologerProfile.id, profilePayload as any);
+      }
+
+      if (isRejected) {
+        await this.auditLogService.createAuditLog({
+          actorId: Number(id),
+          actorType: ACTOR_TYPE.USER,
+          actorRole: USER_ROLE.ASTROLOGER,
+          module: AUDIT_MODULE.USER,
+          entity: 'AstrologerProfile',
+          entityId: String(astrologerProfile.id),
+          action: 'ASTROLOGER_VERIFICATION_RESUBMITTED',
+          message: `Astrologer #${id} resubmitted profile for verification via profile update.`,
+          oldValue: {
+            verificationStatus: PUROHIT_VERIFICATION_STATUS.REJECTED,
+            rejectionReason: previousRejectionReason,
+          },
+          newValue: {
+            verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+            rejectionReason: null,
+          },
+        });
+
+        if (this.notificationService) {
+          try {
+            await this.notificationService.createNotification(
+              Number(id),
+              'Verification Resubmitted',
+              'Your profile verification request has been resubmitted and is under review.',
+              NOTIFICATION_TYPE.SYSTEM,
+              astrologerProfile.id,
+              'ASTROLOGER_PROFILE',
+            );
+
+            const firstName = dto.firstName !== undefined ? dto.firstName : user.firstName;
+            const lastName = dto.lastName !== undefined ? dto.lastName : user.lastName;
+            const astrologerName =
+              [firstName, lastName].filter(Boolean).join(' ').trim() ||
+              dto.username ||
+              user.username ||
+              `Astrologer #${id}`;
+
+            const adminResubmitMessage = `Astrologer profile resubmitted for verification. ${astrologerName} has updated the previously rejected profile and submitted it for Admin review.`;
+
+            await this.notificationService.notifyAdmins(
+              'Astrologer Verification Resubmitted',
+              adminResubmitMessage,
+              NOTIFICATION_TYPE.SYSTEM,
+              astrologerProfile.id,
+              'ASTROLOGER_PROFILE',
+              {
+                userId: Number(id),
+                astrologerId: astrologerProfile.id,
+                astrologerName,
+              },
+            );
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            this.logger.warn(
+              `Failed to send astrologer resubmission notification: ${message}`,
+            );
+          }
+        }
+      }
     }
 
     const fullUser = await this.userRepository.getFullProfile(
@@ -1171,6 +1508,9 @@ export class UserService {
     if ((safeUser as any).profile) {
       (safeUser as any).profile.state =
         (safeUser as any).profile.state || userState;
+      if (safeUser.role === USER_ROLE.ASTROLOGER) {
+        (safeUser as any).astrologerProfile = (safeUser as any).profile;
+      }
       (safeUser as any).verificationStatus =
         (safeUser as any).profile.verificationStatus;
       (safeUser as any).rejectionReason =
@@ -1263,7 +1603,7 @@ export class UserService {
     const { email, phone, role } = dto;
 
     if (
-      ![USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN].includes(role)
+      ![USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN, USER_ROLE.ASTROLOGER].includes(role)
     ) {
       throw new BadRequestException('Invalid role');
     }
@@ -1501,6 +1841,25 @@ export class UserService {
   }
 
   async getPlatformSetting(userId: number) {
+    const existingAstrologyCommission = await this.platformSettingRepository.findOne({
+      where: { key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PRICE },
+    });
+
+    if (!existingAstrologyCommission) {
+      try {
+        await this.platformSettingRepository.save(
+          this.platformSettingRepository.create({
+            key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PRICE,
+            value: '50',
+            description: 'Default platform commission price for astrology consultations',
+            updatedById: userId,
+          }),
+        );
+      } catch {
+        // Ignore potential race condition
+      }
+    }
+
     const settings = await this.platformSettingRepository.findAndCount();
 
     return {
@@ -1585,6 +1944,21 @@ export class UserService {
         if (!state) state = defaultArea?.state || null;
         if (!city) city = defaultArea?.city || null;
       }
+      if (!city && user.profile?.city) {
+        city = user.profile.city;
+      }
+      if (!state && user.profile?.state) {
+        state = user.profile.state;
+      }
+      const addresses = (user.addresses || []).filter((a: any) => !a.deletedAt);
+      if (addresses.length > 0) {
+        const defaultAddress =
+          addresses.find((a: any) => a.isDefault) ||
+          addresses[0];
+        if (!state) state = defaultAddress?.state || null;
+        if (!city) city = defaultAddress?.city || null;
+      }
+    } else if (user.role === USER_ROLE.ASTROLOGER) {
       if (!city && user.profile?.city) {
         city = user.profile.city;
       }
@@ -1786,6 +2160,9 @@ export class UserService {
             userCity,
             userState,
           );
+          if (safeUser.role === USER_ROLE.ASTROLOGER) {
+            (safeUser as any).astrologerProfile = (safeUser as any).profile;
+          }
           delete (safeUser as any).city;
           delete (safeUser as any).state;
           delete (safeUser as any).purohitServices;
@@ -2288,12 +2665,15 @@ export class UserService {
 
       const { city: userCity, state: userState } = this.resolveUserCityAndState(safeUser);
       if ((safeUser as any).profile) {
-        (safeUser as any).profile = this.formatProfileWithCityAndState(
-          (safeUser as any).profile,
-          userCity,
-          userState,
-        );
-        delete (safeUser as any).city;
+          (safeUser as any).profile = this.formatProfileWithCityAndState(
+            (safeUser as any).profile,
+            userCity,
+            userState,
+          );
+          if (safeUser.role === USER_ROLE.ASTROLOGER) {
+            (safeUser as any).astrologerProfile = (safeUser as any).profile;
+          }
+          delete (safeUser as any).city;
         delete (safeUser as any).state;
         delete (safeUser as any).purohitServices;
       } else {
@@ -4210,7 +4590,9 @@ export class UserService {
       }
     }
 
-    if (otpRecord.role === USER_ROLE.CUSTOMER) {
+    const effectiveRole = otpRecord?.role || USER_ROLE.CUSTOMER;
+
+    if (effectiveRole === USER_ROLE.CUSTOMER) {
       if (dto.bio)
         throw new BadRequestException(
           'bio is not allowed for CUSTOMER registration',
@@ -4266,7 +4648,7 @@ export class UserService {
       }
     }
 
-    if (otpRecord.role === USER_ROLE.PUROHIT) {
+    if (effectiveRole === USER_ROLE.PUROHIT) {
       const requiredFields = [
         'bio',
         'qualification',
@@ -4359,12 +4741,25 @@ export class UserService {
       // }
     }
 
-    if (!dto.id || (otpRecord.role === USER_ROLE.PUROHIT && (dto.aadhaarNumber || dto.accountNumber))) {
+    if (effectiveRole === USER_ROLE.ASTROLOGER) {
+      if (dto.aadhaarNumber && typeof dto.aadhaarNumber === 'string' && dto.aadhaarNumber.trim() !== '') {
+        const cleanAadhaar = dto.aadhaarNumber.replace(/[\s-]/g, '');
+        if (!isValidAadhaar(cleanAadhaar)) {
+          throw new BadRequestException(
+            'aadhaarNumber must be a valid Aadhaar number',
+          );
+        }
+        dto.aadhaarNumber = cleanAadhaar;
+      }
+    }
+
+    if (!dto.id || ((effectiveRole === USER_ROLE.PUROHIT || effectiveRole === USER_ROLE.ASTROLOGER) && (dto.aadhaarNumber || dto.accountNumber))) {
       const [
         existingUserByEmail,
         existingUserByPhone,
         existingUsername,
         existingAadhaar,
+        existingAstrologerAadhaar,
         existingAccount,
       ] = await Promise.all([
         !dto.id && dto.email
@@ -4376,12 +4771,17 @@ export class UserService {
         !dto.id && dto.username
           ? this.userRepository.findOne({ where: { username: dto.username.trim() } })
           : Promise.resolve(null),
-        otpRecord.role === USER_ROLE.PUROHIT && dto.aadhaarNumber
+        effectiveRole === USER_ROLE.PUROHIT && dto.aadhaarNumber
           ? this.purohitProfileRepository.findOne({
             where: { aadhaarNumber: dto.aadhaarNumber.trim() },
           })
           : Promise.resolve(null),
-        otpRecord.role === USER_ROLE.PUROHIT && dto.accountNumber
+        effectiveRole === USER_ROLE.ASTROLOGER && dto.aadhaarNumber
+          ? this.dataSource.getRepository(AstrologerProfile).findOne({
+            where: { aadhaarNumber: dto.aadhaarNumber.trim() },
+          })
+          : Promise.resolve(null),
+        effectiveRole === USER_ROLE.PUROHIT && dto.accountNumber
           ? this.dataSource
             .getRepository(PurohitBankAccount)
             .findOne({ where: { accountNumber: dto.accountNumber.trim() } })
@@ -4400,7 +4800,7 @@ export class UserService {
         }
       }
 
-      if (existingAadhaar) {
+      if (existingAadhaar || existingAstrologerAadhaar) {
         throw new ConflictException('Aadhaar number already in use');
       }
 
@@ -4417,9 +4817,10 @@ export class UserService {
     let savedUser: User;
     let savedCustomerAddress: CustomerAddress | null = null;
     let savedPurohitServiceArea: PurohitServiceArea | null = null;
+    let savedAstrologerProfile: AstrologerProfile | null = null;
 
     try {
-      ({ saved: savedUser, savedCustomerAddress, savedPurohitServiceArea } =
+      ({ saved: savedUser, savedCustomerAddress, savedPurohitServiceArea, savedAstrologerProfile } =
         await this.dataSource.transaction(async (manager) => {
           let saved: User;
 
@@ -4447,7 +4848,7 @@ export class UserService {
               firstName: dto.firstName,
               lastName: dto.lastName,
               hashedPassword: hashedPassword,
-              role: otpRecord.role || USER_ROLE.CUSTOMER,
+              role: effectiveRole,
               // TODO: PUROHIT_VERIFICATION_REWORK
               // User account status is ACTIVE upon registration; Purohit verification status is PENDING.
               status: USER_STATUS.ACTIVE,
@@ -4542,7 +4943,7 @@ export class UserService {
             saved.profileImage = profileImageUrl;
           }
 
-          if (otpRecord.role === USER_ROLE.PUROHIT) {
+          if (effectiveRole === USER_ROLE.PUROHIT) {
             // const missingDocs: string[] = [];
             // if (!aadhaarDocUrl && !panDocUrl)
             //   missingDocs.push('Aadhaar or PAN document');
@@ -4673,6 +5074,60 @@ export class UserService {
 
             if (mediaEntries.length > 0) {
               await manager.save(PurohitMedia, mediaEntries);
+            }
+          } else if (effectiveRole === USER_ROLE.ASTROLOGER) {
+            let astrologerProfile = await manager.findOne(AstrologerProfile, {
+              where: { userId: saved.id },
+            });
+
+            const ratePerMin =
+              dto.ratePerMinute !== undefined && dto.ratePerMinute !== null
+                ? Number(dto.ratePerMinute)
+                : 0;
+
+            const astrologySetting = await this.platformSettingRepository.findOne({
+              where: { key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PRICE },
+            });
+            const defaultCommissionPrice =
+              astrologySetting?.value && !isNaN(Number(astrologySetting.value))
+                ? Number(astrologySetting.value)
+                : 50;
+
+            if (astrologerProfile) {
+              Object.assign(astrologerProfile, {
+                bio: dto.bio ?? astrologerProfile.bio,
+                qualification: dto.qualification ?? astrologerProfile.qualification,
+                experienceYears: dto.experienceYears ?? astrologerProfile.experienceYears,
+                aadhaarNumber: dto.aadhaarNumber ?? astrologerProfile.aadhaarNumber,
+                aadhaarDocUrl: aadhaarDocUrl || astrologerProfile.aadhaarDocUrl,
+                panDocUrl: panDocUrl || astrologerProfile.panDocUrl,
+                certificateUrl: certificateUrl || astrologerProfile.certificateUrl,
+                city: dto.city ?? astrologerProfile.city,
+                languages: dto.languages ?? astrologerProfile.languages,
+                specializations: dto.specializations ?? astrologerProfile.specializations,
+                specification: dto.specification ?? astrologerProfile.specification,
+                ratePerMinute: ratePerMin || astrologerProfile.ratePerMinute,
+              });
+              savedAstrologerProfile = await manager.save(astrologerProfile);
+            } else {
+              astrologerProfile = manager.create(AstrologerProfile, {
+                userId: saved.id,
+                bio: dto.bio,
+                qualification: dto.qualification,
+                experienceYears: dto.experienceYears,
+                aadhaarNumber: dto.aadhaarNumber,
+                aadhaarDocUrl,
+                panDocUrl,
+                certificateUrl,
+                city: dto.city,
+                languages: dto.languages,
+                specializations: dto.specializations,
+                specification: dto.specification,
+                ratePerMinute: ratePerMin,
+                commissionPrice: defaultCommissionPrice,
+                verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+              });
+              savedAstrologerProfile = await manager.save(astrologerProfile);
             }
           }
 
@@ -5001,7 +5456,7 @@ export class UserService {
             manager,
           );
 
-          return { saved, savedCustomerAddress, savedPurohitServiceArea };
+          return { saved, savedCustomerAddress, savedPurohitServiceArea, savedAstrologerProfile };
         }));
     } catch (transactionError) {
       // DB transaction failed — clean up any S3 files uploaded during this attempt
@@ -5026,7 +5481,9 @@ export class UserService {
         ? `${savedUser.firstName} ${savedUser.lastName || ''}`.trim()
         : savedUser.role === USER_ROLE.PUROHIT
           ? 'Purohit'
-          : 'Devotee';
+          : savedUser.role === USER_ROLE.ASTROLOGER
+            ? 'Astrologer'
+            : 'Devotee';
       const emailPayload = {
         email: savedUser.email,
         name: fullName,
@@ -5080,6 +5537,7 @@ export class UserService {
       ...data,
       ...(savedCustomerAddress && { address: savedCustomerAddress }),
       ...(savedPurohitServiceArea && { serviceArea: savedPurohitServiceArea }),
+      ...(savedAstrologerProfile && { astrologerProfile: savedAstrologerProfile }),
     };
   }
 

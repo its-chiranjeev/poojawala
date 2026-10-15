@@ -89,6 +89,7 @@ export class ReviewController {
     const roleToken =
       cookies[ROLE_COOKIE_MAP[USER_ROLE.CUSTOMER].access] ||
       cookies[ROLE_COOKIE_MAP[USER_ROLE.PUROHIT].access] ||
+      cookies[ROLE_COOKIE_MAP[USER_ROLE.ASTROLOGER].access] ||
       cookies[ROLE_COOKIE_MAP[USER_ROLE.ADMIN].access];
 
     if (roleToken && typeof roleToken === 'string') {

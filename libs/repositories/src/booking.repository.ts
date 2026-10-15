@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
-import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, BOOKING_PAYMENT_TYPE, USER_ROLE, ASSIGNMENT_TYPE, PAYMENT_TYPE, PAYMENT_STATUS } from '@poojawala/entities';
+import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, BOOKING_PAYMENT_TYPE, BOOKING_TYPE, USER_ROLE, ASSIGNMENT_TYPE, PAYMENT_TYPE, PAYMENT_STATUS } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 interface FindBookingsByRoleOptions {
@@ -13,6 +13,7 @@ interface FindBookingsByRoleOptions {
   status?: BOOKING_STATUS | BOOKING_STATUS[];
   bookingPaymentStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
   purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
+  bookingType?: BOOKING_TYPE | BOOKING_TYPE[];
   search?: string;
 }
 
@@ -73,6 +74,19 @@ export class BookingRepository extends BaseRepository<Booking> {
         'purohitUser.createdAt',
         'purohitUser.updatedAt',
       ])
+      .leftJoinAndSelect('booking.astrologer', 'astrologer')
+      .addSelect([
+        'astrologer.id',
+        'astrologer.email',
+        'astrologer.username',
+        'astrologer.phone',
+        'astrologer.firstName',
+        'astrologer.lastName',
+        'astrologer.profileImage',
+        'astrologer.role',
+        'astrologer.status',
+      ])
+      .leftJoinAndSelect('astrologer.astrologerProfile', 'astrologerProfile')
       .leftJoinAndSelect('booking.customerAddress', 'customerAddress')
       .leftJoinAndSelect(
         'booking.payments',
@@ -130,6 +144,19 @@ export class BookingRepository extends BaseRepository<Booking> {
         'purohitUser.role',
         'purohitUser.status',
       ])
+      .leftJoinAndSelect('booking.astrologer', 'astrologer')
+      .addSelect([
+        'astrologer.id',
+        'astrologer.email',
+        'astrologer.username',
+        'astrologer.phone',
+        'astrologer.firstName',
+        'astrologer.lastName',
+        'astrologer.profileImage',
+        'astrologer.role',
+        'astrologer.status',
+      ])
+      .leftJoinAndSelect('astrologer.astrologerProfile', 'astrologerProfile')
       .leftJoinAndSelect('booking.customerAddress', 'customerAddress')
       .where('booking.bookingNumber = :bookingNumber', {
         bookingNumber,
@@ -150,6 +177,7 @@ export class BookingRepository extends BaseRepository<Booking> {
       status,
       bookingPaymentStatus,
       purohitPayoutStatus,
+      bookingType,
       search,
     } = options;
 
@@ -196,6 +224,19 @@ export class BookingRepository extends BaseRepository<Booking> {
         'purohitUser.role',
         'purohitUser.status',
       ])
+      .leftJoinAndSelect('booking.astrologer', 'astrologer')
+      .addSelect([
+        'astrologer.id',
+        'astrologer.email',
+        'astrologer.username',
+        'astrologer.phone',
+        'astrologer.firstName',
+        'astrologer.lastName',
+        'astrologer.profileImage',
+        'astrologer.role',
+        'astrologer.status',
+      ])
+      .leftJoinAndSelect('astrologer.astrologerProfile', 'astrologerProfile')
       .leftJoinAndSelect('booking.customerAddress', 'customerAddress')
       .leftJoinAndSelect(
         'booking.payments',
@@ -226,9 +267,27 @@ export class BookingRepository extends BaseRepository<Booking> {
         });
         break;
 
+      case USER_ROLE.ASTROLOGER:
+        query.andWhere('booking.astrologerId = :astrologerId', {
+          astrologerId: userId,
+        });
+        break;
+
       default:
         query.andWhere('1 = 0');
         break;
+    }
+
+    if (bookingType) {
+      if (Array.isArray(bookingType)) {
+        query.andWhere('booking.bookingType IN (:...bookingType)', {
+          bookingType,
+        });
+      } else {
+        query.andWhere('booking.bookingType = :bookingType', {
+          bookingType,
+        });
+      }
     }
 
     if (status) {

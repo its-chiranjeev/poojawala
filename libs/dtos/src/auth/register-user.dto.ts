@@ -141,6 +141,19 @@ export class RegisterNormalUserDto {
   // @Transform(({ value }) => value?.trim())
   // otp!: string;
 
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  ratePerMinute?: number;
+
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  specification?: string;
+
   @IsOptional()
   @IsString()
   @Transform(({ value }) => value?.trim())

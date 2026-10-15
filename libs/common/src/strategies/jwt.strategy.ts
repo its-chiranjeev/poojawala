@@ -56,31 +56,16 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
           // Role-based cookies are now authoritative.
           // const legacyToken = rawCookies['accessToken'];
 
-          const adminToken = rawCookies[ROLE_COOKIE_MAP[USER_ROLE.ADMIN].access];
-          const customerToken = rawCookies[ROLE_COOKIE_MAP[USER_ROLE.CUSTOMER].access];
-          const purohitToken = rawCookies[ROLE_COOKIE_MAP[USER_ROLE.PUROHIT].access];
-
           const present: { role: USER_ROLE; token: string; cookieName: string }[] = [];
-          if (adminToken) {
-            present.push({
-              role: USER_ROLE.ADMIN,
-              token: adminToken,
-              cookieName: ROLE_COOKIE_MAP[USER_ROLE.ADMIN].access,
-            });
-          }
-          if (customerToken) {
-            present.push({
-              role: USER_ROLE.CUSTOMER,
-              token: customerToken,
-              cookieName: ROLE_COOKIE_MAP[USER_ROLE.CUSTOMER].access,
-            });
-          }
-          if (purohitToken) {
-            present.push({
-              role: USER_ROLE.PUROHIT,
-              token: purohitToken,
-              cookieName: ROLE_COOKIE_MAP[USER_ROLE.PUROHIT].access,
-            });
+          for (const [roleKey, roleCookies] of Object.entries(ROLE_COOKIE_MAP)) {
+            const token = rawCookies[roleCookies.access] || rawCookies[roleCookies.accessCamel];
+            if (token) {
+              present.push({
+                role: roleKey as USER_ROLE,
+                token,
+                cookieName: roleCookies.access,
+              });
+            }
           }
 
           if (present.length === 0) {

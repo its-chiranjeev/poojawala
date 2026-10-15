@@ -14,11 +14,13 @@ import { CustomerAddress } from './customer-address.entity';
 import { CustomerFavorite } from './customer-favorite.entity';
 import { Booking } from './booking.entity';
 import { PurohitServiceArea } from './purohit-service-area.entity';
+import { AstrologerProfile } from './astrologer-profile.entity';
 
 export enum USER_ROLE {
   CUSTOMER = 'CUSTOMER',
   PUROHIT = 'PUROHIT',
   ADMIN = 'ADMIN',
+  ASTROLOGER = 'ASTROLOGER',
 }
 
 export enum USER_STATUS {
@@ -137,6 +139,9 @@ export class User {
   
   @OneToMany(() => PurohitServiceArea, (serviceArea) => serviceArea.purohit)
   serviceAreas!: PurohitServiceArea[];
+
+  @OneToOne(() => AstrologerProfile, (profile) => profile.user)
+  astrologerProfile?: AstrologerProfile;
 
   // Timestamps
   @CreateDateColumn()

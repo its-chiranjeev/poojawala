@@ -18,6 +18,7 @@ import {
   PurohitService,
   PurohitServiceArea,
   CustomerAddress,
+  AstrologerProfile,
 } from '@poojawala/entities';
 import { VerifyPurohitDto } from '@poojawala/dtos';
 
@@ -55,6 +56,7 @@ describe('UserService - Purohit Verification Rework', () => {
   let testPurohitServices: any[];
   let testServiceAreas: any[];
   let testAddresses: any[];
+  let testAstrologerProfile: any;
 
   beforeEach(() => {
     testAdmin = {
@@ -777,6 +779,30 @@ describe('UserService - Purohit Verification Rework', () => {
                 (!where.customerId || a.customerId === where.customerId),
             );
             return Promise.resolve(found || null);
+          }),
+        };
+      }
+      if (entity === AstrologerProfile) {
+        return {
+          findOne: jest.fn().mockImplementation(({ where }: any) => {
+            if (testAstrologerProfile && (!where?.userId || testAstrologerProfile.userId === where.userId)) {
+              return Promise.resolve(testAstrologerProfile);
+            }
+            return Promise.resolve(null);
+          }),
+          create: jest.fn().mockImplementation((d: any) => ({
+            id: 999,
+            ...d,
+          })),
+          save: jest.fn().mockImplementation((ap: any) => {
+            testAstrologerProfile = { ...(testAstrologerProfile || {}), ...ap };
+            return Promise.resolve(testAstrologerProfile);
+          }),
+          update: jest.fn().mockImplementation((id: any, payload: any) => {
+            if (testAstrologerProfile) {
+              Object.assign(testAstrologerProfile, payload);
+            }
+            return Promise.resolve({ affected: 1 });
           }),
         };
       }
@@ -1967,6 +1993,76 @@ describe('UserService - Purohit Verification Rework', () => {
       expect(testMedia.every((m) => m.verificationStatus === PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING)).toBe(true);
     });
 
+    it('admin edit astrologer profile succeeds with ratePerMinute, commissionPrice, and specification', async () => {
+      const astroUser: User = {
+        id: 20,
+        email: 'astrologer@poojawala.com',
+        username: 'astrologer20',
+        firstName: 'Varahamihira',
+        lastName: 'Sharma',
+        role: USER_ROLE.ASTROLOGER,
+        status: USER_STATUS.ACTIVE,
+        tokenVersion: 1,
+        authProvider: 'LOCAL',
+        isAdminCreated: false,
+        addresses: [],
+        favorites: [],
+        bookings: [],
+      } as unknown as User;
+
+      testAstrologerProfile = {
+        id: 201,
+        userId: 20,
+        bio: 'Vedic Astrologer',
+        city: 'Ujjain',
+        ratePerMinute: 10,
+        commissionPrice: 50,
+        verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+      };
+
+      mockUserRepo.findById.mockImplementation(async (id: string) => {
+        if (id === '20') return astroUser;
+        return testUser;
+      });
+
+      mockUserRepo.getFullProfile.mockImplementation(async (userId: number, role: USER_ROLE) => {
+        if (userId === 20) {
+          return {
+            ...astroUser,
+            profile: { ...testAstrologerProfile },
+          };
+        }
+        return {
+          ...testUser,
+          profile: testProfile,
+        };
+      });
+
+      const payload: any = {
+        bio: 'Senior Astrologer 25 yrs',
+        city: 'Varanasi',
+        ratePerMinute: 25.5,
+        commissionPrice: 65,
+        specification: 'Kundali Matching Expert',
+        specializations: ['Vedic Astrology', 'Palmistry'],
+      };
+
+      const result = await service.updateProfileByAdmin(
+        testAdmin.id,
+        '20',
+        payload,
+      );
+
+      expect(result.success).toBe(true);
+      expect(testAstrologerProfile.ratePerMinute).toBe(25.5);
+      expect(testAstrologerProfile.commissionPrice).toBe(65);
+      expect(testAstrologerProfile.specification).toBe('Kundali Matching Expert');
+      expect(testAstrologerProfile.city).toBe('Varanasi');
+      expect(result.data.profile.ratePerMinute).toBe(25.5);
+      expect(result.data.profile.commissionPrice).toBe(65);
+      expect(result.data.astrologerProfile).toBeDefined();
+    });
+
     it('purohit self update does not set verificationStatus or media to APPROVED when uploading aadhaarDoc or panDoc', async () => {
       testProfile.verificationStatus = PUROHIT_VERIFICATION_STATUS.PENDING;
       testMedia.forEach((m) => (m.verificationStatus = PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING));
@@ -1984,6 +2080,166 @@ describe('UserService - Purohit Verification Rework', () => {
       expect(result.success).toBe(true);
       expect(testProfile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
       expect(testMedia.every((m) => m.verificationStatus === PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING)).toBe(true);
+    });
+
+    it('astrologer self update succeeds and strips commissionPrice, allowing ratePerMinute and other profile fields', async () => {
+      const astroUser: User = {
+        id: 20,
+        email: 'astrologer@poojawala.com',
+        username: 'astrologer20',
+        firstName: 'Varahamihira',
+        lastName: 'Sharma',
+        role: USER_ROLE.ASTROLOGER,
+        status: USER_STATUS.ACTIVE,
+        tokenVersion: 1,
+        authProvider: 'LOCAL',
+        isAdminCreated: false,
+        addresses: [],
+        favorites: [],
+        bookings: [],
+      } as unknown as User;
+
+      testAstrologerProfile = {
+        id: 201,
+        userId: 20,
+        bio: 'Old bio',
+        city: 'Ujjain',
+        ratePerMinute: 10,
+        commissionPrice: 50,
+        verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+      };
+
+      mockUserRepo.findById.mockImplementation(async (id: string) => {
+        if (id === '20') return astroUser;
+        return testUser;
+      });
+
+      mockUserRepo.getFullProfile.mockImplementation(async (userId: number, role: USER_ROLE) => {
+        if (userId === 20) {
+          return {
+            ...astroUser,
+            profile: { ...testAstrologerProfile },
+          };
+        }
+        return {
+          ...testUser,
+          profile: testProfile,
+        };
+      });
+
+      const payload: any = {
+        bio: 'Updated astrologer bio',
+        ratePerMinute: 20,
+        commissionPrice: 999,
+        specification: 'Vedic & KP Astrologer',
+        city: 'Indore',
+      };
+
+      const result = await service.updateProfileByUser(
+        '20',
+        payload,
+        {} as any,
+      );
+
+      expect(result.success).toBe(true);
+      expect(testAstrologerProfile.bio).toBe('Updated astrologer bio');
+      expect(testAstrologerProfile.ratePerMinute).toBe(20);
+      expect(testAstrologerProfile.commissionPrice).toBe(50);
+      expect(testAstrologerProfile.specification).toBe('Vedic & KP Astrologer');
+      expect(testAstrologerProfile.city).toBe('Indore');
+      expect(result.data.profile.ratePerMinute).toBe(20);
+      expect(result.data.astrologerProfile).toBeDefined();
+    });
+
+    it('astrologer self update transitions REJECTED to PENDING and clears rejectionReason on resubmission', async () => {
+      const astroUser: User = {
+        id: 20,
+        email: 'astrologer@poojawala.com',
+        username: 'astrologer20',
+        firstName: 'Varahamihira',
+        lastName: 'Sharma',
+        role: USER_ROLE.ASTROLOGER,
+        status: USER_STATUS.ACTIVE,
+        tokenVersion: 1,
+        authProvider: 'LOCAL',
+        isAdminCreated: false,
+        addresses: [],
+        favorites: [],
+        bookings: [],
+      } as unknown as User;
+
+      testAstrologerProfile = {
+        id: 201,
+        userId: 20,
+        bio: 'Rejected astrologer',
+        city: 'Ujjain',
+        ratePerMinute: 10,
+        commissionPrice: 50,
+        verificationStatus: PUROHIT_VERIFICATION_STATUS.REJECTED,
+        rejectionReason: 'Invalid certificate',
+      };
+
+      mockUserRepo.findById.mockImplementation(async (id: string) => {
+        if (id === '20') return astroUser;
+        return testUser;
+      });
+
+      mockUserRepo.getFullProfile.mockImplementation(async (userId: number, role: USER_ROLE) => {
+        if (userId === 20) {
+          return {
+            ...astroUser,
+            profile: { ...testAstrologerProfile },
+          };
+        }
+        return {
+          ...testUser,
+          profile: testProfile,
+        };
+      });
+
+      const result = await service.updateProfileByUser(
+        '20',
+        {
+          certificate: 'https://s3.amazonaws.com/new-cert.pdf',
+        } as any,
+        {} as any,
+      );
+
+      expect(result.success).toBe(true);
+      expect(testAstrologerProfile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+      expect(testAstrologerProfile.rejectionReason).toBeNull();
+      expect(mockNotificationService.notifyAdmins).toHaveBeenCalled();
+    });
+
+    it('astrologer self update fails if aadhaarDoc is uploaded without aadhaarNumber', async () => {
+      const astroUser: User = {
+        id: 20,
+        email: 'astrologer@poojawala.com',
+        username: 'astrologer20',
+        role: USER_ROLE.ASTROLOGER,
+        status: USER_STATUS.ACTIVE,
+      } as unknown as User;
+
+      testAstrologerProfile = {
+        id: 201,
+        userId: 20,
+        ratePerMinute: 10,
+        commissionPrice: 50,
+        verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+      };
+
+      mockUserRepo.findById.mockImplementation(async (id: string) => {
+        if (id === '20') return astroUser;
+        return testUser;
+      });
+
+      await expect(
+        service.updateProfileByUser(
+          '20',
+          { aadhaarDoc: 'https://s3.amazonaws.com/aadhaar.pdf' } as any,
+          {} as any,
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 

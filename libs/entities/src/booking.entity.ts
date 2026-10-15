@@ -17,6 +17,7 @@ import { PurohitProfile } from './purohit-profile.entity';
 import { CustomerAddress } from './customer-address.entity';
 import { Payment } from './payment.entity';
 import { Complaint } from './complaint.entity';
+import { AstrologerProfile } from './astrologer-profile.entity';
 
 export enum SERVICE_PLAN {
   BASIC = 'BASIC',
@@ -74,6 +75,11 @@ export enum REVIEW_STATUS {
   PUBLISHED = 'PUBLISHED',
 }
 
+export enum BOOKING_TYPE {
+  POOJA = 'POOJA',
+  ASTROLOGY = 'ASTROLOGY',
+}
+
 @Entity('bookings')
 export class Booking {
   @PrimaryGeneratedColumn()
@@ -82,6 +88,13 @@ export class Booking {
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 20, unique: true })
   bookingNumber!: string;
+
+  @Column({
+    type: 'enum',
+    enum: BOOKING_TYPE,
+    default: BOOKING_TYPE.POOJA,
+  })
+  bookingType!: BOOKING_TYPE;
 
   @Column({ type: 'int' })
   customerId!: number;
@@ -93,14 +106,15 @@ export class Booking {
   @Column({ type: 'enum', enum: BOOKING_MODE, default: BOOKING_MODE.OFFLINE })
   bookingMode!: BOOKING_MODE;
 
-  @Column({ type: 'int' })
-  serviceId!: number;
+  @Column({ type: 'int', nullable: true })
+  serviceId?: number;
 
   @ManyToOne(() => Service, (service) => service.bookings, {
     onDelete: 'CASCADE',
+    nullable: true,
   })
   @JoinColumn({ name: 'serviceId' })
-  service!: Service;
+  service?: Service;
 
   @Column({ type: 'int', nullable: true })
   purohitId?: number;
@@ -111,6 +125,18 @@ export class Booking {
   })
   @JoinColumn({ name: 'purohitId' })
   purohit?: PurohitProfile;
+
+  @Column({ type: 'int', nullable: true })
+  astrologerId?: number;
+
+  @ManyToOne(() => User, {
+    onDelete: 'SET NULL',
+    nullable: true,
+  })
+  @JoinColumn({ name: 'astrologerId' })
+  astrologer?: User;
+
+  astrologerProfile?: AstrologerProfile;
 
   @Column({ type: 'int', nullable: true })
   customerAddressId?: number;
@@ -137,8 +163,8 @@ export class Booking {
   @Column({ type: 'jsonb', nullable: true })
   customFields?: Record<string, any>;
 
-  @Column({ type: 'decimal', precision: 5, scale: 2 })
-  commissionPercentage!: number;
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: 0.0, nullable: true })
+  commissionPercentage?: number;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   platformCommission?: number;

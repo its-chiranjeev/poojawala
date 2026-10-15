@@ -40,6 +40,14 @@ export const ROLE_COOKIE_MAP: Record<USER_ROLE, RoleCookieNames> = {
     refresh: 'poojawala-purohit-refresh-token',
     refreshCamel: 'poojawalaPurohitRefreshToken',
   },
+  [USER_ROLE.ASTROLOGER]: {
+    csrf: 'poojawala-astrologer-csrf-token',
+    csrfCamel: 'poojawalaAstrologerCsrfToken',
+    access: 'poojawala-astrologer-access-token',
+    accessCamel: 'poojawalaAstrologerAccessToken',
+    refresh: 'poojawala-astrologer-refresh-token',
+    refreshCamel: 'poojawalaAstrologerRefreshToken',
+  },
 } as const;
 
 export const ALL_AUTH_COOKIE_NAMES: readonly string[] = Object.values(ROLE_COOKIE_MAP).flatMap(
@@ -86,6 +94,7 @@ export function getRoleCsrfPropertyName(role?: USER_ROLE | string | null): strin
   if (role === USER_ROLE.ADMIN) return 'poojawalaAdminCsrfToken';
   if (role === USER_ROLE.CUSTOMER) return 'poojawalaCustomerCsrfToken';
   if (role === USER_ROLE.PUROHIT) return 'poojawalaPurohitCsrfToken';
+  if (role === USER_ROLE.ASTROLOGER) return 'poojawalaAstrologerCsrfToken';
   return null;
 }
 
@@ -241,7 +250,7 @@ export function clearRoleAuthCookies(
  * Clears auth cookies for all roles (complete session wipe).
  */
 export function clearAllAuthCookies(res: Response, req?: Request | any): void {
-  for (const role of [USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT]) {
+  for (const role of Object.values(USER_ROLE)) {
     clearRoleAuthCookies(res, role, req);
   }
 }

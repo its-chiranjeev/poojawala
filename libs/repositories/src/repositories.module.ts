@@ -27,6 +27,7 @@ import { BookingProductRepository } from './booking-product.repository';
 import { OrderRepository } from './order.repository';
 import { TempleRepository } from './temple.repository';
 import { ServiceFeatureRepository } from './service-feature.repository';
+import { AstrologerProfileRepository } from './astrologer-profile.repository';
 
 @Module({
   imports: [EntitiesModule],
@@ -58,6 +59,7 @@ import { ServiceFeatureRepository } from './service-feature.repository';
     OrderRepository,
     TempleRepository,
     ServiceFeatureRepository,
+    AstrologerProfileRepository,
   ],
   exports: [
     RepositoriesService,
@@ -87,6 +89,7 @@ import { ServiceFeatureRepository } from './service-feature.repository';
     OrderRepository,
     TempleRepository,
     ServiceFeatureRepository,
+    AstrologerProfileRepository,
   ],
 })
 export class RepositoriesModule { }

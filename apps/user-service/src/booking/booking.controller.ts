@@ -17,6 +17,7 @@ import {
 import { BookingService } from './booking.service';
 import {
   CreateBookingDto,
+  CreateAstrologyBookingDto,
   UpdateBookingDto,
   BookingQueryDto,
   CancelBookingDto,
@@ -62,9 +63,19 @@ export class BookingController {
     return this.bookingService.createBooking(req.user, dto);
   }
 
+  @Post('add/astrology')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.CUSTOMER)
+  createAstrologyBooking(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: CreateAstrologyBookingDto,
+  ) {
+    return this.bookingService.createAstrologyBooking(req.user, dto);
+  }
+
   @Get('all')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ASTROLOGER)
   getBookings(
     @Req() req: AuthenticatedRequest,
     @Query() query: BookingQueryDto,
@@ -182,7 +193,7 @@ export class BookingController {
 
   @Patch(':id/status')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN, USER_ROLE.ASTROLOGER)
   updateBookingStatus(
     @Req() req: AuthenticatedRequest,
     @Param('id', ParseIntPipe) bookingId: number,
@@ -259,7 +270,7 @@ export class BookingController {
 
   @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ASTROLOGER)
   getBookingById(
     @Req() req: AuthenticatedRequest,
     @Param('id', ParseIntPipe)

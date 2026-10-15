@@ -28,3 +28,4 @@ export * from './booking-product.repository';
 export * from './order.repository';
 export * from './temple.repository';
 export * from './service-feature.repository';
+export * from './astrologer-profile.repository';

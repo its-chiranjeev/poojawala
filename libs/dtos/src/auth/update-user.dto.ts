@@ -1,5 +1,5 @@
-import { IsEmail, IsDateString, IsOptional, IsString, IsEnum, IsArray, IsInt } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { IsEmail, IsDateString, IsOptional, IsString, IsEnum, IsArray, IsInt, IsNumber, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { USER_ROLE, USER_STATUS, PUROHIT_PAYMENT_METHOD } from '@poojawala/entities';
 import { Match, parseStringArray, parseIntArray } from './register-user.dto';
 
@@ -121,6 +121,23 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   templeAffiliationProof?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  ratePerMinute?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  commissionPrice?: number;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  specification?: string;
 
   // Bank Details
 
