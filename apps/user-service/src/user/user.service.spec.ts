@@ -514,6 +514,8 @@ describe('UserService - Purohit Verification Rework', () => {
       sendPurohitRejectionEmail: jest.fn().mockResolvedValue(true),
       sendPurohitCreatedByAdminEmail: jest.fn().mockResolvedValue(true),
       sendAstrologerCreatedByAdminEmail: jest.fn().mockResolvedValue(true),
+      sendAstrologerApprovalEmail: jest.fn().mockResolvedValue(true),
+      sendAstrologerRejectionEmail: jest.fn().mockResolvedValue(true),
     };
 
     mockSmsService = {};

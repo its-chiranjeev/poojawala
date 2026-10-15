@@ -252,11 +252,11 @@ export class UserController {
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
-  @Patch('purohits/:id/verification')
+  @Patch([':id/verification', 'purohits/:id/verification'])
   @HttpCode(HttpStatus.OK)
-  async verifyPurohitByAdmin(
+  async verifyUserByAdmin(
     @Req() req: any,
-    @Param('id', ParseIntPipe) purohitUserId: number,
+    @Param('id', ParseIntPipe) userId: number,
     @Body(
       new ValidationPipe({
         whitelist: true,
@@ -266,9 +266,9 @@ export class UserController {
     )
     dto: VerifyPurohitDto,
   ) {
-    return this.userService.verifyPurohitByAdmin(
+    return this.userService.verifyUserByAdmin(
       req.user.id,
-      purohitUserId,
+      userId,
       dto,
     );
   }

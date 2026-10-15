@@ -140,6 +140,51 @@ export class EmailService {
     });
   }
 
+  async sendAstrologerApprovalEmail(
+    email: string,
+    firstName?: string,
+  ): Promise<void> {
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Profile Approved',
+      userName: firstName || 'Astrologer',
+      preheaderText: 'Congratulations! Your Astrologer Profile has been verified and approved.',
+      emailMessage: 'Congratulations! Your Astrologer profile and submitted documents have been successfully verified and approved by the Poojawala team.',
+      highlight: {
+        title: 'Account Active',
+        text: 'Your account is now active. You can now access all Astrologer features, take astrology consultations, and manage your schedule on the Poojawala platform.',
+      },
+    });
+
+    await this.sendMail({
+      to: email,
+      subject: 'Your Astrologer Profile Has Been Approved - Poojawala',
+      html,
+    });
+  }
+
+  async sendAstrologerRejectionEmail(
+    email: string,
+    rejectionReason: string,
+    firstName?: string,
+  ): Promise<void> {
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Verification Notice',
+      userName: firstName || 'Astrologer',
+      preheaderText: 'Update regarding your Astrologer profile verification.',
+      emailMessage: 'Thank you for your interest in joining Poojawala. After reviewing your submitted documents, your profile verification could not be approved at this time.',
+      highlight: {
+        title: 'Rejection Reason',
+        text: rejectionReason || 'Document verification could not be completed. Please review your credentials and contact support.',
+      },
+    });
+
+    await this.sendMail({
+      to: email,
+      subject: 'Your Astrologer Profile Verification Was Rejected - Poojawala',
+      html,
+    });
+  }
+
   private escapeHtml(value: string): string {
     return value
       .replace(/&/g, '&amp;')

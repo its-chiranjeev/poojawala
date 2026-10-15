@@ -2164,6 +2164,7 @@ export class UserService {
           );
           if (safeUser.role === USER_ROLE.ASTROLOGER) {
             (safeUser as any).astrologerProfile = (safeUser as any).profile;
+            delete (safeUser as any).profile;
           }
           delete (safeUser as any).city;
           delete (safeUser as any).state;
@@ -2674,6 +2675,7 @@ export class UserService {
         );
         if (safeUser.role === USER_ROLE.ASTROLOGER) {
           (safeUser as any).astrologerProfile = (safeUser as any).profile;
+          delete (safeUser as any).profile;
         }
         delete (safeUser as any).city;
         delete (safeUser as any).state;
@@ -4085,9 +4087,69 @@ export class UserService {
     return true;
   }
 
+  private async sendAstrologerVerificationEmail(result: {
+    userId: number;
+    email?: string | null;
+    firstName?: string | null;
+    verificationStatus: PUROHIT_VERIFICATION_STATUS;
+    rejectionReason: string | null;
+  }): Promise<boolean> {
+    const recipientEmail = result.email?.trim();
+
+    this.logger.log(
+      `Preparing astrologer verification email: ${JSON.stringify({
+        userId: result.userId,
+        email: recipientEmail,
+        status: result.verificationStatus,
+      })}`,
+    );
+
+    if (!recipientEmail) {
+      this.logger.warn(
+        `Astrologer user ${result.userId} does not have a valid email, skipping verification email`,
+      );
+      return false;
+    }
+
+    switch (result.verificationStatus) {
+      case PUROHIT_VERIFICATION_STATUS.APPROVED:
+        await this.emailService.sendAstrologerApprovalEmail(
+          recipientEmail,
+          result.firstName ?? undefined,
+        );
+        break;
+
+      case PUROHIT_VERIFICATION_STATUS.REJECTED:
+        if (!result.rejectionReason) {
+          throw new BadRequestException(
+            'Rejection reason is required for rejection email',
+          );
+        }
+        await this.emailService.sendAstrologerRejectionEmail(
+          recipientEmail,
+          result.rejectionReason,
+          result.firstName ?? undefined,
+        );
+        break;
+
+      default:
+        throw new BadRequestException('Invalid verification status');
+    }
+
+    return true;
+  }
+
   async verifyPurohitByAdmin(
     adminId: number,
     purohitUserId: number,
+    dto: VerifyPurohitDto,
+  ) {
+    return this.verifyUserByAdmin(adminId, purohitUserId, dto);
+  }
+
+  async verifyUserByAdmin(
+    adminId: number,
+    targetUserId: number,
     dto: VerifyPurohitDto,
   ) {
     const rejectionReason = this.validateVerificationRequest(dto);
@@ -4096,6 +4158,8 @@ export class UserService {
       const userRepository = manager.getRepository(User);
       const profileRepository = manager.getRepository(PurohitProfile);
       const mediaRepository = manager.getRepository(PurohitMedia);
+      const astrologerProfileRepository = manager.getRepository(AstrologerProfile);
+
       const admin = await userRepository.findOne({
         where: {
           id: adminId,
@@ -4106,31 +4170,91 @@ export class UserService {
 
       if (!admin) {
         throw new ForbiddenException(
-          'Only an active admin can verify a Purohit',
+          'Only an active admin can verify a user',
         );
       }
 
-      const purohitUser = await userRepository
+      const targetUser = await userRepository
         .createQueryBuilder('user')
         .setLock('pessimistic_write')
-        .where('user.id = :purohitUserId', {
-          purohitUserId,
+        .where('user.id = :targetUserId', {
+          targetUserId,
         })
         .getOne();
 
-      if (!purohitUser) {
-        throw new NotFoundException('Purohit user not found');
+      if (!targetUser) {
+        throw new NotFoundException('User not found');
       }
 
-      if (purohitUser.role !== USER_ROLE.PUROHIT) {
-        throw new BadRequestException('The selected user is not a Purohit');
+      if (
+        targetUser.role !== USER_ROLE.PUROHIT &&
+        targetUser.role !== USER_ROLE.ASTROLOGER
+      ) {
+        throw new BadRequestException(
+          'The selected user is neither a Purohit nor an Astrologer',
+        );
       }
 
+      if (targetUser.role === USER_ROLE.ASTROLOGER) {
+        const astrologerProfile = await astrologerProfileRepository
+          .createQueryBuilder('profile')
+          .setLock('pessimistic_write')
+          .where('profile.userId = :targetUserId', {
+            targetUserId,
+          })
+          .getOne();
+
+        if (!astrologerProfile) {
+          throw new NotFoundException('Astrologer profile not found');
+        }
+
+        this.validatePurohitVerificationTransition(
+          astrologerProfile.verificationStatus,
+          dto.status,
+        );
+
+        switch (dto.status) {
+          case PUROHIT_VERIFICATION_STATUS.APPROVED:
+            astrologerProfile.verificationStatus =
+              PUROHIT_VERIFICATION_STATUS.APPROVED;
+            astrologerProfile.rejectionReason = undefined;
+            targetUser.isAdminCreated = false;
+            await manager.save(User, targetUser);
+            await manager.save(AstrologerProfile, astrologerProfile);
+            break;
+
+          case PUROHIT_VERIFICATION_STATUS.REJECTED:
+            astrologerProfile.verificationStatus =
+              PUROHIT_VERIFICATION_STATUS.REJECTED;
+            astrologerProfile.rejectionReason = rejectionReason!;
+            await manager.save(AstrologerProfile, astrologerProfile);
+            break;
+
+          default:
+            throw new BadRequestException('Invalid Astrologer verification status');
+        }
+
+        return {
+          userId: targetUser.id,
+          profileId: astrologerProfile.id,
+          role: USER_ROLE.ASTROLOGER,
+          email: targetUser.email,
+          firstName: targetUser.firstName,
+          userStatus: USER_STATUS.ACTIVE,
+          verificationStatus: dto.status,
+          rejectionReason:
+            dto.status === PUROHIT_VERIFICATION_STATUS.REJECTED
+              ? rejectionReason!
+              : null,
+        };
+      }
+
+      // PUROHIT verification flow
       const profile = await profileRepository
         .createQueryBuilder('profile')
         .setLock('pessimistic_write')
-        .where('profile.userId = :purohitUserId', {
-          purohitUserId,
+        .where('profile.userId = :targetUserId', {
+          targetUserId,
         })
         .getOne();
 
@@ -4155,15 +4279,15 @@ export class UserService {
 
       switch (dto.status) {
         case PUROHIT_VERIFICATION_STATUS.APPROVED:
-          this.validatePurohitForApproval(purohitUser, profile, media);
+          this.validatePurohitForApproval(targetUser, profile, media);
 
-          await this.approvePurohit(manager, purohitUser.id, profile.id);
+          await this.approvePurohit(manager, targetUser.id, profile.id);
           break;
 
         case PUROHIT_VERIFICATION_STATUS.REJECTED:
           await this.rejectPurohit(
             manager,
-            purohitUser.id,
+            targetUser.id,
             profile.id,
             rejectionReason!,
           );
@@ -4173,8 +4297,6 @@ export class UserService {
           throw new BadRequestException('Invalid Purohit verification status');
       }
 
-      // TODO: PUROHIT_VERIFICATION_REWORK
-      // User account status remains ACTIVE during both approval and rejection of Purohit verification.
       const userStatus = USER_STATUS.ACTIVE;
       const mediaStatus =
         dto.status === PUROHIT_VERIFICATION_STATUS.APPROVED
@@ -4186,10 +4308,11 @@ export class UserService {
           : BANK_VERIFICATION_STATUS.FAILED;
 
       return {
-        userId: purohitUser.id,
+        userId: targetUser.id,
         profileId: profile.id,
-        email: purohitUser.email,
-        firstName: purohitUser.firstName,
+        role: USER_ROLE.PUROHIT,
+        email: targetUser.email,
+        firstName: targetUser.firstName,
         userStatus,
         verificationStatus: dto.status,
         mediaStatus,
@@ -4202,15 +4325,18 @@ export class UserService {
       };
     });
 
+    const isAstrologer = result.role === USER_ROLE.ASTROLOGER;
+    const roleLabel = isAstrologer ? 'Astrologer' : 'Purohit';
+
     await this.auditLogService.createAuditLog({
       actorId: adminId,
       actorType: ACTOR_TYPE.USER,
       actorRole: USER_ROLE.ADMIN,
       module: AUDIT_MODULE.USER,
       entity: 'User',
-      entityId: String(purohitUserId),
+      entityId: String(targetUserId),
       action: 'USER_STATUS_CHANGED',
-      message: `Admin verified Purohit #${purohitUserId}. Status changed to ${dto.status}.`,
+      message: `Admin verified ${roleLabel} #${targetUserId}. Status changed to ${dto.status}.`,
       oldValue: undefined,
       newValue: {
         status: dto.status,
@@ -4221,7 +4347,12 @@ export class UserService {
       },
     });
 
-    const emailSent = await this.sendPurohitVerificationEmail(result);
+    let emailSent = false;
+    if (isAstrologer) {
+      emailSent = await this.sendAstrologerVerificationEmail(result);
+    } else {
+      emailSent = await this.sendPurohitVerificationEmail(result as any);
+    }
 
     const isApproved =
       result.verificationStatus === PUROHIT_VERIFICATION_STATUS.APPROVED;
@@ -4231,18 +4362,18 @@ export class UserService {
         await this.notificationService.createNotification(
           result.userId,
           isApproved
-            ? 'Purohit Profile Approved'
-            : 'Purohit Profile Verification Update',
+            ? `${roleLabel} Profile Approved`
+            : `${roleLabel} Profile Verification Update`,
           isApproved
-            ? 'Congratulations! Your Purohit profile has been verified and approved.'
-            : `Your Purohit profile verification was rejected: ${dto.rejectionReason || ''}`,
+            ? `Congratulations! Your ${roleLabel} profile has been verified and approved.`
+            : `Your ${roleLabel} profile verification was rejected: ${dto.rejectionReason || ''}`,
           NOTIFICATION_TYPE.SYSTEM,
           result.profileId,
-          'PUROHIT_PROFILE',
+          isAstrologer ? 'ASTROLOGER_PROFILE' : 'PUROHIT_PROFILE',
         );
       } catch (err: any) {
         this.logger.warn(
-          `Failed to send purohit verification notification: ${err?.message}`,
+          `Failed to send ${roleLabel.toLowerCase()} verification notification: ${err?.message}`,
         );
       }
     }
@@ -4250,16 +4381,18 @@ export class UserService {
     return {
       success: true,
       message: isApproved
-        ? 'Purohit approved successfully'
-        : 'Purohit rejected successfully',
+        ? `${roleLabel} approved successfully`
+        : `${roleLabel} rejected successfully`,
       data: {
         userId: result.userId,
         profileId: result.profileId,
         userStatus: result.userStatus,
         verificationStatus: result.verificationStatus,
-        mediaStatus: result.mediaStatus,
-        bankVerificationStatus: result.bankVerificationStatus,
-        updatedMediaCount: result.updatedMediaCount,
+        ...(result.role === USER_ROLE.PUROHIT && {
+          mediaStatus: (result as any).mediaStatus,
+          bankVerificationStatus: (result as any).bankVerificationStatus,
+          updatedMediaCount: (result as any).updatedMediaCount,
+        }),
         rejectionReason: result.rejectionReason,
         emailSent,
       },
