@@ -1050,6 +1050,10 @@ export class BookingService {
           throw new NotFoundException('Astrologer not found');
         }
 
+        if (astrologer.verificationStatus !== PUROHIT_VERIFICATION_STATUS.APPROVED) {
+          throw new BadRequestException('Astrologer profile is not approved for bookings');
+        }
+
         const duplicateLockKey = [
           user.id,
           dto.astrologerId,

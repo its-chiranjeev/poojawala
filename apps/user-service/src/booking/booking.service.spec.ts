@@ -1948,6 +1948,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
           id: 99,
           userId: 42,
           commissionPrice: 200,
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
           user: { id: 42, firstName: 'Pandit', lastName: 'Jyotish' },
         }),
       };
@@ -1996,6 +1997,24 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
           scheduledAt: scheduledDate,
         }),
       ).rejects.toThrow('Astrologer not found');
+    });
+
+    it('throws BadRequestException if astrologer profile verificationStatus is not APPROVED', async () => {
+      mockAstrologerProfileRepo.findOne.mockResolvedValue({
+        id: 99,
+        userId: 42,
+        commissionPrice: 200,
+        verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+        user: { id: 42, firstName: 'Pandit', lastName: 'Jyotish' },
+      });
+      const scheduledDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+
+      await expect(
+        bookingService.createAstrologyBooking(mockCustomerUser, {
+          astrologerId: 42,
+          scheduledAt: scheduledDate,
+        }),
+      ).rejects.toThrow('Astrologer profile is not approved for bookings');
     });
 
     it('allows assigned astrologer to update status from ACCEPTED to COMPLETED when paymentStatus is PAID', async () => {
