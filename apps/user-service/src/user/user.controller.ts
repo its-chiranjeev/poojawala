@@ -44,6 +44,7 @@ import {
   CustomerFavoriteDto,
   VerifyPurohitDto,
   CreatePurohitByAdminDto,
+  CreateAstrologerByAdminDto,
 } from '@poojawala/dtos';
 import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { filter } from 'rxjs';
@@ -211,6 +212,17 @@ export class UserController {
     dto: CreatePurohitByAdminDto,
   ) {
     return this.userService.createPurohitByAdmin(dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @Post('admin/add-astrologer')
+  @HttpCode(HttpStatus.CREATED)
+  async addAstrologerByAdmin(
+    @Body(new ValidationPipe({ whitelist: true }))
+    dto: CreateAstrologerByAdminDto,
+  ) {
+    return this.userService.createAstrologerByAdmin(dto);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)

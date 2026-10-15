@@ -350,7 +350,9 @@ describe('UserService - Purohit Verification Rework', () => {
     testAddresses = [];
 
     mockCustomerFavoriteRepo = {};
-    mockPlatformSettingRepo = {};
+    mockPlatformSettingRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
     mockCustomerAddressRepo = {
       findById: jest.fn().mockImplementation((id: number) => {
         const found = testAddresses.find((a) => a.id === id);
@@ -511,6 +513,7 @@ describe('UserService - Purohit Verification Rework', () => {
       sendPurohitApprovalEmail: jest.fn().mockResolvedValue(true),
       sendPurohitRejectionEmail: jest.fn().mockResolvedValue(true),
       sendPurohitCreatedByAdminEmail: jest.fn().mockResolvedValue(true),
+      sendAstrologerCreatedByAdminEmail: jest.fn().mockResolvedValue(true),
     };
 
     mockSmsService = {};
@@ -1242,6 +1245,58 @@ describe('UserService - Purohit Verification Rework', () => {
       expect(result.data.serviceAreas).toHaveLength(2);
       expect(result.data.serviceAreas.map((a: any) => a.city)).toEqual(expect.arrayContaining(['Ghaziabad', 'Noida']));
       expect(result.data.serviceAreas.some((a: any) => a.isDefault)).toBe(true);
+    });
+
+    describe('createAstrologerByAdmin', () => {
+      it('successfully creates an astrologer user and profile', async () => {
+        const dto = {
+          firstName: 'Anand',
+          lastName: 'Mishra',
+          email: 'anand.astrologer@example.com',
+          phone: '9876543999',
+          password: 'Password123!',
+          experienceYears: 7,
+          ratePerMinute: 25,
+          commissionPrice: 5,
+          specializations: ['Kundali', 'Vastu'],
+          city: 'Varanasi',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.success).toBe(true);
+        expect(result.message).toBe('Astrologer created successfully by admin');
+        expect(result.data.user).toBeDefined();
+        expect(result.data.profile).toBeDefined();
+        expect(result.data.user.role).toBe(USER_ROLE.ASTROLOGER);
+        expect(result.data.user.isAdminCreated).toBe(true);
+        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).toHaveBeenCalledWith(
+          dto.email,
+          'Anand Mishra',
+          expect.any(String),
+          dto.phone,
+          dto.password,
+        );
+      });
+
+      it('throws BadRequestException if neither email nor phone is provided', async () => {
+        const dto = {
+          firstName: 'Anand',
+          password: 'Password123!',
+        } as any;
+
+        await expect(service.createAstrologerByAdmin(dto)).rejects.toThrow(BadRequestException);
+      });
+
+      it('throws BadRequestException if aadhaarNumber is invalid', async () => {
+        const dto = {
+          firstName: 'Anand',
+          email: 'anand.invalid@example.com',
+          password: 'Password123!',
+          aadhaarNumber: '123',
+        } as any;
+
+        await expect(service.createAstrologerByAdmin(dto)).rejects.toThrow(BadRequestException);
+      });
     });
 
     it('Test 1 — Omitted services preserves existing mappings', async () => {

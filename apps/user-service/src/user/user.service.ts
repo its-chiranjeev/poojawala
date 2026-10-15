@@ -1,6 +1,7 @@
 import {
   CreatePurohitBankAccountDto,
   CreatePurohitByAdminDto,
+  CreateAstrologerByAdminDto,
   CreateCustomerByAdminDto,
   CustomerFavoriteDto,
   GenerateOtpDto,
@@ -4518,6 +4519,128 @@ export class UserService {
     return {
       success: true,
       message: 'Purohit created successfully by admin',
+      data: result,
+    };
+  }
+
+  async createAstrologerByAdmin(dto: CreateAstrologerByAdminDto) {
+    if (!dto.email && !dto.phone) {
+      throw new BadRequestException(
+        'At least email or phone number must be provided',
+      );
+    }
+
+    if (dto.phone) {
+      const existingUserByPhone = await this.userRepository.findOne({
+        where: { phone: dto.phone.trim() },
+      });
+      if (existingUserByPhone)
+        throw new ConflictException('Phone number already in use');
+    }
+    if (dto.email) {
+      const existingUserByEmail = await this.userRepository.findByEmail(
+        dto.email.trim().toLowerCase(),
+      );
+      if (existingUserByEmail)
+        throw new ConflictException('Email already in use');
+    }
+
+    if (dto.aadhaarNumber && typeof dto.aadhaarNumber === 'string' && dto.aadhaarNumber.trim() !== '') {
+      const cleanAadhaar = dto.aadhaarNumber.replace(/[\s-]/g, '');
+      if (!isValidAadhaar(cleanAadhaar)) {
+        throw new BadRequestException(
+          'aadhaarNumber must be a valid Aadhaar number',
+        );
+      }
+      dto.aadhaarNumber = cleanAadhaar;
+
+      const existingAadhaar = await this.dataSource
+        .getRepository(AstrologerProfile)
+        .findOne({
+          where: { aadhaarNumber: dto.aadhaarNumber },
+        });
+      if (existingAadhaar) {
+        throw new ConflictException('Aadhaar number already in use');
+      }
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+    const astrologySetting = await this.platformSettingRepository.findOne({
+      where: { key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PRICE },
+    });
+    const defaultCommissionPrice =
+      astrologySetting?.value && !isNaN(Number(astrologySetting.value))
+        ? Number(astrologySetting.value)
+        : 50;
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      const userRepository = manager.getRepository(User);
+
+      const username =
+        dto.username?.trim() ||
+        (dto.firstName.replace(/\s+/g, '') + Math.floor(Math.random() * 1000));
+
+      const user = userRepository.create({
+        username,
+        email: dto.email?.trim().toLowerCase(),
+        phone: dto.phone?.trim(),
+        countryCode: dto.countryCode?.trim(),
+        hashedPassword,
+        role: USER_ROLE.ASTROLOGER,
+        firstName: dto.firstName.trim(),
+        lastName: dto.lastName.trim(),
+        status: USER_STATUS.ACTIVE,
+        isAdminCreated: true,
+        dob: dto.dob ? new Date(dto.dob) : undefined,
+      });
+
+      const savedUser = await userRepository.save(user);
+
+      const ratePerMin =
+        dto.ratePerMinute !== undefined && dto.ratePerMinute !== null
+          ? Number(dto.ratePerMinute)
+          : 0;
+      const commissionPrice =
+        dto.commissionPrice !== undefined && dto.commissionPrice !== null
+          ? Number(dto.commissionPrice)
+          : defaultCommissionPrice;
+
+      const profile = manager.create(AstrologerProfile, {
+        userId: savedUser.id,
+        bio: dto.bio?.trim(),
+        qualification: dto.qualification,
+        experienceYears: dto.experienceYears,
+        languages: dto.languages,
+        specializations: dto.specializations,
+        specification: dto.specification?.trim(),
+        city: dto.city?.trim(),
+        ratePerMinute: ratePerMin,
+        commissionPrice,
+        aadhaarNumber: dto.aadhaarNumber,
+        verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+      });
+      const savedProfile = await manager.save(profile);
+
+      return {
+        user: savedUser,
+        profile: savedProfile,
+      };
+    });
+
+    if (dto.email) {
+      await this.emailService.sendAstrologerCreatedByAdminEmail(
+        dto.email,
+        `${dto.firstName} ${dto.lastName || ''}`.trim(),
+        result.user.username,
+        dto.phone ?? 'N/A',
+        dto.password,
+      );
+    }
+
+    return {
+      success: true,
+      message: 'Astrologer created successfully by admin',
       data: result,
     };
   }

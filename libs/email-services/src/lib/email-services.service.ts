@@ -246,6 +246,40 @@ export class EmailService {
     });
   }
 
+  async sendAstrologerCreatedByAdminEmail(
+    email: string,
+    name: string,
+    username: string,
+    phone: string,
+    plainPassword: string,
+  ): Promise<void> {
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Astrologer Account Created',
+      userName: name || 'Astrologer',
+      preheaderText: 'Your Poojawala Astrologer account has been created.',
+      emailMessage: 'An administrator has created a Poojawala Astrologer account for you. Welcome to the sacred network of Vedic astrologers!',
+      detailsTable: {
+        title: 'Account & Login Credentials',
+        rows: [
+          { label: 'Email', value: email },
+          { label: 'Username', value: username },
+          { label: 'Phone', value: phone },
+          { label: 'Temporary Password', value: plainPassword, isHighlight: true },
+        ],
+      },
+      highlight: {
+        title: 'Next Steps to Complete Verification',
+        text: 'For your security, please log in and change your password immediately. Next, go to your profile to review your profile and verification documents.',
+      },
+    });
+
+    await this.sendMail({
+      to: email,
+      subject: 'Your Poojawala Astrologer Account Has Been Created',
+      html,
+    });
+  }
+
   async sendCustomerBookingConfirmationEmail(data: {
     email: string;
     customerName: string;

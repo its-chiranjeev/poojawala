@@ -1,4 +1,5 @@
 export * from './auth/create-purohit-by-admin.dto';
+export * from './auth/create-astrologer-by-admin.dto';
 export * from './auth/customer-favorite.dto';
 export * from './auth/login.dto';
 export * from './auth/register-user.dto';
