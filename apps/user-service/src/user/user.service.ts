@@ -66,6 +66,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpStatus,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -4637,12 +4638,8 @@ export class UserService {
         dto.password,
       );
     }
-
-    return {
-      success: true,
-      message: 'Astrologer created successfully by admin',
-      data: result,
-    };
+    (result as any).message = 'Astrologer created successfully by admin';
+    return result;
   }
 
   async registerUserService(

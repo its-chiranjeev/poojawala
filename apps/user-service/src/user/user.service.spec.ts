@@ -1263,12 +1263,10 @@ describe('UserService - Purohit Verification Rework', () => {
         };
 
         const result = await service.createAstrologerByAdmin(dto);
-        expect(result.success).toBe(true);
-        expect(result.message).toBe('Astrologer created successfully by admin');
-        expect(result.data.user).toBeDefined();
-        expect(result.data.profile).toBeDefined();
-        expect(result.data.user.role).toBe(USER_ROLE.ASTROLOGER);
-        expect(result.data.user.isAdminCreated).toBe(true);
+        expect(result.user).toBeDefined();
+        expect(result.profile).toBeDefined();
+        expect(result.user.role).toBe(USER_ROLE.ASTROLOGER);
+        expect(result.user.isAdminCreated).toBe(true);
         expect(mockEmailService.sendAstrologerCreatedByAdminEmail).toHaveBeenCalledWith(
           dto.email,
           'Anand Mishra',
