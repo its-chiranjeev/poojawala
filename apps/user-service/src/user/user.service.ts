@@ -5759,6 +5759,7 @@ export class UserService {
         phone: savedUser.phone,
       };
       const isPurohit = savedUser.role === USER_ROLE.PUROHIT;
+      const isAstrologer = savedUser.role === USER_ROLE.ASTROLOGER;
 
       setImmediate(async () => {
         try {
@@ -5769,6 +5770,14 @@ export class UserService {
             await this.emailService.sendPurohitRegistrationEmail(emailPayload);
             this.logger.log(
               `[UserRegistration] Purohit registration email sent successfully to ${emailPayload.email}.`,
+            );
+          } else if (isAstrologer) {
+            this.logger.log(
+              `[UserRegistration] Sending registration email to Astrologer ${emailPayload.email}...`,
+            );
+            await this.emailService.sendAstrologerRegistrationEmail(emailPayload);
+            this.logger.log(
+              `[UserRegistration] Astrologer registration email sent successfully to ${emailPayload.email}.`,
             );
           } else {
             this.logger.log(

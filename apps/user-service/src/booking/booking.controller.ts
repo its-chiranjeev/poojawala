@@ -65,7 +65,7 @@ export class BookingController {
 
   @Post('add/astrology')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.CUSTOMER)
+  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.ADMIN)
   createAstrologyBooking(
     @Req() req: AuthenticatedRequest,
     @Body() dto: CreateAstrologyBookingDto,
@@ -97,7 +97,7 @@ export class BookingController {
 
   @Patch(':id/cancel')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
+  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN, USER_ROLE.ASTROLOGER)
   cancelBooking(
     @Req() req: AuthenticatedRequest,
     @Param('id', ParseIntPipe) bookingId: number,

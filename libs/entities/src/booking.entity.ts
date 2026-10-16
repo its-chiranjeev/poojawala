@@ -63,6 +63,7 @@ export enum CANCELLED_BY {
   CUSTOMER = 'CUSTOMER',
   PUROHIT = 'PUROHIT',
   ADMIN = 'ADMIN',
+  ASTROLOGER = 'ASTROLOGER',
 }
 
 export enum BOOKING_MODE {

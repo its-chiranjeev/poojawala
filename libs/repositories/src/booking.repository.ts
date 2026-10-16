@@ -278,6 +278,15 @@ export class BookingRepository extends BaseRepository<Booking> {
         break;
     }
 
+    // Exclude astrology bookings that are in PENDING status
+    query.andWhere(
+      'NOT (booking.bookingType = :pendingAstrologyType AND booking.status = :pendingAstrologyStatus)',
+      {
+        pendingAstrologyType: BOOKING_TYPE.ASTROLOGY,
+        pendingAstrologyStatus: BOOKING_STATUS.PENDING,
+      },
+    );
+
     if (bookingType) {
       if (Array.isArray(bookingType)) {
         query.andWhere('booking.bookingType IN (:...bookingType)', {

@@ -1,7 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 // import * as nodemailer from 'nodemailer';
 import { ResendProvider } from './providers/resend.provider';
-import { renderPoojawalaEmail } from './templates/email-base.template';
+import { renderPoojawalaEmail, EmailTableRow } from './templates/email-base.template';
 
 export interface SendEmailOptions {
   to: string | string[];
@@ -748,6 +748,180 @@ export class EmailService {
     await this.sendMail({
       to: data.email,
       subject: `Update on your contact inquiry [${data.status}] - Poojawala`,
+      html,
+    });
+  }
+
+  async sendAstrologerRegistrationEmail(data: {
+    email: string;
+    name: string;
+    username?: string;
+    phone?: string;
+  }): Promise<void> {
+    const rows: EmailTableRow[] = [
+      { label: 'Astrologer Name', value: data.name || 'Astrologer' },
+      { label: 'Email', value: data.email },
+      ...(data.username ? [{ label: 'Username', value: data.username }] : []),
+      ...(data.phone ? [{ label: 'Phone', value: data.phone }] : []),
+      { label: 'Profile Status', value: 'Under Review', isHighlight: true },
+    ];
+
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Registration Received',
+      userName: data.name || 'Astrologer',
+      preheaderText: 'Thank you for registering as an Astrologer with Poojawala.',
+      emailMessage: 'Thank you for joining Poojawala as a Vedic Astrologer. Your registration and verification details have been received successfully. Our administrative team is currently reviewing your profile and credentials.',
+      detailsTable: {
+        title: 'Registration Details',
+        rows,
+      },
+      highlight: {
+        title: 'Verification Process',
+        text: 'Our team verifies all credentials to maintain the highest standards of Vedic consultations. Once your documents are verified and approved by the admin team, you will receive an activation email and can begin accepting astrology consultation bookings.',
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject: 'Astrologer Registration Received - Poojawala',
+      html,
+    });
+  }
+
+  async sendBookingCancellationEmailToCustomer(data: {
+    email: string;
+    customerName: string;
+    bookingId: string;
+    serviceName: string;
+    servicePlan?: string;
+    bookingDate: string;
+    bookingTime: string;
+    cancelledBy: string; // 'PUROHIT' | 'ASTROLOGER' | 'ADMIN' | 'CUSTOMER'
+    cancellationReason?: string;
+    isAstrology?: boolean;
+    providerName?: string;
+  }): Promise<void> {
+    const isPurohitRelease = data.cancelledBy === 'PUROHIT';
+    const isAstrology = Boolean(data.isAstrology);
+
+    let statusBadge: string;
+    let subject: string;
+    let preheaderText: string;
+    let emailMessage: string;
+    let highlightTitle: string;
+    let highlightText: string;
+
+    if (isPurohitRelease) {
+      statusBadge = 'Booking Released';
+      subject = `Booking Update - Poojawala | Booking #${data.bookingId}`;
+      preheaderText = `Booking #${data.bookingId} was released by the assigned Purohit.`;
+      emailMessage = `Your booking for <strong>${this.escapeHtml(data.serviceName)}</strong> was released by the assigned Purohit. We are finding an eligible Purohit for your booking. Please wait some time.`;
+      highlightTitle = 'What happens next?';
+      highlightText = 'Our system is reassigning your booking to available eligible Vedic Purohits. You will receive an update as soon as a new Purohit accepts your booking.';
+    } else if (isAstrology) {
+      statusBadge = 'Consultation Cancelled';
+      subject = `Astrology Consultation Cancelled - Poojawala | Booking #${data.bookingId}`;
+      preheaderText = `Your astrology consultation #${data.bookingId} has been cancelled.`;
+      emailMessage = `Your astrology consultation booking (Booking #${data.bookingId})${data.providerName ? ` with Astrologer <strong>${this.escapeHtml(data.providerName)}</strong>` : ''} has been cancelled by ${data.cancelledBy === 'ASTROLOGER' ? 'the assigned Astrologer' : 'Admin'}.`;
+      highlightTitle = 'Cancellation Reason';
+      highlightText = data.cancellationReason || 'No specific cancellation reason was provided. If you have already made a payment, our support team will initiate your refund.';
+    } else {
+      statusBadge = 'Booking Cancelled';
+      subject = `Booking Cancelled - Poojawala | Booking #${data.bookingId}`;
+      preheaderText = `Your booking #${data.bookingId} has been cancelled.`;
+      emailMessage = `Your sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong> (Booking #${data.bookingId}) has been cancelled by ${data.cancelledBy === 'ADMIN' ? 'Admin' : 'Customer'}.`;
+      highlightTitle = 'Cancellation Reason';
+      highlightText = data.cancellationReason || 'Booking has been cancelled. If any refund is applicable, it will be processed according to our cancellation and refund policy.';
+    }
+
+    const rows: EmailTableRow[] = [
+      { label: 'Booking ID', value: `#${data.bookingId}` },
+      { label: isAstrology ? 'Service' : 'Pooja Service', value: data.serviceName },
+      ...(data.servicePlan ? [{ label: 'Service Plan', value: `${data.servicePlan} Plan` }] : []),
+      { label: 'Date', value: data.bookingDate },
+      { label: 'Time', value: data.bookingTime },
+      ...(data.providerName ? [{ label: isAstrology ? 'Astrologer' : 'Purohit', value: data.providerName }] : []),
+      { label: 'Cancelled By', value: data.cancelledBy, isHighlight: true },
+      ...(data.cancellationReason ? [{ label: 'Reason', value: data.cancellationReason }] : []),
+      { label: 'Booking Status', value: isPurohitRelease ? 'Pending Reassignment' : 'Cancelled' },
+    ];
+
+    const html = renderPoojawalaEmail({
+      statusBadge,
+      userName: data.customerName || 'Devotee',
+      preheaderText,
+      emailMessage,
+      detailsTable: {
+        title: 'Booking Details',
+        rows,
+      },
+      highlight: {
+        title: highlightTitle,
+        text: highlightText,
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject,
+      html,
+    });
+  }
+
+  async sendBookingCancellationEmailToProvider(data: {
+    email: string;
+    providerName: string;
+    providerRole: 'Purohit' | 'Astrologer';
+    bookingId: string;
+    customerName: string;
+    serviceName: string;
+    servicePlan?: string;
+    bookingDate: string;
+    bookingTime: string;
+    cancellationReason?: string;
+    cancelledBy?: string;
+  }): Promise<void> {
+    const isAstrology = data.providerRole === 'Astrologer';
+    const cancelledByLabel = data.cancelledBy === 'ADMIN' ? 'Admin' : 'Customer';
+    const statusBadge = isAstrology ? 'Consultation Cancelled' : 'Booking Cancelled';
+    const subject = isAstrology
+      ? `Astrology Consultation Cancelled by ${cancelledByLabel} - Poojawala | Booking #${data.bookingId}`
+      : `Booking Cancelled by ${cancelledByLabel} - Poojawala | Booking #${data.bookingId}`;
+    const preheaderText = `Booking #${data.bookingId} has been cancelled by ${cancelledByLabel}.`;
+    const emailMessage = isAstrology
+      ? `An astrology consultation (Booking #${data.bookingId}) scheduled with devotee <strong>${this.escapeHtml(data.customerName)}</strong> has been cancelled by ${cancelledByLabel}.`
+      : `Sacred pooja booking #${data.bookingId} for <strong>${this.escapeHtml(data.serviceName)}</strong> with devotee <strong>${this.escapeHtml(data.customerName)}</strong> has been cancelled by ${cancelledByLabel}.`;
+
+    const rows: EmailTableRow[] = [
+      { label: 'Booking ID', value: `#${data.bookingId}` },
+      { label: isAstrology ? 'Service' : 'Pooja Service', value: data.serviceName },
+      ...(data.servicePlan ? [{ label: 'Service Plan', value: `${data.servicePlan} Plan` }] : []),
+      { label: 'Scheduled Date', value: data.bookingDate },
+      { label: 'Scheduled Time', value: data.bookingTime },
+      { label: 'Devotee Name', value: data.customerName },
+      { label: 'Cancelled By', value: cancelledByLabel, isHighlight: true },
+      ...(data.cancellationReason ? [{ label: 'Reason', value: data.cancellationReason }] : []),
+      { label: 'Booking Status', value: 'Cancelled' },
+    ];
+
+    const html = renderPoojawalaEmail({
+      statusBadge,
+      userName: data.providerName || data.providerRole,
+      preheaderText,
+      emailMessage,
+      detailsTable: {
+        title: 'Cancelled Booking Details',
+        rows,
+      },
+      highlight: {
+        title: 'Schedule Released',
+        text: `Your schedule for this time slot has been released. You are now available to receive new ${isAstrology ? 'astrology consultation requests' : 'pooja assignments'}.`,
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject,
       html,
     });
   }

@@ -978,6 +978,8 @@ export class BookingService {
         priceBreakDown: transactionResult.savedBooking.priceBreakDown ?? null,
       };
 
+      (bookingData as any).message = "Redirecting to the payment page";
+
       return bookingData;
     } catch (error) {
       if (
@@ -1003,12 +1005,19 @@ export class BookingService {
     user: User,
     dto: CreateAstrologyBookingDto,
   ): Promise<CreateBookingResponse> {
-    if (user.role !== USER_ROLE.CUSTOMER) {
-      throw new ForbiddenException('Only customers can create bookings');
+    if (user.role !== USER_ROLE.CUSTOMER && user.role !== USER_ROLE.ADMIN) {
+      throw new ForbiddenException('Only customers and admins can create astrology bookings');
     }
 
-    const minimumLeadTimeMinutes = 120;
-    const maximumAdvanceDays = 180;
+    let targetCustomerId: number;
+    if (user.role === USER_ROLE.ADMIN) {
+      if (!dto.customerId) {
+        throw new BadRequestException('customerId is required when an admin creates an astrology booking');
+      }
+      targetCustomerId = dto.customerId;
+    } else {
+      targetCustomerId = user.id;
+    }
 
     const scheduledAt = new Date(dto.scheduledAt);
 
@@ -1016,30 +1025,51 @@ export class BookingService {
       throw new BadRequestException('Invalid scheduled date and time');
     }
 
-    const minimumScheduledAt = new Date(
-      Date.now() + minimumLeadTimeMinutes * 60 * 1000,
-    );
+    if (user.role === USER_ROLE.CUSTOMER) {
+      const minimumLeadTimeMinutes = 120;
+      const maximumAdvanceDays = 180;
 
-    if (scheduledAt < minimumScheduledAt) {
-      throw new BadRequestException(
-        `Booking must be scheduled at least ${minimumLeadTimeMinutes} minutes in advance`,
+      const minimumScheduledAt = new Date(
+        Date.now() + minimumLeadTimeMinutes * 60 * 1000,
       );
-    }
 
-    const maximumScheduledAt = new Date(
-      Date.now() + maximumAdvanceDays * 24 * 60 * 60 * 1000,
-    );
+      if (scheduledAt < minimumScheduledAt) {
+        throw new BadRequestException(
+          `Booking must be scheduled at least ${minimumLeadTimeMinutes} minutes in advance`,
+        );
+      }
 
-    if (scheduledAt > maximumScheduledAt) {
-      throw new BadRequestException(
-        `Booking cannot be scheduled more than ${maximumAdvanceDays} days in advance`,
+      const maximumScheduledAt = new Date(
+        Date.now() + maximumAdvanceDays * 24 * 60 * 60 * 1000,
       );
+
+      if (scheduledAt > maximumScheduledAt) {
+        throw new BadRequestException(
+          `Booking cannot be scheduled more than ${maximumAdvanceDays} days in advance`,
+        );
+      }
     }
 
     try {
       const transactionResult = await this.dataSource.transaction(async (manager) => {
+        const userRepository = manager.getRepository(User);
         const astrologerRepository = manager.getRepository(AstrologerProfile);
         const bookingRepository = manager.getRepository(Booking);
+
+        let customer: User;
+        if (user.role === USER_ROLE.CUSTOMER) {
+          customer = user;
+        } else {
+          const foundCustomer = await userRepository.findOne({
+            where: { id: targetCustomerId, role: USER_ROLE.CUSTOMER },
+          });
+
+          if (!foundCustomer) {
+            throw new NotFoundException('Customer not found');
+          }
+
+          customer = foundCustomer;
+        }
 
         const astrologer = await astrologerRepository.findOne({
           where: { userId: dto.astrologerId },
@@ -1055,7 +1085,7 @@ export class BookingService {
         }
 
         const duplicateLockKey = [
-          user.id,
+          targetCustomerId,
           dto.astrologerId,
           scheduledAt.toISOString(),
         ].join(':');
@@ -1086,7 +1116,7 @@ export class BookingService {
         const duplicateBookingExists = await bookingRepository
           .createQueryBuilder('booking')
           .where('booking.customerId = :customerId', {
-            customerId: user.id,
+            customerId: targetCustomerId,
           })
           .andWhere('booking.astrologerId = :astrologerId', {
             astrologerId: dto.astrologerId,
@@ -1135,7 +1165,7 @@ export class BookingService {
           bookingNumber,
           bookingType: BOOKING_TYPE.ASTROLOGY,
           bookingMode: BOOKING_MODE.ONLINE,
-          customerId: user.id,
+          customerId: targetCustomerId,
           astrologerId: dto.astrologerId,
           scheduledAt,
           commissionPercentage: 0,
@@ -1149,8 +1179,8 @@ export class BookingService {
           paidAmount,
           remainingAmount,
           priceBreakDown,
-          status: BOOKING_STATUS.PENDING,
-          paymentType: BOOKING_PAYMENT_TYPE.TOKEN,
+          status: user.role === USER_ROLE.ADMIN ? BOOKING_STATUS.ACCEPTED : BOOKING_STATUS.PENDING,
+          paymentType: user.role === USER_ROLE.ADMIN ? BOOKING_PAYMENT_TYPE.DEFERRED : BOOKING_PAYMENT_TYPE.TOKEN,
           paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
           assignmentType: ASSIGNMENT_TYPE.MANUAL,
           filteredPurohitIds: [],
@@ -1167,7 +1197,7 @@ export class BookingService {
             entity: 'Booking',
             entityId: String(savedBooking.id),
             action: 'ASTROLOGY_BOOKING_CREATED',
-            message: `Customer created Astrology Booking ${savedBooking.bookingNumber || savedBooking.id}.`,
+            message: `${user.role === USER_ROLE.ADMIN ? 'Admin' : 'Customer'} created Astrology Booking ${savedBooking.bookingNumber || savedBooking.id}.`,
             oldValue: undefined,
             newValue: {
               status: savedBooking.status,
@@ -1180,14 +1210,14 @@ export class BookingService {
           manager,
         );
 
-        return { savedBooking, astrologer };
+        return { savedBooking, astrologer, customer };
       });
 
       if (this.notificationService) {
         try {
           const customerName =
-            [user.firstName, user.lastName].filter(Boolean).join(' ') ||
-            user.phone ||
+            [transactionResult.customer.firstName, transactionResult.customer.lastName].filter(Boolean).join(' ') ||
+            transactionResult.customer.phone ||
             'Customer';
           const scheduledDateStr = transactionResult.savedBooking.scheduledAt
             ? new Date(
@@ -1200,7 +1230,9 @@ export class BookingService {
             transactionResult.savedBooking.bookingNumber ||
             `B-${transactionResult.savedBooking.id}`;
 
-          const adminBookingMessage = `New Astrology booking ${bookingDisplayId} created by ${customerName}. Scheduled at: ${scheduledDateStr}. Total: ₹${transactionResult.savedBooking.finalAmount}.`;
+          const adminBookingMessage = user.role === USER_ROLE.ADMIN
+            ? `New Astrology booking ${bookingDisplayId} created by Admin for customer ${customerName}. Scheduled at: ${scheduledDateStr}. Total: ₹${transactionResult.savedBooking.finalAmount}.`
+            : `New Astrology booking ${bookingDisplayId} created by ${customerName}. Scheduled at: ${scheduledDateStr}. Total: ₹${transactionResult.savedBooking.finalAmount}.`;
 
           await this.notificationService.notifyAdmins(
             'New Astrology Booking Request',
@@ -1211,7 +1243,7 @@ export class BookingService {
             {
               bookingId: transactionResult.savedBooking.id,
               bookingNumber: transactionResult.savedBooking.bookingNumber,
-              customerId: user.id,
+              customerId: transactionResult.customer.id,
               customerName,
               astrologerId: transactionResult.savedBooking.astrologerId,
               finalAmount: transactionResult.savedBooking.finalAmount,
@@ -1221,11 +1253,32 @@ export class BookingService {
             },
           );
 
+          if (user.role === USER_ROLE.ADMIN) {
+            await this.notificationService.createNotification(
+              transactionResult.customer.id,
+              'New Astrology Consultation Scheduled',
+              `An astrology consultation (${bookingDisplayId}) has been scheduled for you by Admin for ${scheduledDateStr}.`,
+              NOTIFICATION_TYPE.BOOKING,
+              transactionResult.savedBooking.id,
+              'BOOKING',
+              true,
+              {
+                bookingId: transactionResult.savedBooking.id,
+                bookingNumber: transactionResult.savedBooking.bookingNumber,
+                scheduledAt: transactionResult.savedBooking.scheduledAt,
+              },
+            );
+          }
+
           if (transactionResult.astrologer.userId) {
+            const astrologerBookingMessage = user.role === USER_ROLE.ADMIN
+              ? `A new astrology consultation (${bookingDisplayId}) has been scheduled by Admin for ${customerName} on ${scheduledDateStr}.`
+              : `A new astrology consultation (${bookingDisplayId}) has been scheduled by ${customerName} for ${scheduledDateStr}.`;
+
             await this.notificationService.createNotification(
               transactionResult.astrologer.userId,
               'New Astrology Consultation Scheduled',
-              `A new astrology consultation (${bookingDisplayId}) has been scheduled by ${customerName} for ${scheduledDateStr}.`,
+              astrologerBookingMessage,
               NOTIFICATION_TYPE.BOOKING,
               transactionResult.savedBooking.id,
               'BOOKING',
@@ -1254,7 +1307,7 @@ export class BookingService {
         );
       } else {
         try {
-          paymentLinkRes = await this.paymentService.createBookingPaymentLink(user, {
+          paymentLinkRes = await this.paymentService.createBookingPaymentLink(transactionResult.customer, {
             bookingId: transactionResult.savedBooking.id,
             paymentOption: 'TOKEN',
           });
@@ -1288,6 +1341,11 @@ export class BookingService {
         finalAmount: Number(transactionResult.savedBooking.finalAmount),
         priceBreakDown: transactionResult.savedBooking.priceBreakDown ?? null,
       };
+
+      (bookingData as any).message =
+        user.role === USER_ROLE.ADMIN
+          ? 'Astrology booking created successfully'
+          : 'Redirecting to the payment page';
 
       return bookingData;
     } catch (error) {
@@ -1940,6 +1998,60 @@ export class BookingService {
     }
   }
 
+  private async validateAstrologerCancellation(
+    manager: EntityManager,
+    user: User,
+    booking: Booking,
+    cancellationReason?: string,
+  ): Promise<void> {
+    if (!cancellationReason?.trim()) {
+      throw new BadRequestException(
+        'Cancellation reason is required when an astrologer cancels a booking',
+      );
+    }
+
+    if (booking.bookingType !== BOOKING_TYPE.ASTROLOGY) {
+      throw new BadRequestException(
+        'Astrologers can only cancel astrology bookings',
+      );
+    }
+
+    const astrologerProfileRepository = manager.getRepository(AstrologerProfile);
+
+    const astrologerProfile = await astrologerProfileRepository.findOne({
+      where: {
+        userId: user.id,
+      },
+    });
+
+    if (!astrologerProfile) {
+      throw new NotFoundException('Astrologer profile not found');
+    }
+
+    if (!booking.astrologerId) {
+      throw new ForbiddenException(
+        'This booking is not assigned to any astrologer',
+      );
+    }
+
+    if (booking.astrologerId !== user.id) {
+      throw new ForbiddenException(
+        'You can only cancel bookings assigned to you',
+      );
+    }
+
+    const allowedStatuses: BOOKING_STATUS[] = [
+      BOOKING_STATUS.PENDING,
+      BOOKING_STATUS.ACCEPTED,
+    ];
+
+    if (!allowedStatuses.includes(booking.status)) {
+      throw new BadRequestException(
+        `Astrologer cannot cancel a booking with status ${booking.status}`,
+      );
+    }
+  }
+
   async softDeleteBooking(
     user: User,
     bookingId: number,
@@ -2017,6 +2129,7 @@ export class BookingService {
       USER_ROLE.CUSTOMER,
       USER_ROLE.PUROHIT,
       USER_ROLE.ADMIN,
+      USER_ROLE.ASTROLOGER,
     ];
 
     if (!allowedRoles.includes(user.role)) {
@@ -2068,6 +2181,8 @@ export class BookingService {
 
         assignedPurohitUserId = purohitProfile?.userId;
       }
+
+      const assignedAstrologerUserId = booking.astrologerId;
 
       switch (user.role) {
         case USER_ROLE.CUSTOMER:
@@ -2139,6 +2254,20 @@ export class BookingService {
 
           break;
 
+        case USER_ROLE.ASTROLOGER: {
+          await this.validateAstrologerCancellation(
+            manager,
+            user,
+            booking,
+            cancellationReason,
+          );
+
+          cancelledBy = CANCELLED_BY.ASTROLOGER;
+          booking.status = BOOKING_STATUS.CANCELLED;
+
+          break;
+        }
+
         default:
           throw new ForbiddenException(
             'You are not allowed to cancel this booking',
@@ -2164,6 +2293,15 @@ export class BookingService {
             assignedPurohitUserId,
             'Booking Cancelled',
             `Booking B-${savedBooking.id} has been cancelled by the customer.`,
+            NOTIFICATION_TYPE.BOOKING,
+            savedBooking.id,
+            'BOOKING',
+          );
+        } else if (assignedAstrologerUserId) {
+          await this.notificationService.createNotification(
+            assignedAstrologerUserId,
+            'Booking Cancelled',
+            `Astrology booking ${savedBooking.bookingNumber || `B-${savedBooking.id}`} has been cancelled by the customer.`,
             NOTIFICATION_TYPE.BOOKING,
             savedBooking.id,
             'BOOKING',
@@ -2216,7 +2354,7 @@ export class BookingService {
         }
       }
 
-      // ADMIN → PUROHIT + CUSTOMER
+      // ADMIN → PUROHIT / ASTROLOGER + CUSTOMER
       if (cancelledBy === CANCELLED_BY.ADMIN) {
         // TODO: commented out to avoid duplicate notification
         // this.bookingGateway.notifyUser(
@@ -2250,6 +2388,46 @@ export class BookingService {
             savedBooking.id,
             'BOOKING',
           );
+        } else if (assignedAstrologerUserId) {
+          await this.notificationService.createNotification(
+            assignedAstrologerUserId,
+            'Booking Cancelled',
+            `Astrology booking ${savedBooking.bookingNumber || `B-${savedBooking.id}`} has been cancelled by the Admin.`,
+            NOTIFICATION_TYPE.BOOKING,
+            savedBooking.id,
+            'BOOKING',
+          );
+        }
+      }
+
+      // ASTROLOGER → CUSTOMER + ADMINS
+      if (cancelledBy === CANCELLED_BY.ASTROLOGER) {
+        await this.notificationService.createNotification(
+          savedBooking.customerId,
+          'Booking Cancelled',
+          `Your astrology booking ${savedBooking.bookingNumber || `B-${savedBooking.id}`} has been cancelled by the astrologer.`,
+          NOTIFICATION_TYPE.BOOKING,
+          savedBooking.id,
+          'BOOKING',
+        );
+
+        const admins = await manager.getRepository(User).find({
+          where: {
+            role: USER_ROLE.ADMIN,
+            status: USER_STATUS.ACTIVE,
+          },
+          select: ['id'],
+        });
+
+        for (const admin of admins) {
+          await this.notificationService.createNotification(
+            admin.id,
+            'Booking Cancelled',
+            `Astrology booking ${savedBooking.bookingNumber || `B-${savedBooking.id}`} was cancelled by the assigned astrologer.`,
+            NOTIFICATION_TYPE.BOOKING,
+            savedBooking.id,
+            'BOOKING',
+          );
         }
       }
 
@@ -2260,6 +2438,7 @@ export class BookingService {
           service: true,
           customerAddress: true,
           purohit: { user: true },
+          astrologer: true,
         },
       });
 
@@ -2278,6 +2457,173 @@ export class BookingService {
         },
         manager,
       );
+
+      if (this.emailService && populatedBooking) {
+        const scheduledAtIst = this.toIstString(savedBooking.scheduledAt);
+        const splitDateIst = scheduledAtIst ? scheduledAtIst.split(', ') : [];
+        const bookingDate = splitDateIst.length > 0 ? splitDateIst[0] : (savedBooking.scheduledAt ? new Date(savedBooking.scheduledAt).toLocaleDateString() : 'Scheduled Date');
+        const bookingTime = splitDateIst.length > 1 ? splitDateIst[1] : (savedBooking.scheduledAt ? new Date(savedBooking.scheduledAt).toLocaleTimeString() : 'Scheduled Time');
+        const bookingRef = savedBooking.bookingNumber || `B-${savedBooking.id}`;
+        const isAstrology = savedBooking.bookingType === BOOKING_TYPE.ASTROLOGY;
+        const serviceName = isAstrology
+          ? 'Astrology Consultation'
+          : (populatedBooking.service?.name || 'Vedic Pooja');
+
+        const customerEmail = populatedBooking.customer?.email;
+        const customerName = [populatedBooking.customer?.firstName, populatedBooking.customer?.lastName].filter(Boolean).join(' ') || 'Devotee';
+
+        const purohitUser = populatedBooking.purohit?.user;
+        const purohitEmail = purohitUser?.email;
+        const purohitName = [purohitUser?.firstName, purohitUser?.lastName].filter(Boolean).join(' ') || 'Purohit';
+
+        const astrologerUser = populatedBooking.astrologer;
+        const astrologerEmail = astrologerUser?.email;
+        const astrologerName = [astrologerUser?.firstName, astrologerUser?.lastName].filter(Boolean).join(' ') || 'Astrologer';
+
+        // 1. If PUROHIT cancels/releases -> send email to customer
+        if (cancelledBy === CANCELLED_BY.PUROHIT && customerEmail) {
+          try {
+            await this.emailService.sendBookingCancellationEmailToCustomer({
+              email: customerEmail,
+              customerName,
+              bookingId: bookingRef,
+              serviceName,
+              servicePlan: savedBooking.plan ? String(savedBooking.plan) : undefined,
+              bookingDate,
+              bookingTime,
+              cancelledBy: 'PUROHIT',
+              cancellationReason,
+              isAstrology: false,
+              providerName: purohitName,
+            });
+          } catch (err: any) {
+            this.logger.error(`[BookingCancellationEmail] Failed to send email to customer for booking ${bookingRef}: ${err?.message}`);
+          }
+        }
+
+        // 2. If CUSTOMER cancels -> send email to assigned purohit OR assigned astrologer
+        if (cancelledBy === CANCELLED_BY.CUSTOMER) {
+          if (purohitEmail && !isAstrology) {
+            try {
+              await this.emailService.sendBookingCancellationEmailToProvider({
+                email: purohitEmail,
+                providerName: purohitName,
+                providerRole: 'Purohit',
+                bookingId: bookingRef,
+                customerName,
+                serviceName,
+                servicePlan: savedBooking.plan ? String(savedBooking.plan) : undefined,
+                bookingDate,
+                bookingTime,
+                cancellationReason,
+                cancelledBy: 'CUSTOMER',
+              });
+            } catch (err: any) {
+              this.logger.error(`[BookingCancellationEmail] Failed to send email to purohit for booking ${bookingRef}: ${err?.message}`);
+            }
+          } else if (astrologerEmail && isAstrology) {
+            try {
+              await this.emailService.sendBookingCancellationEmailToProvider({
+                email: astrologerEmail,
+                providerName: astrologerName,
+                providerRole: 'Astrologer',
+                bookingId: bookingRef,
+                customerName,
+                serviceName,
+                servicePlan: savedBooking.plan ? String(savedBooking.plan) : undefined,
+                bookingDate,
+                bookingTime,
+                cancellationReason,
+                cancelledBy: 'CUSTOMER',
+              });
+            } catch (err: any) {
+              this.logger.error(`[BookingCancellationEmail] Failed to send email to astrologer for booking ${bookingRef}: ${err?.message}`);
+            }
+          }
+        }
+
+        // 3. If ASTROLOGER cancels -> send email to customer
+        if (cancelledBy === CANCELLED_BY.ASTROLOGER && customerEmail) {
+          try {
+            await this.emailService.sendBookingCancellationEmailToCustomer({
+              email: customerEmail,
+              customerName,
+              bookingId: bookingRef,
+              serviceName,
+              servicePlan: savedBooking.plan ? String(savedBooking.plan) : undefined,
+              bookingDate,
+              bookingTime,
+              cancelledBy: 'ASTROLOGER',
+              cancellationReason,
+              isAstrology: true,
+              providerName: astrologerName,
+            });
+          } catch (err: any) {
+            this.logger.error(`[BookingCancellationEmail] Failed to send email to customer for astrology booking ${bookingRef}: ${err?.message}`);
+          }
+        }
+
+        // 4. If ADMIN cancels -> send email to customer AND assigned provider
+        if (cancelledBy === CANCELLED_BY.ADMIN) {
+          if (customerEmail) {
+            try {
+              await this.emailService.sendBookingCancellationEmailToCustomer({
+                email: customerEmail,
+                customerName,
+                bookingId: bookingRef,
+                serviceName,
+                servicePlan: savedBooking.plan ? String(savedBooking.plan) : undefined,
+                bookingDate,
+                bookingTime,
+                cancelledBy: 'ADMIN',
+                cancellationReason,
+                isAstrology,
+                providerName: isAstrology ? astrologerName : purohitName,
+              });
+            } catch (err: any) {
+              this.logger.error(`[BookingCancellationEmail] Failed to send email to customer for booking ${bookingRef}: ${err?.message}`);
+            }
+          }
+
+          if (purohitEmail && !isAstrology) {
+            try {
+              await this.emailService.sendBookingCancellationEmailToProvider({
+                email: purohitEmail,
+                providerName: purohitName,
+                providerRole: 'Purohit',
+                bookingId: bookingRef,
+                customerName,
+                serviceName,
+                servicePlan: savedBooking.plan ? String(savedBooking.plan) : undefined,
+                bookingDate,
+                bookingTime,
+                cancellationReason,
+                cancelledBy: 'ADMIN',
+              });
+            } catch (err: any) {
+              this.logger.error(`[BookingCancellationEmail] Failed to send email to purohit for booking ${bookingRef}: ${err?.message}`);
+            }
+          } else if (astrologerEmail && isAstrology) {
+            try {
+              await this.emailService.sendBookingCancellationEmailToProvider({
+                email: astrologerEmail,
+                providerName: astrologerName,
+                providerRole: 'Astrologer',
+                bookingId: bookingRef,
+                customerName,
+                serviceName,
+                servicePlan: savedBooking.plan ? String(savedBooking.plan) : undefined,
+                bookingDate,
+                bookingTime,
+                cancellationReason,
+                cancelledBy: 'ADMIN',
+              });
+            } catch (err: any) {
+              this.logger.error(`[BookingCancellationEmail] Failed to send email to astrologer for booking ${bookingRef}: ${err?.message}`);
+            }
+          }
+        }
+      }
 
       return {
         message,
@@ -3356,7 +3702,10 @@ export class BookingService {
 
       booking.status = dto.status;
       if (dto.status === BOOKING_STATUS.CANCELLED && !booking.cancelledBy) {
-        booking.cancelledBy = CANCELLED_BY.ADMIN;
+        booking.cancelledBy =
+          user.role === USER_ROLE.ASTROLOGER
+            ? CANCELLED_BY.ASTROLOGER
+            : CANCELLED_BY.ADMIN;
       }
 
       const updatedBooking = await bookingRepository.save(booking);
