@@ -2297,6 +2297,102 @@ describe('UserService - Purohit Verification Rework', () => {
         ),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('astrologer self update sets isAdminCreated to false when aadhaarDoc or panDoc is provided', async () => {
+      const astroUser: User = {
+        id: 20,
+        email: 'astrologer@poojawala.com',
+        username: 'astrologer20',
+        role: USER_ROLE.ASTROLOGER,
+        status: USER_STATUS.ACTIVE,
+        isAdminCreated: true,
+      } as unknown as User;
+
+      testAstrologerProfile = {
+        id: 201,
+        userId: 20,
+        ratePerMinute: 10,
+        commissionPrice: 50,
+        verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+        aadhaarNumber: '123456789012',
+      };
+
+      mockUserRepo.findById.mockImplementation(async (id: string) => {
+        if (id === '20') return astroUser;
+        return testUser;
+      });
+
+      const result = await service.updateProfileByUser(
+        '20',
+        {
+          aadhaarDoc: 'https://s3.amazonaws.com/aadhaar.pdf',
+        } as any,
+        {} as any,
+      );
+
+      expect(result.success).toBe(true);
+      expect(mockUserRepo.updateUser).toHaveBeenCalledWith('20', { isAdminCreated: false });
+      expect(astroUser.isAdminCreated).toBe(false);
+    });
+
+    it('purohit self update keeps isAdminCreated true if docs uploaded but no bank account exists', async () => {
+      testUser.isAdminCreated = true;
+      testBankAccounts = [];
+      mockPurohitBankRepo.findByPurohitId.mockResolvedValue([]);
+
+      const result = await service.updateProfileByUser(
+        String(testUser.id),
+        {
+          aadhaarDoc: 'https://s3.amazonaws.com/aadhaar.pdf',
+          aadhaarNumber: '123456789012',
+        } as any,
+        {} as any,
+      );
+
+      expect(result.success).toBe(true);
+      expect(testUser.isAdminCreated).toBe(true);
+    });
+
+    it('purohit self update sets isAdminCreated false when docs uploaded AND bank account exists', async () => {
+      testUser.isAdminCreated = true;
+      testBankAccounts = [{ id: 1, purohitId: testProfile.id, accountNumber: '1234567890', paymentMethod: PUROHIT_PAYMENT_METHOD.BANK }];
+      mockPurohitBankRepo.findByPurohitId.mockResolvedValue(testBankAccounts);
+
+      const result = await service.updateProfileByUser(
+        String(testUser.id),
+        {
+          aadhaarDoc: 'https://s3.amazonaws.com/aadhaar.pdf',
+          aadhaarNumber: '123456789012',
+        } as any,
+        {} as any,
+      );
+
+      expect(result.success).toBe(true);
+      expect(testUser.isAdminCreated).toBe(false);
+    });
+
+    it('purohit add bank account sets isAdminCreated to false if docs already exist', async () => {
+      testUser.isAdminCreated = true;
+      testProfile.aadhaarDocUrl = 'https://s3.amazonaws.com/aadhaar.pdf';
+
+      const dto = {
+        paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
+        accountHolderName: 'Ramesh Sharma',
+        accountNumber: '9998887779',
+        ifscCode: 'HDFC0001234',
+        bankName: 'HDFC Bank',
+        accountType: BANK_ACCOUNT_TYPE.SAVINGS,
+        isPrimary: false,
+      };
+
+      const res = await service.addPurohitBankAccount(
+        { id: testUser.id, role: USER_ROLE.PUROHIT },
+        dto as any,
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockUserRepo.updateUser).toHaveBeenCalledWith(String(testUser.id), { isAdminCreated: false });
+    });
   });
 
   describe('Purohit & Admin Service Area Management', () => {

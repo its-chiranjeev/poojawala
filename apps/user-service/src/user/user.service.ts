@@ -403,7 +403,24 @@ export class UserService {
         }
       }
 
-      if (user.isAdminCreated && (hasAadhaarDoc || hasPanDoc)) {
+      const existingAccounts =
+        await this.purohitBankAccountRepository.findByPurohitId(profile.id);
+      const hasBankOrUpi = Boolean(
+        (existingAccounts &&
+          existingAccounts.length > 0 &&
+          existingAccounts.some(
+            (acc) => Boolean(acc.accountNumber || acc.upiId),
+          )) ||
+        dto.bankAccount ||
+        dto.accountNumber ||
+        dto.upiId,
+      );
+      const hasAnyDoc =
+        hasAadhaarDoc ||
+        hasPanDoc ||
+        Boolean(profile.aadhaarDocUrl || profile.panDocUrl);
+
+      if (user.isAdminCreated && hasAnyDoc && hasBankOrUpi) {
         userPayload.isAdminCreated = false;
       }
     } else if (user.role === USER_ROLE.ASTROLOGER && astrologerProfile) {
@@ -1110,8 +1127,29 @@ export class UserService {
           }
         }
 
-        if (user.isAdminCreated && (dto.aadhaarDoc || dto.panDoc)) {
+        const hasDoc = Boolean(
+          dto.aadhaarDoc ||
+          dto.panDoc ||
+          profile.aadhaarDocUrl ||
+          profile.panDocUrl,
+        );
+
+        const existingBankAccounts =
+          await this.purohitBankAccountRepository.findByPurohitId(profile.id);
+        const hasBankOrUpi = Boolean(
+          (existingBankAccounts &&
+            existingBankAccounts.length > 0 &&
+            existingBankAccounts.some(
+              (acc) => Boolean(acc.accountNumber || acc.upiId),
+            )) ||
+          dto.accountNumber ||
+          dto.upiId ||
+          dto.bankAccount,
+        );
+
+        if (user.isAdminCreated && hasDoc && hasBankOrUpi) {
           await this.userRepository.updateUser(id, { isAdminCreated: false });
+          user.isAdminCreated = false;
         }
 
         await this.purohitProfileRepository.update(profile.id, {
@@ -1318,6 +1356,7 @@ export class UserService {
 
       if (user.isAdminCreated && (dto.aadhaarDoc || dto.panDoc)) {
         await this.userRepository.updateUser(id, { isAdminCreated: false });
+        user.isAdminCreated = false;
       }
 
       const profilePayload: Partial<AstrologerProfile> = {};
@@ -3453,6 +3492,23 @@ export class UserService {
       newValue: { bankAccountId: account.id },
     });
 
+    const targetUser = await this.userRepository.findById(String(targetUserId));
+    if (targetUser?.isAdminCreated) {
+      const hasDoc = Boolean(profile.aadhaarDocUrl || profile.panDocUrl);
+      const hasBankOrUpi = Boolean(
+        account.accountNumber ||
+        account.upiId ||
+        dto.accountNumber ||
+        dto.upiId,
+      );
+      if (hasDoc && hasBankOrUpi) {
+        await this.userRepository.updateUser(String(targetUserId), {
+          isAdminCreated: false,
+        });
+        targetUser.isAdminCreated = false;
+      }
+    }
+
     return {
       success: true,
       message: 'Bank account added successfully',
@@ -3669,6 +3725,23 @@ export class UserService {
       oldValue: undefined,
       newValue: { bankAccountId: id },
     });
+
+    const targetUser = await this.userRepository.findById(String(profile.userId));
+    if (targetUser?.isAdminCreated) {
+      const hasDoc = Boolean(profile.aadhaarDocUrl || profile.panDocUrl);
+      const hasBankOrUpi = Boolean(
+        freshUpdatedAccount?.accountNumber ||
+        freshUpdatedAccount?.upiId ||
+        dto.accountNumber ||
+        dto.upiId,
+      );
+      if (hasDoc && hasBankOrUpi) {
+        await this.userRepository.updateUser(String(profile.userId), {
+          isAdminCreated: false,
+        });
+        targetUser.isAdminCreated = false;
+      }
+    }
 
     return {
       success: true,
