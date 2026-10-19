@@ -267,16 +267,40 @@ export class TempleService {
       temple.isActive = dto.isActive;
     }
 
+    const oldImageUrl = temple.imageUrl;
     const fileToUpload = files?.imageUrl || files?.image;
-    if (fileToUpload?.length) {
+    const hasImageFile = Boolean(
+      fileToUpload && fileToUpload.length > 0 && fileToUpload[0]?.buffer && fileToUpload[0].buffer.length > 0,
+    );
+
+    if (hasImageFile && fileToUpload) {
       temple.imageUrl =
         (await this.s3Service.uploadFileHelper(
           adminId || 'temple',
           'temple',
           fileToUpload,
         )) || null;
-    } else if (dto.imageUrl !== undefined) {
-      temple.imageUrl = dto.imageUrl;
+      if (
+        oldImageUrl &&
+        oldImageUrl !== temple.imageUrl &&
+        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+        this.s3Service.isVercelBlobUrl(oldImageUrl) &&
+        typeof this.s3Service?.deleteByUrl === 'function'
+      ) {
+        await this.s3Service.deleteByUrl(oldImageUrl);
+      }
+    } else if (typeof dto.imageUrl === 'string' && dto.imageUrl.trim().length > 0) {
+      temple.imageUrl = dto.imageUrl.trim();
+    } else {
+      temple.imageUrl = null;
+      if (
+        oldImageUrl &&
+        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+        this.s3Service.isVercelBlobUrl(oldImageUrl) &&
+        typeof this.s3Service?.deleteByUrl === 'function'
+      ) {
+        await this.s3Service.deleteByUrl(oldImageUrl);
+      }
     }
 
     const updated = await this.templeRepository.save(temple);

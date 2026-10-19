@@ -1154,13 +1154,39 @@ export class ServiceService {
       service.festivalEndDate = null;
     }
 
-    // Upload new icon if provided
-    if (files?.icon?.length) {
+    const oldIconUrl = service.iconUrl;
+    const iconFile = files?.icon;
+    const hasIconFile = Boolean(
+      iconFile && iconFile.length > 0 && iconFile[0]?.buffer && iconFile[0].buffer.length > 0,
+    );
+
+    if (hasIconFile && iconFile) {
       service.iconUrl = await this.s3Service.uploadFileHelper(
         service.slug || service.name || 'service',
         'icon',
-        files.icon,
+        iconFile,
       );
+      if (
+        oldIconUrl &&
+        oldIconUrl !== service.iconUrl &&
+        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+        this.s3Service.isVercelBlobUrl(oldIconUrl) &&
+        typeof this.s3Service?.deleteByUrl === 'function'
+      ) {
+        await this.s3Service.deleteByUrl(oldIconUrl);
+      }
+    } else if (typeof dto.iconUrl === 'string' && dto.iconUrl.trim().length > 0) {
+      service.iconUrl = dto.iconUrl.trim();
+    } else {
+      service.iconUrl = null as any;
+      if (
+        oldIconUrl &&
+        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+        this.s3Service.isVercelBlobUrl(oldIconUrl) &&
+        typeof this.s3Service?.deleteByUrl === 'function'
+      ) {
+        await this.s3Service.deleteByUrl(oldIconUrl);
+      }
     }
 
     const updated = await this.serviceRepository.save(service);
@@ -2026,14 +2052,39 @@ export class ServiceService {
       categoryType: category.categoryType,
     };
 
-    if (files?.icon?.length) {
+    const oldIconUrl = category.iconUrl;
+    const iconFile = files?.icon;
+    const hasIconFile = Boolean(
+      iconFile && iconFile.length > 0 && iconFile[0]?.buffer && iconFile[0].buffer.length > 0,
+    );
+
+    if (hasIconFile && iconFile) {
       category.iconUrl = await this.s3Service.uploadFileHelper(
         `service-categories`,
         'icon',
-        files.icon,
+        iconFile,
       );
-    } else if (dto.iconUrl !== undefined) {
-      category.iconUrl = dto.iconUrl;
+      if (
+        oldIconUrl &&
+        oldIconUrl !== category.iconUrl &&
+        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+        this.s3Service.isVercelBlobUrl(oldIconUrl) &&
+        typeof this.s3Service?.deleteByUrl === 'function'
+      ) {
+        await this.s3Service.deleteByUrl(oldIconUrl);
+      }
+    } else if (typeof dto.iconUrl === 'string' && dto.iconUrl.trim().length > 0) {
+      category.iconUrl = dto.iconUrl.trim();
+    } else {
+      category.iconUrl = null as any;
+      if (
+        oldIconUrl &&
+        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+        this.s3Service.isVercelBlobUrl(oldIconUrl) &&
+        typeof this.s3Service?.deleteByUrl === 'function'
+      ) {
+        await this.s3Service.deleteByUrl(oldIconUrl);
+      }
     }
 
     if (newName !== undefined) category.name = newName;

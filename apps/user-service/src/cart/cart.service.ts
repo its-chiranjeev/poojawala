@@ -36,7 +36,7 @@ import {
 } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
 import { NotificationService } from '@poojawala/notification';
-import { EmailService, renderPoojawalaEmail } from '@poojawala/email-services';
+import { EmailService, renderPoojawalaEmail, platformBrandName } from '@poojawala/email-services';
 import {
   BookingProductRepository,
   BookingRepository,
@@ -1306,8 +1306,8 @@ export class CartService {
         await this.emailService.sendMail({
           to: user.email,
           subject: isCod
-            ? `Order Confirmed - Poojawala | Order ORD-${order.id}`
-            : `Complete Payment for Order ORD-${order.id} - Poojawala`,
+            ? `Order Confirmed - ${platformBrandName} | Order ORD-${order.id}`
+            : `Complete Payment for Order ORD-${order.id} - ${platformBrandName}`,
           html,
         });
       } catch (err: any) {

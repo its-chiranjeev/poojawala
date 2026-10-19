@@ -1,6 +1,7 @@
 import {
   FileInterceptor,
   FileFieldsInterceptor,
+  AnyFilesInterceptor,
 } from '@nestjs/platform-express';
 import {
   Body,
@@ -24,6 +25,7 @@ import {
   ValidationPipe,
   UploadedFile,
   UnprocessableEntityException,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { UserService } from './user.service';
@@ -46,7 +48,7 @@ import {
   CreatePurohitByAdminDto,
   CreateAstrologerByAdminDto,
 } from '@poojawala/dtos';
-import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
+import { USER_ROLE, USER_STATUS, PLATFORM_SETTING_KEY } from '@poojawala/entities';
 import { filter } from 'rxjs';
 import { UpsertPlatformSettingDto } from '@poojawala/dtos/Platform setting/Platform.dto';
 import { GetAllUsersDto } from '@poojawala/dtos/user/get-all-users.dto';
@@ -239,15 +241,62 @@ export class UserController {
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   @Patch('platform-upsert')
+  @UseInterceptors(AnyFilesInterceptor())
   @HttpCode(HttpStatus.OK)
   async upsertPlatformSetting(
     @Req() req: Request,
-    @Body(new ValidationPipe({ whitelist: true }))
-    dto: UpsertPlatformSettingDto,
+    @UploadedFiles() files?: Express.Multer.File[],
   ) {
     const user = (req as any).user;
+    const body = (req as any).body || {};
 
-    return this.userService.upsertPlatformSetting(dto, user.id);
+    // 1. If an image file was uploaded via multipart/form-data
+    const logoFile =
+      files?.find(
+        (f) =>
+          f.fieldname === 'logo' ||
+          f.fieldname === 'file' ||
+          f.fieldname === 'image',
+      ) || files?.[0];
+
+    if (logoFile) {
+      return this.userService.uploadPlatformLogo(logoFile, user.id);
+    }
+
+    // 2. Normalize key/value payload
+    let key = body.key;
+    let value = body.value;
+    const description = body.description;
+
+    // Support shorthand payload: { "PLATFORM_LOGO_URL": "https://..." }
+    if (!key && body.PLATFORM_LOGO_URL) {
+      key = PLATFORM_SETTING_KEY.PLATFORM_LOGO_URL;
+      value = body.PLATFORM_LOGO_URL;
+    }
+
+    // Validate key
+    if (!key || !Object.values(PLATFORM_SETTING_KEY).includes(key)) {
+      throw new BadRequestException(
+        `key must be one of the following values: ${Object.values(PLATFORM_SETTING_KEY).join(', ')}`,
+      );
+    }
+
+    if (value === undefined || value === null || String(value).trim() === '') {
+      throw new BadRequestException('value should not be empty');
+    }
+
+    if (typeof value !== 'string') {
+      value = String(value);
+    }
+
+    return this.userService.upsertPlatformSetting(
+      {
+        key,
+        value,
+        description,
+      },
+      user.id,
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)

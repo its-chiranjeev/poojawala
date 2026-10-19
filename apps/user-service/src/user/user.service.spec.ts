@@ -19,6 +19,7 @@ import {
   PurohitServiceArea,
   CustomerAddress,
   AstrologerProfile,
+  PLATFORM_SETTING_KEY,
 } from '@poojawala/entities';
 import { VerifyPurohitDto } from '@poojawala/dtos';
 
@@ -3670,5 +3671,350 @@ describe('UserService - Purohit Verification Rework', () => {
       });
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STANDARDIZED IMAGE HANDLING TESTS (PATCH /users/profile & /users/admin/update/:id)
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe('Standardized Profile Image Handling on Profile PATCH APIs', () => {
+    describe('updateProfileByUser (PATCH /users/profile)', () => {
+      it('Case 1a: should save uploaded profile image metadata when valid file is provided', async () => {
+        testUser.profileImage = 'https://storage.poojawala.com/old-avatar.jpg';
+        mockS3Service.uploadProfileImage.mockResolvedValue('https://storage.poojawala.com/new-avatar.webp');
+
+        const mockFile = [{
+          buffer: Buffer.from('avatar-bytes'),
+          mimetype: 'image/webp',
+          originalname: 'avatar.webp',
+        }] as Express.Multer.File[];
+
+        const result = await service.updateProfileByUser(
+          String(testUser.id),
+          {},
+          { profileImage: mockFile },
+        );
+
+        expect(mockS3Service.uploadProfileImage).toHaveBeenCalledWith(
+          String(testUser.id),
+          mockFile[0],
+        );
+        expect(mockUserRepo.updateUser).toHaveBeenCalledWith(
+          String(testUser.id),
+          expect.objectContaining({ profileImage: 'https://storage.poojawala.com/new-avatar.webp' }),
+        );
+        expect(result.data.profileImage).toBe('https://storage.poojawala.com/new-avatar.webp');
+      });
+
+      it('Case 1b: should save valid profileImage URL when provided in DTO without file upload', async () => {
+        testUser.profileImage = 'https://storage.poojawala.com/old-avatar.jpg';
+
+        const result = await service.updateProfileByUser(
+          String(testUser.id),
+          { profileImage: 'https://images.poojawala.com/cdn-avatar.jpg' },
+          {},
+        );
+
+        expect(mockUserRepo.updateUser).toHaveBeenCalledWith(
+          String(testUser.id),
+          expect.objectContaining({ profileImage: 'https://images.poojawala.com/cdn-avatar.jpg' }),
+        );
+        expect(result.data.profileImage).toBe('https://images.poojawala.com/cdn-avatar.jpg');
+      });
+
+      it('Case 2: should set profileImage to null when profileImage key is absent from payload', async () => {
+        testUser.profileImage = 'https://storage.poojawala.com/existing-avatar.jpg';
+
+        const result = await service.updateProfileByUser(
+          String(testUser.id),
+          { firstName: 'UpdatedName' },
+          {},
+        );
+
+        expect(mockUserRepo.updateUser).toHaveBeenCalledWith(
+          String(testUser.id),
+          expect.objectContaining({
+            firstName: 'UpdatedName',
+            profileImage: null,
+          }),
+        );
+        expect(result.data.profileImage).toBeNull();
+      });
+
+      it('Case 3: should set profileImage to null when profileImage key is explicitly null or empty', async () => {
+        testUser.profileImage = 'https://storage.poojawala.com/existing-avatar.jpg';
+
+        const resultNull = await service.updateProfileByUser(
+          String(testUser.id),
+          { profileImage: null as any },
+          {},
+        );
+        expect(mockUserRepo.updateUser).toHaveBeenCalledWith(
+          String(testUser.id),
+          expect.objectContaining({ profileImage: null }),
+        );
+        expect(resultNull.data.profileImage).toBeNull();
+
+        const resultEmpty = await service.updateProfileByUser(
+          String(testUser.id),
+          { profileImage: '   ' },
+          {},
+        );
+        expect(mockUserRepo.updateUser).toHaveBeenCalledWith(
+          String(testUser.id),
+          expect.objectContaining({ profileImage: null }),
+        );
+        expect(resultEmpty.data.profileImage).toBeNull();
+      });
+
+      it('should delete old Vercel blob URL when profileImage is replaced or cleared to null', async () => {
+        testUser.profileImage = 'https://blob.vercel-storage.com/old-user-avatar.jpg';
+        mockS3Service.isVercelBlobUrl.mockReturnValue(true);
+
+        await service.updateProfileByUser(
+          String(testUser.id),
+          {},
+          {},
+        );
+
+        expect(mockS3Service.deleteByUrl).toHaveBeenCalledWith('https://blob.vercel-storage.com/old-user-avatar.jpg');
+        expect(mockUserRepo.updateUser).toHaveBeenCalledWith(
+          String(testUser.id),
+          expect.objectContaining({ profileImage: null }),
+        );
+      });
+
+      it('should preserve other user fields when profileImage is omitted and set to null', async () => {
+        testUser.firstName = 'Ramesh';
+        testUser.lastName = 'Sharma';
+        testUser.email = 'purohit@poojawala.com';
+        testUser.profileImage = 'https://storage.poojawala.com/old.jpg';
+
+        await service.updateProfileByUser(
+          String(testUser.id),
+          {},
+          {},
+        );
+
+        expect(mockUserRepo.updateUser).toHaveBeenCalledWith(
+          String(testUser.id),
+          expect.objectContaining({
+            profileImage: null,
+          }),
+        );
+        expect(testUser.firstName).toBe('Ramesh');
+        expect(testUser.lastName).toBe('Sharma');
+        expect(testUser.email).toBe('purohit@poojawala.com');
+        expect(testUser.profileImage).toBeNull();
+      });
+    });
+
+    describe('updateProfileByAdmin (PATCH /users/admin/update/:id)', () => {
+      it('Case 1a: should save uploaded profile image metadata when valid file is provided', async () => {
+        testUser.profileImage = 'https://storage.poojawala.com/old.jpg';
+        mockS3Service.uploadProfileImage.mockResolvedValue('https://storage.poojawala.com/admin-uploaded-avatar.webp');
+
+        const mockFile = [{
+          buffer: Buffer.from('avatar-bytes'),
+          mimetype: 'image/webp',
+          originalname: 'avatar.webp',
+        }] as Express.Multer.File[];
+
+        const result = await service.updateProfileByAdmin(
+          testAdmin.id,
+          String(testUser.id),
+          {},
+          { profileImage: mockFile },
+        );
+
+        expect(mockS3Service.uploadProfileImage).toHaveBeenCalledWith(
+          String(testUser.id),
+          mockFile[0],
+        );
+        expect(mockUserRepo.updateUser).toHaveBeenCalledWith(
+          String(testUser.id),
+          expect.objectContaining({ profileImage: 'https://storage.poojawala.com/admin-uploaded-avatar.webp' }),
+        );
+        expect(result.data.profileImage).toBe('https://storage.poojawala.com/admin-uploaded-avatar.webp');
+      });
+
+      it('Case 1b: should save valid profileImage URL when provided in DTO without file upload', async () => {
+        testUser.profileImage = 'https://storage.poojawala.com/old.jpg';
+
+        const result = await service.updateProfileByAdmin(
+          testAdmin.id,
+          String(testUser.id),
+          { profileImage: 'https://images.poojawala.com/admin-cdn-avatar.jpg' },
+          {},
+        );
+
+        expect(mockUserRepo.updateUser).toHaveBeenCalledWith(
+          String(testUser.id),
+          expect.objectContaining({ profileImage: 'https://images.poojawala.com/admin-cdn-avatar.jpg' }),
+        );
+        expect(result.data.profileImage).toBe('https://images.poojawala.com/admin-cdn-avatar.jpg');
+      });
+
+      it('Case 2: should set profileImage to null when profileImage key is absent from payload', async () => {
+        testUser.profileImage = 'https://storage.poojawala.com/existing.jpg';
+
+        const result = await service.updateProfileByAdmin(
+          testAdmin.id,
+          String(testUser.id),
+          { firstName: 'AdminUpdated' },
+          {},
+        );
+
+        expect(mockUserRepo.updateUser).toHaveBeenCalledWith(
+          String(testUser.id),
+          expect.objectContaining({
+            firstName: 'AdminUpdated',
+            profileImage: null,
+          }),
+        );
+        expect(result.data.profileImage).toBeNull();
+      });
+
+      it('Case 3: should set profileImage to null when profileImage key is explicitly null or empty', async () => {
+        testUser.profileImage = 'https://storage.poojawala.com/existing.jpg';
+
+        const resultNull = await service.updateProfileByAdmin(
+          testAdmin.id,
+          String(testUser.id),
+          { profileImage: null as any },
+          {},
+        );
+        expect(mockUserRepo.updateUser).toHaveBeenCalledWith(
+          String(testUser.id),
+          expect.objectContaining({ profileImage: null }),
+        );
+        expect(resultNull.data.profileImage).toBeNull();
+
+        const resultEmpty = await service.updateProfileByAdmin(
+          testAdmin.id,
+          String(testUser.id),
+          { profileImage: '   ' },
+          {},
+        );
+        expect(mockUserRepo.updateUser).toHaveBeenCalledWith(
+          String(testUser.id),
+          expect.objectContaining({ profileImage: null }),
+        );
+        expect(resultEmpty.data.profileImage).toBeNull();
+      });
+
+      it('should preserve other fields when profileImage is omitted and set to null', async () => {
+        testUser.firstName = 'Ramesh';
+        testUser.lastName = 'Sharma';
+        testUser.role = USER_ROLE.PUROHIT;
+        testUser.profileImage = 'https://storage.poojawala.com/cleared.jpg';
+
+        await service.updateProfileByAdmin(
+          testAdmin.id,
+          String(testUser.id),
+          {},
+          {},
+        );
+
+        expect(mockUserRepo.updateUser).toHaveBeenCalledWith(
+          String(testUser.id),
+          expect.objectContaining({
+            profileImage: null,
+          }),
+        );
+        expect(testUser.firstName).toBe('Ramesh');
+        expect(testUser.lastName).toBe('Sharma');
+        expect(testUser.profileImage).toBeNull();
+      });
+    });
+
+    describe('Platform Logo Setting and Upload', () => {
+      it('should create new platform setting when PLATFORM_LOGO_URL does not exist', async () => {
+        mockPlatformSettingRepo.findOne = jest.fn().mockResolvedValue(null);
+        mockPlatformSettingRepo.create = jest.fn().mockImplementation((d) => d);
+        mockPlatformSettingRepo.save = jest.fn().mockImplementation((d) => Promise.resolve({ id: 1, ...d }));
+
+        const result = await service.upsertPlatformSetting(
+          {
+            key: PLATFORM_SETTING_KEY.PLATFORM_LOGO_URL,
+            value: 'https://storage.poojawala.com/logo.png',
+            description: 'Main brand logo',
+          },
+          testAdmin.id,
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('created');
+        expect(result.data.value).toBe('https://storage.poojawala.com/logo.png');
+        expect(result.data.updatedById).toBe(testAdmin.id);
+      });
+
+      it('should update existing platform setting when PLATFORM_LOGO_URL already exists', async () => {
+        const existing = {
+          id: 5,
+          key: PLATFORM_SETTING_KEY.PLATFORM_LOGO_URL,
+          value: 'https://storage.poojawala.com/old-logo.png',
+          description: 'Old logo',
+          updatedById: 1,
+        };
+        mockPlatformSettingRepo.findOne = jest.fn().mockResolvedValue(existing);
+        mockPlatformSettingRepo.save = jest.fn().mockImplementation((d) => Promise.resolve(d));
+
+        const result = await service.upsertPlatformSetting(
+          {
+            key: PLATFORM_SETTING_KEY.PLATFORM_LOGO_URL,
+            value: 'https://storage.poojawala.com/new-logo.png',
+            description: 'New logo',
+          },
+          testAdmin.id,
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('updated');
+        expect(result.data.value).toBe('https://storage.poojawala.com/new-logo.png');
+        expect(result.data.updatedById).toBe(testAdmin.id);
+      });
+
+      it('should upload platform logo file to storage and update setting', async () => {
+        const mockFile = {
+          originalname: '1Pooja logo.png',
+          mimetype: 'image/png',
+          buffer: Buffer.from('fake-image-bytes'),
+        } as Express.Multer.File;
+
+        mockS3Service.uploadFile = jest.fn().mockResolvedValue('https://wv9qiathcc2z56f9.public.blob.vercel-storage.com/platform/1pooja-logo.png');
+        mockPlatformSettingRepo.findOne = jest.fn().mockResolvedValue(null);
+        mockPlatformSettingRepo.create = jest.fn().mockImplementation((d) => d);
+        mockPlatformSettingRepo.save = jest.fn().mockImplementation((d) => Promise.resolve({ id: 2, ...d }));
+
+        const result = await service.uploadPlatformLogo(mockFile, testAdmin.id);
+
+        expect(mockS3Service.uploadFile).toHaveBeenCalledWith(
+          expect.stringMatching(/^platform\/logo-\d+\.png$/),
+          mockFile.buffer,
+          'image/png',
+        );
+        expect(result.success).toBe(true);
+        expect(result.data.value).toBe('https://wv9qiathcc2z56f9.public.blob.vercel-storage.com/platform/1pooja-logo.png');
+      });
+
+      it('should reject invalid file format during logo upload', async () => {
+        const invalidFile = {
+          originalname: 'script.exe',
+          mimetype: 'application/x-msdownload',
+          buffer: Buffer.from('bad-bytes'),
+        } as Express.Multer.File;
+
+        await expect(service.uploadPlatformLogo(invalidFile, testAdmin.id)).rejects.toThrow(
+          BadRequestException,
+        );
+      });
+
+      it('should reject when logo file is missing', async () => {
+        await expect(service.uploadPlatformLogo(null as any, testAdmin.id)).rejects.toThrow(
+          BadRequestException,
+        );
+      });
+    });
+  });
 });
+
 

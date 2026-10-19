@@ -37,6 +37,8 @@ import {
   User,
   USER_ROLE,
   BANK_VERIFICATION_STATUS,
+  PlatformSetting,
+  PLATFORM_SETTING_KEY,
 } from '@poojawala/entities';
 
 import { BookingRepository, PaymentRepository } from '@poojawala/repositories';
@@ -67,8 +69,9 @@ import {
   AuditLogService,
   buildAstrologyTransparencyNotices,
   AstrologyTransparencyData,
+  getPlatformLogoUrl,
 } from '@poojawala/common';
-import { EmailService, renderPoojawalaEmail } from '@poojawala/email-services';
+import { EmailService, renderPoojawalaEmail, platformBrandName } from '@poojawala/email-services';
 import { AssignmentService } from '../../../user-service/src/assignment/assignment.service';
 
 interface RazorpayError {
@@ -398,6 +401,35 @@ export class PaymentService {
   private _cachedRazorpay: Razorpay | null = null;
   private _cachedRazorpayKeyId: string | null = null;
   private _cachedRazorpayKeySecret: string | null = null;
+
+  private cachedPlatformLogoUrl: { url: string; expiresAt: number } | null = null;
+
+  private async getPlatformLogoUrl(): Promise<string> {
+    const now = Date.now();
+    if (this.cachedPlatformLogoUrl && this.cachedPlatformLogoUrl.expiresAt > now) {
+      return this.cachedPlatformLogoUrl.url;
+    }
+
+    try {
+      if (this.dataSource && this.dataSource.isInitialized) {
+        const settingRepo = this.dataSource.getRepository(PlatformSetting);
+        const setting = await settingRepo.findOne({
+          where: { key: PLATFORM_SETTING_KEY.PLATFORM_LOGO_URL },
+        });
+        if (setting?.value?.trim()) {
+          const url = setting.value.trim();
+          this.cachedPlatformLogoUrl = { url, expiresAt: now + 60 * 1000 };
+          return url;
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`Failed to retrieve platform logo from settings: ${err?.message || err}`);
+    }
+
+    const fallbackUrl = getPlatformLogoUrl();
+    this.cachedPlatformLogoUrl = { url: fallbackUrl, expiresAt: now + 30 * 1000 };
+    return fallbackUrl;
+  }
 
   // TODO: Replaced unmemoized getter that called dotenv.config() and instantiated new Razorpay on every property access
   // private get razorpay(): Razorpay {
@@ -2400,9 +2432,11 @@ export class PaymentService {
       }
     }
     const purohitName = !isAstrology ? this.getPurohitName(booking) : undefined;
+    const logoUrl = await this.getPlatformLogoUrl();
 
     const html = paymentInvoiceTemplate({
       invoiceType: 'BOOKING',
+      logoUrl,
       bookingType: booking.bookingType ?? (isAstrology ? BOOKING_TYPE.ASTROLOGY : BOOKING_TYPE.POOJA),
       companyName: process.env['POOJAWALA_COMPANY_NAME'] ?? '1Pooja',
       companyEmail: process.env['POOJAWALA_COMPANY_EMAIL'] ?? '-',
@@ -2595,6 +2629,7 @@ export class PaymentService {
 
     const html = paymentInvoiceTemplate({
       invoiceType: 'ORDER',
+      logoUrl: await this.getPlatformLogoUrl(),
       companyName: process.env['POOJAWALA_COMPANY_NAME'] ?? '1Pooja',
       companyEmail: process.env['POOJAWALA_COMPANY_EMAIL'] ?? '-',
       companyPhone: process.env['POOJAWALA_COMPANY_PHONE'] ?? '-',
@@ -4832,7 +4867,7 @@ export class PaymentService {
 
           await this.emailService.sendMail({
             to: payer.email,
-            subject: `Payment Successful - Poojawala | Order ${orderCode}`,
+            subject: `Payment Successful - ${platformBrandName} | Order ${orderCode}`,
             html,
           });
         }
@@ -5365,13 +5400,13 @@ export class PaymentService {
             },
             highlight: {
               title: 'Retry Your Payment',
-              text: 'You can retry payment anytime by visiting your orders or cart on the PoojaWala app/website.',
+              text: `You can retry payment anytime by visiting your orders or cart on the ${platformBrandName} app/website.`,
             },
           });
 
           await this.emailService.sendMail({
             to: payer.email,
-            subject: `Payment Failed - Poojawala | Order #${orderNumber}`,
+            subject: `Payment Failed - ${platformBrandName} | Order #${orderNumber}`,
             html,
           });
         }
@@ -5602,7 +5637,7 @@ export class PaymentService {
 
         await this.emailService.sendMail({
           to: user.email,
-          subject: `Payment Link Ready - Poojawala | Order ${orderCode}`,
+          subject: `Payment Link Ready - ${platformBrandName} | Order ${orderCode}`,
           html,
         });
       }

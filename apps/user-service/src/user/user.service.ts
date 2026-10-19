@@ -86,7 +86,9 @@ import {
   DEFAULT_OTP_EXPIRY_SECONDS,
   MAX_OTP_ATTEMPTS,
   RESEND_COOLDOWN_SECONDS,
+  getPlatformLogoUrl,
 } from '@poojawala/common';
+import * as path from 'path';
 
 const ADVISORY_LOCK_NAMESPACE = {
   CUSTOMER_ADDRESS: 1001,
@@ -290,8 +292,8 @@ export class UserService {
         ? (files as Express.Multer.File)
         : undefined);
 
+    const oldProfileImage = user.profileImage;
     if (profileImageFile && profileImageFile.buffer && profileImageFile.buffer.length > 0) {
-      const oldProfileImage = user.profileImage;
       const imageUrl = await this.s3Service.uploadProfileImage(
         id,
         profileImageFile,
@@ -299,7 +301,24 @@ export class UserService {
       dto.profileImage = imageUrl;
 
       // Delete old profile image if it was a Vercel Blob URL
-      if (oldProfileImage && this.s3Service.isVercelBlobUrl(oldProfileImage)) {
+      if (
+        oldProfileImage &&
+        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+        this.s3Service.isVercelBlobUrl(oldProfileImage) &&
+        typeof this.s3Service?.deleteByUrl === 'function'
+      ) {
+        await this.s3Service.deleteByUrl(oldProfileImage);
+      }
+    } else if (typeof dto.profileImage === 'string' && dto.profileImage.trim().length > 0) {
+      dto.profileImage = dto.profileImage.trim();
+    } else {
+      dto.profileImage = null as any;
+      if (
+        oldProfileImage &&
+        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+        this.s3Service.isVercelBlobUrl(oldProfileImage) &&
+        typeof this.s3Service?.deleteByUrl === 'function'
+      ) {
         await this.s3Service.deleteByUrl(oldProfileImage);
       }
     }
@@ -995,15 +1014,33 @@ export class UserService {
       delete dto.confirmPassword;
     }
 
-    if (files?.profileImage?.length) {
-      const oldProfileImage = user.profileImage;
+    const profileImageFile = files?.profileImage?.[0];
+    const oldProfileImage = user.profileImage;
+    if (profileImageFile && profileImageFile.buffer && profileImageFile.buffer.length > 0) {
       dto.profileImage = await this.s3Service.uploadProfileImage(
         id,
-        files.profileImage[0],
+        profileImageFile,
       );
 
       // Delete old profile image if it was a Vercel Blob URL
-      if (oldProfileImage && this.s3Service.isVercelBlobUrl(oldProfileImage)) {
+      if (
+        oldProfileImage &&
+        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+        this.s3Service.isVercelBlobUrl(oldProfileImage) &&
+        typeof this.s3Service?.deleteByUrl === 'function'
+      ) {
+        await this.s3Service.deleteByUrl(oldProfileImage);
+      }
+    } else if (typeof dto.profileImage === 'string' && dto.profileImage.trim().length > 0) {
+      dto.profileImage = dto.profileImage.trim();
+    } else {
+      dto.profileImage = null as any;
+      if (
+        oldProfileImage &&
+        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+        this.s3Service.isVercelBlobUrl(oldProfileImage) &&
+        typeof this.s3Service?.deleteByUrl === 'function'
+      ) {
         await this.s3Service.deleteByUrl(oldProfileImage);
       }
     }
@@ -1887,6 +1924,41 @@ export class UserService {
     };
   }
 
+  async uploadPlatformLogo(file: Express.Multer.File, userId: number) {
+    if (!file) {
+      throw new BadRequestException('Logo file is required');
+    }
+
+    const allowedMimeTypes = [
+      'image/png',
+      'image/jpeg',
+      'image/webp',
+      'image/svg+xml',
+    ];
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      throw new BadRequestException(
+        'Invalid image format. Allowed formats: PNG, JPEG, WebP, SVG.',
+      );
+    }
+
+    const ext = path.extname(file.originalname) || '.png';
+    const filename = `platform/logo-${Date.now()}${ext}`;
+    const logoUrl = await this.s3Service.uploadFile(
+      filename,
+      file.buffer,
+      file.mimetype || 'image/png',
+    );
+
+    return this.upsertPlatformSetting(
+      {
+        key: PLATFORM_SETTING_KEY.PLATFORM_LOGO_URL,
+        value: logoUrl,
+        description: 'Main brand platform logo displayed in emails and invoices',
+      },
+      userId,
+    );
+  }
+
   async getPlatformSetting(userId: number) {
     const existingAstrologyCommission = await this.platformSettingRepository.findOne({
       where: { key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PRICE },
@@ -1899,6 +1971,25 @@ export class UserService {
             key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PRICE,
             value: '50',
             description: 'Default platform commission price for astrology consultations',
+            updatedById: userId,
+          }),
+        );
+      } catch {
+        // Ignore potential race condition
+      }
+    }
+
+    const existingLogoSetting = await this.platformSettingRepository.findOne({
+      where: { key: PLATFORM_SETTING_KEY.PLATFORM_LOGO_URL },
+    });
+
+    if (!existingLogoSetting) {
+      try {
+        await this.platformSettingRepository.save(
+          this.platformSettingRepository.create({
+            key: PLATFORM_SETTING_KEY.PLATFORM_LOGO_URL,
+            value: getPlatformLogoUrl(),
+            description: 'Platform brand logo URL displayed across emails and invoices',
             updatedById: userId,
           }),
         );

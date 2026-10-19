@@ -702,16 +702,35 @@ export class BlogService {
       }));
     }
 
-    if (coverImageFile && coverImageFile.buffer && coverImageFile.buffer.length > 0) {
-      const oldCoverImage = post.coverImage;
+    const oldCoverImage = post.coverImage;
+    const hasCoverImageFile = Boolean(
+      coverImageFile && coverImageFile.buffer && coverImageFile.buffer.length > 0,
+    );
+
+    if (hasCoverImageFile && coverImageFile) {
       post.coverImage = await this.uploadCoverImageToStorage(id, coverImageFile);
 
       // Clean up old cover image from Vercel Blob
-      if (oldCoverImage && this.s3Service.isVercelBlobUrl(oldCoverImage)) {
+      if (
+        oldCoverImage &&
+        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+        this.s3Service.isVercelBlobUrl(oldCoverImage) &&
+        typeof this.s3Service?.deleteByUrl === 'function'
+      ) {
         await this.s3Service.deleteByUrl(oldCoverImage);
       }
-    } else if (dto.coverImage !== undefined) {
-      post.coverImage = dto.coverImage ? dto.coverImage.trim() : undefined;
+    } else if (typeof dto.coverImage === 'string' && dto.coverImage.trim().length > 0) {
+      post.coverImage = dto.coverImage.trim();
+    } else {
+      post.coverImage = null as any;
+      if (
+        oldCoverImage &&
+        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+        this.s3Service.isVercelBlobUrl(oldCoverImage) &&
+        typeof this.s3Service?.deleteByUrl === 'function'
+      ) {
+        await this.s3Service.deleteByUrl(oldCoverImage);
+      }
     }
 
     if (dto.title !== undefined) {
@@ -886,12 +905,16 @@ export class BlogService {
 
   // TODO: BLOG_PHASE_1_ARCHITECTURE_CORRECTION - Consolidated into updatePost with { status: BlogPostStatus.PUBLISHED }
   async publishPost(adminId: number, id: number) {
-    return this.updatePost(adminId, id, { status: BlogPostStatus.PUBLISHED });
+    const post = await this.postRepo.findOne({ where: { id, deletedAt: IsNull() } });
+    if (!post) throw new NotFoundException(`Blog post #${id} not found`);
+    return this.updatePost(adminId, id, { status: BlogPostStatus.PUBLISHED, coverImage: post.coverImage });
   }
 
   // TODO: BLOG_PHASE_1_ARCHITECTURE_CORRECTION - Consolidated into updatePost with { status: BlogPostStatus.DRAFT }
   async unpublishPost(adminId: number, id: number) {
-    return this.updatePost(adminId, id, { status: BlogPostStatus.DRAFT });
+    const post = await this.postRepo.findOne({ where: { id, deletedAt: IsNull() } });
+    if (!post) throw new NotFoundException(`Blog post #${id} not found`);
+    return this.updatePost(adminId, id, { status: BlogPostStatus.DRAFT, coverImage: post.coverImage });
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

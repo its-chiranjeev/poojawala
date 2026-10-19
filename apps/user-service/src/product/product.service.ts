@@ -287,14 +287,39 @@ export class ProductService {
       if (dto.isActive !== undefined) product.isActive = dto.isActive;
       if (dto.categoryId !== undefined) product.categoryId = dto.categoryId;
 
-      if (files?.image?.length) {
+      const oldImageUrl = product.imageUrl;
+      const imageFile = files?.image;
+      const hasImageFile = Boolean(
+        imageFile && imageFile.length > 0 && imageFile[0]?.buffer && imageFile[0].buffer.length > 0,
+      );
+
+      if (hasImageFile && imageFile) {
         product.imageUrl = await this.s3Service.uploadFileHelper(
           product.id,
           'product',
-          files.image,
+          imageFile,
         );
-      } else if (dto.imageUrl !== undefined) {
-        product.imageUrl = dto.imageUrl ? dto.imageUrl.trim() : undefined;
+        if (
+          oldImageUrl &&
+          oldImageUrl !== product.imageUrl &&
+          typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+          this.s3Service.isVercelBlobUrl(oldImageUrl) &&
+          typeof this.s3Service?.deleteByUrl === 'function'
+        ) {
+          await this.s3Service.deleteByUrl(oldImageUrl);
+        }
+      } else if (typeof dto.imageUrl === 'string' && dto.imageUrl.trim().length > 0) {
+        product.imageUrl = dto.imageUrl.trim();
+      } else {
+        product.imageUrl = null as any;
+        if (
+          oldImageUrl &&
+          typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+          this.s3Service.isVercelBlobUrl(oldImageUrl) &&
+          typeof this.s3Service?.deleteByUrl === 'function'
+        ) {
+          await this.s3Service.deleteByUrl(oldImageUrl);
+        }
       }
 
       const updated = await this.productRepository.save(product);

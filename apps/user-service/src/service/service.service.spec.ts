@@ -732,4 +732,234 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
       expect(result.pagination.total).toBe(0);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STANDARDIZED IMAGE HANDLING TESTS (PATCH /services/:id & /services/categories/:id)
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe('Standardized Image Handling on Service and Category PATCH APIs', () => {
+    describe('updateService (PATCH /services/:id)', () => {
+      it('Case 1a: should save uploaded icon metadata when valid icon file is provided', async () => {
+        const existing = {
+          ...sampleIndependentService,
+          iconUrl: 'https://storage.poojawala.com/old-icon.png',
+        };
+        mockServiceRepo.findOne.mockResolvedValue(existing);
+        mockS3Service.uploadFileHelper.mockResolvedValue('https://storage.poojawala.com/new-service-icon.png');
+
+        const mockFile = [{
+          buffer: Buffer.from('test-icon'),
+          mimetype: 'image/png',
+          originalname: 'icon.png',
+        }] as Express.Multer.File[];
+
+        const result = await service.updateService(101, {}, { icon: mockFile }, 99);
+
+        expect(mockS3Service.uploadFileHelper).toHaveBeenCalledWith(
+          existing.slug || existing.name,
+          'icon',
+          mockFile,
+        );
+        expect(mockServiceRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ iconUrl: 'https://storage.poojawala.com/new-service-icon.png' }),
+        );
+        expect(result.data.iconUrl).toBe('https://storage.poojawala.com/new-service-icon.png');
+      });
+
+      it('Case 1b: should save valid iconUrl when provided in DTO without file upload', async () => {
+        const existing = {
+          ...sampleIndependentService,
+          iconUrl: 'https://storage.poojawala.com/old-icon.png',
+        };
+        mockServiceRepo.findOne.mockResolvedValue(existing);
+
+        const result = await service.updateService(
+          101,
+          { iconUrl: 'https://images.poojawala.com/cdn-service-icon.png' },
+          {},
+          99,
+        );
+
+        expect(mockServiceRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ iconUrl: 'https://images.poojawala.com/cdn-service-icon.png' }),
+        );
+        expect(result.data.iconUrl).toBe('https://images.poojawala.com/cdn-service-icon.png');
+      });
+
+      it('Case 2: should set iconUrl to null when icon key is absent from payload', async () => {
+        const existing = {
+          ...sampleIndependentService,
+          id: 101,
+          iconUrl: 'https://storage.poojawala.com/existing-icon.png',
+          name: 'Ganesh Puja',
+        };
+        mockServiceRepo.findOne.mockImplementation(async ({ where }: any) => {
+          if (where.name && where.name !== existing.name) return null;
+          return existing;
+        });
+
+        const result = await service.updateService(101, { name: 'Ganesh Puja Updated' }, {}, 99);
+
+        expect(mockServiceRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: 'Ganesh Puja Updated',
+            iconUrl: null,
+          }),
+        );
+        expect(result.data.iconUrl).toBeNull();
+      });
+
+      it('Case 3: should set iconUrl to null when icon key is explicitly null or empty', async () => {
+        const existing = {
+          ...sampleIndependentService,
+          iconUrl: 'https://storage.poojawala.com/existing-icon.png',
+        };
+        mockServiceRepo.findOne.mockResolvedValue(existing);
+
+        const resultNull = await service.updateService(101, { iconUrl: null as any }, {}, 99);
+        expect(mockServiceRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ iconUrl: null }),
+        );
+        expect(resultNull.data.iconUrl).toBeNull();
+
+        const resultEmpty = await service.updateService(101, { iconUrl: '   ' }, {}, 99);
+        expect(mockServiceRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ iconUrl: null }),
+        );
+        expect(resultEmpty.data.iconUrl).toBeNull();
+      });
+
+      it('should preserve other service fields when icon is omitted and set to null', async () => {
+        const existing = {
+          ...sampleIndependentService,
+          name: 'Special Havan',
+          description: 'Havan description',
+          isOnline: true,
+          isOffline: true,
+          iconUrl: 'https://storage.poojawala.com/will-be-cleared.png',
+        };
+        mockServiceRepo.findOne.mockResolvedValue(existing);
+
+        await service.updateService(101, {}, {}, 99);
+
+        expect(mockServiceRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: 'Special Havan',
+            description: 'Havan description',
+            isOnline: true,
+            isOffline: true,
+            iconUrl: null,
+          }),
+        );
+      });
+    });
+
+    describe('updateCategory (PATCH /services/categories/:id)', () => {
+      const sampleCategory = {
+        id: 5,
+        name: 'Havan',
+        description: 'Havan Category',
+        iconUrl: 'https://storage.poojawala.com/old-cat-icon.png',
+        sortOrder: 1,
+        isActive: true,
+        categoryType: 'SERVICE',
+        deletedAt: null,
+      };
+
+      beforeEach(() => {
+        mockCategoryRepo.save = jest.fn(async (c: any) => ({ ...c, id: c.id || 5 }));
+        mockCategoryRepo.findByNameAndType = jest.fn().mockResolvedValue(null);
+      });
+
+      it('Case 1a: should save uploaded icon metadata when valid icon file is provided', async () => {
+        mockCategoryRepo.findOne.mockResolvedValue({ ...sampleCategory });
+        mockS3Service.uploadFileHelper.mockResolvedValue('https://storage.poojawala.com/new-cat-icon.png');
+
+        const mockFile = [{
+          buffer: Buffer.from('cat-icon'),
+          mimetype: 'image/png',
+          originalname: 'cat-icon.png',
+        }] as Express.Multer.File[];
+
+        const result = await service.updateCategory(5, {}, { icon: mockFile }, 99);
+
+        expect(mockS3Service.uploadFileHelper).toHaveBeenCalledWith(
+          'service-categories',
+          'icon',
+          mockFile,
+        );
+        expect(mockCategoryRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ iconUrl: 'https://storage.poojawala.com/new-cat-icon.png' }),
+        );
+        expect(result.data.iconUrl).toBe('https://storage.poojawala.com/new-cat-icon.png');
+      });
+
+      it('Case 1b: should save valid iconUrl when provided in DTO without file upload', async () => {
+        mockCategoryRepo.findOne.mockResolvedValue({ ...sampleCategory });
+
+        const result = await service.updateCategory(
+          5,
+          { iconUrl: 'https://images.poojawala.com/cdn-cat-icon.png' },
+          {},
+          99,
+        );
+
+        expect(mockCategoryRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ iconUrl: 'https://images.poojawala.com/cdn-cat-icon.png' }),
+        );
+        expect(result.data.iconUrl).toBe('https://images.poojawala.com/cdn-cat-icon.png');
+      });
+
+      it('Case 2: should set iconUrl to null when icon key is absent from payload', async () => {
+        mockCategoryRepo.findOne.mockResolvedValue({ ...sampleCategory });
+
+        const result = await service.updateCategory(5, { name: 'Havan Updated' }, {}, 99);
+
+        expect(mockCategoryRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: 'Havan Updated',
+            iconUrl: null,
+          }),
+        );
+        expect(result.data.iconUrl).toBeNull();
+      });
+
+      it('Case 3: should set iconUrl to null when icon key is explicitly null or empty', async () => {
+        mockCategoryRepo.findOne.mockResolvedValue({ ...sampleCategory });
+
+        const resultNull = await service.updateCategory(5, { iconUrl: null as any }, {}, 99);
+        expect(mockCategoryRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ iconUrl: null }),
+        );
+        expect(resultNull.data.iconUrl).toBeNull();
+
+        const resultEmpty = await service.updateCategory(5, { iconUrl: '   ' }, {}, 99);
+        expect(mockCategoryRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ iconUrl: null }),
+        );
+        expect(resultEmpty.data.iconUrl).toBeNull();
+      });
+
+      it('should preserve other category fields when icon is omitted and set to null', async () => {
+        mockCategoryRepo.findOne.mockResolvedValue({
+          ...sampleCategory,
+          name: 'Puja Category',
+          description: 'Preserved category description',
+          sortOrder: 3,
+          isActive: true,
+        });
+
+        await service.updateCategory(5, {}, {}, 99);
+
+        expect(mockCategoryRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: 'Puja Category',
+            description: 'Preserved category description',
+            sortOrder: 3,
+            isActive: true,
+            iconUrl: null,
+          }),
+        );
+      });
+    });
+  });
 });

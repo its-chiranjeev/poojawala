@@ -30,7 +30,7 @@ import {
 import { S3Service } from '@poojawala/s3';
 import { AuditLogService } from '@poojawala/common';
 import { NotificationService } from '@poojawala/notification';
-import { EmailService, renderPoojawalaEmail } from '@poojawala/email-services';
+import { EmailService, renderPoojawalaEmail, platformBrandName } from '@poojawala/email-services';
 import { CartService } from '../cart/cart.service';
 
 @Injectable()
@@ -392,7 +392,7 @@ export class OrderService {
 
           await this.emailService.sendMail({
             to: customer.email,
-            subject: `Order #${order.orderNumber} Status: ${dto.status} - Poojawala`,
+            subject: `Order #${order.orderNumber} Status: ${dto.status} - ${platformBrandName}`,
             html,
           });
         }
@@ -562,7 +562,7 @@ export class OrderService {
             statusBadge: 'Payment Received',
             userName: customerName,
             preheaderText: `Payment received for Order ORD-${savedOrder.id}`,
-            emailMessage: `We have received your Cash on Delivery payment of <strong>₹${collectedAmount}</strong> for Order <strong>#${savedOrder.id}</strong>. Thank you for choosing Poojawala!`,
+            emailMessage: `We have received your Cash on Delivery payment of <strong>₹${collectedAmount}</strong> for Order <strong>#${savedOrder.id}</strong>. Thank you for choosing ${platformBrandName}!`,
             detailsTable: {
               title: 'Payment Details',
               rows: [
@@ -580,7 +580,7 @@ export class OrderService {
 
           await this.emailService.sendMail({
             to: customer.email,
-            subject: `COD Payment Received - Poojawala | Order #${savedOrder.orderNumber}`,
+            subject: `COD Payment Received - ${platformBrandName} | Order #${savedOrder.orderNumber}`,
             html,
           });
         }

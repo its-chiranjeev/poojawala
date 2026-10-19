@@ -956,7 +956,7 @@ describe('Unified Invoice System', () => {
         };
 
         const html = paymentInvoiceTemplate(data);
-        expect(html).toContain('alt="1Pooja"');
+        expect(html).toContain('alt="1Pooja Logo"');
         expect(html).toContain('Total Paid to 1Pooja');
         expect(html).toContain('Thank you for choosing 1Pooja.');
         expect(html).toContain('The amount paid to 1Pooja covers the astrology platform access fee only');
@@ -971,6 +971,65 @@ describe('Unified Invoice System', () => {
           delete process.env['FRONTEND_URL'];
         }
       }
+    });
+
+    const testInvoiceData: PaymentInvoiceTemplateData = {
+      invoiceTitle: '1Pooja Tax Invoice',
+      invoiceId: 'INV-TEST-001',
+      dateLabel: 'Payment Date',
+      companyName: '1Pooja',
+      companyEmail: 'support@1pooja.com',
+      companyPhone: '+91 9999999999',
+      companyAddress: 'Varanasi',
+      companyGstin: '09AAACH7409R1ZZ',
+      customerName: 'Devotee',
+      customerEmail: 'devotee@example.com',
+      customerPhone: '+91 9123456780',
+      billingAddress: 'Varanasi',
+      paymentId: 'pay_123',
+      orderId: 'ORD-1',
+      paymentStatus: 'Paid',
+      paymentMethod: 'UPI',
+      statusClass: 'success',
+      errorMessage: '-',
+      currency: 'INR',
+      amount: '500.00',
+      finalAmount: '500.00',
+      date: '24 Sep 2026, 11:30 AM',
+    };
+
+    it('should dynamically render default platform logo when logoUrl is omitted', () => {
+      const html = paymentInvoiceTemplate(testInvoiceData);
+      expect(html).toContain('class="brand-logo-image"');
+      expect(html).toContain('alt="1Pooja Logo"');
+      expect(html).toContain('https://wv9qiathcc2z56f9.public.blob.vercel-storage.com/platform/1pooja-logo.png');
+      expect(html).toContain('width: 80px');
+      expect(html).toContain('height: 80px');
+      // Duplicate 1Pooja h1 should not be rendered when logo image is present
+      expect(html).not.toMatch(/<div class="brand-copy">\s*<h1>/);
+    });
+
+    it('should render custom logo when explicit logoUrl is provided', () => {
+      const html = paymentInvoiceTemplate({
+        ...testInvoiceData,
+        logoUrl: 'https://cdn.example.com/custom-brand-logo.png',
+      });
+      expect(html).toContain('class="brand-logo-image"');
+      expect(html).toContain('src="https://cdn.example.com/custom-brand-logo.png"');
+      expect(html).toContain('alt="1Pooja Logo"');
+      expect(html).not.toMatch(/<div class="brand-copy">\s*<h1>/);
+    });
+
+    it('should fall back gracefully to Om symbol when logoUrl is empty or missing without broken img tag', () => {
+      const html = paymentInvoiceTemplate({
+        ...testInvoiceData,
+        logoUrl: '',
+      });
+      expect(html).toContain('class="brand-symbol"');
+      expect(html).toContain('ॐ');
+      expect(html).not.toContain('class="brand-logo-image"');
+      // Falls back to showing companyName h1
+      expect(html).toMatch(/<div class="brand-copy">\s*<h1>\s*1Pooja\s*<\/h1>/);
     });
   });
 

@@ -1,3 +1,5 @@
+import { getPlatformLogoUrl } from '@poojawala/common';
+
 export type InvoiceType = 'BOOKING' | 'ORDER';
 
 export interface InvoiceOrderItem {
@@ -326,11 +328,15 @@ export const paymentInvoiceTemplate = (
 
   const supportHours = data.supportHours?.trim() || 'Mon–Sat, 9:00 AM–7:00 PM';
 
-  const logoMarkup = data.logoUrl?.trim()
+  const resolvedLogoUrl = (
+    data.logoUrl !== undefined ? data.logoUrl : getPlatformLogoUrl()
+  )?.trim();
+
+  const logoMarkup = resolvedLogoUrl
     ? `
       <img
-        src="${displayValue(data.logoUrl)}"
-        alt="1Pooja"
+        src="${displayValue(resolvedLogoUrl)}"
+        alt="1Pooja Logo"
         class="brand-logo-image"
       />
     `
@@ -479,14 +485,10 @@ export const paymentInvoiceTemplate = (
       gap: 12px;
     }
 
-    .brand-symbol,
-    .brand-logo-image {
-      width: 50px;
-      height: 50px;
-      border-radius: 14px;
-    }
-
     .brand-symbol {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -505,8 +507,11 @@ export const paymentInvoiceTemplate = (
     }
 
     .brand-logo-image {
+      width: 80px;
+      height: 80px;
       object-fit: contain;
       background: #ffffff;
+      border-radius: 14px;
     }
 
     .brand-copy h1 {
@@ -969,10 +974,15 @@ export const paymentInvoiceTemplate = (
             ${logoMarkup}
 
             <div class="brand-copy">
+              ${
+                !resolvedLogoUrl
+                  ? `
               <h1>
                 ${displayValue(data.companyName)}
               </h1>
-
+              `
+                  : ''
+              }
               <p>
                 Sacred rituals. Trusted Pandits.
               </p>

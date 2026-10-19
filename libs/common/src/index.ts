@@ -19,3 +19,4 @@ export * from './context/request-context';
 export * from './utils/city.util';
 export * from './utils/otp.util';
 export * from './utils/astrology-transparency.util';
+export * from './constants/platform.constant';

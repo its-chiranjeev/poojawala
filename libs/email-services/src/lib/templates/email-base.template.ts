@@ -1,3 +1,13 @@
+import {
+  platformDomainName,
+  platformBrandName,
+  platformCompanyName,
+  platformSupportEmail,
+  platformSupportPhone,
+  getPlatformWebsiteUrl,
+  getPlatformLogoUrl,
+} from '../config/platform.config';
+
 export interface EmailTableRow {
   label: string;
   value: string;
@@ -36,6 +46,12 @@ export interface PoojawalaEmailTemplateOptions {
   paymentStatus?: string;
   additionalContentHtml?: string;
   websiteUrl?: string;
+  brandName?: string;
+  companyName?: string;
+  supportEmail?: string;
+  supportPhone?: string;
+  platformDomain?: string;
+  logoUrl?: string;
 }
 
 function escapeHtml(value: string | number | undefined | null): string {
@@ -120,11 +136,18 @@ function getPaymentStatusBadge(status: string): PaymentStatusBadgeConfig {
 }
 
 export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): string {
-  const websiteUrl = options.websiteUrl || process.env['FRONTEND_URL'] || 'https://poojawala.com';
+  const websiteUrl = (options.websiteUrl || getPlatformWebsiteUrl()).replace(/\/+$/, '');
+  const brandName = escapeHtml(options.brandName || platformBrandName);
+  const companyName = escapeHtml(options.companyName || platformCompanyName);
+  const supportEmail = escapeHtml(options.supportEmail || platformSupportEmail);
+  const supportPhone = escapeHtml(options.supportPhone || platformSupportPhone);
   const preheaderText = escapeHtml(options.preheaderText || options.statusBadge);
   const statusBadge = escapeHtml(options.statusBadge);
   const userName = escapeHtml(options.userName || 'Devotee');
   const emailMessage = options.emailMessage; // May contain safe formatting
+
+  const rawLogoUrl = options.logoUrl !== undefined ? options.logoUrl : getPlatformLogoUrl();
+  const logoUrl = rawLogoUrl ? escapeHtml(rawLogoUrl) : '';
 
   // Optional OTP Block
   let otpBlock = '';
@@ -218,7 +241,7 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
                     <tr>
                       <td style="vertical-align: middle;">
                         <span style="font-size: 11.5px; color: #A67D65; font-style: italic;">
-                          — Poojawala Devotee Care Desk
+                          — ${brandName} Devotee Care Desk
                         </span>
                       </td>
                     </tr>
@@ -371,7 +394,7 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>Poojawala - Sacred Pooja Services</title>
+  <title>${brandName} - Sacred Pooja Services</title>
   
   <!--[if mso]>
   <style type="text/css">
@@ -467,14 +490,29 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
 
       <!-- Header Section -->
       <tr>
-        <td style="padding: 28px 40px 24px 40px; background-color: #FFFFFF; text-align: center; border-bottom: 1px solid #FFF0E6;" class="mobile-padding">
+        <td style="padding: 24px 40px 20px 40px; background-color: #FFFFFF; text-align: center; border-bottom: 1px solid #FFF0E6;" class="mobile-padding">
           <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
             <tr>
               <td align="center">
+                ${
+                  logoUrl
+                    ? `
+                <!-- Configured Platform Brand Logo -->
+                <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto 10px auto;">
+                  <tr>
+                    <td align="center" style="vertical-align: middle;">
+                      <img src="${logoUrl}" alt="${brandName} Logo" width="78" height="78" style="display: block; width: 78px; height: 78px; max-width: 78px; max-height: 78px; border: 0; outline: none; text-decoration: none; object-fit: contain; margin: 0 auto;" />
+                    </td>
+                  </tr>
+                </table>
+                `
+                    : `
                 <!-- Brand Title / Logo Text -->
-                <h1 style="margin: 0; font-size: 32px; font-weight: 800; color: #D32F2F; letter-spacing: -0.5px; font-family: 'Outfit', 'DM Sans', sans-serif;">
-                  Poojawala<span style="color: #FF6200;">.</span>
+                <h1 style="margin: 0; font-size: 30px; font-weight: 800; color: #D32F2F; letter-spacing: -0.5px; font-family: 'Outfit', 'DM Sans', sans-serif; line-height: 1.2;">
+                  ${brandName}<span style="color: #FF6200;">.</span>
                 </h1>
+                `
+                }
                 <p style="margin: 4px 0 0 0; font-size: 13px; font-weight: 600; color: #8C6A5A; text-transform: uppercase; letter-spacing: 1.5px;">
                   Your Sacred pooja Partner
                 </p>
@@ -531,7 +569,7 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
         </td>
       </tr>
 
-      <!-- Why Poojawala / 3 Columns Highlights -->
+      <!-- Why Choose Us / 3 Columns Highlights -->
       <tr>
         <td style="padding: 28px 40px;" class="mobile-padding">
           <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
@@ -567,7 +605,7 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
               <td style="padding: 16px 20px;">
                 <p style="margin: 0; font-size: 13.5px; color: #666666;">
                   Have questions or need assistance? We're here for you. <br>
-                  Email us at <a href="mailto:support@poojawala.com" style="color: #FF6200; font-weight: 700; text-decoration: underline;">support@poojawala.com</a> or call <strong style="color: #1A1A1A;">+91 98765 43210</strong>.
+                  Email us at <a href="mailto:${supportEmail}" style="color: #FF6200; font-weight: 700; text-decoration: underline;">${supportEmail}</a> or call <strong style="color: #1A1A1A;">${supportPhone}</strong>.
                 </p>
               </td>
             </tr>
@@ -583,7 +621,7 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
             <tr>
               <td align="center" style="padding-bottom: 12px;">
                 <span style="font-size: 22px; font-weight: 800; color: #FFF; letter-spacing: -0.5px;">
-                  Poojawala<span style="color: #FF6200;">.</span>
+                  ${brandName}<span style="color: #FF6200;">.</span>
                 </span>
               </td>
             </tr>
@@ -623,7 +661,7 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
             <tr>
               <td align="center">
                 <p style="margin: 0; font-size: 11.5px; color: #9E7F72; line-height: 1.4;">
-                  &copy; 2026 Poojawala Tech Services Pvt Ltd. All rights reserved. <br>
+                  &copy; 2026 ${companyName}. All rights reserved. <br>
                   India &bull; Connecting Devotees Worldwide
                 </p>
               </td>

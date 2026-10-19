@@ -881,4 +881,149 @@ describe('BlogService', () => {
       expect(authorError).toBeDefined();
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STANDARDIZED IMAGE HANDLING TESTS (PATCH /blog/admin/posts/:id)
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe('Standardized Image Handling on PATCH /blog/admin/posts/:id', () => {
+    it('Case 1a: should save uploaded cover image metadata when valid file is provided', async () => {
+      const existing = { ...mockPost };
+      const qbMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(existing),
+      };
+      postRepo.createQueryBuilder!.mockReturnValue(qbMock);
+      s3Service.uploadFile!.mockResolvedValue('https://storage.poojawala.com/new-cover.webp');
+
+      const mockFile = {
+        buffer: Buffer.from('cover-image-bytes'),
+        mimetype: 'image/webp',
+        originalname: 'cover.webp',
+      } as Express.Multer.File;
+
+      const result = await service.updatePost(1, 101, {}, mockFile);
+
+      expect(postRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ coverImage: 'https://storage.poojawala.com/new-cover.webp' }),
+      );
+      expect(result.coverImage).toBe('https://storage.poojawala.com/new-cover.webp');
+    });
+
+    it('Case 1b: should save valid coverImage URL when provided in DTO without file upload', async () => {
+      const existing = { ...mockPost };
+      const qbMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(existing),
+      };
+      postRepo.createQueryBuilder!.mockReturnValue(qbMock);
+
+      const result = await service.updatePost(
+        1,
+        101,
+        { coverImage: 'https://images.poojawala.com/cdn-cover.jpg' },
+        undefined,
+      );
+
+      expect(postRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ coverImage: 'https://images.poojawala.com/cdn-cover.jpg' }),
+      );
+      expect(result.coverImage).toBe('https://images.poojawala.com/cdn-cover.jpg');
+    });
+
+    it('Case 2: should set coverImage to null when coverImage key is absent from payload', async () => {
+      const existing = { ...mockPost, coverImage: 'https://storage.poojawala.com/old-cover.jpg' };
+      const qbMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(existing),
+      };
+      postRepo.createQueryBuilder!.mockReturnValue(qbMock);
+
+      const result = await service.updatePost(1, 101, { title: 'Updated Title' }, undefined);
+
+      expect(postRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Updated Title',
+          coverImage: null,
+        }),
+      );
+      expect(result.coverImage).toBeNull();
+    });
+
+    it('Case 3: should set coverImage to null when coverImage key is explicitly null or empty', async () => {
+      const existing = { ...mockPost, coverImage: 'https://storage.poojawala.com/old-cover.jpg' };
+      const qbMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(existing),
+      };
+      postRepo.createQueryBuilder!.mockReturnValue(qbMock);
+
+      const resultNull = await service.updatePost(1, 101, { coverImage: null as any }, undefined);
+      expect(postRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ coverImage: null }),
+      );
+      expect(resultNull.coverImage).toBeNull();
+
+      const resultEmpty = await service.updatePost(1, 101, { coverImage: '   ' }, undefined);
+      expect(postRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ coverImage: null }),
+      );
+      expect(resultEmpty.coverImage).toBeNull();
+    });
+
+    it('should delete old Vercel blob URL when cover image is cleared to null', async () => {
+      const existing = {
+        ...mockPost,
+        coverImage: 'https://blob.vercel-storage.com/old-blog-cover.jpg',
+      };
+      const qbMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(existing),
+      };
+      postRepo.createQueryBuilder!.mockReturnValue(qbMock);
+      s3Service.isVercelBlobUrl!.mockReturnValue(true);
+
+      await service.updatePost(1, 101, {}, undefined);
+
+      expect(s3Service.deleteByUrl).toHaveBeenCalledWith('https://blob.vercel-storage.com/old-blog-cover.jpg');
+      expect(postRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ coverImage: null }),
+      );
+    });
+
+    it('should preserve other blog post fields when coverImage is omitted and set to null', async () => {
+      const existing = {
+        ...mockPost,
+        title: 'Preserved Title',
+        excerpt: 'Preserved Excerpt',
+        content: '<p>Preserved Content</p>',
+        authorName: 'Pt. Ramesh Sharma',
+        readTime: 7,
+        coverImage: 'https://storage.poojawala.com/cleared-image.jpg',
+      };
+      const qbMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(existing),
+      };
+      postRepo.createQueryBuilder!.mockReturnValue(qbMock);
+
+      await service.updatePost(1, 101, {}, undefined);
+
+      expect(postRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Preserved Title',
+          excerpt: 'Preserved Excerpt',
+          content: '<p>Preserved Content</p>',
+          authorName: 'Pt. Ramesh Sharma',
+          readTime: 7,
+          coverImage: null,
+        }),
+      );
+    });
+  });
 });

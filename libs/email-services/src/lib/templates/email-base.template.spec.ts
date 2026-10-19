@@ -108,4 +108,91 @@ describe('renderPoojawalaEmail - Global Payment Status in Navbar', () => {
     expect(html).not.toContain('✓');
     expect(html).not.toContain('⏳');
   });
+
+  describe('Centralized platformDomainName and Brand Rendering', () => {
+    it('should render 1Pooja branding and not contain poojawala.com in default email templates', () => {
+      const html = renderPoojawalaEmail({
+        statusBadge: 'OTP Verification',
+        userName: 'Aarav',
+        otpCode: '852963',
+        emailMessage: 'Use your OTP code below to continue with your sacred journey on 1Pooja.',
+        highlight: {
+          title: 'Official Response',
+          text: 'Thank you for reaching out.',
+        },
+      });
+
+      // Platform brand checks
+      expect(html).toContain('1Pooja');
+      expect(html).toContain('852963');
+      expect(html).toContain('support@1pooja.com');
+      expect(html).toContain('https://1pooja.com');
+
+      // Crucial: Must NOT contain unverified legacy domain
+      expect(html).not.toContain('poojawala.com');
+      expect(html).not.toContain('Poojawala Devotee Care Desk');
+      expect(html).toContain('1Pooja Devotee Care Desk');
+    });
+
+    it('should respect custom websiteUrl and brand overrides without leaking undefined or malformed URLs', () => {
+      const html = renderPoojawalaEmail({
+        statusBadge: 'Welcome',
+        userName: 'Priya',
+        brandName: '1Pooja Divine',
+        websiteUrl: 'https://custom.1pooja.com/',
+        emailMessage: 'Welcome to our platform!',
+      });
+
+      expect(html).toContain('1Pooja Divine');
+      // No double trailing slashes
+      expect(html).toContain('href="https://custom.1pooja.com/privacy-policy"');
+      expect(html).toContain('href="https://custom.1pooja.com/terms-and-conditions"');
+      expect(html).toContain('href="https://custom.1pooja.com"');
+      expect(html).not.toContain('undefined');
+    });
+  });
+
+  describe('Configurable Platform Logo in Email Templates', () => {
+    it('should render the default configured platform logo with correct dimensions and alt text', () => {
+      const html = renderPoojawalaEmail({
+        statusBadge: 'Booking Confirmed',
+        userName: 'Aarav',
+        emailMessage: 'Your sacred ritual is booked.',
+      });
+
+      expect(html).toContain('alt="1Pooja Logo"');
+      expect(html).toContain('width="78" height="78"');
+      expect(html).toContain('https://wv9qiathcc2z56f9.public.blob.vercel-storage.com/platform/1pooja-logo.png');
+      expect(html).toContain('object-fit: contain');
+      expect(html).not.toContain('<h1 style="margin: 0; font-size: 30px');
+    });
+
+    it('should render custom logoUrl when explicitly provided in options', () => {
+      const customLogo = 'https://custom-storage.com/logos/partner-logo.png';
+      const html = renderPoojawalaEmail({
+        statusBadge: 'Welcome Devotee',
+        userName: 'Aarav',
+        emailMessage: 'Welcome to our platform.',
+        logoUrl: customLogo,
+      });
+
+      expect(html).toContain(`src="${customLogo}"`);
+      expect(html).toContain('alt="1Pooja Logo"');
+      expect(html).toContain('width="78" height="78"');
+    });
+
+    it('should gracefully omit logo img when logoUrl is empty string without breaking email', () => {
+      const html = renderPoojawalaEmail({
+        statusBadge: 'Notice',
+        userName: 'Aarav',
+        emailMessage: 'Notice text.',
+        logoUrl: '',
+      });
+
+      expect(html).not.toContain('<img src=""');
+      expect(html).not.toContain('<!-- Configured Platform Brand Logo -->');
+      expect(html).toContain('1Pooja');
+      expect(html).toContain('Your Sacred pooja Partner');
+    });
+  });
 });

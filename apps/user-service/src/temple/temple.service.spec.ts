@@ -550,4 +550,107 @@ describe('TempleService', () => {
       expect(mockAuditLogService.createAuditLog).not.toHaveBeenCalled();
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 4. STANDARDIZED IMAGE HANDLING TESTS (PATCH /temples/:id)
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe('Standardized Image Handling on PATCH /temples/:id', () => {
+    it('Case 1a: should save uploaded image metadata when a valid image file is provided', async () => {
+      const existing = { ...sampleActiveTemple, imageUrl: 'https://storage.poojawala.com/old.jpg' };
+      mockTempleRepo.findOne.mockResolvedValue(existing);
+      mockS3Service.uploadFileHelper.mockResolvedValue('https://storage.poojawala.com/new-temple.webp');
+
+      const mockFile = [{
+        buffer: Buffer.from('test-image'),
+        mimetype: 'image/webp',
+        originalname: 'temple.webp',
+      }] as Express.Multer.File[];
+
+      const result = await service.updateTemple(1, {}, { image: mockFile }, 99);
+
+      expect(mockS3Service.uploadFileHelper).toHaveBeenCalledWith(99, 'temple', mockFile);
+      expect(mockTempleRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ imageUrl: 'https://storage.poojawala.com/new-temple.webp' }),
+      );
+      expect(result.data.imageUrl).toBe('https://storage.poojawala.com/new-temple.webp');
+    });
+
+    it('Case 1b: should save valid image URL when provided in DTO without file upload', async () => {
+      const existing = { ...sampleActiveTemple, imageUrl: 'https://storage.poojawala.com/old.jpg' };
+      mockTempleRepo.findOne.mockResolvedValue(existing);
+
+      const result = await service.updateTemple(
+        1,
+        { imageUrl: 'https://images.poojawala.com/temple-cdn.jpg' },
+        undefined,
+        99,
+      );
+
+      expect(mockTempleRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ imageUrl: 'https://images.poojawala.com/temple-cdn.jpg' }),
+      );
+      expect(result.data.imageUrl).toBe('https://images.poojawala.com/temple-cdn.jpg');
+    });
+
+    it('Case 2: should set imageUrl to null when image key is absent from payload', async () => {
+      const existing = { ...sampleActiveTemple, imageUrl: 'https://storage.poojawala.com/existing.jpg' };
+      mockTempleRepo.findOne.mockResolvedValue(existing);
+
+      const result = await service.updateTemple(1, { name: 'Renamed Mandir' }, undefined, 99);
+
+      expect(mockTempleRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Renamed Mandir',
+          imageUrl: null,
+        }),
+      );
+      expect(result.data.imageUrl).toBeNull();
+    });
+
+    it('Case 3: should set imageUrl to null when image key is explicitly null or empty', async () => {
+      const existing = { ...sampleActiveTemple, imageUrl: 'https://storage.poojawala.com/existing.jpg' };
+      mockTempleRepo.findOne.mockResolvedValue(existing);
+
+      const resultNull = await service.updateTemple(1, { imageUrl: null as any }, undefined, 99);
+      expect(mockTempleRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ imageUrl: null }),
+      );
+      expect(resultNull.data.imageUrl).toBeNull();
+
+      const resultEmpty = await service.updateTemple(1, { imageUrl: '   ' }, undefined, 99);
+      expect(mockTempleRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ imageUrl: null }),
+      );
+      expect(resultEmpty.data.imageUrl).toBeNull();
+    });
+
+    it('should preserve other temple fields when image is omitted and set to null', async () => {
+      const existing = {
+        ...sampleActiveTemple,
+        name: 'Preserved Mandir',
+        description: 'Preserved Description',
+        city: 'Varanasi',
+        state: 'Uttar Pradesh',
+        address: 'Ghat Road',
+        isActive: true,
+        imageUrl: 'https://storage.poojawala.com/will-clear.jpg',
+      };
+      mockTempleRepo.findOne.mockResolvedValue(existing);
+
+      await service.updateTemple(1, {}, undefined, 99);
+
+      expect(mockTempleRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Preserved Mandir',
+          description: 'Preserved Description',
+          city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          address: 'Ghat Road',
+          isActive: true,
+          imageUrl: null,
+        }),
+      );
+    });
+  });
 });
+

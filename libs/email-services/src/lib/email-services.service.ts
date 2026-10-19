@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 // import * as nodemailer from 'nodemailer';
 import { ResendProvider } from './providers/resend.provider';
 import { renderPoojawalaEmail, EmailTableRow } from './templates/email-base.template';
+import { platformBrandName } from './config/platform.config';
 
 export interface SendEmailOptions {
   to: string | string[];
@@ -103,16 +104,16 @@ export class EmailService {
       statusBadge: 'Profile Approved',
       userName: firstName || 'Purohit',
       preheaderText: 'Congratulations! Your Purohit Profile has been verified and approved.',
-      emailMessage: 'Congratulations! Your Purohit profile and submitted documents have been successfully verified and approved by the Poojawala team.',
+      emailMessage: `Congratulations! Your Purohit profile and submitted documents have been successfully verified and approved by the ${platformBrandName} team.`,
       highlight: {
         title: 'Account Active',
-        text: 'Your account is now active. You can now access all Purohit features, accept sacred pooja booking assignments, and manage your schedule on the Poojawala platform.',
+        text: `Your account is now active. You can now access all Purohit features, accept sacred pooja booking assignments, and manage your schedule on the ${platformBrandName} platform.`,
       },
     });
 
     await this.sendMail({
       to: email,
-      subject: 'Your Purohit Profile Has Been Approved - Poojawala',
+      subject: `Your Purohit Profile Has Been Approved - ${platformBrandName}`,
       html,
     });
   }
@@ -126,7 +127,7 @@ export class EmailService {
       statusBadge: 'Verification Notice',
       userName: firstName || 'Purohit',
       preheaderText: 'Update regarding your Purohit profile verification.',
-      emailMessage: 'Thank you for your interest in joining Poojawala. After reviewing your submitted documents, your profile verification could not be approved at this time.',
+      emailMessage: `Thank you for your interest in joining ${platformBrandName}. After reviewing your submitted documents, your profile verification could not be approved at this time.`,
       highlight: {
         title: 'Rejection Reason',
         text: rejectionReason || 'Document verification could not be completed. Please review your credentials and contact support.',
@@ -135,7 +136,7 @@ export class EmailService {
 
     await this.sendMail({
       to: email,
-      subject: 'Your Purohit Profile Verification Was Rejected - Poojawala',
+      subject: `Your Purohit Profile Verification Was Rejected - ${platformBrandName}`,
       html,
     });
   }
@@ -148,16 +149,16 @@ export class EmailService {
       statusBadge: 'Profile Approved',
       userName: firstName || 'Astrologer',
       preheaderText: 'Congratulations! Your Astrologer Profile has been verified and approved.',
-      emailMessage: 'Congratulations! Your Astrologer profile and submitted documents have been successfully verified and approved by the Poojawala team.',
+      emailMessage: `Congratulations! Your Astrologer profile and submitted documents have been successfully verified and approved by the ${platformBrandName} team.`,
       highlight: {
         title: 'Account Active',
-        text: 'Your account is now active. You can now access all Astrologer features, take astrology consultations, and manage your schedule on the Poojawala platform.',
+        text: `Your account is now active. You can now access all Astrologer features, take astrology consultations, and manage your schedule on the ${platformBrandName} platform.`,
       },
     });
 
     await this.sendMail({
       to: email,
-      subject: 'Your Astrologer Profile Has Been Approved - Poojawala',
+      subject: `Your Astrologer Profile Has Been Approved - ${platformBrandName}`,
       html,
     });
   }
@@ -171,7 +172,7 @@ export class EmailService {
       statusBadge: 'Verification Notice',
       userName: firstName || 'Astrologer',
       preheaderText: 'Update regarding your Astrologer profile verification.',
-      emailMessage: 'Thank you for your interest in joining Poojawala. After reviewing your submitted documents, your profile verification could not be approved at this time.',
+      emailMessage: `Thank you for your interest in joining ${platformBrandName}. After reviewing your submitted documents, your profile verification could not be approved at this time.`,
       highlight: {
         title: 'Rejection Reason',
         text: rejectionReason || 'Document verification could not be completed. Please review your credentials and contact support.',
@@ -180,7 +181,7 @@ export class EmailService {
 
     await this.sendMail({
       to: email,
-      subject: 'Your Astrologer Profile Verification Was Rejected - Poojawala',
+      subject: `Your Astrologer Profile Verification Was Rejected - ${platformBrandName}`,
       html,
     });
   }
@@ -200,7 +201,7 @@ export class EmailService {
       statusBadge: badge,
       userName: firstName || 'Devotee',
       preheaderText: `Your verification OTP is ${otp}`,
-      emailMessage: 'Use the One-Time Password (OTP) below to complete your verification and continue with your sacred journey on Poojawala.',
+      emailMessage: `Use the One-Time Password (OTP) below to complete your verification and continue with your sacred journey on ${platformBrandName}.`,
       otpCode: otp,
       otpSubtitle: 'Valid for 10 minutes. Do not share this code with anyone.',
     });
@@ -209,7 +210,7 @@ export class EmailService {
       this.logger.log(`Attempting to send OTP email to ${email}`);
       await this.sendMail({
         to: email,
-        subject: `${badge} - Poojawala`,
+        subject: `${badge} - ${platformBrandName}`,
         html,
       });
       this.logger.log(`OTP email sent successfully to ${email}`);
@@ -233,8 +234,8 @@ export class EmailService {
     const html = renderPoojawalaEmail({
       statusBadge: 'Account Created',
       userName: name || 'Devotee',
-      preheaderText: 'Your Poojawala customer account has been created.',
-      emailMessage: 'An administrator has created a Poojawala customer account for you. Welcome to our sacred pooja family!',
+      preheaderText: `Your ${platformBrandName} customer account has been created.`,
+      emailMessage: `An administrator has created a ${platformBrandName} customer account for you. Welcome to our sacred pooja family!`,
       detailsTable: {
         title: 'Account & Login Credentials',
         rows: [
@@ -252,7 +253,7 @@ export class EmailService {
 
     await this.sendMail({
       to: email,
-      subject: 'Your Poojawala Account Has Been Created',
+      subject: `Your ${platformBrandName} Account Has Been Created`,
       html,
     });
   }
@@ -267,8 +268,8 @@ export class EmailService {
     const html = renderPoojawalaEmail({
       statusBadge: 'Purohit Account Created',
       userName: name || 'Purohit',
-      preheaderText: 'Your Poojawala Purohit account has been created.',
-      emailMessage: 'An administrator has created a Poojawala Purohit account for you. Welcome to the sacred network of Vedic pandits!',
+      preheaderText: `Your ${platformBrandName} Purohit account has been created.`,
+      emailMessage: `An administrator has created a ${platformBrandName} Purohit account for you. Welcome to the sacred network of Vedic pandits!`,
       detailsTable: {
         title: 'Account & Login Credentials',
         rows: [
@@ -286,7 +287,7 @@ export class EmailService {
 
     await this.sendMail({
       to: email,
-      subject: 'Your Poojawala Purohit Account Has Been Created',
+      subject: `Your ${platformBrandName} Purohit Account Has Been Created`,
       html,
     });
   }
@@ -301,8 +302,8 @@ export class EmailService {
     const html = renderPoojawalaEmail({
       statusBadge: 'Astrologer Account Created',
       userName: name || 'Astrologer',
-      preheaderText: 'Your Poojawala Astrologer account has been created.',
-      emailMessage: 'An administrator has created a Poojawala Astrologer account for you. Welcome to the sacred network of Vedic astrologers!',
+      preheaderText: `Your ${platformBrandName} Astrologer account has been created.`,
+      emailMessage: `An administrator has created a ${platformBrandName} Astrologer account for you. Welcome to the sacred network of Vedic astrologers!`,
       detailsTable: {
         title: 'Account & Login Credentials',
         rows: [
@@ -320,7 +321,7 @@ export class EmailService {
 
     await this.sendMail({
       to: email,
-      subject: 'Your Poojawala Astrologer Account Has Been Created',
+      subject: `Your ${platformBrandName} Astrologer Account Has Been Created`,
       html,
     });
   }
@@ -391,7 +392,7 @@ export class EmailService {
 
     await this.sendMail({
       to: data.email,
-      subject: `Booking Confirmed - Poojawala | Booking #${data.bookingId}`,
+      subject: `Booking Confirmed - ${platformBrandName} | Booking #${data.bookingId}`,
       html,
     });
   }
@@ -479,7 +480,7 @@ export class EmailService {
 
     await this.sendMail({
       to: data.email,
-      subject: `${isOnline ? 'Online Booking' : 'New Booking'} Assigned - Poojawala | Booking #${data.bookingId}`,
+      subject: `${isOnline ? 'Online Booking' : 'New Booking'} Assigned - ${platformBrandName} | Booking #${data.bookingId}`,
       html,
     });
   }
@@ -546,7 +547,7 @@ export class EmailService {
 
     await this.sendMail({
       to: data.email,
-      subject: `Booking Accepted by Purohit - Poojawala | Booking #${data.bookingId}`,
+      subject: `Booking Accepted by Purohit - ${platformBrandName} | Booking #${data.bookingId}`,
       html,
     });
   }
@@ -598,13 +599,13 @@ export class EmailService {
       },
       highlight: {
         title: 'Divine Blessings & Feedback',
-        text: 'Thank you for choosing Poojawala for your sacred ceremonies. We welcome your blessings and valuable feedback. Please visit your dashboard to rate your experience with your Purohit.',
+        text: `Thank you for choosing ${platformBrandName} for your sacred ceremonies. We welcome your blessings and valuable feedback. Please visit your dashboard to rate your experience with your Purohit.`,
       },
     });
 
     await this.sendMail({
       to: data.email,
-      subject: `Pooja Completed Successfully - Poojawala | Booking #${data.bookingId}`,
+      subject: `Pooja Completed Successfully - ${platformBrandName} | Booking #${data.bookingId}`,
       html,
     });
   }
@@ -656,10 +657,10 @@ export class EmailService {
     ];
 
     const html = renderPoojawalaEmail({
-      statusBadge: 'Welcome to Poojawala',
+      statusBadge: `Welcome to ${platformBrandName}`,
       userName: data.name || 'Devotee',
-      preheaderText: 'Welcome to Poojawala! Your account has been registered successfully.',
-      emailMessage: 'Welcome to the Poojawala family! Your customer account has been successfully created. You can now explore Vedic pooja services, book verified purohits, and schedule sacred ceremonies with ease.',
+      preheaderText: `Welcome to ${platformBrandName}! Your account has been registered successfully.`,
+      emailMessage: `Welcome to the ${platformBrandName} family! Your customer account has been successfully created. You can now explore Vedic pooja services, book verified purohits, and schedule sacred ceremonies with ease.`,
       detailsTable: {
         title: 'Account Summary',
         rows,
@@ -672,7 +673,7 @@ export class EmailService {
 
     await this.sendMail({
       to: data.email,
-      subject: 'Welcome to Poojawala - Your Sacred Journey Begins',
+      subject: `Welcome to ${platformBrandName} - Your Sacred Journey Begins`,
       html,
     });
   }
@@ -694,8 +695,8 @@ export class EmailService {
     const html = renderPoojawalaEmail({
       statusBadge: 'Registration Received',
       userName: data.name || 'Purohit',
-      preheaderText: 'Thank you for registering as a Purohit with Poojawala.',
-      emailMessage: 'Thank you for joining Poojawala as a Vedic Purohit. Your registration and verification details have been received successfully. Our administrative team is currently reviewing your profile and credentials.',
+      preheaderText: `Thank you for registering as a Purohit with ${platformBrandName}.`,
+      emailMessage: `Thank you for joining ${platformBrandName} as a Vedic Purohit. Your registration and verification details have been received successfully. Our administrative team is currently reviewing your profile and credentials.`,
       detailsTable: {
         title: 'Registration Details',
         rows,
@@ -708,7 +709,7 @@ export class EmailService {
 
     await this.sendMail({
       to: data.email,
-      subject: 'Purohit Registration Received - Poojawala',
+      subject: `Purohit Registration Received - ${platformBrandName}`,
       html,
     });
   }
@@ -733,21 +734,21 @@ export class EmailService {
     const html = renderPoojawalaEmail({
       statusBadge: `Inquiry ${data.status}`,
       userName: data.name || 'Devotee',
-      preheaderText: `Update regarding your contact request (${data.status}) - Poojawala`,
-      emailMessage: `Thank you for contacting Poojawala. Our administrative team has reviewed your query regarding "<strong>${this.escapeHtml(data.subject || 'Inquiry')}</strong>" and updated its status to <strong>${this.escapeHtml(data.status)}</strong>. Please find our response below:`,
+      preheaderText: `Update regarding your contact request (${data.status}) - ${platformBrandName}`,
+      emailMessage: `Thank you for contacting ${platformBrandName}. Our administrative team has reviewed your query regarding "<strong>${this.escapeHtml(data.subject || 'Inquiry')}</strong>" and updated its status to <strong>${this.escapeHtml(data.status)}</strong>. Please find our response below:`,
       detailsTable: {
         title: 'Inquiry Details',
         rows,
       },
       highlight: {
-        title: 'Response from Poojawala Team',
+        title: `Response from ${platformBrandName} Team`,
         text: data.adminMessage,
       },
     });
 
     await this.sendMail({
       to: data.email,
-      subject: `Update on your contact inquiry [${data.status}] - Poojawala`,
+      subject: `Update on your contact inquiry [${data.status}] - ${platformBrandName}`,
       html,
     });
   }
@@ -769,8 +770,8 @@ export class EmailService {
     const html = renderPoojawalaEmail({
       statusBadge: 'Registration Received',
       userName: data.name || 'Astrologer',
-      preheaderText: 'Thank you for registering as an Astrologer with Poojawala.',
-      emailMessage: 'Thank you for joining Poojawala as a Vedic Astrologer. Your registration and verification details have been received successfully. Our administrative team is currently reviewing your profile and credentials.',
+      preheaderText: `Thank you for registering as an Astrologer with ${platformBrandName}.`,
+      emailMessage: `Thank you for joining ${platformBrandName} as a Vedic Astrologer. Your registration and verification details have been received successfully. Our administrative team is currently reviewing your profile and credentials.`,
       detailsTable: {
         title: 'Registration Details',
         rows,
@@ -783,7 +784,7 @@ export class EmailService {
 
     await this.sendMail({
       to: data.email,
-      subject: 'Astrologer Registration Received - Poojawala',
+      subject: `Astrologer Registration Received - ${platformBrandName}`,
       html,
     });
   }
@@ -813,21 +814,21 @@ export class EmailService {
 
     if (isPurohitRelease) {
       statusBadge = 'Booking Released';
-      subject = `Booking Update - Poojawala | Booking #${data.bookingId}`;
+      subject = `Booking Update - ${platformBrandName} | Booking #${data.bookingId}`;
       preheaderText = `Booking #${data.bookingId} was released by the assigned Purohit.`;
       emailMessage = `Your booking for <strong>${this.escapeHtml(data.serviceName)}</strong> was released by the assigned Purohit. We are finding an eligible Purohit for your booking. Please wait some time.`;
       highlightTitle = 'What happens next?';
       highlightText = 'Our system is reassigning your booking to available eligible Vedic Purohits. You will receive an update as soon as a new Purohit accepts your booking.';
     } else if (isAstrology) {
       statusBadge = 'Consultation Cancelled';
-      subject = `Astrology Consultation Cancelled - Poojawala | Booking #${data.bookingId}`;
+      subject = `Astrology Consultation Cancelled - ${platformBrandName} | Booking #${data.bookingId}`;
       preheaderText = `Your astrology consultation #${data.bookingId} has been cancelled.`;
       emailMessage = `Your astrology consultation booking (Booking #${data.bookingId})${data.providerName ? ` with Astrologer <strong>${this.escapeHtml(data.providerName)}</strong>` : ''} has been cancelled by ${data.cancelledBy === 'ASTROLOGER' ? 'the assigned Astrologer' : 'Admin'}.`;
       highlightTitle = 'Cancellation Reason';
       highlightText = data.cancellationReason || 'No specific cancellation reason was provided. If you have already made a payment, our support team will initiate your refund.';
     } else {
       statusBadge = 'Booking Cancelled';
-      subject = `Booking Cancelled - Poojawala | Booking #${data.bookingId}`;
+      subject = `Booking Cancelled - ${platformBrandName} | Booking #${data.bookingId}`;
       preheaderText = `Your booking #${data.bookingId} has been cancelled.`;
       emailMessage = `Your sacred pooja booking for <strong>${this.escapeHtml(data.serviceName)}</strong> (Booking #${data.bookingId}) has been cancelled by ${data.cancelledBy === 'ADMIN' ? 'Admin' : 'Customer'}.`;
       highlightTitle = 'Cancellation Reason';
@@ -885,8 +886,8 @@ export class EmailService {
     const cancelledByLabel = data.cancelledBy === 'ADMIN' ? 'Admin' : 'Customer';
     const statusBadge = isAstrology ? 'Consultation Cancelled' : 'Booking Cancelled';
     const subject = isAstrology
-      ? `Astrology Consultation Cancelled by ${cancelledByLabel} - Poojawala | Booking #${data.bookingId}`
-      : `Booking Cancelled by ${cancelledByLabel} - Poojawala | Booking #${data.bookingId}`;
+      ? `Astrology Consultation Cancelled by ${cancelledByLabel} - ${platformBrandName} | Booking #${data.bookingId}`
+      : `Booking Cancelled by ${cancelledByLabel} - ${platformBrandName} | Booking #${data.bookingId}`;
     const preheaderText = `Booking #${data.bookingId} has been cancelled by ${cancelledByLabel}.`;
     const emailMessage = isAstrology
       ? `An astrology consultation (Booking #${data.bookingId}) scheduled with devotee <strong>${this.escapeHtml(data.customerName)}</strong> has been cancelled by ${cancelledByLabel}.`
