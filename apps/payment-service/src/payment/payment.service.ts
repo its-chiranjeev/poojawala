@@ -1271,7 +1271,7 @@ export class PaymentService {
             ? (booking.bookingType === BOOKING_TYPE.ASTROLOGY
                 ? `Astrology Platform Access Fee - Booking ${booking.bookingNumber}`
                 : `Payment for booking ${booking.bookingNumber}`)
-            : `Poojawala Product Purchase #${payment.id}`),
+            : `1Pooja Product Purchase #${payment.id}`),
 
         customer: {
           name: customer.name,
@@ -2404,11 +2404,16 @@ export class PaymentService {
     const html = paymentInvoiceTemplate({
       invoiceType: 'BOOKING',
       bookingType: booking.bookingType ?? (isAstrology ? BOOKING_TYPE.ASTROLOGY : BOOKING_TYPE.POOJA),
-      companyName: process.env['POOJAWALA_COMPANY_NAME'] ?? 'Poojawala',
+      companyName: process.env['POOJAWALA_COMPANY_NAME'] ?? '1Pooja',
       companyEmail: process.env['POOJAWALA_COMPANY_EMAIL'] ?? '-',
       companyPhone: process.env['POOJAWALA_COMPANY_PHONE'] ?? '-',
       companyAddress: process.env['POOJAWALA_COMPANY_ADDRESS'] ?? '-',
       companyGstin: process.env['POOJAWALA_GSTIN'] ?? '-',
+      websiteUrl: (
+        process.env['FRONTEND_URL']?.trim() ||
+        process.env['FRONTEND_PAYMENT_CALLBACK_URL']?.trim() ||
+        'https://1pooja.com'
+      ).replace(/\/+$/, ''),
       billingAddress: this.getBillingAddress(booking),
       purohitName,
       astrologerName,
@@ -2590,11 +2595,16 @@ export class PaymentService {
 
     const html = paymentInvoiceTemplate({
       invoiceType: 'ORDER',
-      companyName: process.env['POOJAWALA_COMPANY_NAME'] ?? 'Poojawala',
+      companyName: process.env['POOJAWALA_COMPANY_NAME'] ?? '1Pooja',
       companyEmail: process.env['POOJAWALA_COMPANY_EMAIL'] ?? '-',
       companyPhone: process.env['POOJAWALA_COMPANY_PHONE'] ?? '-',
       companyAddress: process.env['POOJAWALA_COMPANY_ADDRESS'] ?? '-',
       companyGstin: process.env['POOJAWALA_GSTIN'] ?? '-',
+      websiteUrl: (
+        process.env['FRONTEND_URL']?.trim() ||
+        process.env['FRONTEND_PAYMENT_CALLBACK_URL']?.trim() ||
+        'https://1pooja.com'
+      ).replace(/\/+$/, ''),
       billingAddress,
       customerName,
       customerEmail,

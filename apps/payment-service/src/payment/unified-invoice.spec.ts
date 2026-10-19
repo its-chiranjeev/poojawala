@@ -315,9 +315,9 @@ describe('Unified Invoice System', () => {
         expect(html).toContain('Assigned Astrologer');
         expect(html).toContain('Acharya Vidyadhar');
         expect(html).toContain('Astrology Platform Access Fee');
-        expect(html).toContain('Total Paid to Poojawala');
+        expect(html).toContain('Total Paid to 1Pooja');
         expect(html).toContain(
-          'The amount paid to Poojawala covers the astrology platform access fee only. Astrology consultation charges are separate and payable directly to the assigned astrologer at their applicable per-minute rate. Poojawala does not collect these consultation charges.',
+          'The amount paid to 1Pooja covers the astrology platform access fee only. Astrology consultation charges are separate and payable directly to the assigned astrologer at their applicable per-minute rate. 1Pooja does not collect these consultation charges.',
         );
         expect(html).toContain('Important: Consultation Charges');
         expect(html).not.toContain('Remaining Balance');
@@ -804,9 +804,9 @@ describe('Unified Invoice System', () => {
       expect(renderedHtml).toContain('Assigned Astrologer');
       expect(renderedHtml).toContain('Acharya Vidyadhar');
       expect(renderedHtml).toContain('Astrology Platform Access Fee');
-      expect(renderedHtml).toContain('Total Paid to Poojawala');
+      expect(renderedHtml).toContain('Total Paid to 1Pooja');
       expect(renderedHtml).toContain(
-        'The amount paid to Poojawala covers the astrology platform access fee only',
+        'The amount paid to 1Pooja covers the astrology platform access fee only',
       );
       expect(renderedHtml).not.toContain('Remaining Balance');
       expect(renderedHtml).not.toContain('Assigned Purohit');
@@ -894,7 +894,7 @@ describe('Unified Invoice System', () => {
 
       const html = paymentInvoiceTemplate(dynamicFeeData);
       expect(html).toContain('INR 120.00');
-      expect(html).toContain('Total Paid to Poojawala');
+      expect(html).toContain('Total Paid to 1Pooja');
       expect(html).toContain('Astrology Platform Access Fee');
       expect(html).not.toContain('INR 50.00');
       expect(html).toContain('Important: Consultation Charges');
@@ -929,7 +929,48 @@ describe('Unified Invoice System', () => {
       expect(html).toContain(longName);
       expect(html).toContain(longAddress);
       expect(html).toContain('Astrology Platform Access Fee');
-      expect(html).toContain('Total Paid to Poojawala');
+      expect(html).toContain('Total Paid to 1Pooja');
+    });
+
+    it('should use 1Pooja branding in footer, notice, logo alt, and resolve websiteUrl from .env', () => {
+      const prevFrontendUrl = process.env['FRONTEND_URL'];
+      process.env['FRONTEND_URL'] = 'https://custom-1pooja-env.com/';
+
+      try {
+        const data: PaymentInvoiceTemplateData = {
+          invoiceType: 'BOOKING',
+          bookingType: 'ASTROLOGY',
+          invoiceTitle: 'Tax Invoice',
+          invoiceId: 'INV-BRAND-01',
+          customerName: 'Rohit Verma',
+          companyName: '1Pooja',
+          logoUrl: 'https://custom-1pooja-env.com/logo.png',
+          bookingId: 900,
+          bookingNumber: 'PW-ASTRO-900',
+          serviceName: 'Astrology Platform Access',
+          paymentStatus: 'Paid',
+          statusClass: 'success',
+          currency: 'INR',
+          amount: '50.00',
+          finalAmount: '50.00',
+        };
+
+        const html = paymentInvoiceTemplate(data);
+        expect(html).toContain('alt="1Pooja"');
+        expect(html).toContain('Total Paid to 1Pooja');
+        expect(html).toContain('Thank you for choosing 1Pooja.');
+        expect(html).toContain('The amount paid to 1Pooja covers the astrology platform access fee only');
+        expect(html).toContain('1Pooja does not collect these consultation charges.');
+        expect(html).toContain('https://custom-1pooja-env.com');
+        expect(html).toMatch(/<strong>Website:<\/strong>\s+https:\/\/custom-1pooja-env\.com/);
+        expect(html).not.toContain('poojawala.com');
+      } finally {
+        if (prevFrontendUrl !== undefined) {
+          process.env['FRONTEND_URL'] = prevFrontendUrl;
+        } else {
+          delete process.env['FRONTEND_URL'];
+        }
+      }
     });
   });
 

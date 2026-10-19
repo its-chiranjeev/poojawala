@@ -314,7 +314,15 @@ export const paymentInvoiceTemplate = (
   const bookingStatus = formatBookingStatus(data.bookingStatus);
   const orderStatus = formatOrderStatus(data.orderStatus);
 
-  const websiteUrl = data.websiteUrl?.trim() || 'https://poojawala.com';
+  const envWebsiteUrl =
+    process.env['FRONTEND_URL']?.trim() ||
+    process.env['FRONTEND_PAYMENT_CALLBACK_URL']?.trim();
+
+  const websiteUrl = (
+    data.websiteUrl?.trim() ||
+    envWebsiteUrl ||
+    'https://1pooja.com'
+  ).replace(/\/+$/, '');
 
   const supportHours = data.supportHours?.trim() || 'Mon–Sat, 9:00 AM–7:00 PM';
 
@@ -322,7 +330,7 @@ export const paymentInvoiceTemplate = (
     ? `
       <img
         src="${displayValue(data.logoUrl)}"
-        alt="Poojawala"
+        alt="1Pooja"
         class="brand-logo-image"
       />
     `
@@ -1495,8 +1503,8 @@ export const paymentInvoiceTemplate = (
                   <tr class="total-row">
                     <td>
                       ${isPaid
-                        ? (isAstrology ? 'Total Paid to Poojawala' : 'Total Paid Amount')
-                        : (isAstrology ? 'Total Payable to Poojawala' : 'Total Payable Amount')
+                        ? (isAstrology ? 'Total Paid to 1Pooja' : 'Total Paid Amount')
+                        : (isAstrology ? 'Total Payable to 1Pooja' : 'Total Payable Amount')
                       }
                     </td>
 
@@ -1679,7 +1687,7 @@ export const paymentInvoiceTemplate = (
       ? `
             <div class="notice astrology-notice">
               <strong>Important: Consultation Charges</strong><br />
-              The amount paid to Poojawala covers the astrology platform access fee only. Astrology consultation charges are separate and payable directly to the assigned astrologer at their applicable per-minute rate. Poojawala does not collect these consultation charges.
+              The amount paid to 1Pooja covers the astrology platform access fee only. Astrology consultation charges are separate and payable directly to the assigned astrologer at their applicable per-minute rate. 1Pooja does not collect these consultation charges.
             </div>
           `
       : ''
@@ -1689,7 +1697,7 @@ export const paymentInvoiceTemplate = (
     <footer class="footer">
       <div>
         <h3>
-          Thank you for choosing Poojawala.
+          Thank you for choosing 1Pooja.
         </h3>
 
         <p>
