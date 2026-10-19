@@ -1,16 +1,19 @@
 import { CreateReviewDto } from '@poojawala/dtos/review/create-review.dto';
 import { ReviewQueryDto } from '@poojawala/dtos/review/review-query.dto';
 import { UpdateReviewStatusDto } from '@poojawala/dtos/review/update-review-status.dto';
+import { DataSource } from 'typeorm';
 import {
   BOOKING_STATUS,
   REVIEW_STATUS,
   User,
   USER_ROLE,
+  AstrologerProfile,
 } from '@poojawala/entities';
 import {
   BookingRepository,
   PurohitProfileRepository,
   UserRepository,
+  AstrologerProfileRepository,
 } from '@poojawala/repositories';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
@@ -28,7 +31,9 @@ export class ReviewService {
     private readonly bookingRepository: BookingRepository,
     private readonly userRepository: UserRepository,
     private readonly purohitProfileRepository: PurohitProfileRepository,
+    private readonly astrologerProfileRepository: AstrologerProfileRepository,
     private readonly auditLogService: AuditLogService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async create(user: User, bookingId: number, dto: CreateReviewDto) {
@@ -77,9 +82,23 @@ export class ReviewService {
       }
       booking.purohitRating = dto.rating;
       booking.purohitReview = dto.review;
+    } else if (user.role === USER_ROLE.ASTROLOGER) {
+      if (booking.astrologerId !== user.id) {
+        throw new ForbiddenException('You cannot review this booking.');
+      }
+      if (
+        booking.purohitRating !== null &&
+        booking.purohitRating !== undefined
+      ) {
+        throw new BadRequestException(
+          'You have already reviewed this booking.',
+        );
+      }
+      booking.purohitRating = dto.rating;
+      booking.purohitReview = dto.review;
     } else {
       throw new ForbiddenException(
-        'Only customers and purohits can submit a review.',
+        'Only customers, purohits, and astrologers can submit a review.',
       );
     }
 
@@ -174,6 +193,8 @@ export class ReviewService {
       .leftJoinAndSelect('booking.customer', 'customer')
       .leftJoinAndSelect('booking.purohit', 'purohit')
       .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('booking.astrologer', 'astrologer')
+      .leftJoinAndSelect('astrologer.astrologerProfile', 'astrologerProfile')
       .leftJoinAndSelect('booking.service', 'service')
       .where(
         '(booking.customerRating IS NOT NULL OR booking.purohitRating IS NOT NULL)',
@@ -233,8 +254,26 @@ export class ReviewService {
           purohitReviewStatus: query.status,
         });
       }
+    } else if (userRole === USER_ROLE.ASTROLOGER) {
+      // 4. ASTROLOGER:
+      // Must only see reviews related to that Astrologer (booking.astrologerId = loggedInUser.id).
+      // Can see related reviews regardless of review status by default.
+      if (userId) {
+        queryBuilder.andWhere('booking.astrologerId = :astrologerUserId', {
+          astrologerUserId: userId,
+        });
+      } else {
+        queryBuilder.andWhere('booking.astrologerId = -1');
+      }
+
+      // If ?status=... is explicitly provided, filter related reviews by requested status
+      if (query.status) {
+        queryBuilder.andWhere('booking.reviewStatus = :astrologerReviewStatus', {
+          astrologerReviewStatus: query.status,
+        });
+      }
     } else {
-      // 4. GUEST / NOT LOGGED IN:
+      // 5. GUEST / NOT LOGGED IN:
       // Unauthenticated users must ONLY see customer reviews with reviewStatus = PUBLISHED.
       queryBuilder.andWhere('booking.customerRating IS NOT NULL');
       queryBuilder.andWhere('booking.reviewStatus = :guestPublishedStatus', {
@@ -270,6 +309,8 @@ export class ReviewService {
       .leftJoinAndSelect('booking.customer', 'customer')
       .leftJoinAndSelect('booking.purohit', 'purohit')
       .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('booking.astrologer', 'astrologer')
+      .leftJoinAndSelect('astrologer.astrologerProfile', 'astrologerProfile')
       .leftJoinAndSelect('booking.service', 'service')
       .where('booking.customerRating IS NOT NULL')
       .andWhere('booking.reviewStatus = :status', {
@@ -302,6 +343,8 @@ export class ReviewService {
       .leftJoinAndSelect('booking.customer', 'customer')
       .leftJoinAndSelect('booking.purohit', 'purohit')
       .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('booking.astrologer', 'astrologer')
+      .leftJoinAndSelect('astrologer.astrologerProfile', 'astrologerProfile')
       .leftJoinAndSelect('booking.service', 'service')
       .where('booking.id = :bookingId', { bookingId })
       .andWhere(
@@ -314,6 +357,8 @@ export class ReviewService {
       });
     } else if (user.role === USER_ROLE.PUROHIT) {
       queryBuilder.andWhere('purohit.userId = :userId', { userId: user.id });
+    } else if (user.role === USER_ROLE.ASTROLOGER) {
+      queryBuilder.andWhere('booking.astrologerId = :userId', { userId: user.id });
     }
 
     const booking = await queryBuilder.getOne();
@@ -344,9 +389,12 @@ export class ReviewService {
     booking.reviewStatus = dto.status;
     await this.bookingRepository.save(booking);
 
-    // Recalculate ratings for both parties based on the new status
+    // Recalculate ratings for all parties based on the new status
     if (booking.purohitId) {
       await this.recalculatePurohitRating(booking.purohitId);
+    }
+    if (booking.astrologerId) {
+      await this.recalculateAstrologerRating(booking.astrologerId);
     }
     if (booking.customerId) {
       await this.recalculateCustomerRating(booking.customerId);
@@ -389,6 +437,9 @@ export class ReviewService {
     if (booking.purohitId) {
       await this.recalculatePurohitRating(booking.purohitId);
     }
+    if (booking.astrologerId) {
+      await this.recalculateAstrologerRating(booking.astrologerId);
+    }
     if (booking.customerId) {
       await this.recalculateCustomerRating(booking.customerId);
     }
@@ -426,6 +477,23 @@ export class ReviewService {
     };
   }
 
+  async getAstrologerOverallRating(astrologerId: number) {
+    const result = await this.bookingRepository
+      .createQueryBuilder('booking')
+      .select('AVG(booking.customerRating)', 'average')
+      .addSelect('COUNT(booking.id)', 'count')
+      .where('booking.astrologerId = :astrologerId', { astrologerId })
+      .andWhere('booking.customerRating IS NOT NULL')
+      .andWhere('booking.reviewStatus = :status', {
+        status: REVIEW_STATUS.PUBLISHED,
+      })
+      .getRawOne();
+
+    return {
+      averageRating: parseFloat(result?.average || '0'),
+    };
+  }
+
   private async recalculatePurohitRating(purohitId: number) {
     const stats = await this.getPurohitOverallRating(purohitId);
 
@@ -438,6 +506,27 @@ export class ReviewService {
     });
     if (profile) {
       await this.purohitProfileRepository.update(profile.id, {
+        avgRating: finalRating,
+      });
+    }
+  }
+
+  private async recalculateAstrologerRating(astrologerId: number) {
+    const stats = await this.getAstrologerOverallRating(astrologerId);
+
+    // Max rating is 5
+    const finalRating = Math.min(stats.averageRating, 5.0);
+
+    // astrologerId on booking is User.id
+    await this.userRepository.update(astrologerId, {
+      avgRating: finalRating,
+    });
+
+    const profile = await this.astrologerProfileRepository.findOne({
+      where: { userId: astrologerId },
+    });
+    if (profile) {
+      await this.astrologerProfileRepository.update(profile.id, {
         avgRating: finalRating,
       });
     }
@@ -465,10 +554,17 @@ export class ReviewService {
   }
 
   private mapReviewResponse(booking: any) {
+    const isAstrology =
+      booking.bookingType === 'ASTROLOGY' || !!booking.astrologerId;
+    const astrologerUser = booking.astrologer;
+    const astrologerProfile =
+      astrologerUser?.astrologerProfile || booking.astrologerProfile;
+
     return {
       id: booking.id,
       bookingId: booking.id,
       bookingNumber: booking.bookingNumber,
+      bookingType: booking.bookingType,
 
       customerId: booking.customerId,
       customer: booking.customer
@@ -498,6 +594,23 @@ export class ReviewService {
           }
         : null,
 
+      astrologerId: booking.astrologerId,
+      astrologer: astrologerUser
+        ? {
+            id: astrologerUser.id,
+            firstName: astrologerUser.firstName,
+            lastName: astrologerUser.lastName,
+            profileImage: astrologerUser.profileImage,
+            bio: astrologerProfile?.bio,
+            qualification: astrologerProfile?.qualification,
+            experienceYears: astrologerProfile?.experienceYears,
+            languages: astrologerProfile?.languages,
+            specializations: astrologerProfile?.specializations,
+            city: astrologerProfile?.city,
+            avgRating: astrologerProfile?.avgRating ?? astrologerUser.avgRating,
+          }
+        : null,
+
       serviceId: booking.serviceId,
       service: booking.service
         ? {
@@ -511,6 +624,8 @@ export class ReviewService {
       customerRating: booking.customerRating,
       purohitReview: booking.purohitReview,
       purohitRating: booking.purohitRating,
+      astrologerReview: isAstrology ? booking.purohitReview : undefined,
+      astrologerRating: isAstrology ? booking.purohitRating : undefined,
       reviewStatus: booking.reviewStatus,
 
       createdAt: booking.createdAt,
@@ -518,3 +633,4 @@ export class ReviewService {
     };
   }
 }
+

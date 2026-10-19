@@ -39,7 +39,7 @@ export class ReviewController {
 
   @Post(':bookingId')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ASTROLOGER)
   create(
     @Req() req: any,
     @Param('bookingId', ParseIntPipe) bookingId: number,
@@ -172,9 +172,18 @@ export class ReviewController {
     return await this.reviewService.getPurohitOverallRating(purohitId);
   }
 
+  @Get('astrologer/:astrologerId/rating')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  async getAstrologerOverallRating(
+    @Param('astrologerId', ParseIntPipe) astrologerId: number,
+  ) {
+    return await this.reviewService.getAstrologerOverallRating(astrologerId);
+  }
+
   @Get(':bookingId')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
+  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ASTROLOGER, USER_ROLE.ADMIN)
   findOne(
     @Req() req: any,
     @Param('bookingId', ParseIntPipe) bookingId: number,
