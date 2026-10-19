@@ -4,6 +4,7 @@ import { UpdateReviewStatusDto } from '@poojawala/dtos/review/update-review-stat
 import { DataSource } from 'typeorm';
 import {
   BOOKING_STATUS,
+  BOOKING_TYPE,
   REVIEW_STATUS,
   User,
   USER_ROLE,
@@ -284,6 +285,35 @@ export class ReviewService {
       // to override this guest security restriction.
     }
 
+    if (query.bookingType) {
+      if (Array.isArray(query.bookingType)) {
+        if (query.bookingType.length > 0) {
+          const types = query.bookingType;
+          if (types.includes(BOOKING_TYPE.POOJA)) {
+            queryBuilder.andWhere(
+              '(booking.bookingType IN (:...bookingTypes) OR booking.bookingType IS NULL)',
+              { bookingTypes: types },
+            );
+          } else {
+            queryBuilder.andWhere('booking.bookingType IN (:...bookingTypes)', {
+              bookingTypes: types,
+            });
+          }
+        }
+      } else {
+        if (query.bookingType === BOOKING_TYPE.POOJA) {
+          queryBuilder.andWhere(
+            '(booking.bookingType = :bookingType OR booking.bookingType IS NULL)',
+            { bookingType: query.bookingType },
+          );
+        } else {
+          queryBuilder.andWhere('booking.bookingType = :bookingType', {
+            bookingType: query.bookingType,
+          });
+        }
+      }
+    }
+
     const total = await queryBuilder.getCount();
 
     queryBuilder
@@ -316,6 +346,36 @@ export class ReviewService {
       .andWhere('booking.reviewStatus = :status', {
         status: REVIEW_STATUS.PUBLISHED,
       });
+
+    if (query.bookingType) {
+      if (Array.isArray(query.bookingType)) {
+        if (query.bookingType.length > 0) {
+          const types = query.bookingType;
+          if (types.includes(BOOKING_TYPE.POOJA)) {
+            queryBuilder.andWhere(
+              '(booking.bookingType IN (:...custBookingTypes) OR booking.bookingType IS NULL)',
+              { custBookingTypes: types },
+            );
+          } else {
+            queryBuilder.andWhere(
+              'booking.bookingType IN (:...custBookingTypes)',
+              { custBookingTypes: types },
+            );
+          }
+        }
+      } else {
+        if (query.bookingType === BOOKING_TYPE.POOJA) {
+          queryBuilder.andWhere(
+            '(booking.bookingType = :custBookingType OR booking.bookingType IS NULL)',
+            { custBookingType: query.bookingType },
+          );
+        } else {
+          queryBuilder.andWhere('booking.bookingType = :custBookingType', {
+            custBookingType: query.bookingType,
+          });
+        }
+      }
+    }
 
     const total = await queryBuilder.getCount();
 

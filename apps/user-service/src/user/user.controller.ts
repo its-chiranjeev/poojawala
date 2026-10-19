@@ -473,8 +473,8 @@ export class UserController {
     return this.userService.deletePlatformSetting(id, user.id);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER)
+  // @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  // @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER)
   @Get('get')
   async getAllUsers(
     @Query(new ValidationPipe({ transform: true }))

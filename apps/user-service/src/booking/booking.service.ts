@@ -73,7 +73,12 @@ import { AssignmentService } from '../assignment/assignment.service';
 import { BookingGateway } from '@poojawala/gateway';
 import { NotificationService } from '@poojawala/notification';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
-import { AuditLogService, normalizeCityName } from '@poojawala/common';
+import {
+  AuditLogService,
+  normalizeCityName,
+  buildAstrologyTransparencyNotices,
+  AstrologyTransparencyData,
+} from '@poojawala/common';
 import { PaymentService } from '../../../payment-service/src/payment/payment.service';
 
 export interface CreateBookingResponse {
@@ -86,6 +91,11 @@ export interface CreateBookingResponse {
   paymentUrl: string | null;
   finalAmount?: number | null;
   priceBreakDown?: Record<string, any> | null;
+  platformAccessFee?: number;
+  ratePerMinute?: number | null;
+  consultationChargesNoticeTitle?: string;
+  consultationFeeNotice?: string;
+  astrologyTransparency?: AstrologyTransparencyData | null;
 }
 
 export interface CreateBookingByAdminResponse {
@@ -1330,6 +1340,14 @@ export class BookingService {
       const existingPaymentId = paymentLinkRes?.paymentId ?? null;
       const existingPaymentUrl = paymentLinkRes?.paymentUrl ?? null;
 
+      const platformAccessFee = Number(transactionResult.savedBooking.finalAmount);
+      const ratePerMinute = transactionResult.astrologer.ratePerMinute;
+      const astrologyTransparency = buildAstrologyTransparencyNotices(
+        platformAccessFee,
+        ratePerMinute,
+        false,
+      );
+
       const bookingData: CreateBookingResponse = {
         bookingId: transactionResult.savedBooking.id,
         bookingNumber: transactionResult.savedBooking.bookingNumber,
@@ -1338,8 +1356,13 @@ export class BookingService {
         paymentStatus: transactionResult.savedBooking.paymentStatus,
         paymentId: existingPaymentId,
         paymentUrl: existingPaymentUrl,
-        finalAmount: Number(transactionResult.savedBooking.finalAmount),
+        finalAmount: platformAccessFee,
         priceBreakDown: transactionResult.savedBooking.priceBreakDown ?? null,
+        platformAccessFee: astrologyTransparency.platformAccessFee,
+        ratePerMinute: astrologyTransparency.ratePerMinute,
+        consultationChargesNoticeTitle: astrologyTransparency.consultationChargesNoticeTitle,
+        consultationFeeNotice: astrologyTransparency.consultationFeeNotice,
+        astrologyTransparency,
       };
 
       (bookingData as any).message =
@@ -1501,10 +1524,34 @@ export class BookingService {
         booking.astrologer?.astrologerProfile ||
         null;
 
+      const isAstrologyBooking = booking.bookingType === BOOKING_TYPE.ASTROLOGY;
+      const isAstrologyUnlocked =
+        user.role !== USER_ROLE.CUSTOMER ||
+        !isAstrologyBooking ||
+        booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
+        booking.status === BOOKING_STATUS.ACCEPTED ||
+        booking.status === BOOKING_STATUS.COMPLETED ||
+        booking.paymentType === BOOKING_PAYMENT_TYPE.DEFERRED;
+
+      const fee = Number(booking.finalAmount ?? booking.platformCommission ?? 50);
+      const transparency = isAstrologyBooking
+        ? buildAstrologyTransparencyNotices(
+            fee,
+            astrologerProfile?.ratePerMinute,
+            isAstrologyUnlocked,
+          )
+        : null;
+
       return {
         ...booking,
-        astrologer: booking.astrologer || null,
-        astrologerProfile,
+        astrologer: isAstrologyUnlocked ? (booking.astrologer || null) : null,
+        astrologerProfile: isAstrologyUnlocked ? astrologerProfile : null,
+        platformAccessFee: transparency?.platformAccessFee,
+        ratePerMinute: transparency?.ratePerMinute ?? null,
+        consultationChargesNoticeTitle: transparency?.consultationChargesNoticeTitle,
+        consultationFeeNotice: transparency?.consultationFeeNotice,
+        consultationDirectBillingNotice: transparency?.consultationDirectBillingNotice,
+        astrologyTransparency: transparency,
         payments,
         bookingPayment,
         purohitPayout,
@@ -1570,21 +1617,37 @@ export class BookingService {
       null;
 
     switch (user.role) {
-      case USER_ROLE.ADMIN:
+      case USER_ROLE.ADMIN: {
         // Admin can access any booking.
         this.enrichBookingServicePlans(booking);
+        const isAdminAstrology = booking.bookingType === BOOKING_TYPE.ASTROLOGY;
+        const adminFee = Number(booking.finalAmount ?? booking.platformCommission ?? 50);
+        const adminTransparency = isAdminAstrology
+          ? buildAstrologyTransparencyNotices(
+              adminFee,
+              astrologerProfile?.ratePerMinute,
+              true,
+            )
+          : null;
         return {
           ...booking,
           astrologer: booking.astrologer || null,
           astrologerProfile,
+          platformAccessFee: adminTransparency?.platformAccessFee,
+          ratePerMinute: adminTransparency?.ratePerMinute ?? null,
+          consultationChargesNoticeTitle: adminTransparency?.consultationChargesNoticeTitle,
+          consultationFeeNotice: adminTransparency?.consultationFeeNotice,
+          consultationDirectBillingNotice: adminTransparency?.consultationDirectBillingNotice,
+          astrologyTransparency: adminTransparency,
           bookingPayment,
           purohitPayout,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),
         };
+      }
 
-      case USER_ROLE.CUSTOMER:
+      case USER_ROLE.CUSTOMER: {
         // Customer can access only their own booking.
         if (booking.customerId !== user.id) {
           throw new ForbiddenException(
@@ -1593,10 +1656,33 @@ export class BookingService {
         }
 
         this.enrichBookingServicePlans(booking);
+        const isAstrology = booking.bookingType === BOOKING_TYPE.ASTROLOGY;
+        const isAstrologyUnlocked =
+          !isAstrology ||
+          booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
+          booking.status === BOOKING_STATUS.ACCEPTED ||
+          booking.status === BOOKING_STATUS.COMPLETED ||
+          booking.paymentType === BOOKING_PAYMENT_TYPE.DEFERRED;
+
+        const customerFee = Number(booking.finalAmount ?? booking.platformCommission ?? 50);
+        const customerTransparency = isAstrology
+          ? buildAstrologyTransparencyNotices(
+              customerFee,
+              astrologerProfile?.ratePerMinute,
+              isAstrologyUnlocked,
+            )
+          : null;
+
         return {
           ...booking,
-          astrologer: booking.astrologer || null,
-          astrologerProfile,
+          astrologer: isAstrologyUnlocked ? (booking.astrologer || null) : null,
+          astrologerProfile: isAstrologyUnlocked ? astrologerProfile : null,
+          platformAccessFee: customerTransparency?.platformAccessFee,
+          ratePerMinute: customerTransparency?.ratePerMinute ?? null,
+          consultationChargesNoticeTitle: customerTransparency?.consultationChargesNoticeTitle,
+          consultationFeeNotice: customerTransparency?.consultationFeeNotice,
+          consultationDirectBillingNotice: customerTransparency?.consultationDirectBillingNotice,
+          astrologyTransparency: customerTransparency,
           payments: (booking.payments || []).filter(
             (p) =>
               p.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
@@ -1614,6 +1700,7 @@ export class BookingService {
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),
         };
+      }
 
       case USER_ROLE.PUROHIT: {
         const purohitProfileRepository =

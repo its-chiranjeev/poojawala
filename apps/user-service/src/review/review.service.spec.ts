@@ -255,4 +255,90 @@ describe('ReviewService', () => {
       expect(mockAstrologerProfileRepository.update).toHaveBeenCalledWith(5, { avgRating: 4.8 });
     });
   });
+
+  describe('BookingType filtering in findAll and getAllCustomerReviews', () => {
+    let qbMock: any;
+
+    beforeEach(() => {
+      qbMock = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(1),
+        getMany: jest.fn().mockResolvedValue([
+          {
+            id: 10,
+            bookingType: BOOKING_TYPE.ASTROLOGY,
+            customerRating: 5,
+            customerReview: 'Great astrology reading',
+            reviewStatus: REVIEW_STATUS.PUBLISHED,
+            customer: { id: 1, firstName: 'Aarav' },
+            astrologer: { id: 2, firstName: 'Acharya' },
+          },
+        ]),
+      };
+      mockBookingRepository.createQueryBuilder = jest.fn().mockReturnValue(qbMock);
+    });
+
+    it('filters by ASTROLOGY bookingType in findAll', async () => {
+      const adminUser = { id: 1, role: USER_ROLE.ADMIN } as User;
+      const res = await service.findAll(adminUser, {
+        page: 1,
+        limit: 10,
+        bookingType: BOOKING_TYPE.ASTROLOGY,
+      });
+
+      expect(qbMock.andWhere).toHaveBeenCalledWith(
+        'booking.bookingType = :bookingType',
+        { bookingType: BOOKING_TYPE.ASTROLOGY },
+      );
+      expect(res.data).toHaveLength(1);
+      expect(res.data[0].bookingType).toBe(BOOKING_TYPE.ASTROLOGY);
+    });
+
+    it('filters by POOJA bookingType in findAll (including null fallback)', async () => {
+      const adminUser = { id: 1, role: USER_ROLE.ADMIN } as User;
+      await service.findAll(adminUser, {
+        page: 1,
+        limit: 10,
+        bookingType: BOOKING_TYPE.POOJA,
+      });
+
+      expect(qbMock.andWhere).toHaveBeenCalledWith(
+        '(booking.bookingType = :bookingType OR booking.bookingType IS NULL)',
+        { bookingType: BOOKING_TYPE.POOJA },
+      );
+    });
+
+    it('filters by array of bookingTypes in findAll', async () => {
+      const adminUser = { id: 1, role: USER_ROLE.ADMIN } as User;
+      await service.findAll(adminUser, {
+        page: 1,
+        limit: 10,
+        bookingType: [BOOKING_TYPE.POOJA, BOOKING_TYPE.ASTROLOGY],
+      });
+
+      expect(qbMock.andWhere).toHaveBeenCalledWith(
+        '(booking.bookingType IN (:...bookingTypes) OR booking.bookingType IS NULL)',
+        { bookingTypes: [BOOKING_TYPE.POOJA, BOOKING_TYPE.ASTROLOGY] },
+      );
+    });
+
+    it('filters by ASTROLOGY bookingType in getAllCustomerReviews', async () => {
+      const res = await service.getAllCustomerReviews({
+        page: 1,
+        limit: 10,
+        bookingType: BOOKING_TYPE.ASTROLOGY,
+      });
+
+      expect(qbMock.andWhere).toHaveBeenCalledWith(
+        'booking.bookingType = :custBookingType',
+        { custBookingType: BOOKING_TYPE.ASTROLOGY },
+      );
+      expect(res.data).toHaveLength(1);
+    });
+  });
 });

@@ -29,8 +29,10 @@ export interface PaymentInvoiceTemplateData {
   bookingId?: number;
   bookingNumber?: string;
   bookingStatus?: string;
+  bookingType?: string;
   serviceName?: string;
   purohitName?: string;
+  astrologerName?: string;
   donationAmount?: string;
 
   // Order-specific fields
@@ -220,6 +222,20 @@ export const paymentInvoiceTemplate = (
   const isOrder =
     data.invoiceType === 'ORDER' ||
     Boolean(data.orderItems && data.orderItems.length > 0);
+
+  const isAstrology =
+    (data.bookingType || '').trim().toUpperCase() === 'ASTROLOGY' ||
+    Boolean(data.astrologerName && !data.purohitName);
+
+  const bookingTypeDisplay = isAstrology ? 'Astrology' : 'Pooja';
+
+  const assignedPersonLabel = isAstrology
+    ? 'Assigned Astrologer'
+    : 'Assigned Purohit';
+
+  const assignedPersonValue = isAstrology
+    ? (data.astrologerName || data.purohitName)
+    : data.purohitName;
 
   const isProformaInvoice = data.invoiceTitle
     .toLowerCase()
@@ -638,8 +654,8 @@ export const paymentInvoiceTemplate = (
 
     .booking-card {
       display: grid;
-      grid-template-columns:
-        repeat(4, minmax(0, 1fr));
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(0, 1fr);
       gap: 0;
       border: 1px solid var(--line);
       border-radius: 14px;
@@ -852,6 +868,23 @@ export const paymentInvoiceTemplate = (
       font-size: 9px;
     }
 
+    .astrology-notice {
+      margin-top: 12px;
+      padding: 10px 14px;
+      border: 1px solid rgba(224, 86, 36, 0.4);
+      border-radius: 12px;
+      color: #84501c;
+      background: #fff8f3;
+      font-size: 9px;
+      line-height: 1.5;
+    }
+
+    .astrology-notice strong {
+      color: var(--primary-dark);
+      display: inline-block;
+      margin-right: 4px;
+    }
+
     .error-box {
       margin-top: 10px;
       padding: 10px 12px;
@@ -946,7 +979,9 @@ export const paymentInvoiceTemplate = (
             <p>
               ${isOrder
       ? 'Devotional products order invoice'
-      : 'Sacred ritual booking invoice'
+      : (isAstrology
+        ? 'Astrology platform access fee receipt'
+        : 'Sacred ritual booking invoice')
     }
             </p>
           </div>
@@ -1154,6 +1189,16 @@ export const paymentInvoiceTemplate = (
 
                 <div class="booking-item">
                   <div class="booking-item-label">
+                    Booking Type
+                  </div>
+
+                  <div class="booking-item-value">
+                    ${displayValue(bookingTypeDisplay)}
+                  </div>
+                </div>
+
+                <div class="booking-item">
+                  <div class="booking-item-label">
                     Service
                   </div>
 
@@ -1164,11 +1209,11 @@ export const paymentInvoiceTemplate = (
 
                 <div class="booking-item">
                   <div class="booking-item-label">
-                    Assigned Purohit
+                    ${assignedPersonLabel}
                   </div>
 
                   <div class="booking-item-value">
-                    ${displayValue(data.purohitName)}
+                    ${displayValue(assignedPersonValue)}
                   </div>
                 </div>
 
@@ -1351,8 +1396,10 @@ export const paymentInvoiceTemplate = (
       : `
                   <tr>
                     <td>
-                      ${displayValue(data.serviceName)}
-                      service charge
+                      ${isAstrology
+                        ? 'Astrology Platform Access Fee'
+                        : `${displayValue(data.serviceName)} service charge`
+                      }
                     </td>
 
                     <td class="amount">
@@ -1447,7 +1494,10 @@ export const paymentInvoiceTemplate = (
 
                   <tr class="total-row">
                     <td>
-                      ${isPaid ? 'Total Paid Amount' : 'Total Payable Amount'}
+                      ${isPaid
+                        ? (isAstrology ? 'Total Paid to Poojawala' : 'Total Paid Amount')
+                        : (isAstrology ? 'Total Payable to Poojawala' : 'Total Payable Amount')
+                      }
                     </td>
 
                     <td class="amount">
@@ -1456,7 +1506,7 @@ export const paymentInvoiceTemplate = (
                     </td>
                   </tr>
 
-                  ${data.paidAmount != null
+                  ${!isAstrology && data.paidAmount != null
                     ? `
                         <tr>
                           <td>Paid Amount</td>
@@ -1465,7 +1515,7 @@ export const paymentInvoiceTemplate = (
                       `
                     : ''
                   }
-                  ${data.remainingAmount != null
+                  ${!isAstrology && data.remainingAmount != null
                     ? `
                         <tr>
                           <td>Remaining Balance</td>
@@ -1624,6 +1674,16 @@ export const paymentInvoiceTemplate = (
             </div>
           `
     }
+
+      ${isAstrology
+      ? `
+            <div class="notice astrology-notice">
+              <strong>Important: Consultation Charges</strong><br />
+              The amount paid to Poojawala covers the astrology platform access fee only. Astrology consultation charges are separate and payable directly to the assigned astrologer at their applicable per-minute rate. Poojawala does not collect these consultation charges.
+            </div>
+          `
+      : ''
+    }
     </div>
 
     <footer class="footer">
@@ -1635,7 +1695,9 @@ export const paymentInvoiceTemplate = (
         <p>
           ${isOrder
       ? 'Devotional products and sacred items for your home and rituals.'
-      : 'Trusted Puja services for sacred moments.'
+      : (isAstrology
+        ? 'Trusted Astrology consultation and guidance services.'
+        : 'Trusted Puja services for sacred moments.')
     }
         </p>
 

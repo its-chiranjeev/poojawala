@@ -108,7 +108,12 @@ export class PaymentController {
 
   @Get('booking/:bookingId/invoice')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
+  @Roles(
+    USER_ROLE.ADMIN,
+    USER_ROLE.CUSTOMER,
+    USER_ROLE.PUROHIT,
+    USER_ROLE.ASTROLOGER,
+  )
   async downloadBookingInvoice(
     @Req() req: AuthenticatedRequest,
 

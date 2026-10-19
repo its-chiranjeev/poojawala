@@ -2079,6 +2079,86 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         }),
       ).rejects.toThrow('Payment has not been completed');
     });
+
+    it('returns transparency notices and dynamic platform access fee in createAstrologyBooking', async () => {
+      mockAstrologerProfileRepo.findOne.mockResolvedValue({
+        id: 99,
+        userId: 42,
+        commissionPrice: 150,
+        ratePerMinute: 35,
+        verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+        user: { id: 42, firstName: 'Acharya', lastName: 'Jyotish' },
+      });
+      const scheduledDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+
+      const res = await bookingService.createAstrologyBooking(mockCustomerUser, {
+        astrologerId: 42,
+        scheduledAt: scheduledDate,
+      });
+
+      expect(res.finalAmount).toBe(150);
+      expect(res.platformAccessFee).toBe(150);
+      expect(res.ratePerMinute).toBe(35);
+      expect(res.consultationChargesNoticeTitle).toBe('Astrology Consultation Charges');
+      expect(res.consultationFeeNotice).toContain('Pay ₹150 to unlock the astrologer\'s details');
+      expect(res.consultationFeeNotice).toContain('rate of ₹35/min');
+      expect(res.astrologyTransparency?.isUnlocked).toBe(false);
+    });
+
+    it('masks astrologer details and provides pre-payment notice for unpaid booking in getBookingById', async () => {
+      const unpaidBooking = {
+        id: 701,
+        bookingNumber: 'B-ASTRO-UNPAID',
+        bookingType: BOOKING_TYPE.ASTROLOGY,
+        customerId: 1,
+        astrologerId: 42,
+        astrologer: { id: 42, firstName: 'Acharya', lastName: 'Secret' },
+        astrologerProfile: { ratePerMinute: 40 },
+        status: BOOKING_STATUS.PENDING,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+        finalAmount: 100,
+        platformCommission: 100,
+        payments: [],
+      } as any;
+
+      mockBookingRepository.findBookingById = jest.fn().mockResolvedValue(unpaidBooking);
+
+      const res = await bookingService.getBookingById(mockCustomerUser, 701);
+      expect(res.astrologer).toBeNull();
+      expect(res.astrologerProfile).toBeNull();
+      expect(res.platformAccessFee).toBe(100);
+      expect(res.ratePerMinute).toBe(40);
+      expect(res.consultationChargesNoticeTitle).toBe('Astrology Consultation Charges');
+      expect(res.consultationFeeNotice).toContain('Pay ₹100 to unlock the astrologer\'s details');
+      expect(res.consultationDirectBillingNotice).toBeNull();
+    });
+
+    it('unlocks astrologer details and provides direct billing notice for paid booking in getBookingById', async () => {
+      const paidBooking = {
+        id: 702,
+        bookingNumber: 'B-ASTRO-PAID',
+        bookingType: BOOKING_TYPE.ASTROLOGY,
+        customerId: 1,
+        astrologerId: 42,
+        astrologer: { id: 42, firstName: 'Acharya', lastName: 'Revealed' },
+        astrologerProfile: { ratePerMinute: 40 },
+        status: BOOKING_STATUS.ACCEPTED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+        finalAmount: 100,
+        platformCommission: 100,
+        payments: [],
+      } as any;
+
+      mockBookingRepository.findBookingById = jest.fn().mockResolvedValue(paidBooking);
+
+      const res = await bookingService.getBookingById(mockCustomerUser, 702);
+      expect(res.astrologer).toBeDefined();
+      expect(res.astrologer?.firstName).toBe('Acharya');
+      expect(res.astrologerProfile).toBeDefined();
+      expect(res.consultationChargesNoticeTitle).toBe('Direct Astrologer Billing');
+      expect(res.consultationDirectBillingNotice).toContain('Payment for the consultation is made directly to the astrologer');
+      expect(res.astrologyTransparency?.isUnlocked).toBe(true);
+    });
   });
 });
 

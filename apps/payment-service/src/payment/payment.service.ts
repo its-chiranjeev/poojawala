@@ -63,7 +63,11 @@ import {
 } from '@poojawala/entities';
 import { BookingGateway } from '@poojawala/gateway';
 import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
-import { AuditLogService } from '@poojawala/common';
+import {
+  AuditLogService,
+  buildAstrologyTransparencyNotices,
+  AstrologyTransparencyData,
+} from '@poojawala/common';
 import { EmailService, renderPoojawalaEmail } from '@poojawala/email-services';
 import { AssignmentService } from '../../../user-service/src/assignment/assignment.service';
 
@@ -286,6 +290,13 @@ export interface BookingPaymentLinkResponse {
   razorpayOrderId?: string;
   razorpayPaymentLinkId?: string;
   razorpayPaymentId?: string;
+
+  // Astrology Platform Fee Transparency Disclosures
+  platformAccessFee?: number;
+  ratePerMinute?: number | null;
+  consultationChargesNoticeTitle?: string;
+  consultationFeeNotice?: string;
+  astrologyTransparency?: AstrologyTransparencyData | null;
 }
 
 export interface RazorpayWebhookPaymentEntity {
@@ -886,6 +897,15 @@ export class PaymentService {
           );
 
           if (paymentLink && paymentLink.status === 'created') {
+            const isAstrology = booking.bookingType === BOOKING_TYPE.ASTROLOGY;
+            const ratePerMinute =
+              booking.astrologer?.astrologerProfile?.ratePerMinute ??
+              (booking as any).astrologerProfile?.ratePerMinute ??
+              null;
+            const astrologyTransparency = isAstrology
+              ? buildAstrologyTransparencyNotices(amount, ratePerMinute, false)
+              : null;
+
             return {
               paymentId: existingPayment.id,
               paymentUrl: paymentLink.short_url,
@@ -901,6 +921,11 @@ export class PaymentService {
               razorpayPaymentLinkId:
                 existingPayment.razorpayPaymentLinkId ?? undefined,
               razorpayPaymentId: existingPayment.razorpayPaymentId ?? undefined,
+              platformAccessFee: astrologyTransparency?.platformAccessFee,
+              ratePerMinute: astrologyTransparency?.ratePerMinute ?? null,
+              consultationChargesNoticeTitle: astrologyTransparency?.consultationChargesNoticeTitle,
+              consultationFeeNotice: astrologyTransparency?.consultationFeeNotice,
+              astrologyTransparency,
             };
           } else {
             // Status is cancelled, expired, paid, or partially_paid
@@ -985,6 +1010,15 @@ export class PaymentService {
         dto.description,
       );
 
+      const isAstrology = booking.bookingType === BOOKING_TYPE.ASTROLOGY;
+      const ratePerMinute =
+        booking.astrologer?.astrologerProfile?.ratePerMinute ??
+        (booking as any).astrologerProfile?.ratePerMinute ??
+        null;
+      const astrologyTransparency = isAstrology
+        ? buildAstrologyTransparencyNotices(amount, ratePerMinute, false)
+        : null;
+
       return {
         paymentId: savedPayment.id,
         paymentUrl: paymentLink.short_url,
@@ -999,6 +1033,11 @@ export class PaymentService {
         razorpayOrderId: savedPayment.razorpayOrderId ?? undefined,
         razorpayPaymentLinkId: savedPayment.razorpayPaymentLinkId ?? undefined,
         razorpayPaymentId: savedPayment.razorpayPaymentId ?? undefined,
+        platformAccessFee: astrologyTransparency?.platformAccessFee,
+        ratePerMinute: astrologyTransparency?.ratePerMinute ?? null,
+        consultationChargesNoticeTitle: astrologyTransparency?.consultationChargesNoticeTitle,
+        consultationFeeNotice: astrologyTransparency?.consultationFeeNotice,
+        astrologyTransparency,
       };
     } catch (error) {
       savedPayment.status = PAYMENT_STATUS.FAILED;
@@ -1229,7 +1268,9 @@ export class PaymentService {
         description:
           description?.trim() ||
           (booking
-            ? `Payment for booking ${booking.bookingNumber}`
+            ? (booking.bookingType === BOOKING_TYPE.ASTROLOGY
+                ? `Astrology Platform Access Fee - Booking ${booking.bookingNumber}`
+                : `Payment for booking ${booking.bookingNumber}`)
             : `Poojawala Product Purchase #${payment.id}`),
 
         customer: {
@@ -2248,7 +2289,9 @@ export class PaymentService {
     const canDownload =
       user.role === USER_ROLE.ADMIN ||
       booking.customerId === user.id ||
-      booking.purohit?.userId === user.id;
+      booking.purohit?.userId === user.id ||
+      booking.astrologerId === user.id ||
+      booking.astrologer?.id === user.id;
 
     if (!canDownload) {
       throw new ForbiddenException(
@@ -2343,15 +2386,32 @@ export class PaymentService {
         ? 'Pay After Service (Deferred)'
         : '-');
 
+    const isAstrology = booking.bookingType === BOOKING_TYPE.ASTROLOGY;
+    let astrologerName: string | undefined = undefined;
+    if (isAstrology) {
+      if (
+        isPaid ||
+        user.role === USER_ROLE.ADMIN ||
+        user.role === USER_ROLE.ASTROLOGER
+      ) {
+        astrologerName = await this.getAstrologerName(booking);
+      } else {
+        astrologerName = 'Available after payment confirmation';
+      }
+    }
+    const purohitName = !isAstrology ? this.getPurohitName(booking) : undefined;
+
     const html = paymentInvoiceTemplate({
       invoiceType: 'BOOKING',
+      bookingType: booking.bookingType ?? (isAstrology ? BOOKING_TYPE.ASTROLOGY : BOOKING_TYPE.POOJA),
       companyName: process.env['POOJAWALA_COMPANY_NAME'] ?? 'Poojawala',
       companyEmail: process.env['POOJAWALA_COMPANY_EMAIL'] ?? '-',
       companyPhone: process.env['POOJAWALA_COMPANY_PHONE'] ?? '-',
       companyAddress: process.env['POOJAWALA_COMPANY_ADDRESS'] ?? '-',
       companyGstin: process.env['POOJAWALA_GSTIN'] ?? '-',
       billingAddress: this.getBillingAddress(booking),
-      purohitName: this.getPurohitName(booking),
+      purohitName,
+      astrologerName,
       invoiceTitle,
       invoiceId,
       dateLabel: isPaid ? 'Payment Date' : 'Invoice Date',
@@ -2360,7 +2420,9 @@ export class PaymentService {
       customerName: this.getCustomerName(booking),
       customerEmail: booking.customer?.email ?? '-',
       customerPhone: booking.customer?.phone ?? '-',
-      serviceName: booking.service?.name ?? '-',
+      serviceName:
+        booking.service?.name ??
+        (isAstrology ? 'Astrology Platform Access' : '-'),
       bookingStatus: booking.status,
       paymentId: String(
         razorpayPayment?.id ??
@@ -3110,6 +3172,39 @@ export class PaymentService {
         .join(' ')
         .trim() || '-'
     );
+  }
+
+  private async getAstrologerName(booking: Booking): Promise<string> {
+    if (booking.astrologer?.firstName || booking.astrologer?.lastName) {
+      return (
+        [booking.astrologer.firstName, booking.astrologer.lastName]
+          .filter(Boolean)
+          .join(' ')
+          .trim() || '-'
+      );
+    }
+
+    if (booking.astrologerId) {
+      try {
+        const userRepo = this.dataSource.getRepository(User);
+        const astrologerUser = await userRepo.findOne({
+          where: { id: booking.astrologerId },
+        });
+        if (astrologerUser) {
+          booking.astrologer = astrologerUser;
+          return (
+            [astrologerUser.firstName, astrologerUser.lastName]
+              .filter(Boolean)
+              .join(' ')
+              .trim() || '-'
+          );
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to resolve astrologer name: ${err}`);
+      }
+    }
+
+    return '-';
   }
 
   // TODO: Replaced basic parsing with hardened batch resolution, conflict detection, and safety handling

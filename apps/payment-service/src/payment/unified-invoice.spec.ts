@@ -259,9 +259,70 @@ describe('Unified Invoice System', () => {
         expect(html).toContain('Booking No.');
         expect(html).toContain('Sacred ritual booking invoice');
         expect(html).toContain('Booking Summary');
+        expect(html).toContain('Booking Type');
+        expect(html).toContain('Pooja');
         expect(html).toContain('Satyanarayan Katha');
+        expect(html).toContain('Assigned Purohit');
         expect(html).toContain('Pt. Ramesh Shastri');
         expect(html).toContain('Voluntary donation');
+        expect(html).not.toContain('Order Summary');
+        expect(html).not.toContain('Assigned Astrologer');
+      });
+
+      it('should render Astrology booking invoice with Astrology Platform Access Fee, Total Paid to Poojawala, disclaimer, and no Remaining Balance', () => {
+        const astrologyData: PaymentInvoiceTemplateData = {
+          invoiceType: 'BOOKING',
+          bookingType: 'ASTROLOGY',
+          invoiceTitle: 'Poojawala Tax Invoice',
+          invoiceId: 'INV-PW-ASTRO-2001',
+          dateLabel: 'Payment Date',
+          companyName: 'Poojawala',
+          companyEmail: 'support@poojawala.com',
+          companyPhone: '+91 9876543210',
+          companyAddress: 'Varanasi',
+          companyGstin: '09AAACP1234A1Z5',
+          customerName: 'Suresh Kumar',
+          customerEmail: 'suresh@example.com',
+          customerPhone: '+91 9999988888',
+          billingAddress: 'Ghat Road, Varanasi',
+          bookingId: 202,
+          bookingNumber: 'PW-ASTRO-2001',
+          bookingStatus: 'ACCEPTED',
+          serviceName: 'Astrology Platform Access',
+          astrologerName: 'Acharya Vidyadhar',
+          paymentId: 'pay_astro_123',
+          orderId: 'order_astro_456',
+          paymentStatus: 'Paid',
+          paymentMethod: 'UPI',
+          statusClass: 'success',
+          errorMessage: '-',
+          currency: 'INR',
+          amount: '50.00',
+          finalAmount: '50.00',
+          paidAmount: '50.00',
+          remainingAmount: '0.00',
+          donationAmount: '0.00',
+          discountAmount: '0.00',
+          date: '25 Sep 2026, 11:00 AM',
+        };
+
+        const html = paymentInvoiceTemplate(astrologyData);
+
+        expect(html).toContain('INV-PW-ASTRO-2001');
+        expect(html).toContain('Booking Summary');
+        expect(html).toContain('Booking Type');
+        expect(html).toContain('Astrology');
+        expect(html).toContain('Assigned Astrologer');
+        expect(html).toContain('Acharya Vidyadhar');
+        expect(html).toContain('Astrology Platform Access Fee');
+        expect(html).toContain('Total Paid to Poojawala');
+        expect(html).toContain(
+          'The amount paid to Poojawala covers the astrology platform access fee only. Astrology consultation charges are separate and payable directly to the assigned astrologer at their applicable per-minute rate. Poojawala does not collect these consultation charges.',
+        );
+        expect(html).toContain('Important: Consultation Charges');
+        expect(html).not.toContain('Remaining Balance');
+        expect(html).not.toContain('service charge');
+        expect(html).not.toContain('Assigned Purohit');
         expect(html).not.toContain('Order Summary');
       });
     });
@@ -691,6 +752,239 @@ describe('Unified Invoice System', () => {
       expect(renderedHtml).toContain('525.00');
       expect(renderedHtml).not.toContain('Razorpay Fee');
       expect(renderedHtml).not.toContain('Razorpay Tax');
+    });
+
+    it('should allow astrologer to download invoice for their astrology booking and render Assigned Astrologer', async () => {
+      const mockAstrologerUser: User = {
+        id: 77,
+        role: USER_ROLE.ASTROLOGER,
+        firstName: 'Acharya',
+        lastName: 'Vidyadhar',
+        email: 'astrologer@example.com',
+      } as any;
+
+      const astrologyBooking = {
+        id: 301,
+        bookingNumber: 'PW-ASTRO-9999',
+        bookingType: 'ASTROLOGY',
+        customerId: 10,
+        astrologerId: 77,
+        customer: mockCustomerUser,
+        astrologer: mockAstrologerUser,
+        status: BOOKING_STATUS.ACCEPTED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+        finalAmount: 50,
+        paidAmount: 50,
+        donationAmount: 0,
+        discountAmount: 0,
+        customerAddress: {
+          addressLine1: 'Ganga Ghat',
+          city: 'Varanasi',
+        } as any,
+      } as any;
+
+      mockBookingRepo.findBookingById.mockResolvedValue(astrologyBooking);
+      mockPaymentRepo.findLatestByBookingId.mockResolvedValue({
+        id: 150,
+        amount: 50,
+        paymentMethod: 'UPI',
+        status: PAYMENT_STATUS.SUCCESS,
+        paidAt: new Date(),
+      });
+
+      const result = await service.generateInvoicePdf(mockAstrologerUser, 301);
+      expect(result).toBeDefined();
+      expect(result.filename).toBe('invoice-PW-ASTRO-9999.pdf');
+
+      const renderedHtml = result.buffer.toString();
+      expect(renderedHtml).toContain('Booking Summary');
+      expect(renderedHtml).toContain('PW-ASTRO-9999');
+      expect(renderedHtml).toContain('Booking Type');
+      expect(renderedHtml).toContain('Astrology');
+      expect(renderedHtml).toContain('Assigned Astrologer');
+      expect(renderedHtml).toContain('Acharya Vidyadhar');
+      expect(renderedHtml).toContain('Astrology Platform Access Fee');
+      expect(renderedHtml).toContain('Total Paid to Poojawala');
+      expect(renderedHtml).toContain(
+        'The amount paid to Poojawala covers the astrology platform access fee only',
+      );
+      expect(renderedHtml).not.toContain('Remaining Balance');
+      expect(renderedHtml).not.toContain('Assigned Purohit');
+    });
+
+    it('should protect astrologer identity in invoice before payment is verified for customer', async () => {
+      const mockAstrologerUser: User = {
+        id: 77,
+        role: USER_ROLE.ASTROLOGER,
+        firstName: 'Acharya',
+        lastName: 'Vidyadhar',
+        email: 'astrologer@example.com',
+      } as any;
+
+      const unpaidAstrologyBooking = {
+        id: 302,
+        bookingNumber: 'PW-ASTRO-UNPAID',
+        bookingType: 'ASTROLOGY',
+        customerId: 10,
+        astrologerId: 77,
+        customer: mockCustomerUser,
+        astrologer: mockAstrologerUser,
+        status: BOOKING_STATUS.PENDING,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+        finalAmount: 50,
+        paidAmount: 0,
+        donationAmount: 0,
+        discountAmount: 0,
+        customerAddress: {
+          addressLine1: 'Ganga Ghat',
+          city: 'Varanasi',
+        } as any,
+      } as any;
+
+      mockBookingRepo.findBookingById.mockResolvedValue(unpaidAstrologyBooking);
+      mockPaymentRepo.findLatestByBookingId.mockResolvedValue(null);
+
+      const result = await service.generateInvoicePdf(mockCustomerUser, 302);
+      const renderedHtml = result.buffer.toString();
+
+      expect(renderedHtml).toContain('Available after payment confirmation');
+      expect(renderedHtml).not.toContain('Acharya Vidyadhar');
+    });
+
+    it('should throw ForbiddenException if another customer tries to download astrology invoice', async () => {
+      const astrologyBooking = {
+        id: 303,
+        bookingNumber: 'PW-ASTRO-OTHER',
+        bookingType: 'ASTROLOGY',
+        customerId: 10,
+        astrologerId: 77,
+      } as any;
+
+      mockBookingRepo.findBookingById.mockResolvedValue(astrologyBooking);
+
+      await expect(
+        service.generateInvoicePdf(mockOtherCustomerUser, 303),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should render invoice correctly with dynamic fee (e.g. ₹120) and not hardcode ₹50', () => {
+      const dynamicFeeData: PaymentInvoiceTemplateData = {
+        invoiceType: 'BOOKING',
+        bookingType: 'ASTROLOGY',
+        invoiceTitle: 'Poojawala Tax Invoice',
+        invoiceId: 'INV-PW-ASTRO-DYNAMIC',
+        dateLabel: 'Payment Date',
+        companyName: 'Poojawala',
+        companyEmail: 'support@poojawala.com',
+        customerName: 'Aarav Patel',
+        bookingId: 401,
+        bookingNumber: 'PW-ASTRO-DYN-01',
+        bookingStatus: 'ACCEPTED',
+        serviceName: 'Astrology Platform Access',
+        astrologerName: 'Pandit Shastri',
+        paymentId: 'pay_dyn_123',
+        paymentStatus: 'Paid',
+        paymentMethod: 'UPI',
+        statusClass: 'success',
+        currency: 'INR',
+        amount: '120.00',
+        finalAmount: '120.00',
+        paidAmount: '120.00',
+      };
+
+      const html = paymentInvoiceTemplate(dynamicFeeData);
+      expect(html).toContain('INR 120.00');
+      expect(html).toContain('Total Paid to Poojawala');
+      expect(html).toContain('Astrology Platform Access Fee');
+      expect(html).not.toContain('INR 50.00');
+      expect(html).toContain('Important: Consultation Charges');
+      expect(html).not.toContain('Remaining Balance');
+    });
+
+    it('should handle extremely long customer name and address without breaking layout', () => {
+      const longName =
+        'VeryLongCustomerNameThatExceedsNormalLengthWithoutSpacesToTestWrappingAndLayoutSafety1234567890';
+      const longAddress =
+        'House No 999, Ultra Extended Complex Name, Behind Ancient Heritage Site, Very Long Street Name That Keeps Going On And On, Varanasi, Uttar Pradesh, 221001, India';
+
+      const data: PaymentInvoiceTemplateData = {
+        invoiceType: 'BOOKING',
+        bookingType: 'ASTROLOGY',
+        invoiceTitle: 'Poojawala Tax Invoice',
+        invoiceId: 'INV-PW-ASTRO-LONG',
+        customerName: longName,
+        billingAddress: longAddress,
+        bookingId: 402,
+        bookingNumber: 'PW-ASTRO-LONG-01',
+        serviceName: 'Astrology Platform Access',
+        astrologerName: 'Acharya Vidyadhar',
+        paymentStatus: 'Paid',
+        statusClass: 'success',
+        currency: 'INR',
+        amount: '75.00',
+        finalAmount: '75.00',
+      };
+
+      const html = paymentInvoiceTemplate(data);
+      expect(html).toContain(longName);
+      expect(html).toContain(longAddress);
+      expect(html).toContain('Astrology Platform Access Fee');
+      expect(html).toContain('Total Paid to Poojawala');
+    });
+  });
+
+  describe('Astrology Transparency Utilities & Payment Disclosures', () => {
+    it('should build pre-payment disclosure with per-minute rate when available', () => {
+      const { buildAstrologyTransparencyNotices } = require('@poojawala/common');
+      const notices = buildAstrologyTransparencyNotices(50, 25, false);
+
+      expect(notices.platformAccessFee).toBe(50);
+      expect(notices.ratePerMinute).toBe(25);
+      expect(notices.isUnlocked).toBe(false);
+      expect(notices.consultationChargesNoticeTitle).toBe('Astrology Consultation Charges');
+      expect(notices.consultationFeeNotice).toContain('Pay ₹50 to unlock the astrologer\'s details');
+      expect(notices.consultationFeeNotice).toContain('rate of ₹25/min');
+      expect(notices.consultationDirectBillingNotice).toBeNull();
+    });
+
+    it('should build pre-payment disclosure without fabricating rate when rate is null/undefined', () => {
+      const { buildAstrologyTransparencyNotices } = require('@poojawala/common');
+      const notices = buildAstrologyTransparencyNotices(75, null, false);
+
+      expect(notices.platformAccessFee).toBe(75);
+      expect(notices.ratePerMinute).toBeNull();
+      expect(notices.isUnlocked).toBe(false);
+      expect(notices.consultationFeeNotice).toContain('Pay ₹75 to unlock the astrologer\'s details');
+      expect(notices.consultationFeeNotice).toContain('Please confirm the rate with the astrologer before starting');
+      expect(notices.consultationFeeNotice).not.toContain('undefined');
+      expect(notices.consultationFeeNotice).not.toContain('null');
+    });
+
+    it('should build unlocked astrologer details disclosure explaining direct billing', () => {
+      const { buildAstrologyTransparencyNotices } = require('@poojawala/common');
+      const notices = buildAstrologyTransparencyNotices(50, 30, true);
+
+      expect(notices.isUnlocked).toBe(true);
+      expect(notices.consultationChargesNoticeTitle).toBe('Direct Astrologer Billing');
+      expect(notices.consultationDirectBillingNotice).toContain(
+        'Consultation charges (₹30/min) are separate from the Poojawala platform access fee',
+      );
+      expect(notices.consultationDirectBillingNotice).toContain(
+        'Payment for the consultation is made directly to the astrologer, not through Poojawala',
+      );
+    });
+
+    it('should build unlocked disclosure without rate when rate is unavailable', () => {
+      const { buildAstrologyTransparencyNotices } = require('@poojawala/common');
+      const notices = buildAstrologyTransparencyNotices(50, undefined, true);
+
+      expect(notices.ratePerMinute).toBeNull();
+      expect(notices.consultationDirectBillingNotice).toContain(
+        'Consultation charges are separate from the Poojawala platform access fee',
+      );
+      expect(notices.consultationDirectBillingNotice).toContain(
+        'Please confirm the applicable per-minute rate with the astrologer',
+      );
     });
   });
 });
