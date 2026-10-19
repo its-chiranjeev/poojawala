@@ -11,7 +11,7 @@ export class ComplaintController {
 
   @Post('add')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ASTROLOGER)
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(
     FilesInterceptor('evidence', 5, {
@@ -37,7 +37,7 @@ export class ComplaintController {
 
   @Get('all')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ASTROLOGER)
   async getComplaints(
     @Req() req: any,
     @Query(
@@ -100,7 +100,7 @@ export class ComplaintController {
 
   @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT)
+  @Roles(USER_ROLE.ADMIN, USER_ROLE.CUSTOMER, USER_ROLE.PUROHIT, USER_ROLE.ASTROLOGER)
   @HttpCode(HttpStatus.OK)
   async getComplaintById(
     @Req() req: any,

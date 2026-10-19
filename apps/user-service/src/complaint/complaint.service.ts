@@ -110,7 +110,9 @@ export class ComplaintService {
           user.username ||
           (user.role === USER_ROLE.PUROHIT
             ? `Purohit #${user.id}`
-            : `Customer #${user.id}`);
+            : user.role === USER_ROLE.ASTROLOGER
+              ? `Astrologer #${user.id}`
+              : `Customer #${user.id}`);
 
         const rawSubjectOrDesc =
           dto.subject?.trim() ||
@@ -276,10 +278,25 @@ export class ComplaintService {
         await this.validatePurohitComplaintAccess(user, booking);
         break;
 
+      case USER_ROLE.ASTROLOGER:
+        this.validateAstrologerComplaintAccess(user, booking);
+        break;
+
       default:
         throw new ForbiddenException(
-          'Only customers and purohits can raise complaints',
+          'Only customers, purohits, and astrologers can raise complaints',
         );
+    }
+  }
+
+  private validateAstrologerComplaintAccess(
+    user: User,
+    booking: Booking,
+  ): void {
+    if (booking.astrologerId !== user.id) {
+      throw new ForbiddenException(
+        'You cannot raise a complaint for this booking',
+      );
     }
   }
 
@@ -322,6 +339,7 @@ export class ComplaintService {
       .leftJoinAndSelect('booking.customer', 'customer')
       .leftJoinAndSelect('booking.purohit', 'purohit')
       .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('booking.astrologer', 'astrologer')
       .where('booking.id = :bookingId', {
         bookingId,
       })

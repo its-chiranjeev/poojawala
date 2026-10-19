@@ -26,6 +26,7 @@ describe('ComplaintService - Booking and General Complaints', () => {
 
   let testCustomer: User;
   let testPurohitUser: User;
+  let testAstrologerUser: User;
   let testPurohitProfile: PurohitProfile;
   let testBooking: Booking;
 
@@ -47,6 +48,16 @@ describe('ComplaintService - Booking and General Complaints', () => {
       firstName: 'Acharya',
       lastName: 'Shastri',
       role: USER_ROLE.PUROHIT,
+      status: USER_STATUS.ACTIVE,
+    } as unknown as User;
+
+    testAstrologerUser = {
+      id: 3,
+      email: 'astrologer@test.com',
+      username: 'astrologer1',
+      firstName: 'Pandit',
+      lastName: 'Varma',
+      role: USER_ROLE.ASTROLOGER,
       status: USER_STATUS.ACTIVE,
     } as unknown as User;
 
@@ -389,6 +400,141 @@ describe('ComplaintService - Booking and General Complaints', () => {
         'COMPLAINT',
         expect.anything(),
       );
+    });
+  });
+
+  // =========================================================================
+  // Test 11 — Astrologer complaints
+  // =========================================================================
+  describe('Test 11 — Astrologer complaints', () => {
+    it('creates booking complaint from assigned astrologer and notifies admin', async () => {
+      const astrologerBooking = {
+        id: 200,
+        bookingNumber: 'BK-ASTRO-1',
+        customerId: 1,
+        astrologerId: 3,
+        customer: testCustomer,
+      } as unknown as Booking;
+
+      mockBookingRepository.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(astrologerBooking),
+      });
+
+      const dto: CreateComplaintDto = {
+        bookingId: 200,
+        subject: 'Customer did not join call',
+        description: 'Customer did not attend the scheduled astrology consultation.',
+        category: COMPLAINT_CATEGORY.CUSTOMER_BEHAVIOR,
+      };
+
+      const result = await service.createComplaint(testAstrologerUser, dto, []);
+
+      expect(result.message).toBe('Complaint created successfully');
+      expect(result.data.bookingId).toBe(200);
+
+      expect(mockNotificationService.notifyAdmins).toHaveBeenCalledWith(
+        'New Booking Complaint',
+        'New booking complaint received from Pandit Varma for Booking #BK-ASTRO-1: Customer did not join call.',
+        NOTIFICATION_TYPE.BOOKING,
+        501,
+        'COMPLAINT',
+        expect.objectContaining({
+          raisedById: testAstrologerUser.id,
+          raisedByName: 'Pandit Varma',
+        }),
+      );
+    });
+
+    it('astrologer cannot complain about a booking assigned to another astrologer', async () => {
+      const otherAstrologerBooking = {
+        id: 200,
+        bookingNumber: 'BK-ASTRO-2',
+        customerId: 1,
+        astrologerId: 999, // different astrologer
+        customer: testCustomer,
+      } as unknown as Booking;
+
+      mockBookingRepository.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(otherAstrologerBooking),
+      });
+
+      const dto: CreateComplaintDto = {
+        bookingId: 200,
+        subject: 'Unauthorized astrologer complaint',
+        description: 'Trying to complain against another astrologer booking.',
+      };
+
+      await expect(
+        service.createComplaint(testAstrologerUser, dto, []),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(mockComplaintRepository.save).not.toHaveBeenCalled();
+      expect(mockNotificationService.notifyAdmins).not.toHaveBeenCalled();
+    });
+
+    it('astrologer can create general complaint without booking ID', async () => {
+      const dto: CreateComplaintDto = {
+        subject: 'Payout settlement query',
+        description: 'Need assistance with weekly settlement details.',
+        category: COMPLAINT_CATEGORY.PAYMENT_ISSUE,
+      };
+
+      const result = await service.createComplaint(testAstrologerUser, dto, []);
+
+      expect(result.message).toBe('Complaint created successfully');
+      expect(mockNotificationService.notifyAdmins).toHaveBeenCalledWith(
+        'New General Complaint',
+        'New general complaint received from Pandit Varma: Payout settlement query.',
+        NOTIFICATION_TYPE.SYSTEM,
+        501,
+        'COMPLAINT',
+        expect.objectContaining({
+          raisedById: testAstrologerUser.id,
+          raisedByName: 'Pandit Varma',
+        }),
+      );
+    });
+
+    it('astrologer getComplaints filters by raisedById', async () => {
+      mockComplaintRepository.findComplaints.mockResolvedValue({
+        complaints: [{ id: 501, raisedById: testAstrologerUser.id }],
+        total: 1,
+      });
+
+      const res = await service.getComplaints(testAstrologerUser, {
+        page: 1,
+        limit: 10,
+      } as any);
+
+      expect(mockComplaintRepository.findComplaints).toHaveBeenCalledWith(
+        expect.objectContaining({
+          raisedById: testAstrologerUser.id,
+        }),
+      );
+      expect(res.data.length).toBe(1);
+    });
+
+    it('astrologer can get their own complaint by ID but not others', async () => {
+      mockComplaintRepository.findComplaintById.mockResolvedValueOnce({
+        id: 501,
+        raisedById: testAstrologerUser.id,
+      });
+
+      const res = await service.getComplaintById(testAstrologerUser, 501);
+      expect(res.id).toBe(501);
+
+      mockComplaintRepository.findComplaintById.mockResolvedValueOnce({
+        id: 502,
+        raisedById: 999,
+      });
+
+      await expect(
+        service.getComplaintById(testAstrologerUser, 502),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });

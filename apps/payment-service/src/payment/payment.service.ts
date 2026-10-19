@@ -1327,9 +1327,9 @@ export class PaymentService {
 
         /*
          * This identifies the local DB payment row
-         * without storing paymentLinkId.
+         * without storing paymentLinkId. Timestamp ensures uniqueness across retries/resets.
          */
-        reference_id: `payment_${payment.id}`,
+        reference_id: `payment_${payment.id}_${Date.now()}`,
 
         notes: {
           paymentId: String(payment.id),
@@ -1856,10 +1856,13 @@ export class PaymentService {
     }
 
     if (referenceId?.startsWith('payment_')) {
-      const parsedPaymentId = Number(referenceId.replace('payment_', ''));
+      const match = referenceId.match(/^payment_(\d+)(?:_.*)?$/);
+      if (match && match[1]) {
+        const parsedPaymentId = Number(match[1]);
 
-      if (Number.isInteger(parsedPaymentId) && parsedPaymentId > 0) {
-        return parsedPaymentId;
+        if (Number.isInteger(parsedPaymentId) && parsedPaymentId > 0) {
+          return parsedPaymentId;
+        }
       }
     }
 
