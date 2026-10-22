@@ -83,6 +83,8 @@ export class PaymentController {
     @Req() req: RawBodyRequest<Request>,
     @Headers('x-razorpay-signature')
     signature: string,
+    @Headers('x-razorpay-event-id')
+    eventId?: string,
   ) {
     const rawBody = req.rawBody;
 
@@ -98,6 +100,7 @@ export class PaymentController {
 
     await this.paymentService.processRazorpayWebhook(
       req.body as RazorpayWebhookPayload,
+      eventId,
     );
 
     return {
@@ -208,8 +211,31 @@ export class PaymentController {
 
     @Req()
     req: AuthenticatedRequest,
+
+    @Headers('x-idempotency-key')
+    idempotencyHeader?: string,
   ) {
+    if (idempotencyHeader?.trim()) {
+      dto.idempotencyKey = idempotencyHeader.trim();
+    }
     return this.paymentService.createRefund(req.user, paymentId, dto);
+  }
+
+  @Post(':paymentId/refund/:refundPaymentId/reconcile')
+  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
+  @Roles(USER_ROLE.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  async reconcileRefund(
+    @Param('paymentId', ParseIntPipe)
+    paymentId: number,
+
+    @Param('refundPaymentId', ParseIntPipe)
+    refundPaymentId: number,
+
+    @Req()
+    req: AuthenticatedRequest,
+  ) {
+    return this.paymentService.reconcileRefund(req.user, paymentId, refundPaymentId);
   }
   @Get('admin/payouts')
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)

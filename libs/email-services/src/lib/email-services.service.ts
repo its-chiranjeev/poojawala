@@ -926,5 +926,52 @@ export class EmailService {
       html,
     });
   }
+
+  async sendRefundEmail(data: {
+    email: string;
+    customerName?: string;
+    amount: number;
+    currency?: string;
+    refundId: string | number;
+    bookingNumber?: string;
+    reason?: string;
+    status: string;
+  }): Promise<void> {
+    const isSuccess = data.status === 'SUCCESS' || data.status === 'processed';
+    const statusBadge = isSuccess ? 'Refund Processed' : 'Refund Initiated';
+    const formattedAmount = `₹${data.amount.toFixed(2)}`;
+    const subject = `Refund Confirmation - ${formattedAmount} - ${platformBrandName}`;
+    const preheaderText = `Your refund of ${formattedAmount} has been ${isSuccess ? 'processed' : 'initiated'}.`;
+    const emailMessage = `A refund of <strong>${formattedAmount}</strong> has been ${isSuccess ? 'processed successfully' : 'initiated'} for your payment.`;
+
+    const rows: EmailTableRow[] = [
+      { label: 'Refund Amount', value: formattedAmount, isHighlight: true },
+      { label: 'Refund Reference', value: `#${data.refundId}` },
+      ...(data.bookingNumber ? [{ label: 'Booking Number', value: `#${data.bookingNumber}` }] : []),
+      { label: 'Status', value: isSuccess ? 'Processed' : 'Initiated', isHighlight: true },
+      ...(data.reason ? [{ label: 'Reason', value: data.reason }] : []),
+    ];
+
+    const html = renderPoojawalaEmail({
+      statusBadge,
+      userName: data.customerName || 'Devotee',
+      preheaderText,
+      emailMessage,
+      detailsTable: {
+        title: 'Refund Summary',
+        rows,
+      },
+      highlight: {
+        title: 'Credit Timeline',
+        text: 'The refunded amount will be credited back to your original source payment method within 5-7 business days, depending on your bank.',
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject,
+      html,
+    });
+  }
 }
 

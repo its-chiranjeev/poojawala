@@ -20,4 +20,9 @@ export class CreateRefundDto {
   @IsString()
   @MaxLength(255)
   reason?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  idempotencyKey?: string;
 }

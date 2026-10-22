@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, In, IsNull, Not, Repository } from 'typeorm';
+import { EntityManager, FindOptionsWhere, In, IsNull, Not, Repository } from 'typeorm';
 import {
   Payment,
   PAYMENT_STATUS,
@@ -848,8 +848,9 @@ export class PaymentRepository extends BaseRepository<Payment> {
 
   async getReservedRefundAmountByRazorpayPaymentId(
     razorpayPaymentId: string,
+    manager?: EntityManager,
   ): Promise<number> {
-    const result = await this.repo
+    const qb = (manager ? manager.getRepository(Payment) : this.repo)
       .createQueryBuilder('refund')
       .select('COALESCE(SUM(refund.amount), 0)', 'total')
       .where('refund.paymentType = :paymentType', {
@@ -860,11 +861,23 @@ export class PaymentRepository extends BaseRepository<Payment> {
       })
       .andWhere('refund.status IN (:...statuses)', {
         statuses: [PAYMENT_STATUS.PENDING, PAYMENT_STATUS.SUCCESS],
-      })
-      .getRawOne<{
-        total: string;
-      }>();
+      });
+
+    const result = await qb.getRawOne<{
+      total: string;
+    }>();
 
     return Number(result?.total ?? 0);
+  }
+
+  async findByIdempotencyKey(
+    idempotencyKey: string,
+    manager?: EntityManager,
+  ): Promise<Payment | null> {
+    const repo = manager ? manager.getRepository(Payment) : this.repo;
+    return repo.findOne({
+      where: { idempotencyKey },
+      relations: ['paymentBookings', 'paymentBookings.booking'],
+    });
   }
 }
