@@ -107,9 +107,9 @@ export class ServiceRepository extends BaseRepository<Service> {
       qb.andWhere('service.isGlobal = :isGlobal', { isGlobal: parsedIsGlobal });
     }
     */
-    // Standalone isGlobal filter applies only when city is NOT provided.
-    // When city IS provided, global services are automatically included via inclusive OR logic.
-    if (parsedIsGlobal !== undefined && (!city || city.trim() === '')) {
+    // Standalone isGlobal filter applies only when city is NOT provided and neither isOnline nor isOffline is active.
+    // When isOnline=true or isOffline=true is active, all online services or all offline services are returned.
+    if (parsedIsGlobal !== undefined && (!city || city.trim() === '') && parsedIsOnline !== true && parsedIsOffline !== true) {
       qb.andWhere('service.isGlobal = :isGlobal', { isGlobal: parsedIsGlobal });
     }
 
@@ -227,13 +227,12 @@ export class ServiceRepository extends BaseRepository<Service> {
     */
     // Production inclusive city & online filter:
     // When a city filter IS provided:
-    // Include:
-    // - Online services available globally (isOnline = true)
-    // - Offline services whose configured cities match the requested city (isOffline = true and matches city or has no city restrictions)
-    // When NO city filter is provided:
-    // All eligible services are returned without restricting by isOnline or isOffline.
+    // When isOnline=true: all online services are returned (available globally).
+    // When isOffline=true: all offline services are returned (all global offline + all city-specific offline).
+    // When city filter is provided (without isOnline=true or isOffline=true):
+    // Include online services and offline services matching that city (or global).
     const normalizedCity = city ? city.trim() : undefined;
-    if (normalizedCity && normalizedCity !== '') {
+    if (normalizedCity && normalizedCity !== '' && parsedIsOnline !== true && parsedIsOffline !== true) {
       const cityFilterJson = JSON.stringify([{ name: normalizedCity }]);
       qb.andWhere(
         new Brackets((cityQb) => {

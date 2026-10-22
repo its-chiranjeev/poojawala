@@ -560,18 +560,53 @@ export class ServiceService {
         validatedTemple = await this.validateTemple(dto.templeId);
       }
 
-      const duplicateConditions: any[] = [{ name: dto.name.trim() }];
-      if (dto.slug && dto.slug.trim()) {
-        duplicateConditions.push({ slug: dto.slug.trim() });
+      // Availability modes (isOnline, isOffline):
+      // Require at least one availability mode to be true.
+      // Defaults: isOnline = false, isOffline = true for backward compatibility.
+      const resolvedIsOnline = dto.isOnline !== undefined
+        ? Boolean(dto.isOnline)
+        : false;
+      const resolvedIsOffline = dto.isOffline !== undefined
+        ? Boolean(dto.isOffline)
+        : (!dto.isOnline);
+
+      if (!resolvedIsOnline && !resolvedIsOffline) {
+        throw new BadRequestException('Service must be available either online, offline, or both.');
       }
-      const existing = await this.serviceRepository.findOne({
-        where: duplicateConditions,
+
+      if (dto.slug && dto.slug.trim()) {
+        const existingSlug = await this.serviceRepository.findOne({
+          where: { slug: dto.slug.trim() },
+        });
+        if (existingSlug) {
+          throw new ConflictException('Service with same slug already exists');
+        }
+      }
+
+      const existingWithName = await this.serviceRepository.find({
+        where: { name: dto.name.trim() },
       });
 
-      if (existing) {
-        throw new ConflictException(
-          'Service with same name or slug already exists',
-        );
+      const conflictService = (existingWithName || []).find((s) => {
+        const sIsOnline = Boolean(s.isOnline);
+        const sIsOffline = Boolean(s.isOffline);
+        return (resolvedIsOnline && sIsOnline) || (resolvedIsOffline && sIsOffline);
+      });
+
+      if (conflictService) {
+        if (resolvedIsOnline && conflictService.isOnline && resolvedIsOffline && conflictService.isOffline) {
+          throw new ConflictException(
+            `An online and offline service with name "${dto.name.trim()}" already exists`,
+          );
+        } else if (resolvedIsOnline && conflictService.isOnline) {
+          throw new ConflictException(
+            `An online service with name "${dto.name.trim()}" already exists`,
+          );
+        } else {
+          throw new ConflictException(
+            `An offline service with name "${dto.name.trim()}" already exists`,
+          );
+        }
       }
 
       if (!dto.plans) {
@@ -668,19 +703,6 @@ export class ServiceService {
       // Final condition: agar service main city h toh isGlobal = false, agar ek bhi city nahi h toh isGlobal = true
       const resolvedIsGlobal = validCities.length === 0;
 
-      // Availability modes (isOnline, isOffline):
-      // Require at least one availability mode to be true.
-      // Defaults: isOnline = false, isOffline = true for backward compatibility.
-      const resolvedIsOnline = dto.isOnline !== undefined
-        ? Boolean(dto.isOnline)
-        : false;
-      const resolvedIsOffline = dto.isOffline !== undefined
-        ? Boolean(dto.isOffline)
-        : (!dto.isOnline);
-
-      if (!resolvedIsOnline && !resolvedIsOffline) {
-        throw new BadRequestException('Service must be available either online, offline, or both.');
-      }
 
       let finalSortOrder: number;
       if (dto.sortOrder != null && Number(dto.sortOrder) > 0) {
@@ -838,14 +860,15 @@ export class ServiceService {
       throw new NotFoundException('Service not found');
     }
 
-    if (dto.name && dto.name.trim()) {
-      const existingName = await this.serviceRepository.findOne({
-        where: { name: dto.name.trim() },
-      });
+    const finalIsOnline = dto.isOnline !== undefined
+      ? Boolean(dto.isOnline)
+      : (service.isOnline ?? false);
+    const finalIsOffline = dto.isOffline !== undefined
+      ? Boolean(dto.isOffline)
+      : (service.isOffline ?? true);
 
-      if (existingName && existingName.id !== id) {
-        throw new ConflictException('Service with same name already exists');
-      }
+    if (!finalIsOnline && !finalIsOffline) {
+      throw new BadRequestException('Service must be available either online, offline, or both.');
     }
 
     if (dto.slug && dto.slug.trim()) {
@@ -855,6 +878,36 @@ export class ServiceService {
 
       if (existingSlug && existingSlug.id !== id) {
         throw new ConflictException('Service with same slug already exists');
+      }
+    }
+
+    const targetName = dto.name !== undefined ? dto.name.trim() : service.name.trim();
+    if (targetName) {
+      const existingWithName = await this.serviceRepository.find({
+        where: { name: targetName },
+      });
+
+      const conflictService = (existingWithName || []).find((s) => {
+        if (s.id === id) return false;
+        const sIsOnline = Boolean(s.isOnline);
+        const sIsOffline = Boolean(s.isOffline);
+        return (finalIsOnline && sIsOnline) || (finalIsOffline && sIsOffline);
+      });
+
+      if (conflictService) {
+        if (finalIsOnline && conflictService.isOnline && finalIsOffline && conflictService.isOffline) {
+          throw new ConflictException(
+            `An online and offline service with name "${targetName}" already exists`,
+          );
+        } else if (finalIsOnline && conflictService.isOnline) {
+          throw new ConflictException(
+            `An online service with name "${targetName}" already exists`,
+          );
+        } else {
+          throw new ConflictException(
+            `An offline service with name "${targetName}" already exists`,
+          );
+        }
       }
     }
 
@@ -1035,19 +1088,6 @@ export class ServiceService {
       };
     }
 
-    // Resolve availability flags (isOnline, isOffline):
-    // Support partial updates: if only one flag is supplied, preserve the other flag's existing value.
-    // Validate the final resulting state so both flags cannot become false.
-    const finalIsOnline = dto.isOnline !== undefined
-      ? Boolean(dto.isOnline)
-      : (service.isOnline ?? false);
-    const finalIsOffline = dto.isOffline !== undefined
-      ? Boolean(dto.isOffline)
-      : (service.isOffline ?? true);
-
-    if (!finalIsOnline && !finalIsOffline) {
-      throw new BadRequestException('Service must be available either online, offline, or both.');
-    }
 
     if (dto.sortOrder !== undefined && dto.sortOrder !== null) {
       const newSortOrder = Number(dto.sortOrder);

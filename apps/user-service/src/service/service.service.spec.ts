@@ -137,6 +137,7 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
       create: jest.fn((data) => ({ ...data, id: 101 })),
       save: jest.fn(async (entity) => ({ ...entity, id: entity.id || 101 })),
       findOne: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
       findAllServices: jest.fn(),
       findById: jest.fn(),
       getMaxSortOrder: jest.fn().mockResolvedValue(0),
@@ -312,8 +313,8 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
 
       const result = await service.createService(dto, {}, 1);
 
-      expect(mockServiceRepo.findOne).toHaveBeenCalledWith({
-        where: [{ name: 'Puja Without Slug' }],
+      expect(mockServiceRepo.find).toHaveBeenCalledWith({
+        where: { name: 'Puja Without Slug' },
       });
       expect(result.data.slug).toBeNull();
     });
@@ -335,7 +336,10 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
       const result = await service.createService(dto, {}, 1);
 
       expect(mockServiceRepo.findOne).toHaveBeenCalledWith({
-        where: [{ name: 'Hanuman Special Puja' }, { slug: 'hanuman-special-puja' }],
+        where: { slug: 'hanuman-special-puja' },
+      });
+      expect(mockServiceRepo.find).toHaveBeenCalledWith({
+        where: { name: 'Hanuman Special Puja' },
       });
       expect(result.data.templeId).toBe(10);
       expect(result.data.slug).toBe('hanuman-special-puja');
@@ -391,10 +395,12 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
     });
 
     it('7. Duplicate name check', async () => {
-      mockServiceRepo.findOne.mockResolvedValue({ id: 1, name: 'Hanuman Puja' });
+      mockServiceRepo.find.mockResolvedValue([{ id: 1, name: 'Hanuman Puja', isOffline: true, isOnline: false }]);
 
       const dto: CreateServiceDto = {
         name: 'Hanuman Puja',
+        isOffline: true,
+        isOnline: false,
         plans: { basic: { price: 500 }, standard: { price: 1000 } },
         commissionPercentage: 10,
         durationMinutes: 60,
@@ -402,6 +408,28 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
       };
 
       await expect(service.createService(dto, {}, 1)).rejects.toThrow(ConflictException);
+    });
+
+    it('7b. Allows same name service when separated by online and offline', async () => {
+      // Existing service is offline only
+      mockServiceRepo.find.mockResolvedValue([{ id: 1, name: 'Hanuman Puja', isOffline: true, isOnline: false }]);
+      mockServiceRepo.findOne.mockResolvedValue(null);
+
+      // New service is online only
+      const dto: CreateServiceDto = {
+        name: 'Hanuman Puja',
+        isOnline: true,
+        isOffline: false,
+        plans: { basic: { price: 500 }, standard: { price: 1000 } },
+        commissionPercentage: 10,
+        durationMinutes: 60,
+        requiresVenue: false,
+      };
+
+      const result = await service.createService(dto, {}, 1);
+      expect(result.success).toBe(true);
+      expect(result.data.isOnline).toBe(true);
+      expect(result.data.isOffline).toBe(false);
     });
 
     it('8. Duplicate slug checked only when slug is provided', async () => {
