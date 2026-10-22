@@ -1290,5 +1290,5 @@ export class AuthModuleService {
   //     message: 'Purohit onboarding initiated. Profile pending admin verification.',
   //     ...tokenData,
   //   };
-  // }
 }
+

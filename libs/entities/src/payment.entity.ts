@@ -13,12 +13,13 @@ import {
 import { Booking } from './booking.entity';
 import { User } from './user.entity';
 import { PaymentBooking } from './payment-booking.entity';
-import { PurohitBankAccount } from './purohit-bank-account.entity';
 import { Order } from './order.entity';
+import { BankAccount } from './bank-account.entity';
 
 export enum PAYMENT_TYPE {
   BOOKING_PAYMENT = 'BOOKING_PAYMENT',
   PUROHIT_PAYOUT = 'PUROHIT_PAYOUT',
+  ASTROLOGER_PAYOUT = 'ASTROLOGER_PAYOUT',
   CUSTOMER_REFUND = 'CUSTOMER_REFUND',
   DONATION = 'DONATION',
   PRODUCT_PAYMENT = 'PRODUCT_PAYMENT',
@@ -156,12 +157,12 @@ export class Payment {
   @Column({ type: 'varchar', length: 100, nullable: true, unique: true })
   idempotencyKey?: string;
 
-  @Column({ type: 'int', nullable: true })
-  purohitBankAccountId?: number;
+  @Column({ name: 'bankAccountId', type: 'int', nullable: true })
+  bankAccountId?: number;
 
-  @ManyToOne(() => PurohitBankAccount, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'purohitBankAccountId' })
-  purohitBankAccount?: PurohitBankAccount;
+  @ManyToOne(() => BankAccount, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'bankAccountId' })
+  bankAccount?: BankAccount;
 
   @Column({ type: 'text', nullable: true })
   remark?: string;
@@ -176,5 +177,5 @@ export class Payment {
   updatedAt!: Date;
 
   @DeleteDateColumn()
-    deletedAt?: Date;
+  deletedAt?: Date;
 }

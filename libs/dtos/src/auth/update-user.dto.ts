@@ -135,6 +135,24 @@ export class UpdateUserDto {
   commissionPrice?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  astrologyPrice?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  commissionPercentage?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  astrologerPayout?: number;
+
+  @IsOptional()
   @IsString()
   @Transform(({ value }) => value?.trim())
   specification?: string;

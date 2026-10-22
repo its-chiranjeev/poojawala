@@ -74,12 +74,24 @@ export class AstrologerProfile {
   avgRating!: number;
 
   /** Per minute consultation rate (e.g. ₹15.00/min) */
-  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0.0 })
-  ratePerMinute!: number;
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  ratePerMinute?: number | null;
 
   /** Astrology platform commission price (e.g. ₹50.00) */
-  @Column({ type: 'decimal', precision: 10, scale: 2, default: 50.0 })
-  commissionPrice!: number;
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  commissionPrice?: number | null;
+
+  /** Base astrology consultation price (e.g. ₹500.00) */
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  astrologyPrice?: number | null;
+
+  /** Commission percentage applied to astrology consultations (e.g. 10.00%) */
+  @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
+  commissionPercentage?: number | null;
+
+  /** Net astrologer payout (astrologyPrice - commissionPrice) */
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  astrologerPayout?: number | null;
 
   @CreateDateColumn()
   createdAt!: Date;

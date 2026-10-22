@@ -32,8 +32,8 @@ import { UserService } from './user.service';
 import type { Response } from 'express';
 import * as crypto from 'crypto';
 import {
-  CreatePurohitBankAccountDto,
-  UpdatePurohitBankAccountDto,
+  CreateBankAccountDto,
+  UpdateBankAccountDto,
   NotificationQueryDto,
   CreateCustomerByAdminDto,
 } from '@poojawala/dtos';
@@ -240,7 +240,7 @@ export class UserController {
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
-  @Patch('platform-upsert')
+  @Patch(['platform-upsert', 'platform-setting'])
   @UseInterceptors(AnyFilesInterceptor())
   @HttpCode(HttpStatus.OK)
   async upsertPlatformSetting(
@@ -499,19 +499,17 @@ export class UserController {
     */
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.ADMIN)
   @Get('platform-setting')
   @HttpCode(HttpStatus.OK)
   async getPlatformSetting(@Req() req: Request) {
-    const user = (req as any).user;
+    const user = (req as any)?.user;
 
-    return this.userService.getPlatformSetting(user.id);
+    return this.userService.getPlatformSetting(user?.id);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
-  @Delete('platform-setting/:id')
+  @Delete(['platform-setting/:id', 'platform-upsert/:id'])
   @HttpCode(HttpStatus.OK)
   async deletePlatformSetting(
     @Param('id', ParseIntPipe) id: number,
@@ -684,90 +682,95 @@ export class UserController {
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
-  @Post('purohit/bank-account')
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ASTROLOGER, USER_ROLE.ADMIN)
+  @Post(['purohit/bank-account', 'bank-account'])
   @HttpCode(HttpStatus.CREATED)
   async addPurohitBankAccount(
     @Req() req: any,
     @Body(new ValidationPipe({ whitelist: true, transform: true }))
-    dto: CreatePurohitBankAccountDto,
-    @Query('purohitId') purohitId?: string,
+    dto: CreateBankAccountDto,
+    @Query('userId') userId?: string,
   ) {
+    const targetId = userId ? Number(userId) : undefined;
     return this.userService.addPurohitBankAccount(
       { id: req.user.id, role: req.user.role },
       dto,
-      purohitId ? Number(purohitId) : undefined,
+      targetId,
     );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
-  @Get('purohit/bank-accounts')
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ASTROLOGER, USER_ROLE.ADMIN)
+  @Get(['purohit/bank-accounts', 'bank-accounts'])
   @HttpCode(HttpStatus.OK)
   async getPurohitBankAccounts(
     @Req() req: any,
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '10',
     @Query('search') search?: string,
-    @Query('purohitId') purohitId?: string,
+    @Query('userId') userId?: string,
   ) {
+    const targetId = userId ? Number(userId) : undefined;
     return this.userService.getPurohitBankAccounts(
       { id: req.user.id, role: req.user.role },
       Number(page),
       Number(limit),
       search,
-      purohitId ? Number(purohitId) : undefined,
+      targetId,
     );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
-  @Get('purohit/bank-account/:id')
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ASTROLOGER, USER_ROLE.ADMIN)
+  @Get(['purohit/bank-account/:id', 'bank-account/:id'])
   @HttpCode(HttpStatus.OK)
   async getPurohitBankAccountById(
     @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
-    @Query('purohitId') purohitId?: string,
+    @Query('userId') userId?: string,
   ) {
+    const targetId = userId ? Number(userId) : undefined;
     return this.userService.getPurohitBankAccountById(
       { id: req.user.id, role: req.user.role },
       id,
-      purohitId ? Number(purohitId) : undefined,
+      targetId,
     );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
-  @Patch('purohit/bank-account/:id')
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ASTROLOGER, USER_ROLE.ADMIN)
+  @Patch(['purohit/bank-account/:id', 'bank-account/:id'])
   @HttpCode(HttpStatus.OK)
   async updatePurohitBankAccount(
     @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
     @Body(new ValidationPipe({ whitelist: true, transform: true }))
-    dto: UpdatePurohitBankAccountDto,
-    @Query('purohitId') purohitId?: string,
+    dto: UpdateBankAccountDto,
+    @Query('userId') userId?: string,
   ) {
+    const targetId = userId ? Number(userId) : undefined;
     return this.userService.updatePurohitBankAccount(
       { id: req.user.id, role: req.user.role },
       id,
       dto,
-      purohitId ? Number(purohitId) : undefined,
+      targetId,
     );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
-  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ADMIN)
-  @Delete('purohit/bank-account/:id')
+  @Roles(USER_ROLE.PUROHIT, USER_ROLE.ASTROLOGER, USER_ROLE.ADMIN)
+  @Delete(['purohit/bank-account/:id', 'bank-account/:id'])
   @HttpCode(HttpStatus.OK)
   async deletePurohitBankAccount(
     @Req() req: any,
     @Param('id', ParseIntPipe) id: number,
-    @Query('purohitId') purohitId?: string,
+    @Query('userId') userId?: string,
   ) {
+    const targetId = userId ? Number(userId) : undefined;
     return this.userService.deletePurohitBankAccount(
       { id: req.user.id, role: req.user.role },
       id,
-      purohitId ? Number(purohitId) : undefined,
+      targetId,
     );
   }
 

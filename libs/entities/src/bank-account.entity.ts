@@ -9,7 +9,7 @@ import {
   DeleteDateColumn,
   Index,
 } from 'typeorm';
-import { PurohitProfile } from './purohit-profile.entity';
+import { User } from './user.entity';
 
 export enum PUROHIT_PAYMENT_METHOD {
   BANK = 'BANK',
@@ -27,23 +27,23 @@ export enum BANK_ACCOUNT_TYPE {
   CURRENT = 'CURRENT',
 }
 
-@Index('UQ_purohit_bank_accounts_single_primary', ['purohitId'], {
+@Index('UQ_bank_accounts_single_primary', ['userId'], {
   unique: true,
   where: '"isPrimary" = true AND "deletedAt" IS NULL',
 })
-@Entity('purohit_bank_accounts')
-export class PurohitBankAccount {
+@Entity('bank_accounts')
+export class BankAccount {
   @PrimaryGeneratedColumn()
   id!: number;
 
   @Column({ type: 'int' })
-  purohitId!: number;
+  userId!: number;
 
-  @ManyToOne(() => PurohitProfile, (profile) => profile.bankAccounts, {
+  @ManyToOne(() => User, (user) => user.bankAccounts, {
     onDelete: 'CASCADE',
   })
-  @JoinColumn({ name: 'purohitId' })
-  purohit!: PurohitProfile;
+  @JoinColumn({ name: 'userId' })
+  user!: User;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   accountHolderName?: string;

@@ -45,8 +45,8 @@ export * from './payment/create-refund.dto';
 export * from './payment/payment-query.dto';
 
 export * from './user/verify-purohit.dto';
-export * from './user/add-purohit-bank-account.dto';
-export * from './user/update-purohit-bank-account.dto';
+export * from './user/add-bank-account.dto';
+export * from './user/update-bank-account.dto';
 export * from './user/create-customer-by-admin.dto';
 export * from './user/add-customer-address.dto';
 export * from './user/update-customer-address.dto';

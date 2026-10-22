@@ -2,7 +2,7 @@ import { IsEnum, IsOptional, IsString, IsBoolean } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { BANK_ACCOUNT_TYPE, PUROHIT_PAYMENT_METHOD } from '@poojawala/entities';
 
-export class UpdatePurohitBankAccountDto {
+export class UpdateBankAccountDto {
   @IsOptional()
   @IsEnum(PUROHIT_PAYMENT_METHOD)
   paymentMethod?: PUROHIT_PAYMENT_METHOD;
@@ -42,5 +42,5 @@ export class UpdatePurohitBankAccountDto {
 
   @IsOptional()
   @Transform(({ value }) => (value !== undefined && value !== null ? Number(value) : undefined))
-  purohitId?: number;
+  userId?: number;
 }

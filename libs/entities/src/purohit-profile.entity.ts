@@ -10,7 +10,6 @@ import {
   Index,
 } from 'typeorm';
 import { User } from './user.entity';
-import { PurohitBankAccount } from './purohit-bank-account.entity';
 import { PurohitServiceArea } from './purohit-service-area.entity';
 import { PurohitMedia } from './purohit-media.entity';
 import { PurohitService } from './purohit-service.entity';
@@ -90,9 +89,6 @@ export class PurohitProfile {
 
   @Column({ type: 'boolean', default: false })
   isOfflineAvailable!: boolean;
-
-  @OneToMany(() => PurohitBankAccount, (account) => account.purohit)
-  bankAccounts!: PurohitBankAccount[];
 
   @OneToMany(() => PurohitServiceArea, (area) => area.purohit)
   serviceAreas!: PurohitServiceArea[];

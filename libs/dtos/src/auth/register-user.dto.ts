@@ -148,6 +148,29 @@ export class RegisterNormalUserDto {
   @Min(0)
   ratePerMinute?: number;
 
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  commissionPrice?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  astrologyPrice?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  commissionPercentage?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  astrologerPayout?: number;
 
   @IsOptional()
   @IsString()

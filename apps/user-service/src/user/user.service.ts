@@ -1,12 +1,12 @@
 import {
-  CreatePurohitBankAccountDto,
+  CreateBankAccountDto,
   CreatePurohitByAdminDto,
   CreateAstrologerByAdminDto,
   CreateCustomerByAdminDto,
   CustomerFavoriteDto,
   GenerateOtpDto,
   RegisterNormalUserDto,
-  UpdatePurohitBankAccountDto,
+  UpdateBankAccountDto,
   UpdateUserDto,
   VerifyPurohitDto,
   parseIntArray,
@@ -27,7 +27,7 @@ import {
   PUROHIT_MEDIA_VERIFICATION_STATUS,
   PUROHIT_PAYMENT_METHOD,
   PUROHIT_VERIFICATION_STATUS,
-  PurohitBankAccount,
+  BankAccount,
   PurohitMedia,
   PurohitProfile,
   PurohitServiceArea,
@@ -52,7 +52,7 @@ import {
   CustomerFavoriteRepository,
   OtpRepository,
   PlatformSettingRepository,
-  PurohitBankAccountRepository,
+  BankAccountRepository,
   PurohitMediaRepository,
   PurohitProfileRepository,
   PurohitServiceAreaRepository,
@@ -160,7 +160,7 @@ export class UserService {
     private readonly smsService: SmsService,
     private readonly configService: ConfigService,
     private readonly purohitMediaRepository: PurohitMediaRepository,
-    private readonly purohitBankAccountRepository: PurohitBankAccountRepository,
+    private readonly bankAccountRepository: BankAccountRepository,
     private readonly bookingRepository: BookingRepository,
     private readonly purohitServiceRepository: PurohitServiceRepository,
     private readonly auditLogService: AuditLogService,
@@ -423,7 +423,7 @@ export class UserService {
       }
 
       const existingAccounts =
-        await this.purohitBankAccountRepository.findByPurohitId(profile.id);
+        await this.bankAccountRepository.findByUserId(Number(id));
       const hasBankOrUpi = Boolean(
         (existingAccounts &&
           existingAccounts.length > 0 &&
@@ -475,7 +475,20 @@ export class UserService {
         }
       }
 
-      if (user.isAdminCreated && (hasAadhaarDoc || hasPanDoc)) {
+      const existingAccounts =
+        await this.bankAccountRepository.findByUserId(Number(id));
+      const hasBankOrUpi = Boolean(
+        (existingAccounts &&
+          existingAccounts.length > 0 &&
+          existingAccounts.some(
+            (acc) => Boolean(acc.accountNumber || acc.upiId),
+          )) ||
+        dto.bankAccount ||
+        dto.accountNumber ||
+        dto.upiId,
+      );
+
+      if (user.isAdminCreated && (hasAadhaarDoc || hasPanDoc || hasBankOrUpi)) {
         userPayload.isAdminCreated = false;
       }
     }
@@ -598,49 +611,7 @@ export class UserService {
         }
       }
 
-      // Bank account update if provided
-      const bankData = dto.bankAccount || (dto.bankAccounts && dto.bankAccounts[0]) || {};
-      const accountHolderName = dto.accountHolderName ?? bankData.accountHolderName;
-      const accountNumber = dto.accountNumber ?? bankData.accountNumber;
-      const ifscCode = dto.ifscCode ?? bankData.ifscCode;
-      const bankName = dto.bankName ?? bankData.bankName;
-      const paymentMethod = dto.paymentMethod ?? bankData.paymentMethod;
-      const upiId = dto.upiId ?? bankData.upiId;
 
-      if (
-        accountHolderName !== undefined ||
-        accountNumber !== undefined ||
-        ifscCode !== undefined ||
-        bankName !== undefined ||
-        paymentMethod !== undefined ||
-        upiId !== undefined
-      ) {
-        const existingBankAccount = await this.purohitBankAccountRepository.findOne({
-          where: { purohitId: profile.id },
-        });
-
-        if (existingBankAccount) {
-          await this.purohitBankAccountRepository.update(existingBankAccount.id, {
-            ...(accountHolderName !== undefined && { accountHolderName }),
-            ...(accountNumber !== undefined && { accountNumber }),
-            ...(ifscCode !== undefined && { ifscCode }),
-            ...(bankName !== undefined && { bankName }),
-            ...(paymentMethod !== undefined && { paymentMethod }),
-            ...(upiId !== undefined && { upiId }),
-          });
-        } else if (accountNumber || upiId) {
-          const newAccount = this.purohitBankAccountRepository.create({
-            purohitId: profile.id,
-            accountHolderName: accountHolderName || '',
-            accountNumber: accountNumber || '',
-            ifscCode: ifscCode || '',
-            bankName: bankName || '',
-            paymentMethod: paymentMethod || PUROHIT_PAYMENT_METHOD.BANK,
-            upiId: upiId || null,
-          });
-          await this.purohitBankAccountRepository.save(newAccount);
-        }
-      }
 
       if (uniqueServiceIds !== undefined) {
         const existingServices = await this.purohitServiceRepository.find({
@@ -779,6 +750,18 @@ export class UserService {
         dto.commissionPrice !== undefined
           ? dto.commissionPrice
           : dto.profile?.commissionPrice;
+      const astrologyPrice =
+        dto.astrologyPrice !== undefined
+          ? dto.astrologyPrice
+          : (dto.profile as any)?.astrologyPrice;
+      const commissionPercentage =
+        dto.commissionPercentage !== undefined
+          ? dto.commissionPercentage
+          : (dto.profile as any)?.commissionPercentage;
+      const astrologerPayout =
+        dto.astrologerPayout !== undefined
+          ? dto.astrologerPayout
+          : (dto.profile as any)?.astrologerPayout;
       const verificationStatus =
         dto.verificationStatus !== undefined
           ? dto.verificationStatus
@@ -820,11 +803,117 @@ export class UserService {
       }
       if (specification !== undefined) profilePayload.specification = specification;
 
-      if (ratePerMinute !== undefined && ratePerMinute !== null && ratePerMinute !== '') {
-        profilePayload.ratePerMinute = Number(ratePerMinute);
+      if (ratePerMinute !== undefined) {
+        profilePayload.ratePerMinute =
+          ratePerMinute !== null && ratePerMinute !== ''
+            ? Number(ratePerMinute)
+            : null;
       }
-      if (commissionPrice !== undefined && commissionPrice !== null && commissionPrice !== '') {
-        profilePayload.commissionPrice = Number(commissionPrice);
+      if (astrologyPrice !== undefined) {
+        profilePayload.astrologyPrice =
+          astrologyPrice !== null && astrologyPrice !== ''
+            ? Number(astrologyPrice)
+            : null;
+      }
+      if (commissionPercentage !== undefined) {
+        profilePayload.commissionPercentage =
+          commissionPercentage !== null && commissionPercentage !== ''
+            ? Number(commissionPercentage)
+            : null;
+      }
+      const effPrice =
+        profilePayload.astrologyPrice !== undefined
+          ? profilePayload.astrologyPrice
+          : (astrologerProfile.astrologyPrice != null
+              ? Number(astrologerProfile.astrologyPrice)
+              : null);
+
+      const effPct =
+        profilePayload.commissionPercentage !== undefined
+          ? profilePayload.commissionPercentage
+          : (astrologerProfile.commissionPercentage != null
+              ? Number(astrologerProfile.commissionPercentage)
+              : null);
+
+      if (
+        astrologyPrice !== undefined ||
+        commissionPercentage !== undefined ||
+        (effPrice !== null && (commissionPrice !== undefined || astrologerPayout !== undefined))
+      ) {
+        if (effPrice !== null && effPct !== null) {
+          const expectedCommissionPrice = Number(
+            ((effPrice * effPct) / 100).toFixed(2),
+          );
+          const expectedAstrologerPayout = Number(
+            (effPrice - expectedCommissionPrice).toFixed(2),
+          );
+
+          if (
+            commissionPrice !== undefined &&
+            commissionPrice !== null &&
+            (commissionPrice as any) !== ''
+          ) {
+            const parsedCommPrice = Number(commissionPrice);
+            if (Math.abs(parsedCommPrice - expectedCommissionPrice) > 0.01) {
+              throw new BadRequestException(
+                `commissionPrice (${parsedCommPrice}) must match the calculated commission price based on astrologyPrice (${effPrice}) and commissionPercentage (${effPct}%): ${expectedCommissionPrice}`,
+              );
+            }
+          }
+
+          if (
+            astrologerPayout !== undefined &&
+            astrologerPayout !== null &&
+            (astrologerPayout as any) !== ''
+          ) {
+            const parsedPayout = Number(astrologerPayout);
+            if (Math.abs(parsedPayout - expectedAstrologerPayout) > 0.01) {
+              throw new BadRequestException(
+                `astrologerPayout (${parsedPayout}) must match the calculated astrologer payout based on astrologyPrice (${effPrice}) and commissionPrice (${expectedCommissionPrice}): ${expectedAstrologerPayout}`,
+              );
+            }
+          }
+
+          profilePayload.commissionPrice = expectedCommissionPrice;
+          profilePayload.astrologerPayout = expectedAstrologerPayout;
+        } else if (effPrice !== null) {
+          const expectedAstrologerPayout = Number(effPrice.toFixed(2));
+          if (
+            astrologerPayout !== undefined &&
+            astrologerPayout !== null &&
+            (astrologerPayout as any) !== ''
+          ) {
+            const parsedPayout = Number(astrologerPayout);
+            if (Math.abs(parsedPayout - expectedAstrologerPayout) > 0.01) {
+              throw new BadRequestException(
+                `astrologerPayout (${parsedPayout}) must match the calculated astrologer payout based on astrologyPrice (${effPrice}): ${expectedAstrologerPayout}`,
+              );
+            }
+          }
+          profilePayload.commissionPrice = null;
+          profilePayload.astrologerPayout = expectedAstrologerPayout;
+        } else if (astrologyPrice !== undefined) {
+          profilePayload.commissionPrice = null;
+          profilePayload.astrologerPayout = null;
+        }
+      } else if (commissionPrice !== undefined) {
+        profilePayload.commissionPrice =
+          commissionPrice !== null && (commissionPrice as any) !== ''
+            ? Number(commissionPrice)
+            : null;
+      } else if (astrologerPayout !== undefined) {
+        profilePayload.astrologerPayout =
+          astrologerPayout !== null && (astrologerPayout as any) !== ''
+            ? Number(astrologerPayout)
+            : null;
+      } else if (astrologerProfile.astrologerPayout == null && effPrice !== null) {
+        const effComm =
+          astrologerProfile.commissionPrice != null
+            ? Number(astrologerProfile.commissionPrice)
+            : effPct != null
+              ? Number(((effPrice * effPct) / 100).toFixed(2))
+              : 0;
+        profilePayload.astrologerPayout = Number((effPrice - effComm).toFixed(2));
       }
 
       if (aadhaarDocUrl !== undefined) profilePayload.aadhaarDocUrl = aadhaarDocUrl;
@@ -848,6 +937,30 @@ export class UserService {
       if (Object.keys(profilePayload).length > 0) {
         const astrologerRepo = this.dataSource.getRepository(AstrologerProfile);
         await astrologerRepo.update(astrologerProfile.id, profilePayload as any);
+
+        if (profilePayload.verificationStatus === PUROHIT_VERIFICATION_STATUS.APPROVED) {
+          await this.dataSource
+            .getRepository(BankAccount)
+            .createQueryBuilder()
+            .update(BankAccount)
+            .set({
+              verificationStatus: BANK_VERIFICATION_STATUS.VERIFIED,
+            })
+            .where('"userId" = :userId', { userId: Number(id) })
+            .andWhere('"deletedAt" IS NULL')
+            .execute();
+        } else if (profilePayload.verificationStatus === PUROHIT_VERIFICATION_STATUS.REJECTED) {
+          await this.dataSource
+            .getRepository(BankAccount)
+            .createQueryBuilder()
+            .update(BankAccount)
+            .set({
+              verificationStatus: BANK_VERIFICATION_STATUS.FAILED,
+            })
+            .where('"userId" = :userId', { userId: Number(id) })
+            .andWhere('"deletedAt" IS NULL')
+            .execute();
+        }
       }
     } else if (user.role === USER_ROLE.CUSTOMER) {
       const stateToUpdate = dto.state !== undefined ? dto.state : dto.profile?.state;
@@ -866,6 +979,56 @@ export class UserService {
             ...(stateToUpdate !== undefined && { state: stateToUpdate }),
             ...(cityToUpdate !== undefined && { city: cityToUpdate }),
           });
+        }
+      }
+    }
+
+    if (user.role === USER_ROLE.PUROHIT || user.role === USER_ROLE.ASTROLOGER) {
+      const bankData = dto.bankAccount || (dto.bankAccounts && dto.bankAccounts[0]) || {};
+      const accountHolderName = dto.accountHolderName ?? bankData.accountHolderName;
+      const accountNumber = dto.accountNumber ?? bankData.accountNumber;
+      const ifscCode = dto.ifscCode ?? bankData.ifscCode;
+      const bankName = dto.bankName ?? bankData.bankName;
+      const paymentMethod = dto.paymentMethod ?? bankData.paymentMethod;
+      const upiId = dto.upiId ?? bankData.upiId;
+
+      if (
+        accountHolderName !== undefined ||
+        accountNumber !== undefined ||
+        ifscCode !== undefined ||
+        bankName !== undefined ||
+        paymentMethod !== undefined ||
+        upiId !== undefined
+      ) {
+        const existingBankAccount =
+          (await this.bankAccountRepository.findOne({
+            where: { userId: Number(id), isPrimary: true },
+          })) ||
+          (await this.bankAccountRepository.findOne({
+            where: { userId: Number(id) },
+          }));
+
+        if (existingBankAccount) {
+          await this.bankAccountRepository.update(existingBankAccount.id, {
+            ...(accountHolderName !== undefined && { accountHolderName }),
+            ...(accountNumber !== undefined && { accountNumber }),
+            ...(ifscCode !== undefined && { ifscCode }),
+            ...(bankName !== undefined && { bankName }),
+            ...(paymentMethod !== undefined && { paymentMethod }),
+            ...(upiId !== undefined && { upiId }),
+          });
+        } else if (accountNumber || upiId) {
+          const newAccount = this.bankAccountRepository.create({
+            userId: Number(id),
+            accountHolderName: accountHolderName || '',
+            accountNumber: accountNumber || '',
+            ifscCode: ifscCode || '',
+            bankName: bankName || '',
+            paymentMethod: paymentMethod || (upiId ? PUROHIT_PAYMENT_METHOD.UPI : PUROHIT_PAYMENT_METHOD.BANK),
+            upiId: upiId || null,
+            isPrimary: true,
+          });
+          await this.bankAccountRepository.save(newAccount);
         }
       }
     }
@@ -1000,11 +1163,15 @@ export class UserService {
       throw new BadRequestException('Phone number cannot be updated');
     }
 
-    // Normal users cannot change their role, status, or commissionPrice
+    const userSuppliedCommissionPrice = dto.commissionPrice;
+    const userSuppliedAstrologerPayout = dto.astrologerPayout;
+
+    // Normal users cannot change their role, status, or override commissionPrice directly
     if (user.role !== USER_ROLE.ADMIN) {
       delete dto.role;
       delete dto.status;
       delete dto.commissionPrice;
+      delete dto.astrologerPayout;
     }
 
     if (dto.password) {
@@ -1172,7 +1339,7 @@ export class UserService {
         );
 
         const existingBankAccounts =
-          await this.purohitBankAccountRepository.findByPurohitId(profile.id);
+          await this.bankAccountRepository.findByUserId(Number(id));
         const hasBankOrUpi = Boolean(
           (existingBankAccounts &&
             existingBankAccounts.length > 0 &&
@@ -1240,14 +1407,14 @@ export class UserService {
 
           // Reset any failed bank accounts to PENDING
           await this.dataSource
-            .getRepository(PurohitBankAccount)
+            .getRepository(BankAccount)
             .createQueryBuilder()
-            .update(PurohitBankAccount)
+            .update(BankAccount)
             .set({
               verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
             })
-            .where('"purohitId" = :profileId AND "verificationStatus" = :status', {
-              profileId: profile.id,
+            .where('"userId" = :userId AND "verificationStatus" = :status', {
+              userId: Number(id),
               status: BANK_VERIFICATION_STATUS.FAILED,
             })
             .andWhere('"deletedAt" IS NULL')
@@ -1391,7 +1558,20 @@ export class UserService {
         }
       }
 
-      if (user.isAdminCreated && (dto.aadhaarDoc || dto.panDoc)) {
+      const existingBankAccounts =
+        await this.bankAccountRepository.findByUserId(Number(id));
+      const hasBankOrUpi = Boolean(
+        (existingBankAccounts &&
+          existingBankAccounts.length > 0 &&
+          existingBankAccounts.some(
+            (acc) => Boolean(acc.accountNumber || acc.upiId),
+          )) ||
+        dto.accountNumber ||
+        dto.upiId ||
+        dto.bankAccount,
+      );
+
+      if (user.isAdminCreated && (dto.aadhaarDoc || dto.panDoc || hasBankOrUpi)) {
         await this.userRepository.updateUser(id, { isAdminCreated: false });
         user.isAdminCreated = false;
       }
@@ -1414,8 +1594,107 @@ export class UserService {
         profilePayload.specializations = parseStringArray(dto.specializations) || dto.specializations;
       }
       if (dto.specification !== undefined) profilePayload.specification = dto.specification;
-      if (dto.ratePerMinute !== undefined && dto.ratePerMinute !== null && (dto.ratePerMinute as any) !== '') {
-        profilePayload.ratePerMinute = Number(dto.ratePerMinute);
+      if (dto.ratePerMinute !== undefined) {
+        profilePayload.ratePerMinute =
+          dto.ratePerMinute !== null && (dto.ratePerMinute as any) !== ''
+            ? Number(dto.ratePerMinute)
+            : null;
+      }
+      if (dto.astrologyPrice !== undefined) {
+        profilePayload.astrologyPrice =
+          dto.astrologyPrice !== null && (dto.astrologyPrice as any) !== ''
+            ? Number(dto.astrologyPrice)
+            : null;
+      }
+      if (dto.commissionPercentage !== undefined) {
+        profilePayload.commissionPercentage =
+          dto.commissionPercentage !== null && (dto.commissionPercentage as any) !== ''
+            ? Number(dto.commissionPercentage)
+            : null;
+      }
+      const effPrice =
+        profilePayload.astrologyPrice !== undefined
+          ? profilePayload.astrologyPrice
+          : (astrologerProfile.astrologyPrice != null
+              ? Number(astrologerProfile.astrologyPrice)
+              : null);
+
+      const effPct =
+        profilePayload.commissionPercentage !== undefined
+          ? profilePayload.commissionPercentage
+          : (astrologerProfile.commissionPercentage != null
+              ? Number(astrologerProfile.commissionPercentage)
+              : null);
+
+      if (
+        dto.astrologyPrice !== undefined ||
+        dto.commissionPercentage !== undefined ||
+        (effPrice !== null && (userSuppliedCommissionPrice !== undefined || userSuppliedAstrologerPayout !== undefined))
+      ) {
+        if (effPrice !== null && effPct !== null) {
+          const expectedCommissionPrice = Number(
+            ((effPrice * effPct) / 100).toFixed(2),
+          );
+          const expectedAstrologerPayout = Number(
+            (effPrice - expectedCommissionPrice).toFixed(2),
+          );
+
+          if (
+            userSuppliedCommissionPrice !== undefined &&
+            userSuppliedCommissionPrice !== null &&
+            (userSuppliedCommissionPrice as any) !== ''
+          ) {
+            const parsedCommPrice = Number(userSuppliedCommissionPrice);
+            if (Math.abs(parsedCommPrice - expectedCommissionPrice) > 0.01) {
+              throw new BadRequestException(
+                `commissionPrice (${parsedCommPrice}) must match the calculated commission price based on astrologyPrice (${effPrice}) and commissionPercentage (${effPct}%): ${expectedCommissionPrice}`,
+              );
+            }
+          }
+
+          if (
+            userSuppliedAstrologerPayout !== undefined &&
+            userSuppliedAstrologerPayout !== null &&
+            (userSuppliedAstrologerPayout as any) !== ''
+          ) {
+            const parsedPayout = Number(userSuppliedAstrologerPayout);
+            if (Math.abs(parsedPayout - expectedAstrologerPayout) > 0.01) {
+              throw new BadRequestException(
+                `astrologerPayout (${parsedPayout}) must match the calculated astrologer payout based on astrologyPrice (${effPrice}) and commissionPrice (${expectedCommissionPrice}): ${expectedAstrologerPayout}`,
+              );
+            }
+          }
+
+          profilePayload.commissionPrice = expectedCommissionPrice;
+          profilePayload.astrologerPayout = expectedAstrologerPayout;
+        } else if (effPrice !== null) {
+          const expectedAstrologerPayout = Number(effPrice.toFixed(2));
+          if (
+            userSuppliedAstrologerPayout !== undefined &&
+            userSuppliedAstrologerPayout !== null &&
+            (userSuppliedAstrologerPayout as any) !== ''
+          ) {
+            const parsedPayout = Number(userSuppliedAstrologerPayout);
+            if (Math.abs(parsedPayout - expectedAstrologerPayout) > 0.01) {
+              throw new BadRequestException(
+                `astrologerPayout (${parsedPayout}) must match the calculated astrologer payout based on astrologyPrice (${effPrice}): ${expectedAstrologerPayout}`,
+              );
+            }
+          }
+          profilePayload.commissionPrice = null;
+          profilePayload.astrologerPayout = expectedAstrologerPayout;
+        } else if (dto.astrologyPrice !== undefined) {
+          profilePayload.commissionPrice = null;
+          profilePayload.astrologerPayout = null;
+        }
+      } else if (astrologerProfile.astrologerPayout == null && effPrice !== null) {
+        const effComm =
+          astrologerProfile.commissionPrice != null
+            ? Number(astrologerProfile.commissionPrice)
+            : effPct != null
+              ? Number(((effPrice * effPct) / 100).toFixed(2))
+              : 0;
+        profilePayload.astrologerPayout = Number((effPrice - effComm).toFixed(2));
       }
 
       if (dto.aadhaarDoc !== undefined) profilePayload.aadhaarDocUrl = dto.aadhaarDoc;
@@ -1432,6 +1711,21 @@ export class UserService {
       }
 
       if (isRejected) {
+        // Reset any failed bank accounts to PENDING
+        await this.dataSource
+          .getRepository(BankAccount)
+          .createQueryBuilder()
+          .update(BankAccount)
+          .set({
+            verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
+          })
+          .where('"userId" = :userId AND "verificationStatus" = :status', {
+            userId: Number(id),
+            status: BANK_VERIFICATION_STATUS.FAILED,
+          })
+          .andWhere('"deletedAt" IS NULL')
+          .execute();
+
         await this.auditLogService.createAuditLog({
           actorId: Number(id),
           actorType: ACTOR_TYPE.USER,
@@ -1896,12 +2190,42 @@ export class UserService {
     });
 
     if (existingSetting) {
+      const oldValue = {
+        id: existingSetting.id,
+        key: existingSetting.key,
+        value: existingSetting.value,
+        description: existingSetting.description,
+      };
+
       existingSetting.value = dto.value;
       existingSetting.description = dto.description;
       existingSetting.updatedById = userId;
 
       const updatedSetting =
         await this.platformSettingRepository.save(existingSetting);
+
+      const newValue = {
+        id: updatedSetting.id,
+        key: updatedSetting.key,
+        value: updatedSetting.value,
+        description: updatedSetting.description,
+      };
+
+      await this.auditLogService.createAuditLog({
+        actorId: userId,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: USER_ROLE.ADMIN,
+        module: AUDIT_MODULE.SETTING,
+        entity: 'PlatformSetting',
+        entityId: String(updatedSetting.id),
+        action: 'PLATFORM_SETTING_UPDATED',
+        message: `Admin #${userId} updated platform setting '${updatedSetting.key}'.`,
+        oldValue,
+        newValue,
+        metadata: {
+          key: updatedSetting.key,
+        },
+      });
 
       return {
         success: true,
@@ -1916,6 +2240,29 @@ export class UserService {
     });
 
     const savedSetting = await this.platformSettingRepository.save(newSetting);
+
+    const newValue = {
+      id: savedSetting.id,
+      key: savedSetting.key,
+      value: savedSetting.value,
+      description: savedSetting.description,
+    };
+
+    await this.auditLogService.createAuditLog({
+      actorId: userId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.SETTING,
+      entity: 'PlatformSetting',
+      entityId: String(savedSetting.id),
+      action: 'PLATFORM_SETTING_CREATED',
+      message: `Admin #${userId} created platform setting '${savedSetting.key}'.`,
+      oldValue: undefined,
+      newValue,
+      metadata: {
+        key: savedSetting.key,
+      },
+    });
 
     return {
       success: true,
@@ -1959,7 +2306,7 @@ export class UserService {
     );
   }
 
-  async getPlatformSetting(userId: number) {
+  async getPlatformSetting(userId?: number) {
     const existingAstrologyCommission = await this.platformSettingRepository.findOne({
       where: { key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PRICE },
     });
@@ -1971,6 +2318,25 @@ export class UserService {
             key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PRICE,
             value: '50',
             description: 'Default platform commission price for astrology consultations',
+            updatedById: userId,
+          }),
+        );
+      } catch {
+        // Ignore potential race condition
+      }
+    }
+
+    const existingAstrologyCommPct = await this.platformSettingRepository.findOne({
+      where: { key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PERCENTAGE },
+    });
+
+    if (!existingAstrologyCommPct) {
+      try {
+        await this.platformSettingRepository.save(
+          this.platformSettingRepository.create({
+            key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PERCENTAGE,
+            value: '60',
+            description: 'Default platform commission percentage for astrology consultations',
             updatedById: userId,
           }),
         );
@@ -2016,7 +2382,30 @@ export class UserService {
       throw new NotFoundException('Platform setting not found');
     }
 
+    const oldValue = {
+      id: setting.id,
+      key: setting.key,
+      value: setting.value,
+      description: setting.description,
+    };
+
     await this.platformSettingRepository.delete(id);
+
+    await this.auditLogService.createAuditLog({
+      actorId: userId,
+      actorType: ACTOR_TYPE.USER,
+      actorRole: USER_ROLE.ADMIN,
+      module: AUDIT_MODULE.SETTING,
+      entity: 'PlatformSetting',
+      entityId: String(id),
+      action: 'PLATFORM_SETTING_DELETED',
+      message: `Admin #${userId} deleted platform setting '${setting.key}' (#${id}).`,
+      oldValue,
+      newValue: undefined,
+      metadata: {
+        key: setting.key,
+      },
+    });
 
     return {
       success: true,
@@ -3462,25 +3851,67 @@ export class UserService {
     };
   }
 
+  hasValidPayoutMethod(account?: {
+    accountNumber?: string | null;
+    ifscCode?: string | null;
+    accountHolderName?: string | null;
+    upiId?: string | null;
+  } | null): boolean {
+    if (!account) return false;
+    const hasValidUpi = Boolean(account.upiId && account.upiId.trim().includes('@'));
+    const hasValidBank = Boolean(
+      account.accountNumber &&
+      account.accountNumber.trim().length >= 8 &&
+      account.ifscCode &&
+      account.ifscCode.trim().length >= 4 &&
+      account.accountHolderName &&
+      account.accountHolderName.trim().length > 0,
+    );
+    return hasValidUpi || hasValidBank;
+  }
+
+  async resolveTargetBankUser(
+    authenticatedUserId: number,
+    role: USER_ROLE,
+    requestedUserId?: number,
+  ): Promise<User> {
+    if (role === USER_ROLE.ADMIN) {
+      if (!requestedUserId) {
+        throw new BadRequestException('userId is required for admin');
+      }
+
+      const user = await this.userRepository.findById(requestedUserId);
+
+      if (!user || (user.role !== USER_ROLE.PUROHIT && user.role !== USER_ROLE.ASTROLOGER)) {
+        throw new NotFoundException('User (Purohit or Astrologer) not found');
+      }
+
+      return user;
+    }
+
+    if (role === USER_ROLE.PUROHIT || role === USER_ROLE.ASTROLOGER) {
+      const user = await this.userRepository.findById(authenticatedUserId);
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+      return user;
+    }
+
+    throw new ForbiddenException('Access denied');
+  }
+
   async addPurohitBankAccount(
     callerOrUserId: { id: number; role?: USER_ROLE } | number,
-    dto: CreatePurohitBankAccountDto,
-    requestedPurohitId?: number,
+    dto: CreateBankAccountDto,
+    requestedUserId?: number,
   ) {
     const caller = this.normalizeCaller(callerOrUserId);
-    const targetUserId = await this.resolveTargetPurohitId(
+    const targetUser = await this.resolveTargetBankUser(
       caller.id,
       caller.role,
-      requestedPurohitId ?? (dto as any)?.purohitId,
+      requestedUserId ?? dto.userId,
     );
-
-    const profile = await this.purohitProfileRepository.findOne({
-      where: { userId: targetUserId },
-    });
-
-    if (!profile) {
-      throw new NotFoundException('Purohit profile not found');
-    }
+    const targetUserId = targetUser.id;
 
     if (dto.paymentMethod === PUROHIT_PAYMENT_METHOD.BANK) {
       if (!dto.accountHolderName || !dto.accountNumber || !dto.ifscCode) {
@@ -3498,11 +3929,11 @@ export class UserService {
 
     if (dto.accountNumber) {
       const existingAccount =
-        await this.purohitBankAccountRepository.findByAccountNumber(
+        await this.bankAccountRepository.findByAccountNumber(
           dto.accountNumber,
         );
 
-      if (existingAccount) {
+      if (existingAccount && existingAccount.userId !== targetUserId) {
         throw new ConflictException('Bank account number already in use');
       }
     }
@@ -3511,15 +3942,12 @@ export class UserService {
       await this.acquireOwnerLock(
         manager,
         ADVISORY_LOCK_NAMESPACE.PUROHIT_BANK_ACCOUNT,
-        profile.id,
+        targetUserId,
       );
 
-      const bankRepo = manager.getRepository(PurohitBankAccount);
+      const bankRepo = manager.getRepository(BankAccount);
 
-      const existingAccounts =
-        typeof bankRepo.find === 'function'
-          ? await bankRepo.find({ where: { purohitId: profile.id } })
-          : await this.purohitBankAccountRepository.findByPurohitId(profile.id);
+      const existingAccounts = await bankRepo.find({ where: { userId: targetUserId } });
 
       let isPrimary = false;
       if (dto.isPrimary !== undefined && dto.isPrimary !== null) {
@@ -3536,18 +3964,30 @@ export class UserService {
         isPrimary = true;
       } else if (isPrimary) {
         await bankRepo.update(
-          { purohitId: profile.id, isPrimary: true },
+          { userId: targetUserId, isPrimary: true },
           { isPrimary: false },
         );
       }
 
-      const initialVerificationStatus =
-        profile.verificationStatus === PUROHIT_VERIFICATION_STATUS.APPROVED
-          ? BANK_VERIFICATION_STATUS.VERIFIED
-          : BANK_VERIFICATION_STATUS.PENDING;
+      let initialVerificationStatus = BANK_VERIFICATION_STATUS.PENDING;
+      if (targetUser.role === USER_ROLE.PUROHIT) {
+        const profile = await this.purohitProfileRepository.findOne({
+          where: { userId: targetUserId },
+        });
+        if (profile?.verificationStatus === PUROHIT_VERIFICATION_STATUS.APPROVED) {
+          initialVerificationStatus = BANK_VERIFICATION_STATUS.VERIFIED;
+        }
+      } else if (targetUser.role === USER_ROLE.ASTROLOGER) {
+        const profile = await this.dataSource.getRepository(AstrologerProfile).findOne({
+          where: { userId: targetUserId },
+        });
+        if (profile?.verificationStatus === PUROHIT_VERIFICATION_STATUS.APPROVED) {
+          initialVerificationStatus = BANK_VERIFICATION_STATUS.VERIFIED;
+        }
+      }
 
       const payload = {
-        purohitId: profile.id,
+        userId: targetUserId,
         paymentMethod: dto.paymentMethod,
         accountHolderName: dto.accountHolderName,
         accountNumber: dto.accountNumber,
@@ -3559,12 +3999,8 @@ export class UserService {
         verificationStatus: initialVerificationStatus,
       };
 
-      if (typeof bankRepo.create === 'function' && typeof bankRepo.save === 'function') {
-        const newAccount = bankRepo.create(payload);
-        return bankRepo.save(newAccount);
-      }
-
-      return this.purohitBankAccountRepository.createAccount(payload);
+      const newAccount = bankRepo.create(payload);
+      return bankRepo.save(newAccount);
     });
 
     await this.auditLogService.createAuditLog({
@@ -3574,29 +4010,35 @@ export class UserService {
       module: AUDIT_MODULE.USER,
       entity: 'User',
       entityId: String(targetUserId),
-      action: 'PUROHIT_BANK_UPDATED',
+      action: 'BANK_ACCOUNT_CREATED',
       message:
         caller.role === USER_ROLE.ADMIN
-          ? `Admin #${caller.id} added a new bank account #${account.id} for Purohit #${targetUserId}.`
-          : `Purohit #${caller.id} added a new bank account #${account.id}.`,
+          ? `Admin #${caller.id} added a new bank account #${account.id} for User #${targetUserId}.`
+          : `User #${caller.id} added a new bank account #${account.id}.`,
       oldValue: undefined,
       newValue: { bankAccountId: account.id },
     });
 
-    const targetUser = await this.userRepository.findById(String(targetUserId));
-    if (targetUser?.isAdminCreated) {
-      const hasDoc = Boolean(profile.aadhaarDocUrl || profile.panDocUrl);
-      const hasBankOrUpi = Boolean(
-        account.accountNumber ||
-        account.upiId ||
-        dto.accountNumber ||
-        dto.upiId,
-      );
-      if (hasDoc && hasBankOrUpi) {
-        await this.userRepository.updateUser(String(targetUserId), {
-          isAdminCreated: false,
+    if (targetUser.isAdminCreated) {
+      if (targetUser.role === USER_ROLE.ASTROLOGER) {
+        if (this.hasValidPayoutMethod(account)) {
+          await this.userRepository.updateUser(String(targetUserId), {
+            isAdminCreated: false,
+          });
+          targetUser.isAdminCreated = false;
+        }
+      } else if (targetUser.role === USER_ROLE.PUROHIT) {
+        const profile = await this.purohitProfileRepository.findOne({
+          where: { userId: targetUserId },
         });
-        targetUser.isAdminCreated = false;
+        const hasDoc = Boolean(profile?.aadhaarDocUrl || profile?.panDocUrl);
+        const hasBankOrUpi = Boolean(account.accountNumber || account.upiId);
+        if (hasDoc && hasBankOrUpi) {
+          await this.userRepository.updateUser(String(targetUserId), {
+            isAdminCreated: false,
+          });
+          targetUser.isAdminCreated = false;
+        }
       }
     }
 
@@ -3612,26 +4054,19 @@ export class UserService {
     page: number = 1,
     limit: number = 10,
     search?: string,
-    requestedPurohitId?: number,
+    requestedUserId?: number,
   ) {
     const caller = this.normalizeCaller(callerOrUserId);
-    const targetUserId = await this.resolveTargetPurohitId(
+    const targetUser = await this.resolveTargetBankUser(
       caller.id,
       caller.role,
-      requestedPurohitId,
+      requestedUserId,
     );
-
-    const profile = await this.purohitProfileRepository.findOne({
-      where: { userId: targetUserId },
-    });
-
-    if (!profile) {
-      throw new NotFoundException('Purohit profile not found');
-    }
+    const targetUserId = targetUser.id;
 
     const { data, total } =
-      await this.purohitBankAccountRepository.findBankAccounts(
-        profile.id,
+      await this.bankAccountRepository.findBankAccounts(
+        targetUserId,
         page,
         limit,
         search,
@@ -3653,42 +4088,31 @@ export class UserService {
   async getPurohitBankAccountById(
     callerOrUserId: { id: number; role?: USER_ROLE } | number | any,
     id: number,
-    requestedPurohitId?: number,
+    requestedUserId?: number,
   ) {
     const caller = this.normalizeCaller(callerOrUserId);
-    const account = await this.purohitBankAccountRepository.findById(id);
+    const account = await this.bankAccountRepository.findById(id);
 
     if (!account) {
       throw new NotFoundException('Bank account not found');
     }
 
-    if (caller.role === USER_ROLE.PUROHIT) {
-      const profile = await this.purohitProfileRepository.findOne({
-        where: { userId: caller.id },
-      });
-
-      if (!profile) {
-        throw new NotFoundException('Purohit profile not found');
+    if (caller.role === USER_ROLE.ADMIN) {
+      if (requestedUserId) {
+        const targetUser = await this.resolveTargetBankUser(
+          caller.id,
+          caller.role,
+          requestedUserId,
+        );
+        if (account.userId !== targetUser.id) {
+          throw new NotFoundException('Bank account is not mapped to this user');
+        }
       }
-
-      if (account.purohitId !== profile.id) {
+    } else if (caller.role === USER_ROLE.PUROHIT || caller.role === USER_ROLE.ASTROLOGER) {
+      if (account.userId !== caller.id) {
         throw new ForbiddenException(
           'You can access only your own bank account',
         );
-      }
-    } else if (caller.role === USER_ROLE.ADMIN) {
-      if (requestedPurohitId) {
-        const targetUserId = await this.resolveTargetPurohitId(
-          caller.id,
-          caller.role,
-          requestedPurohitId,
-        );
-        const profile = await this.purohitProfileRepository.findOne({
-          where: { userId: targetUserId },
-        });
-        if (!profile || account.purohitId !== profile.id) {
-          throw new NotFoundException('Bank account is not mapped to this Purohit');
-        }
       }
     } else {
       throw new ForbiddenException('Access denied');
@@ -3704,50 +4128,31 @@ export class UserService {
   async updatePurohitBankAccount(
     callerOrUserId: { id: number; role?: USER_ROLE } | number,
     id: number,
-    dto: UpdatePurohitBankAccountDto,
-    requestedPurohitId?: number,
+    dto: UpdateBankAccountDto,
+    requestedUserId?: number,
   ) {
     const caller = this.normalizeCaller(callerOrUserId);
-    const account = await this.purohitBankAccountRepository.findById(id);
+    const account = await this.bankAccountRepository.findById(id);
 
     if (!account) {
       throw new NotFoundException('Bank account not found');
     }
 
-    let profile: PurohitProfile | null = null;
-    if (caller.role === USER_ROLE.PUROHIT) {
-      profile = await this.purohitProfileRepository.findOne({
-        where: { userId: caller.id },
-      });
-
-      if (!profile) {
-        throw new NotFoundException('Purohit profile not found');
-      }
-
-      if (account.purohitId !== profile.id) {
-        throw new ForbiddenException('You can update only your own bank account');
-      }
-    } else if (caller.role === USER_ROLE.ADMIN) {
-      const targetIdToValidate = requestedPurohitId ?? (dto as any)?.purohitId;
+    if (caller.role === USER_ROLE.ADMIN) {
+      const targetIdToValidate = requestedUserId ?? dto.userId;
       if (targetIdToValidate) {
-        const targetUserId = await this.resolveTargetPurohitId(
+        const targetUser = await this.resolveTargetBankUser(
           caller.id,
           caller.role,
           targetIdToValidate,
         );
-        profile = await this.purohitProfileRepository.findOne({
-          where: { userId: targetUserId },
-        });
-        if (!profile || account.purohitId !== profile.id) {
-          throw new NotFoundException('Bank account is not mapped to this Purohit');
+        if (account.userId !== targetUser.id) {
+          throw new NotFoundException('Bank account is not mapped to this user');
         }
-      } else {
-        profile = await this.purohitProfileRepository.findOne({
-          where: { id: account.purohitId },
-        });
-        if (!profile) {
-          throw new NotFoundException('Purohit profile not found');
-        }
+      }
+    } else if (caller.role === USER_ROLE.PUROHIT || caller.role === USER_ROLE.ASTROLOGER) {
+      if (account.userId !== caller.id) {
+        throw new ForbiddenException('You can update only your own bank account');
       }
     } else {
       throw new ForbiddenException('Access denied');
@@ -3755,7 +4160,7 @@ export class UserService {
 
     if (dto.accountNumber && dto.accountNumber !== account.accountNumber) {
       const existingAccount =
-        await this.purohitBankAccountRepository.findByAccountNumber(
+        await this.bankAccountRepository.findByAccountNumber(
           dto.accountNumber,
         );
 
@@ -3770,9 +4175,9 @@ export class UserService {
       isPrimary = valStr === 'true' || valStr === '1';
     }
 
-    const { purohitId: _ignoredPurohitId, ...updatePayload } = dto as any;
+    const { userId: _ignoredUserId, ...updatePayload } = dto as any;
 
-    const updatedData: Partial<PurohitBankAccount> = {
+    const updatedData: Partial<BankAccount> = {
       ...updatePayload,
       ...(isPrimary !== undefined && { isPrimary }),
       verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
@@ -3782,15 +4187,14 @@ export class UserService {
       await this.acquireOwnerLock(
         manager,
         ADVISORY_LOCK_NAMESPACE.PUROHIT_BANK_ACCOUNT,
-        profile.id,
+        account.userId,
       );
 
-      const bankRepo = manager.getRepository(PurohitBankAccount);
+      const bankRepo = manager.getRepository(BankAccount);
 
       if (isPrimary === true) {
-        // Clear all primary accounts across both BANK and UPI for this Purohit
         await bankRepo.update(
-          { purohitId: profile.id, isPrimary: true },
+          { userId: account.userId, isPrimary: true },
           { isPrimary: false },
         );
       }
@@ -3799,7 +4203,7 @@ export class UserService {
     });
 
     const freshUpdatedAccount =
-      await this.purohitBankAccountRepository.findById(id);
+      await this.bankAccountRepository.findById(id);
 
     await this.auditLogService.createAuditLog({
       actorId: caller.id,
@@ -3807,30 +4211,42 @@ export class UserService {
       actorRole: caller.role,
       module: AUDIT_MODULE.USER,
       entity: 'User',
-      entityId: String(profile.userId),
-      action: 'PUROHIT_BANK_UPDATED',
+      entityId: String(account.userId),
+      action: 'BANK_ACCOUNT_UPDATED',
       message:
         caller.role === USER_ROLE.ADMIN
-          ? `Admin #${caller.id} updated bank account #${id} for Purohit #${profile.userId}.`
-          : `Purohit #${caller.id} updated bank account #${id}.`,
+          ? `Admin #${caller.id} updated bank account #${id} for User #${account.userId}.`
+          : `User #${caller.id} updated bank account #${id}.`,
       oldValue: undefined,
       newValue: { bankAccountId: id },
     });
 
-    const targetUser = await this.userRepository.findById(String(profile.userId));
+    const targetUser = await this.userRepository.findById(String(account.userId));
     if (targetUser?.isAdminCreated) {
-      const hasDoc = Boolean(profile.aadhaarDocUrl || profile.panDocUrl);
-      const hasBankOrUpi = Boolean(
-        freshUpdatedAccount?.accountNumber ||
-        freshUpdatedAccount?.upiId ||
-        dto.accountNumber ||
-        dto.upiId,
-      );
-      if (hasDoc && hasBankOrUpi) {
-        await this.userRepository.updateUser(String(profile.userId), {
-          isAdminCreated: false,
+      if (targetUser.role === USER_ROLE.ASTROLOGER) {
+        if (this.hasValidPayoutMethod(freshUpdatedAccount)) {
+          await this.userRepository.updateUser(String(account.userId), {
+            isAdminCreated: false,
+          });
+          targetUser.isAdminCreated = false;
+        }
+      } else if (targetUser.role === USER_ROLE.PUROHIT) {
+        const profile = await this.purohitProfileRepository.findOne({
+          where: { userId: account.userId },
         });
-        targetUser.isAdminCreated = false;
+        const hasDoc = Boolean(profile?.aadhaarDocUrl || profile?.panDocUrl);
+        const hasBankOrUpi = Boolean(
+          freshUpdatedAccount?.accountNumber ||
+          freshUpdatedAccount?.upiId ||
+          dto.accountNumber ||
+          dto.upiId,
+        );
+        if (hasDoc && hasBankOrUpi) {
+          await this.userRepository.updateUser(String(account.userId), {
+            isAdminCreated: false,
+          });
+          targetUser.isAdminCreated = false;
+        }
       }
     }
 
@@ -3844,48 +4260,29 @@ export class UserService {
   async deletePurohitBankAccount(
     callerOrUserId: { id: number; role?: USER_ROLE } | number,
     id: number,
-    requestedPurohitId?: number,
+    requestedUserId?: number,
   ) {
     const caller = this.normalizeCaller(callerOrUserId);
-    const account = await this.purohitBankAccountRepository.findById(id);
+    const account = await this.bankAccountRepository.findById(id);
 
     if (!account) {
       throw new NotFoundException('Bank account not found');
     }
 
-    let profile: PurohitProfile | null = null;
-    if (caller.role === USER_ROLE.PUROHIT) {
-      profile = await this.purohitProfileRepository.findOne({
-        where: { userId: caller.id },
-      });
-
-      if (!profile) {
-        throw new NotFoundException('Purohit profile not found');
-      }
-
-      if (account.purohitId !== profile.id) {
-        throw new ForbiddenException('You can delete only your own bank account');
-      }
-    } else if (caller.role === USER_ROLE.ADMIN) {
-      if (requestedPurohitId) {
-        const targetUserId = await this.resolveTargetPurohitId(
+    if (caller.role === USER_ROLE.ADMIN) {
+      if (requestedUserId) {
+        const targetUser = await this.resolveTargetBankUser(
           caller.id,
           caller.role,
-          requestedPurohitId,
+          requestedUserId,
         );
-        profile = await this.purohitProfileRepository.findOne({
-          where: { userId: targetUserId },
-        });
-        if (!profile || account.purohitId !== profile.id) {
-          throw new NotFoundException('Bank account is not mapped to this Purohit');
+        if (account.userId !== targetUser.id) {
+          throw new NotFoundException('Bank account is not mapped to this user');
         }
-      } else {
-        profile = await this.purohitProfileRepository.findOne({
-          where: { id: account.purohitId },
-        });
-        if (!profile) {
-          throw new NotFoundException('Purohit profile not found');
-        }
+      }
+    } else if (caller.role === USER_ROLE.PUROHIT || caller.role === USER_ROLE.ASTROLOGER) {
+      if (account.userId !== caller.id) {
+        throw new ForbiddenException('You can delete only your own bank account');
       }
     } else {
       throw new ForbiddenException('Access denied');
@@ -3897,10 +4294,10 @@ export class UserService {
       await this.acquireOwnerLock(
         manager,
         ADVISORY_LOCK_NAMESPACE.PUROHIT_BANK_ACCOUNT,
-        profile.id,
+        account.userId,
       );
 
-      const bankRepo = manager.getRepository(PurohitBankAccount);
+      const bankRepo = manager.getRepository(BankAccount);
 
       if (wasPrimary) {
         await bankRepo.update(id, { isPrimary: false });
@@ -3909,13 +4306,10 @@ export class UserService {
       await bankRepo.softDelete(id);
 
       if (wasPrimary) {
-        const remainingAccounts =
-          typeof bankRepo.find === 'function'
-            ? await bankRepo.find({
-              where: { purohitId: profile.id },
-              order: { id: 'ASC' },
-            })
-            : await this.purohitBankAccountRepository.findByPurohitId(profile.id);
+        const remainingAccounts = await bankRepo.find({
+          where: { userId: account.userId },
+          order: { id: 'ASC' },
+        });
 
         if (remainingAccounts.length > 0) {
           await bankRepo.update(remainingAccounts[0].id, { isPrimary: true });
@@ -3929,13 +4323,13 @@ export class UserService {
       actorRole: caller.role,
       module: AUDIT_MODULE.USER,
       entity: 'User',
-      entityId: String(profile.userId),
-      action: 'PUROHIT_BANK_UPDATED',
+      entityId: String(account.userId),
+      action: 'BANK_ACCOUNT_DELETED',
       message:
         caller.role === USER_ROLE.ADMIN
-          ? `Admin #${caller.id} deleted bank account #${id} for Purohit #${profile.userId}.`
-          : `Purohit #${caller.id} deleted bank account #${id}.`,
-      oldValue: undefined,
+          ? `Admin #${caller.id} deleted bank account #${id} for User #${account.userId}.`
+          : `User #${caller.id} deleted bank account #${id}.`,
+      oldValue: { bankAccountId: id },
       newValue: { bankAccountId: id, deleted: true },
     });
 
@@ -3944,6 +4338,12 @@ export class UserService {
       message: 'Bank account deleted successfully',
     };
   }
+
+  addBankAccount = this.addPurohitBankAccount.bind(this);
+  getBankAccounts = this.getPurohitBankAccounts.bind(this);
+  getBankAccountById = this.getPurohitBankAccountById.bind(this);
+  updateBankAccount = this.updatePurohitBankAccount.bind(this);
+  deleteBankAccount = this.deletePurohitBankAccount.bind(this);
 
   private validatePurohitVerificationTransition(
     currentStatus: PUROHIT_VERIFICATION_STATUS,
@@ -4004,7 +4404,8 @@ export class UserService {
       // 'Aadhaar number': profile.aadhaarNumber,
       // TODO: Qualification certificate is optional as per business requirements
       // 'qualification certificate': profile.certificateUrl,
-      qualification: profile.qualification,
+      // TODO: Qualification is optional as per business requirements
+      // qualification: profile.qualification,
       experienceYears: profile.experienceYears,
       languages: profile.languages,
       specializations: profile.specializations,
@@ -4093,7 +4494,7 @@ export class UserService {
     const userRepository = manager.getRepository(User);
     const profileRepository = manager.getRepository(PurohitProfile);
     const mediaRepository = manager.getRepository(PurohitMedia);
-    const bankAccountRepository = manager.getRepository(PurohitBankAccount);
+    const bankAccountRepository = manager.getRepository(BankAccount);
 
     await userRepository
       .createQueryBuilder()
@@ -4130,12 +4531,12 @@ export class UserService {
 
     await bankAccountRepository
       .createQueryBuilder()
-      .update(PurohitBankAccount)
+      .update(BankAccount)
       .set({
         verificationStatus: BANK_VERIFICATION_STATUS.VERIFIED,
       })
-      .where('"purohitId" = :profileId', {
-        profileId,
+      .where('"userId" = :userId', {
+        userId,
       })
       .andWhere('"deletedAt" IS NULL')
       .execute();
@@ -4150,7 +4551,7 @@ export class UserService {
     const userRepository = manager.getRepository(User);
     const profileRepository = manager.getRepository(PurohitProfile);
     const mediaRepository = manager.getRepository(PurohitMedia);
-    const bankAccountRepository = manager.getRepository(PurohitBankAccount);
+    const bankAccountRepository = manager.getRepository(BankAccount);
 
     // TODO: PUROHIT_VERIFICATION_REWORK
     // Verification rejection must not reject/deactivate the User account.
@@ -4190,12 +4591,12 @@ export class UserService {
 
     await bankAccountRepository
       .createQueryBuilder()
-      .update(PurohitBankAccount)
+      .update(BankAccount)
       .set({
         verificationStatus: BANK_VERIFICATION_STATUS.FAILED,
       })
-      .where('"purohitId" = :profileId', {
-        profileId,
+      .where('"userId" = :userId', {
+        userId,
       })
       .andWhere('"deletedAt" IS NULL')
       .execute();
@@ -4385,6 +4786,8 @@ export class UserService {
           dto.status,
         );
 
+        const bankAccountRepository = manager.getRepository(BankAccount);
+
         switch (dto.status) {
           case PUROHIT_VERIFICATION_STATUS.APPROVED:
             astrologerProfile.verificationStatus =
@@ -4393,6 +4796,18 @@ export class UserService {
             targetUser.isAdminCreated = false;
             await manager.save(User, targetUser);
             await manager.save(AstrologerProfile, astrologerProfile);
+
+            await bankAccountRepository
+              .createQueryBuilder()
+              .update(BankAccount)
+              .set({
+                verificationStatus: BANK_VERIFICATION_STATUS.VERIFIED,
+              })
+              .where('"userId" = :userId', {
+                userId: targetUserId,
+              })
+              .andWhere('"deletedAt" IS NULL')
+              .execute();
             break;
 
           case PUROHIT_VERIFICATION_STATUS.REJECTED:
@@ -4400,11 +4815,28 @@ export class UserService {
               PUROHIT_VERIFICATION_STATUS.REJECTED;
             astrologerProfile.rejectionReason = rejectionReason!;
             await manager.save(AstrologerProfile, astrologerProfile);
+
+            await bankAccountRepository
+              .createQueryBuilder()
+              .update(BankAccount)
+              .set({
+                verificationStatus: BANK_VERIFICATION_STATUS.FAILED,
+              })
+              .where('"userId" = :userId', {
+                userId: targetUserId,
+              })
+              .andWhere('"deletedAt" IS NULL')
+              .execute();
             break;
 
           default:
             throw new BadRequestException('Invalid Astrologer verification status');
         }
+
+        const bankVerificationStatus =
+          dto.status === PUROHIT_VERIFICATION_STATUS.APPROVED
+            ? BANK_VERIFICATION_STATUS.VERIFIED
+            : BANK_VERIFICATION_STATUS.FAILED;
 
         return {
           userId: targetUser.id,
@@ -4414,6 +4846,7 @@ export class UserService {
           firstName: targetUser.firstName,
           userStatus: USER_STATUS.ACTIVE,
           verificationStatus: dto.status,
+          bankVerificationStatus,
           rejectionReason:
             dto.status === PUROHIT_VERIFICATION_STATUS.REJECTED
               ? rejectionReason!
@@ -4560,9 +4993,9 @@ export class UserService {
         profileId: result.profileId,
         userStatus: result.userStatus,
         verificationStatus: result.verificationStatus,
+        bankVerificationStatus: (result as any).bankVerificationStatus,
         ...(result.role === USER_ROLE.PUROHIT && {
           mediaStatus: (result as any).mediaStatus,
-          bankVerificationStatus: (result as any).bankVerificationStatus,
           updatedMediaCount: (result as any).updatedMediaCount,
         }),
         rejectionReason: result.rejectionReason,
@@ -4882,6 +5315,18 @@ export class UserService {
         ? Number(astrologySetting.value)
         : 50;
 
+    const commissionPctSetting =
+      (await this.platformSettingRepository.findOne({
+        where: { key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PERCENTAGE },
+      })) ||
+      (await this.platformSettingRepository.findOne({
+        where: { key: PLATFORM_SETTING_KEY.COMMISSION_PERCENTAGE },
+      }));
+    const defaultCommissionPercentage =
+      commissionPctSetting?.value && !isNaN(Number(commissionPctSetting.value))
+        ? Number(commissionPctSetting.value)
+        : 10;
+
     const result = await this.dataSource.transaction(async (manager) => {
       const userRepository = manager.getRepository(User);
 
@@ -4906,13 +5351,82 @@ export class UserService {
       const savedUser = await userRepository.save(user);
 
       const ratePerMin =
-        dto.ratePerMinute !== undefined && dto.ratePerMinute !== null
+        dto.ratePerMinute !== undefined && dto.ratePerMinute !== null && (dto.ratePerMinute as any) !== ''
           ? Number(dto.ratePerMinute)
-          : 0;
-      const commissionPrice =
-        dto.commissionPrice !== undefined && dto.commissionPrice !== null
-          ? Number(dto.commissionPrice)
-          : defaultCommissionPrice;
+          : null;
+
+      const astrologyPrice =
+        dto.astrologyPrice !== undefined && dto.astrologyPrice !== null && (dto.astrologyPrice as any) !== ''
+          ? Number(dto.astrologyPrice)
+          : null;
+
+      let commissionPercentage: number | null = null;
+      if (
+        dto.commissionPercentage !== undefined &&
+        dto.commissionPercentage !== null &&
+        (dto.commissionPercentage as any) !== ''
+      ) {
+        commissionPercentage = Number(dto.commissionPercentage);
+      } else if (astrologyPrice !== null) {
+        commissionPercentage = defaultCommissionPercentage;
+      }
+
+      let commissionPrice: number | null = null;
+      if (astrologyPrice !== null && commissionPercentage !== null) {
+        commissionPrice = Number(
+          ((astrologyPrice * commissionPercentage) / 100).toFixed(2),
+        );
+      } else if (
+        dto.commissionPrice !== undefined &&
+        dto.commissionPrice !== null &&
+        (dto.commissionPrice as any) !== ''
+      ) {
+        commissionPrice = Number(dto.commissionPrice);
+      }
+
+      let astrologerPayout: number | null = null;
+      if (astrologyPrice !== null && commissionPrice !== null) {
+        astrologerPayout = Number((astrologyPrice - commissionPrice).toFixed(2));
+      } else if (astrologyPrice !== null) {
+        astrologerPayout = Number(astrologyPrice.toFixed(2));
+      } else if (
+        dto.astrologerPayout !== undefined &&
+        dto.astrologerPayout !== null &&
+        (dto.astrologerPayout as any) !== ''
+      ) {
+        astrologerPayout = Number(dto.astrologerPayout);
+      }
+
+      // Validate pricing if supplied
+      if (
+        dto.commissionPrice !== undefined &&
+        dto.commissionPrice !== null &&
+        (dto.commissionPrice as any) !== '' &&
+        astrologyPrice !== null &&
+        commissionPercentage !== null
+      ) {
+        const expected = Number(((astrologyPrice * commissionPercentage) / 100).toFixed(2));
+        if (Math.abs(Number(dto.commissionPrice) - expected) > 0.01) {
+          throw new BadRequestException(
+            `commissionPrice (${dto.commissionPrice}) must match calculated commission price: ${expected}`,
+          );
+        }
+      }
+
+      if (
+        dto.astrologerPayout !== undefined &&
+        dto.astrologerPayout !== null &&
+        (dto.astrologerPayout as any) !== '' &&
+        astrologyPrice !== null &&
+        commissionPrice !== null
+      ) {
+        const expectedPayout = Number((astrologyPrice - commissionPrice).toFixed(2));
+        if (Math.abs(Number(dto.astrologerPayout) - expectedPayout) > 0.01) {
+          throw new BadRequestException(
+            `astrologerPayout (${dto.astrologerPayout}) must match calculated payout: ${expectedPayout}`,
+          );
+        }
+      }
 
       const profile = manager.create(AstrologerProfile, {
         userId: savedUser.id,
@@ -4925,11 +5439,43 @@ export class UserService {
         city: dto.city?.trim(),
         state: dto.state?.trim(),
         ratePerMinute: ratePerMin,
+        astrologyPrice,
+        commissionPercentage,
         commissionPrice,
+        astrologerPayout,
         aadhaarNumber: dto.aadhaarNumber,
         verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
       });
       const savedProfile = await manager.save(profile);
+
+      const bankData = (dto as any).bankAccount || ((dto as any).bankAccounts && (dto as any).bankAccounts[0]) || {};
+      const accountHolderName = dto.accountHolderName ?? bankData.accountHolderName;
+      const accountNumber = dto.accountNumber ?? bankData.accountNumber;
+      const ifscCode = dto.ifscCode ?? bankData.ifscCode;
+      const bankName = dto.bankName ?? bankData.bankName;
+      const paymentMethod = dto.paymentMethod ?? bankData.paymentMethod;
+      const upiId = dto.upiId ?? bankData.upiId;
+
+      if (accountNumber || upiId) {
+        const bankRepo = manager.getRepository(BankAccount);
+        const newAccount = bankRepo.create({
+          userId: savedUser.id,
+          accountHolderName: accountHolderName || '',
+          accountNumber: accountNumber || '',
+          ifscCode: ifscCode || '',
+          bankName: bankName || '',
+          paymentMethod: paymentMethod || (upiId ? PUROHIT_PAYMENT_METHOD.UPI : PUROHIT_PAYMENT_METHOD.BANK),
+          upiId: upiId || null,
+          isPrimary: true,
+          verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
+        });
+        await bankRepo.save(newAccount);
+
+        if (this.hasValidPayoutMethod(newAccount)) {
+          savedUser.isAdminCreated = false;
+          await manager.update(User, savedUser.id, { isAdminCreated: false });
+        }
+      }
 
       return {
         user: savedUser,
@@ -5209,9 +5755,9 @@ export class UserService {
             where: { aadhaarNumber: dto.aadhaarNumber.trim() },
           })
           : Promise.resolve(null),
-        effectiveRole === USER_ROLE.PUROHIT && dto.accountNumber
+        (effectiveRole === USER_ROLE.PUROHIT || effectiveRole === USER_ROLE.ASTROLOGER) && dto.accountNumber
           ? this.dataSource
-            .getRepository(PurohitBankAccount)
+            .getRepository(BankAccount)
             .findOne({ where: { accountNumber: dto.accountNumber.trim() } })
           : Promise.resolve(null),
       ]);
@@ -5440,7 +5986,7 @@ export class UserService {
             }
 
             const bankAccountData: any = {
-              purohitId: profile.id,
+              userId: saved.id,
               paymentMethod: dto.paymentMethod,
               isPrimary: true,
               verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
@@ -5455,7 +6001,7 @@ export class UserService {
               bankAccountData.upiId = dto.upiId;
             }
 
-            await manager.save(manager.create(PurohitBankAccount, bankAccountData));
+            await manager.save(manager.create(BankAccount, bankAccountData));
 
             const mediaEntries: PurohitMedia[] = [];
             if (aadhaarDocUrl) {
@@ -5511,17 +6057,113 @@ export class UserService {
             });
 
             const ratePerMin =
-              dto.ratePerMinute !== undefined && dto.ratePerMinute !== null
+              dto.ratePerMinute !== undefined && dto.ratePerMinute !== null && (dto.ratePerMinute as any) !== ''
                 ? Number(dto.ratePerMinute)
-                : 0;
+                : null;
 
-            const astrologySetting = await this.platformSettingRepository.findOne({
-              where: { key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PRICE },
-            });
-            const defaultCommissionPrice =
-              astrologySetting?.value && !isNaN(Number(astrologySetting.value))
-                ? Number(astrologySetting.value)
-                : 50;
+            const rawAstrologyPrice =
+              dto.astrologyPrice !== undefined
+                ? dto.astrologyPrice
+                : (dto as any).profile?.astrologyPrice;
+
+            const astrologyPrice =
+              rawAstrologyPrice !== undefined && rawAstrologyPrice !== null && (rawAstrologyPrice as any) !== ''
+                ? Number(rawAstrologyPrice)
+                : null;
+
+            const commissionPctSetting =
+              (await this.platformSettingRepository.findOne({
+                where: { key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PERCENTAGE },
+              })) ||
+              (await this.platformSettingRepository.findOne({
+                where: { key: PLATFORM_SETTING_KEY.COMMISSION_PERCENTAGE },
+              }));
+            const defaultCommissionPercentage =
+              commissionPctSetting?.value && !isNaN(Number(commissionPctSetting.value))
+                ? Number(commissionPctSetting.value)
+                : 10;
+
+            const rawCommissionPct =
+              dto.commissionPercentage !== undefined
+                ? dto.commissionPercentage
+                : (dto as any).profile?.commissionPercentage;
+
+            let commissionPercentage: number | null = null;
+            if (
+              rawCommissionPct !== undefined &&
+              rawCommissionPct !== null &&
+              (rawCommissionPct as any) !== ''
+            ) {
+              commissionPercentage = Number(rawCommissionPct);
+            } else if (astrologyPrice !== null) {
+              commissionPercentage = defaultCommissionPercentage;
+            }
+
+            const rawCommissionPrice =
+              dto.commissionPrice !== undefined
+                ? dto.commissionPrice
+                : (dto as any).profile?.commissionPrice;
+
+            let commissionPrice: number | null = null;
+            if (astrologyPrice !== null && commissionPercentage !== null) {
+              commissionPrice = Number(
+                ((astrologyPrice * commissionPercentage) / 100).toFixed(2),
+              );
+            } else if (
+              rawCommissionPrice !== undefined &&
+              rawCommissionPrice !== null &&
+              (rawCommissionPrice as any) !== ''
+            ) {
+              commissionPrice = Number(rawCommissionPrice);
+            }
+
+            const rawAstrologerPayout =
+              (dto as any).astrologerPayout !== undefined
+                ? (dto as any).astrologerPayout
+                : (dto as any).profile?.astrologerPayout;
+
+            let astrologerPayout: number | null = null;
+            if (astrologyPrice !== null && commissionPrice !== null) {
+              astrologerPayout = Number((astrologyPrice - commissionPrice).toFixed(2));
+            } else if (astrologyPrice !== null) {
+              astrologerPayout = Number(astrologyPrice.toFixed(2));
+            } else if (
+              rawAstrologerPayout !== undefined &&
+              rawAstrologerPayout !== null &&
+              (rawAstrologerPayout as any) !== ''
+            ) {
+              astrologerPayout = Number(rawAstrologerPayout);
+            }
+
+            if (
+              rawCommissionPrice !== undefined &&
+              rawCommissionPrice !== null &&
+              (rawCommissionPrice as any) !== '' &&
+              astrologyPrice !== null &&
+              commissionPercentage !== null
+            ) {
+              const expected = Number(((astrologyPrice * commissionPercentage) / 100).toFixed(2));
+              if (Math.abs(Number(rawCommissionPrice) - expected) > 0.01) {
+                throw new BadRequestException(
+                  `commissionPrice (${rawCommissionPrice}) must match calculated commission price: ${expected}`,
+                );
+              }
+            }
+
+            if (
+              rawAstrologerPayout !== undefined &&
+              rawAstrologerPayout !== null &&
+              (rawAstrologerPayout as any) !== '' &&
+              astrologyPrice !== null &&
+              commissionPrice !== null
+            ) {
+              const expectedPayout = Number((astrologyPrice - commissionPrice).toFixed(2));
+              if (Math.abs(Number(rawAstrologerPayout) - expectedPayout) > 0.01) {
+                throw new BadRequestException(
+                  `astrologerPayout (${rawAstrologerPayout}) must match calculated payout: ${expectedPayout}`,
+                );
+              }
+            }
 
             if (astrologerProfile) {
               Object.assign(astrologerProfile, {
@@ -5537,7 +6179,11 @@ export class UserService {
                 languages: dto.languages ?? astrologerProfile.languages,
                 specializations: dto.specializations ?? astrologerProfile.specializations,
                 specification: dto.specification ?? astrologerProfile.specification,
-                ratePerMinute: ratePerMin || astrologerProfile.ratePerMinute,
+                ratePerMinute: ratePerMin !== null ? ratePerMin : astrologerProfile.ratePerMinute,
+                astrologyPrice: astrologyPrice !== null ? astrologyPrice : astrologerProfile.astrologyPrice,
+                commissionPercentage: commissionPercentage !== null ? commissionPercentage : astrologerProfile.commissionPercentage,
+                commissionPrice: commissionPrice !== null ? commissionPrice : astrologerProfile.commissionPrice,
+                astrologerPayout: astrologerPayout !== null ? astrologerPayout : astrologerProfile.astrologerPayout,
               });
               savedAstrologerProfile = await manager.save(astrologerProfile);
             } else {
@@ -5556,10 +6202,47 @@ export class UserService {
                 specializations: dto.specializations,
                 specification: dto.specification,
                 ratePerMinute: ratePerMin,
-                commissionPrice: defaultCommissionPrice,
+                astrologyPrice,
+                commissionPercentage,
+                commissionPrice,
+                astrologerPayout,
                 verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
               });
               savedAstrologerProfile = await manager.save(astrologerProfile);
+            }
+
+            const bankData = (dto as any).bankAccount || ((dto as any).bankAccounts && (dto as any).bankAccounts[0]) || {};
+            const accountHolderName = dto.accountHolderName ?? bankData.accountHolderName;
+            const accountNumber = dto.accountNumber ?? bankData.accountNumber;
+            const ifscCode = dto.ifscCode ?? bankData.ifscCode;
+            const bankName = dto.bankName ?? bankData.bankName;
+            const paymentMethod = dto.paymentMethod ?? bankData.paymentMethod;
+            const upiId = dto.upiId ?? bankData.upiId;
+
+            if (accountNumber || upiId) {
+              const astrologerBankData: any = {
+                userId: saved.id,
+                paymentMethod: paymentMethod || (upiId ? PUROHIT_PAYMENT_METHOD.UPI : PUROHIT_PAYMENT_METHOD.BANK),
+                isPrimary: true,
+                verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
+              };
+
+              if (accountNumber) {
+                astrologerBankData.accountHolderName = accountHolderName;
+                astrologerBankData.accountNumber = accountNumber;
+                astrologerBankData.ifscCode = ifscCode;
+                astrologerBankData.bankName = bankName;
+                astrologerBankData.accountType = (dto as any).accountType ?? bankData.accountType;
+              }
+              if (upiId) {
+                astrologerBankData.upiId = upiId;
+              }
+
+              const savedAccount = await manager.save(manager.create(BankAccount, astrologerBankData));
+              if (this.hasValidPayoutMethod(savedAccount) && saved.isAdminCreated) {
+                saved.isAdminCreated = false;
+                await manager.update(User, saved.id, { isAdminCreated: false });
+              }
             }
           }
 

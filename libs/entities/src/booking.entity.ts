@@ -171,7 +171,7 @@ export class Booking {
   platformCommission?: number;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
-  purohitPayoutAmount?: number;
+  partnerPayoutAmount?: number;
 
   @Column({ type: 'varchar', length: 30, nullable: true })
   couponCode?: string;
@@ -244,10 +244,10 @@ export class Booking {
     enum: BOOKING_PAYMENT_STATUS,
     default: BOOKING_PAYMENT_STATUS.PENDING,
   })
-  purohitPayoutStatus!: BOOKING_PAYMENT_STATUS;
+  partnerPayoutStatus!: BOOKING_PAYMENT_STATUS;
 
   @Column({ type: 'int', nullable: true })
-  purohitPaymentId?: number;
+  partnerPayoutId?: number;
 
   @Column({
     type: 'enum',

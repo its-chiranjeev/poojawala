@@ -12,6 +12,7 @@ interface FindBookingsByRoleOptions {
   limit?: number;
   status?: BOOKING_STATUS | BOOKING_STATUS[];
   bookingPaymentStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
+  partnerPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
   purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
   bookingType?: BOOKING_TYPE | BOOKING_TYPE[];
   search?: string;
@@ -95,7 +96,8 @@ export class BookingRepository extends BaseRepository<Booking> {
         { bookingPaymentType: PAYMENT_TYPE.BOOKING_PAYMENT },
       )
       .leftJoinAndSelect('booking.complaints', 'complaints')
-      .leftJoinAndSelect('purohit.bankAccounts', 'purohitBankAccounts')
+      .leftJoinAndSelect('purohitUser.bankAccounts', 'purohitBankAccounts')
+      .leftJoinAndSelect('astrologer.bankAccounts', 'astrologerBankAccounts')
       .where('booking.id = :bookingId', {
         bookingId,
       })
@@ -176,7 +178,7 @@ export class BookingRepository extends BaseRepository<Booking> {
       limit = 10,
       status,
       bookingPaymentStatus,
-      purohitPayoutStatus,
+      partnerPayoutStatus = options.partnerPayoutStatus ?? options.purohitPayoutStatus,
       bookingType,
       search,
     } = options;
@@ -244,7 +246,7 @@ export class BookingRepository extends BaseRepository<Booking> {
         '(payments."paymentType" != :bookingPaymentType OR (payments."razorpayPaymentLinkId" IS NOT NULL AND payments."razorpayPaymentLinkId" != \'\'))',
         { bookingPaymentType: PAYMENT_TYPE.BOOKING_PAYMENT },
       )
-      .leftJoinAndSelect('payments.purohitBankAccount', 'purohitBankAccount');
+      .leftJoinAndSelect('payments.bankAccount', 'bankAccount');
 
     switch (userRole) {
       case USER_ROLE.ADMIN:
@@ -323,19 +325,19 @@ export class BookingRepository extends BaseRepository<Booking> {
       }
     }
 
-    if (purohitPayoutStatus) {
-      if (Array.isArray(purohitPayoutStatus)) {
+    if (partnerPayoutStatus) {
+      if (Array.isArray(partnerPayoutStatus)) {
         query.andWhere(
-          'booking.purohitPayoutStatus IN (:...purohitPayoutStatus)',
+          'booking.partnerPayoutStatus IN (:...partnerPayoutStatus)',
           {
-            purohitPayoutStatus,
+            partnerPayoutStatus,
           },
         );
       } else {
         query.andWhere(
-          'booking.purohitPayoutStatus = :purohitPayoutStatus',
+          'booking.partnerPayoutStatus = :partnerPayoutStatus',
           {
-            purohitPayoutStatus,
+            partnerPayoutStatus,
           },
         );
       }
@@ -802,13 +804,13 @@ export class BookingRepository extends BaseRepository<Booking> {
 
     const query = this.bookingRepo
       .createQueryBuilder('booking')
-      .select('COALESCE(SUM(CASE WHEN booking.status = :completed AND booking."purohitPayoutStatus" = :payoutPaid THEN booking.purohitPayoutAmount ELSE 0 END), 0)', 'totalEarnings')
+      .select('COALESCE(SUM(CASE WHEN booking.status = :completed AND booking."partnerPayoutStatus" = :payoutPaid THEN booking.partnerPayoutAmount ELSE 0 END), 0)', 'totalEarnings')
       .addSelect(
-        `COALESCE(SUM(CASE WHEN booking.scheduledAt >= :startOfMonth AND booking.status = :completed AND booking."purohitPayoutStatus" = :payoutPaid THEN booking.purohitPayoutAmount ELSE 0 END), 0)`,
+        `COALESCE(SUM(CASE WHEN booking.scheduledAt >= :startOfMonth AND booking.status = :completed AND booking."partnerPayoutStatus" = :payoutPaid THEN booking.partnerPayoutAmount ELSE 0 END), 0)`,
         'thisMonthEarnings',
       )
       .addSelect(
-        `COALESCE(SUM(CASE WHEN booking.scheduledAt >= :startOfWeek AND booking.status = :completed AND booking."purohitPayoutStatus" = :payoutPaid THEN booking.purohitPayoutAmount ELSE 0 END), 0)`,
+        `COALESCE(SUM(CASE WHEN booking.scheduledAt >= :startOfWeek AND booking.status = :completed AND booking."partnerPayoutStatus" = :payoutPaid THEN booking.partnerPayoutAmount ELSE 0 END), 0)`,
         'thisWeekEarnings',
       )
       .addSelect(

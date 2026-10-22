@@ -72,6 +72,8 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       id: 5,
       name: 'Varalakshmi Vratam Puja',
       isActive: true,
+      isOffline: true,
+      isOnline: true,
       cities: [{ name: 'Varanasi' }],
       commissionPercentage: 10,
       tokenPercentage: 20,
@@ -711,7 +713,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       expect(savedBooking.servicePrice).toBe(4100);
       expect(savedBooking.finalAmount).toBe(4100);
       expect(savedBooking.platformCommission).toBe(410);
-      expect(savedBooking.purohitPayoutAmount).toBe(3690);
+      expect(savedBooking.partnerPayoutAmount).toBe(3690);
     });
 
     it('21. Book with plan=standard', async () => {
@@ -747,7 +749,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       expect(savedBooking.servicePrice).toBe(6100);
       expect(savedBooking.finalAmount).toBe(6100);
       expect(savedBooking.platformCommission).toBe(610);
-      expect(savedBooking.purohitPayoutAmount).toBe(5490);
+      expect(savedBooking.partnerPayoutAmount).toBe(5490);
     });
 
     it('23. Invalid plan rejected', async () => {
@@ -898,10 +900,10 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         finalAmount: 4100,
         servicePrice: 4100,
         platformCommission: 410,
-        purohitPayoutAmount: 3690,
+        partnerPayoutAmount: 3690,
       } as Partial<Booking>;
 
-      expect(Number(booking.purohitPayoutAmount)).toBe(3690);
+      expect(Number(booking.partnerPayoutAmount)).toBe(3690);
       expect(Number(booking.platformCommission)).toBe(410);
     });
 
@@ -931,7 +933,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         samagriIncluded: true,
         servicePrice: 2200,
         finalAmount: 2200,
-        purohitPayoutAmount: 1350,
+        partnerPayoutAmount: 1350,
         platformCommission: 150,
       };
 
@@ -1439,7 +1441,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         'agreedPrice',
         'commissionPercentage',
         'platformCommission',
-        'purohitPayoutAmount',
+        'partnerPayoutAmount',
         'couponCode',
         'discountAmount',
         'donationAmount',
@@ -2097,12 +2099,14 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       });
 
       expect(res.finalAmount).toBe(150);
-      expect(res.platformAccessFee).toBe(150);
-      expect(res.ratePerMinute).toBe(35);
-      expect(res.consultationChargesNoticeTitle).toBe('Astrology Consultation Charges');
-      expect(res.consultationFeeNotice).toContain('Pay ₹150 to unlock the astrologer\'s details');
-      expect(res.consultationFeeNotice).toContain('rate of ₹35/min');
-      expect(res.astrologyTransparency?.isUnlocked).toBe(false);
+      expect(res.priceBreakDown?.commissionPrice).toBe(150);
+      expect(res.priceBreakDown?.platformCommissionPercentage).toBe(10);
+      expect(res.priceBreakDown?.platformCommission).toBeUndefined();
+      expect(res.platformAccessFee).toBeUndefined();
+      expect(res.ratePerMinute).toBeUndefined();
+      expect(res.consultationChargesNoticeTitle).toBeUndefined();
+      expect(res.consultationFeeNotice).toBeUndefined();
+      expect(res.astrologyTransparency).toBeUndefined();
     });
 
     it('masks astrologer details and provides pre-payment notice for unpaid booking in getBookingById', async () => {

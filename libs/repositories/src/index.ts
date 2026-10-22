@@ -3,7 +3,7 @@ export * from './repositories.service';
 export * from './user.repository';
 export * from './otp.repository';
 export * from './purohit-profile.repository';
-export * from './purohit-bank-account.repository';
+export * from './bank-account.repository';
 export * from './purohit-service-area.repository';
 export * from './purohit-media.repository';
 export * from './service.repository';

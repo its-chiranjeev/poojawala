@@ -59,7 +59,7 @@ import { NotificationService } from '@poojawala/notification';
 import {
   NOTIFICATION_TYPE,
   PurohitProfile,
-  PurohitBankAccount,
+  BankAccount,
   ASSIGNMENT_TYPE,
   BOOKING_PAYMENT_TYPE,
 } from '@poojawala/entities';
@@ -212,7 +212,8 @@ export interface PaymentDetailsResponse {
   orderId: number | null;
   orderNumber: string | null;
   bookingPaymentStatus: BOOKING_PAYMENT_STATUS | null;
-  purohitPayoutStatus: BOOKING_PAYMENT_STATUS | null;
+  partnerPayoutStatus?: BOOKING_PAYMENT_STATUS | null;
+  purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | null;
   purohitPayoutAmount: number | null;
 
   customerDetails: {
@@ -577,7 +578,7 @@ export class PaymentService {
   async getPurohitPayoutDetails(bookingId: number) {
     const booking = await this.bookingRepository.findOne({
       where: { id: bookingId },
-      relations: ['purohit', 'purohit.user'],
+      relations: ['purohit', 'purohit.user', 'astrologer'],
     });
 
     if (!booking) {
@@ -592,25 +593,48 @@ export class PaymentService {
       throw new BadRequestException('Booking payment is not completed yet');
     }
 
-    if (!booking.purohitId || !booking.purohit) {
-      throw new BadRequestException('No Purohit is assigned to this booking');
+    const isAstrology =
+      booking.bookingType === BOOKING_TYPE.ASTROLOGY || Boolean(booking.astrologerId);
+
+    let recipientUserId: number;
+    let recipientName: string;
+    let payoutAmount: number;
+    let payoutStatus: BOOKING_PAYMENT_STATUS;
+
+    if (isAstrology) {
+      if (!booking.astrologerId) {
+        throw new BadRequestException('No Astrologer is assigned to this booking');
+      }
+      recipientUserId = booking.astrologerId;
+      recipientName = booking.astrologer
+        ? `${booking.astrologer.firstName} ${booking.astrologer.lastName}`.trim()
+        : 'Astrologer';
+      payoutAmount = Number(booking.partnerPayoutAmount || booking.finalAmount || 0);
+      payoutStatus = booking.partnerPayoutStatus;
+    } else {
+      if (!booking.purohitId || !booking.purohit) {
+        throw new BadRequestException('No Purohit is assigned to this booking');
+      }
+      recipientUserId = booking.purohit.userId;
+      recipientName = booking.purohit.user
+        ? `${booking.purohit.user.firstName} ${booking.purohit.user.lastName}`.trim()
+        : 'Unknown';
+      payoutAmount = Number(booking.partnerPayoutAmount || 0);
+      payoutStatus = booking.partnerPayoutStatus;
     }
 
-    const purohitBankAccountRepository =
-      this.dataSource.getRepository(PurohitBankAccount);
-    const bankAccount = await purohitBankAccountRepository.findOne({
-      where: { purohitId: booking.purohitId, isPrimary: true },
+    const bankAccountRepository = this.dataSource.getRepository(BankAccount);
+    const bankAccount = await bankAccountRepository.findOne({
+      where: { userId: recipientUserId, isPrimary: true },
     });
 
     if (!bankAccount) {
-      throw new NotFoundException('Purohit bank account not found');
+      throw new NotFoundException('Primary bank account not found');
     }
 
     if (bankAccount.verificationStatus !== BANK_VERIFICATION_STATUS.VERIFIED) {
-      throw new BadRequestException('Purohit bank account is not verified');
+      throw new BadRequestException('Recipient bank account is not verified');
     }
-
-    const payoutAmount = Number(booking.purohitPayoutAmount);
 
     // Mask account number
     const maskedAccountNumber = bankAccount.accountNumber
@@ -621,14 +645,15 @@ export class PaymentService {
     return {
       bookingId: booking.id,
       bookingNumber: booking.bookingNumber,
+      recipientId: recipientUserId,
       purohitId: booking.purohitId,
-      purohitName: booking.purohit.user
-        ? `${booking.purohit.user.firstName} ${booking.purohit.user.lastName}`
-        : 'Unknown',
+      astrologerId: booking.astrologerId,
+      purohitName: recipientName,
+      recipientName,
       payoutAmount,
       bookingStatus: booking.status,
       bookingPaymentStatus: booking.paymentStatus,
-      payoutStatus: booking.purohitPayoutStatus,
+      payoutStatus,
       bankAccount: {
         id: bankAccount.id,
         paymentMethod: bankAccount.paymentMethod,
@@ -648,6 +673,7 @@ export class PaymentService {
   ) {
     const booking = await this.bookingRepository.findOne({
       where: { id: dto.bookingId },
+      relations: ['purohit', 'purohit.user', 'astrologer'],
     });
 
     if (!booking) {
@@ -662,101 +688,69 @@ export class PaymentService {
       throw new BadRequestException('Booking payment is not completed yet');
     }
 
-    if (!booking.purohitId) {
-      throw new BadRequestException('No Purohit is assigned to this booking');
+    const isAstrology =
+      booking.bookingType === BOOKING_TYPE.ASTROLOGY || Boolean(booking.astrologerId);
+
+    let recipientUserId: number;
+    let recipientName: string;
+    let payoutAmount: number;
+    let currentPayoutStatus: BOOKING_PAYMENT_STATUS;
+
+    if (isAstrology) {
+      if (!booking.astrologerId) {
+        throw new BadRequestException('No Astrologer is assigned to this booking');
+      }
+      recipientUserId = booking.astrologerId;
+      recipientName = booking.astrologer
+        ? `${booking.astrologer.firstName} ${booking.astrologer.lastName}`.trim()
+        : 'Astrologer';
+      payoutAmount = Number(booking.partnerPayoutAmount || booking.finalAmount || 0);
+      currentPayoutStatus = booking.partnerPayoutStatus;
+    } else {
+      if (!booking.purohitId) {
+        throw new BadRequestException('No Purohit is assigned to this booking');
+      }
+      const purohitProfile = await this.dataSource
+        .getRepository(PurohitProfile)
+        .findOne({
+          where: { id: booking.purohitId },
+          relations: ['user'],
+        });
+      if (!purohitProfile) {
+        throw new NotFoundException('Purohit profile not found');
+      }
+      recipientUserId = purohitProfile.userId;
+      recipientName = purohitProfile.user
+        ? `${purohitProfile.user.firstName} ${purohitProfile.user.lastName}`.trim()
+        : 'Unknown';
+      payoutAmount = Number(booking.partnerPayoutAmount || 0);
+      currentPayoutStatus = booking.partnerPayoutStatus;
     }
 
-    const purohitProfile = await this.dataSource
-      .getRepository(PurohitProfile)
-      .findOne({
-        where: { id: booking.purohitId },
-      });
-
-    if (!purohitProfile) {
-      throw new NotFoundException('Purohit profile not found');
-    }
-
-    const purohitBankAccountRepository =
-      this.dataSource.getRepository(PurohitBankAccount);
-    const bankAccount = await purohitBankAccountRepository.findOne({
-      where: { purohitId: booking.purohitId, isPrimary: true },
-    });
-
-    if (!bankAccount) {
-      throw new NotFoundException('Primary Purohit bank account not found');
-    }
-
-    if (bankAccount.verificationStatus !== BANK_VERIFICATION_STATUS.VERIFIED) {
-      throw new BadRequestException('Purohit bank account is not verified');
-    }
-
-    const payoutAmount = Number(booking.purohitPayoutAmount);
-
-    if (payoutAmount <= 0) {
-      throw new BadRequestException('Payout amount must be greater than zero');
-    }
-
-    // TODO: Deprecated.
-    // Relied solely on post-query payment records without checking booking-level
-    // purohitPayoutStatus and purohitPaymentId or pessimistic lock.
-    // const existingPayouts = await this.paymentRepository.find({
-    //   where: {
-    //     bookingId: booking.id,
-    //     paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT,
-    //   },
-    // });
-    //
-    // for (const ep of existingPayouts) {
-    //   if (ep.status === PAYMENT_STATUS.SUCCESS) {
-    //     throw new BadRequestException(
-    //       'Payout has already been completed for this booking',
-    //     );
-    //   }
-    // }
-
-    // TODO: Deprecated check on booking.purohitPaymentId != null.
-    // Now that a real PUROHIT_PAYOUT payment record is created in PENDING status
-    // when the customer fully pays, booking.purohitPaymentId points to that pending payout ID.
-    // Admin payout must update that SAME record to PAID rather than rejecting.
-    // if (
-    //   booking.purohitPayoutStatus === BOOKING_PAYMENT_STATUS.PAID ||
-    //   booking.purohitPaymentId != null
-    // ) {
-    //   throw new BadRequestException(
-    //     'Payout has already been completed for this booking',
-    //   );
-    // }
-    if (booking.purohitPayoutStatus === BOOKING_PAYMENT_STATUS.PAID) {
+    if (currentPayoutStatus === BOOKING_PAYMENT_STATUS.PAID) {
       throw new BadRequestException(
         'Payout has already been completed for this booking',
       );
     }
 
-    const existingPayouts = await this.paymentRepository.find({
-      where: {
-        bookingId: booking.id,
-        paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT,
-      },
+    const bankAccountRepository = this.dataSource.getRepository(BankAccount);
+    const bankAccount = await bankAccountRepository.findOne({
+      where: { userId: recipientUserId, isPrimary: true },
     });
 
-    for (const ep of existingPayouts) {
-      if (ep.status === PAYMENT_STATUS.SUCCESS) {
-        throw new BadRequestException(
-          'Payout has already been completed for this booking',
-        );
-      }
+    if (!bankAccount) {
+      throw new NotFoundException('Primary bank account not found');
+    }
+
+    if (bankAccount.verificationStatus !== BANK_VERIFICATION_STATUS.VERIFIED) {
+      throw new BadRequestException('Recipient bank account is not verified');
+    }
+
+    if (payoutAmount <= 0) {
+      throw new BadRequestException('Payout amount must be greater than zero');
     }
 
     const idempotencyKey = crypto.randomUUID();
-
-    // Check duplicate Idempotency Key (unlikely with UUID but good practice)
-    const duplicatePayment = await this.paymentRepository.findOne({
-      where: { idempotencyKey, status: PAYMENT_STATUS.SUCCESS },
-    });
-
-    if (duplicatePayment) {
-      throw new BadRequestException('Duplicate idempotency key detected');
-    }
 
     // Wrap in transaction
     const savedPayout = await this.dataSource.transaction(async (manager) => {
@@ -769,24 +763,32 @@ export class PaymentService {
         lock: { mode: 'pessimistic_write' },
       });
 
-      if (
-        !lockedBooking ||
-        lockedBooking.purohitPayoutStatus === BOOKING_PAYMENT_STATUS.PAID
-      ) {
+      if (!lockedBooking) {
+        throw new NotFoundException('Booking not found during transaction');
+      }
+
+      const lockedStatus = lockedBooking.partnerPayoutStatus;
+
+      if (lockedStatus === BOOKING_PAYMENT_STATUS.PAID) {
         throw new BadRequestException(
           'Payout has already been completed for this booking',
         );
       }
 
-      // Find the existing PUROHIT_PAYOUT payment record for this booking
+      const expectedPaymentType = isAstrology
+        ? PAYMENT_TYPE.ASTROLOGER_PAYOUT
+        : PAYMENT_TYPE.PUROHIT_PAYOUT;
+
+      const existingPayoutPendingId = lockedBooking.partnerPayoutId;
+
       let payoutRecord = await paymentRepo.findOne({
         where: [
-          ...(lockedBooking.purohitPaymentId
-            ? [{ id: lockedBooking.purohitPaymentId, paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT }]
+          ...(existingPayoutPendingId
+            ? [{ id: existingPayoutPendingId, paymentType: expectedPaymentType }]
             : []),
           {
             bookingId: booking.id,
-            paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT,
+            paymentType: expectedPaymentType,
           },
         ],
       });
@@ -807,29 +809,26 @@ export class PaymentService {
         payoutRecord.status = PAYMENT_STATUS.SUCCESS;
         payoutRecord.paidAt = new Date();
         payoutRecord.payerId = adminId;
-        payoutRecord.payeeId = payoutRecord.payeeId || purohitProfile.userId;
+        payoutRecord.payeeId = payoutRecord.payeeId || recipientUserId;
         payoutRecord.paymentMethod = payoutMethod;
-        payoutRecord.purohitBankAccountId = bankAccount.id;
+        payoutRecord.bankAccountId = bankAccount.id;
         payoutRecord.idempotencyKey = idempotencyKey;
         if (dto.remark) {
           payoutRecord.remark = dto.remark;
         }
         payoutRecord = await paymentRepo.save(payoutRecord);
       } else {
-        // Fallback: create if none existed yet
-        // TODO: Deprecated new payout creation when one should already exist.
-        // Preserved as fallback for legacy bookings.
         payoutRecord = paymentRepo.create({
-          paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT,
+          paymentType: expectedPaymentType,
           bookingId: booking.id,
           createdById: adminId,
           payerId: adminId,
-          payeeId: purohitProfile.userId,
+          payeeId: recipientUserId,
           amount: payoutAmount,
           currency: 'INR',
           paymentMethod: payoutMethod,
           idempotencyKey,
-          purohitBankAccountId: bankAccount.id,
+          bankAccountId: bankAccount.id,
           status: PAYMENT_STATUS.SUCCESS,
           remark: dto.remark,
           paidAt: new Date(),
@@ -837,12 +836,12 @@ export class PaymentService {
         payoutRecord = await paymentRepo.save(payoutRecord);
       }
 
-      lockedBooking.purohitPayoutStatus = BOOKING_PAYMENT_STATUS.PAID;
-      lockedBooking.purohitPaymentId = payoutRecord.id;
+      lockedBooking.partnerPayoutStatus = BOOKING_PAYMENT_STATUS.PAID;
+      lockedBooking.partnerPayoutId = payoutRecord.id;
       await bkRepo.save(lockedBooking);
 
-      booking.purohitPayoutStatus = BOOKING_PAYMENT_STATUS.PAID;
-      booking.purohitPaymentId = payoutRecord.id;
+      booking.partnerPayoutStatus = BOOKING_PAYMENT_STATUS.PAID;
+      booking.partnerPayoutId = payoutRecord.id;
 
       await this.auditLogService.createAuditLog(
         {
@@ -853,10 +852,12 @@ export class PaymentService {
           entity: 'Payment',
           entityId: String(payoutRecord.id),
           action: 'PAYOUT_PROCESSED',
-          message: `Admin manually processed a payout of ₹${payoutAmount} for Purohit #${purohitProfile.userId} (Booking #${booking.bookingNumber}).`,
-          oldValue: { purohitPayoutStatus: BOOKING_PAYMENT_STATUS.PENDING },
+          message: `Admin manually processed a payout of ₹${payoutAmount} for ${isAstrology ? 'Astrologer' : 'Purohit'} #${recipientUserId} (Booking #${booking.bookingNumber}).`,
+          oldValue: {
+            payoutStatus: BOOKING_PAYMENT_STATUS.PENDING,
+          },
           newValue: {
-            purohitPayoutStatus: booking.purohitPayoutStatus,
+            payoutStatus: BOOKING_PAYMENT_STATUS.PAID,
             paymentId: payoutRecord.id,
           },
         },
@@ -868,7 +869,7 @@ export class PaymentService {
 
     // Create Notification
     await this.notificationService.createNotification(
-      purohitProfile.userId,
+      recipientUserId,
       'Payout Processed',
       `A payout of ₹${payoutAmount} has been processed for Booking B-${booking.id}.`,
       NOTIFICATION_TYPE.PAYOUT,
@@ -879,8 +880,10 @@ export class PaymentService {
     return {
       payoutId: savedPayout.id,
       bookingId: savedPayout.bookingId,
+      recipientId: recipientUserId,
       purohitId: booking.purohitId,
-      purohitBankAccountId: savedPayout.purohitBankAccountId,
+      astrologerId: booking.astrologerId,
+      bankAccountId: savedPayout.bankAccountId,
       amount: savedPayout.amount,
       status: savedPayout.status,
       paymentMethod: savedPayout.paymentMethod,
@@ -2005,8 +2008,8 @@ export class PaymentService {
       );
       if (
         !purohitPayoutPayment &&
-        booking.purohitPayoutStatus !== BOOKING_PAYMENT_STATUS.PAID &&
-        Number(booking.purohitPayoutAmount) > 0
+        booking.partnerPayoutStatus !== BOOKING_PAYMENT_STATUS.PAID &&
+        Number(booking.partnerPayoutAmount) > 0
       ) {
         purohitPayoutPayment = (await this.ensurePurohitPendingPayout(
           this.dataSource.manager,
@@ -2078,7 +2081,8 @@ export class PaymentService {
 
       paymentType: query.paymentType,
 
-      purohitPayoutStatus: query.purohitPayoutStatus,
+      partnerPayoutStatus: query.partnerPayoutStatus ?? query.purohitPayoutStatus,
+      purohitPayoutStatus: query.partnerPayoutStatus ?? query.purohitPayoutStatus,
 
       bookingPaymentStatus: query.bookingPaymentStatus,
 
@@ -3613,16 +3617,20 @@ export class PaymentService {
       // purohitPayoutAmount: primaryBooking?.purohitPayoutAmount != null
       //   ? Number(primaryBooking.purohitPayoutAmount)
       //   : null,
+      partnerPayoutStatus:
+        viewerRole === USER_ROLE.CUSTOMER
+          ? null
+          : (primaryBooking?.partnerPayoutStatus ?? null),
       purohitPayoutStatus:
         viewerRole === USER_ROLE.CUSTOMER
           ? null
-          : (primaryBooking?.purohitPayoutStatus ?? null),
+          : (primaryBooking?.partnerPayoutStatus ?? null),
 
       purohitPayoutAmount:
         viewerRole === USER_ROLE.CUSTOMER
           ? null
-          : primaryBooking?.purohitPayoutAmount != null
-            ? Number(primaryBooking.purohitPayoutAmount)
+          : primaryBooking?.partnerPayoutAmount != null
+            ? Number(primaryBooking.partnerPayoutAmount)
             : null,
 
       customerDetails: resolvedCustomer
@@ -3808,7 +3816,8 @@ export class PaymentService {
 
       paymentMethod: query.paymentMethod,
 
-      purohitPayoutStatus: query.purohitPayoutStatus,
+      partnerPayoutStatus: query.partnerPayoutStatus ?? query.purohitPayoutStatus,
+      purohitPayoutStatus: query.partnerPayoutStatus ?? query.purohitPayoutStatus,
 
       bookingPaymentStatus: query.bookingPaymentStatus,
 
@@ -5088,14 +5097,14 @@ export class PaymentService {
       return null;
     }
 
-    // 3. booking.purohitPayoutAmount is available and greater than 0
-    const payoutAmount = Number(booking.purohitPayoutAmount);
+    // 3. booking.partnerPayoutAmount is available and greater than 0
+    const payoutAmount = Number(booking.partnerPayoutAmount);
     if (!payoutAmount || payoutAmount <= 0) {
       return null;
     }
 
-    // 5. Purohit payout has not already been marked PAID
-    if (booking.purohitPayoutStatus === BOOKING_PAYMENT_STATUS.PAID) {
+    // 5. Partner payout has not already been marked PAID
+    if (booking.partnerPayoutStatus === BOOKING_PAYMENT_STATUS.PAID) {
       return null;
     }
 
@@ -5106,8 +5115,8 @@ export class PaymentService {
     // Verify inside transaction for idempotency / duplicate protection
     const existingPayout = await paymentRepo.findOne({
       where: [
-        ...(booking.purohitPaymentId
-          ? [{ id: booking.purohitPaymentId, paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT }]
+        ...(booking.partnerPayoutId
+          ? [{ id: booking.partnerPayoutId, paymentType: PAYMENT_TYPE.PUROHIT_PAYOUT }]
           : []),
         {
           bookingId: booking.id,
@@ -5118,9 +5127,9 @@ export class PaymentService {
 
     if (existingPayout) {
       // Reuse existing payout instead of creating another one
-      if (booking.purohitPaymentId !== existingPayout.id) {
-        booking.purohitPaymentId = existingPayout.id;
-        booking.purohitPayoutStatus =
+      if (booking.partnerPayoutId !== existingPayout.id) {
+        booking.partnerPayoutId = existingPayout.id;
+        booking.partnerPayoutStatus =
           existingPayout.status === PAYMENT_STATUS.SUCCESS
             ? BOOKING_PAYMENT_STATUS.PAID
             : BOOKING_PAYMENT_STATUS.PENDING;
@@ -5153,8 +5162,8 @@ export class PaymentService {
 
     createdPayout = await paymentRepo.save(createdPayout);
 
-    booking.purohitPaymentId = createdPayout.id;
-    booking.purohitPayoutStatus = BOOKING_PAYMENT_STATUS.PENDING;
+    booking.partnerPayoutId = createdPayout.id;
+    booking.partnerPayoutStatus = BOOKING_PAYMENT_STATUS.PENDING;
     await bkRepo.save(booking);
 
     return createdPayout;
@@ -5175,8 +5184,8 @@ export class PaymentService {
         .andWhere(
           '(booking.remainingAmount <= 0 OR booking.remainingAmount IS NULL)',
         )
-        .andWhere('booking.purohitPayoutAmount > 0')
-        .andWhere('booking.purohitPayoutStatus != :payoutPaidStatus', {
+        .andWhere('booking.partnerPayoutAmount > 0')
+        .andWhere('booking.partnerPayoutStatus != :payoutPaidStatus', {
           payoutPaidStatus: BOOKING_PAYMENT_STATUS.PAID,
         })
         .getMany();
@@ -5225,8 +5234,8 @@ export class PaymentService {
       .skip((page - 1) * limit)
       .take(limit);
 
-    qb.andWhere('booking.purohitPayoutStatus = :purohitPayoutStatus', {
-      purohitPayoutStatus: BOOKING_PAYMENT_STATUS.PAID,
+    qb.andWhere('booking.partnerPayoutStatus = :partnerPayoutStatus', {
+      partnerPayoutStatus: BOOKING_PAYMENT_STATUS.PAID,
     });
 
     const [bookings, total] = await qb.getManyAndCount();
@@ -5240,12 +5249,13 @@ export class PaymentService {
         purohitPayoutDate: payoutPayment
           ? (payoutPayment.paidAt ?? payoutPayment.createdAt)
           : null,
-        purohitPayoutStatus: booking.purohitPayoutStatus,
+        partnerPayoutStatus: booking.partnerPayoutStatus,
+        purohitPayoutStatus: booking.partnerPayoutStatus,
         purohitName: booking.purohit?.user
           ? `${booking.purohit.user.firstName} ${booking.purohit.user.lastName}`.trim()
           : null,
         finalAmount: booking.finalAmount,
-        payoutAmount: booking.purohitPayoutAmount,
+        payoutAmount: booking.partnerPayoutAmount,
       };
     });
 
@@ -5311,8 +5321,8 @@ export class PaymentService {
 
     const { purohitPayoutsAmount } = await bookingRepo
       .createQueryBuilder('booking')
-      .select('COALESCE(SUM(booking.purohitPayoutAmount), 0)', 'purohitPayoutsAmount')
-      .where('booking.purohitPayoutStatus = :status', {
+      .select('COALESCE(SUM(booking.partnerPayoutAmount), 0)', 'purohitPayoutsAmount')
+      .where('booking.partnerPayoutStatus = :status', {
         status: BOOKING_PAYMENT_STATUS.PAID,
       })
       .andWhere('booking.purohitId IS NOT NULL')
@@ -5329,8 +5339,8 @@ export class PaymentService {
       .andWhere(
         '(booking.remainingAmount <= 0 OR booking.remainingAmount IS NULL)',
       )
-      .andWhere('booking.purohitPayoutAmount > 0')
-      .andWhere('booking.purohitPayoutStatus = :payoutStatus', {
+      .andWhere('booking.partnerPayoutAmount > 0')
+      .andWhere('booking.partnerPayoutStatus = :payoutStatus', {
         payoutStatus: BOOKING_PAYMENT_STATUS.PENDING,
       })
       .andWhere('booking.purohitId IS NOT NULL')
@@ -5338,7 +5348,7 @@ export class PaymentService {
 
     const successfulPayoutsNumber = await bookingRepo
       .createQueryBuilder('booking')
-      .where('booking.purohitPayoutStatus = :payoutStatus', {
+      .where('booking.partnerPayoutStatus = :payoutStatus', {
         payoutStatus: BOOKING_PAYMENT_STATUS.PAID,
       })
       .andWhere('booking.purohitId IS NOT NULL')

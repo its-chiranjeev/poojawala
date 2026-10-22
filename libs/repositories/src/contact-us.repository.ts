@@ -15,18 +15,45 @@ export class ContactUsRepository {
     return this.repo.save(newContactUs);
   }
 
-  async getAll(page: number = 1, limit: number = 10, search?: string, status?: CONTACT_US_STATUS) {
-    const query = this.repo.createQueryBuilder('contactUs');
+  async getAll(
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+    status?: CONTACT_US_STATUS,
+    serviceId?: number,
+    isServiceQuery?: boolean,
+  ) {
+    const query = this.repo
+      .createQueryBuilder('contactUs')
+      .leftJoin('contactUs.service', 'service')
+      .addSelect([
+        'service.id',
+        'service.name',
+        'service.slug',
+        'service.iconUrl',
+        'service.cities',
+        'service.isGlobal',
+        'service.isOnline',
+        'service.isOffline',
+      ]);
 
     if (search) {
       query.andWhere(
-        '(CAST(contactUs.id AS TEXT) ILIKE :search OR contactUs.name ILIKE :search OR contactUs.email ILIKE :search OR contactUs.subject ILIKE :search)',
+        '(CAST(contactUs.id AS TEXT) ILIKE :search OR contactUs.name ILIKE :search OR contactUs.email ILIKE :search OR contactUs.subject ILIKE :search OR service.name ILIKE :search)',
         { search: `%${search}%` },
       );
     }
 
     if (status) {
       query.andWhere('contactUs.status = :status', { status });
+    }
+
+    if (serviceId) {
+      query.andWhere('contactUs.serviceId = :serviceId', { serviceId });
+    } else if (isServiceQuery === true) {
+      query.andWhere('contactUs.serviceId IS NOT NULL');
+    } else if (isServiceQuery === false) {
+      query.andWhere('contactUs.serviceId IS NULL');
     }
 
     query.orderBy('contactUs.createdAt', 'DESC');
@@ -46,7 +73,21 @@ export class ContactUsRepository {
   }
 
   async getById(id: number): Promise<ContactUs | null> {
-    return this.repo.findOne({ where: { id } });
+    return this.repo
+      .createQueryBuilder('contactUs')
+      .leftJoin('contactUs.service', 'service')
+      .addSelect([
+        'service.id',
+        'service.name',
+        'service.slug',
+        'service.iconUrl',
+        'service.cities',
+        'service.isGlobal',
+        'service.isOnline',
+        'service.isOffline',
+      ])
+      .where('contactUs.id = :id', { id })
+      .getOne();
   }
 
   async updateStatus(id: number, status: CONTACT_US_STATUS): Promise<ContactUs | null> {

@@ -4,7 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from './user.entity';
 import { Otp } from './otp.entity';
 import { PurohitProfile } from './purohit-profile.entity';
-import { PurohitBankAccount } from './purohit-bank-account.entity';
+import { BankAccount } from './bank-account.entity';
 import { PurohitServiceArea } from './purohit-service-area.entity';
 import { PurohitMedia } from './purohit-media.entity';
 import { Service } from './service.entity';
@@ -42,7 +42,7 @@ import { AstrologerProfile } from './astrologer-profile.entity';
       User,
       Otp,
       PurohitProfile,
-      PurohitBankAccount,
+      BankAccount,
       PurohitServiceArea,
       PurohitMedia,
       Service,

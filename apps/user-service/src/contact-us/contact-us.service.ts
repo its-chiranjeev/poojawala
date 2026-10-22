@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { ContactUsRepository } from '@poojawala/repositories';
+import { ContactUsRepository, ServiceRepository } from '@poojawala/repositories';
 import { CreateContactUsDto, GetAllContactUsDto, UpdateContactUsStatusDto } from '@poojawala/dtos';
 import { EmailService } from '@poojawala/email-services';
 import { CONTACT_US_STATUS, ACTOR_TYPE, AUDIT_MODULE, USER_ROLE } from '@poojawala/entities';
@@ -11,22 +11,38 @@ export class ContactUsService {
 
   constructor(
     private readonly contactUsRepo: ContactUsRepository,
+    private readonly serviceRepo: ServiceRepository,
     private readonly emailService: EmailService,
     private readonly auditLogService: AuditLogService,
   ) {}
 
   async create(dto: CreateContactUsDto) {
+    if (dto.serviceId) {
+      const service = await this.serviceRepo.findById(dto.serviceId);
+      if (!service) {
+        throw new NotFoundException('Service not found');
+      }
+    }
+
     const contactUs = await this.contactUsRepo.create(dto);
+    const createdWithRelations = await this.contactUsRepo.getById(contactUs.id);
     return {
       success: true,
       message: 'Your message has been submitted successfully.',
-      data: contactUs,
+      data: createdWithRelations || contactUs,
     };
   }
 
   async getAll(query: GetAllContactUsDto) {
-    const { page, limit, search, status } = query;
-    const result = await this.contactUsRepo.getAll(page, limit, search, status);
+    const { page, limit, search, status, serviceId, isServiceQuery } = query;
+    const result = await this.contactUsRepo.getAll(
+      page,
+      limit,
+      search,
+      status,
+      serviceId,
+      isServiceQuery,
+    );
 
     return {
       success: true,

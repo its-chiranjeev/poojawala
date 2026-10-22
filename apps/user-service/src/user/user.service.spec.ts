@@ -10,7 +10,7 @@ import {
   PurohitMedia,
   PUROHIT_MEDIA_TYPE,
   PUROHIT_MEDIA_VERIFICATION_STATUS,
-  PurohitBankAccount,
+  BankAccount,
   BANK_VERIFICATION_STATUS,
   PUROHIT_PAYMENT_METHOD,
   BANK_ACCOUNT_TYPE,
@@ -20,6 +20,7 @@ import {
   CustomerAddress,
   AstrologerProfile,
   PLATFORM_SETTING_KEY,
+  AUDIT_MODULE,
 } from '@poojawala/entities';
 import { VerifyPurohitDto } from '@poojawala/dtos';
 
@@ -51,7 +52,7 @@ describe('UserService - Purohit Verification Rework', () => {
   let testAdmin: User;
   let testProfile: PurohitProfile;
   let testMedia: PurohitMedia[];
-  let testBankAccount: PurohitBankAccount;
+  let testBankAccount: BankAccount;
   let testBankAccounts: any[];
   let testServices: Service[];
   let testPurohitServices: any[];
@@ -139,6 +140,7 @@ describe('UserService - Purohit Verification Rework', () => {
 
     testBankAccount = {
       id: 5,
+      userId: 10,
       purohitId: 101,
       accountHolderName: 'Ramesh Sharma',
       accountNumber: '1234567890',
@@ -147,7 +149,7 @@ describe('UserService - Purohit Verification Rework', () => {
       paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
       verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
       isPrimary: true,
-    } as unknown as PurohitBankAccount;
+    } as unknown as BankAccount;
 
     testBankAccounts = [testBankAccount];
 
@@ -285,16 +287,41 @@ describe('UserService - Purohit Verification Rework', () => {
         return Promise.resolve(found || null);
       }),
       findByPurohitId: jest.fn().mockImplementation((purohitId: number) => {
-        const found = testBankAccounts.filter((b) => b.purohitId === purohitId);
+        const found = testBankAccounts.filter(
+          (b) =>
+            b.purohitId === purohitId ||
+            b.userId === purohitId ||
+            (purohitId === 101 && b.userId === 10) ||
+            (purohitId === 10 && b.purohitId === 101),
+        );
+        return Promise.resolve(found);
+      }),
+      findByUserId: jest.fn().mockImplementation((userId: number) => {
+        const found = testBankAccounts.filter(
+          (b) =>
+            b.userId === userId ||
+            b.purohitId === userId ||
+            (userId === 10 && b.purohitId === 101) ||
+            (userId === 101 && b.userId === 10),
+        );
         return Promise.resolve(found);
       }),
       findByAccountNumber: jest.fn().mockImplementation((accountNumber: string) => {
         const found = testBankAccounts.find((b) => b.accountNumber === accountNumber);
         return Promise.resolve(found || null);
       }),
-      clearPrimaryAccount: jest.fn().mockImplementation((purohitId: number) => {
+      findPrimaryAccount: jest.fn().mockImplementation((userId: number) => {
+        const found = testBankAccounts.find(
+          (b) =>
+            (b.userId === userId || b.purohitId === userId || (userId === 10 && b.purohitId === 101)) &&
+            b.isPrimary,
+        );
+        return Promise.resolve(found || null);
+      }),
+      clearPrimaryAccount: jest.fn().mockImplementation((userId: number) => {
         testBankAccounts.forEach((b) => {
-          if (b.purohitId === purohitId) b.isPrimary = false;
+          if (b.userId === userId || b.purohitId === userId || (userId === 10 && b.purohitId === 101))
+            b.isPrimary = false;
         });
         return Promise.resolve();
       }),
@@ -312,8 +339,14 @@ describe('UserService - Purohit Verification Rework', () => {
         testBankAccounts = testBankAccounts.filter((b) => b.id !== id);
         return Promise.resolve({ affected: 1 });
       }),
-      findBankAccounts: jest.fn().mockImplementation((purohitId: number, page: number = 1, limit: number = 10, search?: string) => {
-        let list = testBankAccounts.filter((b) => b.purohitId === purohitId);
+      findBankAccounts: jest.fn().mockImplementation((userId: number, page: number = 1, limit: number = 10, search?: string) => {
+        let list = testBankAccounts.filter(
+          (b) =>
+            b.userId === userId ||
+            b.purohitId === userId ||
+            (userId === 10 && b.purohitId === 101) ||
+            (userId === 101 && b.userId === 10),
+        );
         if (search) {
           list = list.filter((b) => String(b.id).includes(search) || b.accountHolderName?.includes(search) || b.accountNumber?.includes(search));
         }
@@ -619,11 +652,19 @@ describe('UserService - Purohit Verification Rework', () => {
           }),
         };
       }
-      if (entity === PurohitBankAccount) {
+      if (entity === BankAccount) {
         return {
           find: jest.fn().mockImplementation(({ where, order }: any) => {
             let filtered = testBankAccounts.filter(
-              (b) => (!where?.purohitId || b.purohitId === where.purohitId) && !b.deletedAt,
+              (b) =>
+                (!where?.userId ||
+                  b.userId === where.userId ||
+                  (where.userId === 10 && b.purohitId === 101)) &&
+                (!where?.purohitId ||
+                  b.purohitId === where.purohitId ||
+                  b.userId === where.purohitId ||
+                  (where.purohitId === 101 && b.userId === 10)) &&
+                !b.deletedAt,
             );
             if (order?.id === 'ASC') {
               filtered = [...filtered].sort((a, b) => a.id - b.id);
@@ -633,7 +674,19 @@ describe('UserService - Purohit Verification Rework', () => {
           update: jest.fn().mockImplementation((criteria: any, payload: any) => {
             testBankAccounts.forEach((b) => {
               if (typeof criteria === 'number' && b.id !== criteria) return;
-              if (criteria.purohitId && b.purohitId !== criteria.purohitId) return;
+              if (
+                criteria.userId &&
+                b.userId !== criteria.userId &&
+                !(criteria.userId === 10 && b.purohitId === 101)
+              )
+                return;
+              if (
+                criteria.purohitId &&
+                b.purohitId !== criteria.purohitId &&
+                b.userId !== criteria.purohitId &&
+                !(criteria.purohitId === 101 && b.userId === 10)
+              )
+                return;
               if (criteria.isPrimary !== undefined && b.isPrimary !== criteria.isPrimary) return;
               if (criteria.id && b.id !== criteria.id) return;
               Object.assign(b, payload);
@@ -1044,6 +1097,19 @@ describe('UserService - Purohit Verification Rework', () => {
       expect(testProfile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
       expect(testUser.status).toBe(USER_STATUS.ACTIVE);
     });
+
+    it('allows admin approval when qualification is empty or not provided', async () => {
+      testProfile.verificationStatus = PUROHIT_VERIFICATION_STATUS.PENDING;
+      testProfile.qualification = [];
+
+      const approveDto: VerifyPurohitDto = {
+        status: PUROHIT_VERIFICATION_STATUS.APPROVED,
+      };
+      const approveResult = await service.verifyPurohitByAdmin(testAdmin.id, testUser.id, approveDto);
+
+      expect(approveResult.success).toBe(true);
+      expect(approveResult.data.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+    });
   });
 
   // =========================================================================
@@ -1298,6 +1364,65 @@ describe('UserService - Purohit Verification Rework', () => {
         } as any;
 
         await expect(service.createAstrologerByAdmin(dto)).rejects.toThrow(BadRequestException);
+      });
+
+      it('allows ratePerMinute and commissionPrice to be omitted/nullable and sets null', async () => {
+        const dto = {
+          firstName: 'Anand',
+          lastName: 'Mishra',
+          email: 'anand.nullprices@example.com',
+          phone: '9876543888',
+          password: 'Password123!',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto as any);
+        expect(result.profile.ratePerMinute).toBeNull();
+        expect(result.profile.commissionPrice).toBeNull();
+      });
+
+      it('calculates commissionPrice and astrologerPayout from astrologyPrice and platform setting commission percentage', async () => {
+        const dto = {
+          firstName: 'Anand',
+          lastName: 'Mishra',
+          email: 'anand.calc@example.com',
+          phone: '9876543777',
+          password: 'Password123!',
+          astrologyPrice: 1000,
+        };
+
+        const result = await service.createAstrologerByAdmin(dto as any);
+        expect(result.profile.astrologyPrice).toBe(1000);
+        expect(result.profile.commissionPercentage).toBe(10);
+        expect(result.profile.commissionPrice).toBe(100);
+        expect(result.profile.astrologerPayout).toBe(900);
+      });
+
+      it('rejects createAstrologerByAdmin if commissionPrice or astrologerPayout does not match calculation', async () => {
+        const dtoMismatchedComm = {
+          firstName: 'Anand',
+          lastName: 'Mishra',
+          email: 'anand.mismatch1@example.com',
+          phone: '9876543778',
+          password: 'Password123!',
+          astrologyPrice: 1000,
+          commissionPrice: 200,
+        };
+        await expect(service.createAstrologerByAdmin(dtoMismatchedComm as any)).rejects.toThrow(
+          BadRequestException,
+        );
+
+        const dtoMismatchedPayout = {
+          firstName: 'Anand',
+          lastName: 'Mishra',
+          email: 'anand.mismatch2@example.com',
+          phone: '9876543779',
+          password: 'Password123!',
+          astrologyPrice: 1000,
+          astrologerPayout: 500,
+        };
+        await expect(service.createAstrologerByAdmin(dtoMismatchedPayout as any)).rejects.toThrow(
+          BadRequestException,
+        );
       });
     });
 
@@ -2336,10 +2461,147 @@ describe('UserService - Purohit Verification Rework', () => {
       expect(astroUser.isAdminCreated).toBe(false);
     });
 
+    it('admin edit astrologer profile calculates commissionPrice and astrologerPayout from astrologyPrice and commissionPercentage', async () => {
+      const astroUser: User = {
+        id: 21,
+        email: 'astrologer21@poojawala.com',
+        username: 'astrologer21',
+        firstName: 'Varahamihira',
+        lastName: 'Sharma',
+        role: USER_ROLE.ASTROLOGER,
+        status: USER_STATUS.ACTIVE,
+        isAdminCreated: false,
+      } as unknown as User;
+
+      testAstrologerProfile = {
+        id: 202,
+        userId: 21,
+        astrologyPrice: 2000,
+        commissionPercentage: 15,
+      };
+
+      mockUserRepo.findById.mockImplementation(async (id: string) => {
+        if (id === '21') return astroUser;
+        return testUser;
+      });
+
+      mockUserRepo.getFullProfile.mockImplementation(async (userId: number) => {
+        return {
+          ...astroUser,
+          profile: { ...testAstrologerProfile },
+          astrologerProfile: { ...testAstrologerProfile },
+        };
+      });
+
+      const result = await service.updateProfileByAdmin(
+        testAdmin.id,
+        '21',
+        { astrologyPrice: 1000, commissionPercentage: 10 } as any,
+      );
+
+      expect(result.success).toBe(true);
+      expect(testAstrologerProfile.astrologyPrice).toBe(1000);
+      expect(testAstrologerProfile.commissionPercentage).toBe(10);
+      expect(testAstrologerProfile.commissionPrice).toBe(100);
+      expect(testAstrologerProfile.astrologerPayout).toBe(900);
+    });
+
+    it('admin edit astrologer profile validates commissionPrice and astrologerPayout matching calculation', async () => {
+      const astroUser: User = {
+        id: 21,
+        role: USER_ROLE.ASTROLOGER,
+        status: USER_STATUS.ACTIVE,
+      } as unknown as User;
+
+      mockUserRepo.findById.mockImplementation(async (id: string) => {
+        if (id === '21') return astroUser;
+        return testUser;
+      });
+
+      testAstrologerProfile = {
+        id: 202,
+        userId: 21,
+        astrologyPrice: 1000,
+        commissionPercentage: 10,
+      };
+
+      await expect(
+        service.updateProfileByAdmin(testAdmin.id, '21', {
+          astrologyPrice: 1000,
+          commissionPercentage: 10,
+          commissionPrice: 150,
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.updateProfileByAdmin(testAdmin.id, '21', {
+          astrologyPrice: 1000,
+          commissionPercentage: 10,
+          astrologerPayout: 800,
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('user update astrologer profile calculates and validates commissionPrice and astrologerPayout', async () => {
+      const astroUser: User = {
+        id: 22,
+        role: USER_ROLE.ASTROLOGER,
+        status: USER_STATUS.ACTIVE,
+      } as unknown as User;
+
+      testAstrologerProfile = {
+        id: 203,
+        userId: 22,
+        astrologyPrice: 500,
+        commissionPercentage: 10,
+      };
+
+      mockUserRepo.findById.mockImplementation(async (id: string) => {
+        if (id === '22') return astroUser;
+        return testUser;
+      });
+
+      mockUserRepo.getFullProfile.mockImplementation(async (userId: number) => {
+        return {
+          ...astroUser,
+          profile: { ...testAstrologerProfile },
+          astrologerProfile: { ...testAstrologerProfile },
+        };
+      });
+
+      const result = await service.updateProfileByUser(
+        '22',
+        { astrologyPrice: 1000 } as any,
+        {} as any,
+      );
+
+      expect(result.success).toBe(true);
+      expect(testAstrologerProfile.astrologyPrice).toBe(1000);
+      expect(testAstrologerProfile.commissionPrice).toBe(100);
+      expect(testAstrologerProfile.astrologerPayout).toBe(900);
+
+      await expect(
+        service.updateProfileByUser(
+          '22',
+          { astrologyPrice: 1000, astrologerPayout: 800 } as any,
+          {} as any,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.updateProfileByUser(
+          '22',
+          { astrologyPrice: 1000, commissionPrice: 200 } as any,
+          {} as any,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('purohit self update keeps isAdminCreated true if docs uploaded but no bank account exists', async () => {
       testUser.isAdminCreated = true;
       testBankAccounts = [];
       mockPurohitBankRepo.findByPurohitId.mockResolvedValue([]);
+      mockPurohitBankRepo.findByUserId.mockResolvedValue([]);
 
       const result = await service.updateProfileByUser(
         String(testUser.id),
@@ -2356,8 +2618,9 @@ describe('UserService - Purohit Verification Rework', () => {
 
     it('purohit self update sets isAdminCreated false when docs uploaded AND bank account exists', async () => {
       testUser.isAdminCreated = true;
-      testBankAccounts = [{ id: 1, purohitId: testProfile.id, accountNumber: '1234567890', paymentMethod: PUROHIT_PAYMENT_METHOD.BANK }];
+      testBankAccounts = [{ id: 1, userId: testUser.id, purohitId: testProfile.id, accountNumber: '1234567890', paymentMethod: PUROHIT_PAYMENT_METHOD.BANK }];
       mockPurohitBankRepo.findByPurohitId.mockResolvedValue(testBankAccounts);
+      mockPurohitBankRepo.findByUserId.mockResolvedValue(testBankAccounts);
 
       const result = await service.updateProfileByUser(
         String(testUser.id),
@@ -3009,25 +3272,30 @@ describe('UserService - Purohit Verification Rework', () => {
 
   describe('Purohit & Admin Bank Account Management', () => {
     describe('Controller Decorator and Authorization Guard Verification', () => {
-      it('all 5 bank account controller endpoints allow both PUROHIT and ADMIN roles', () => {
+      it('all 5 bank account controller endpoints allow PUROHIT, ASTROLOGER and ADMIN roles', () => {
         const addRoles = Reflect.getMetadata('roles', UserController.prototype.addPurohitBankAccount);
         expect(addRoles).toContain(USER_ROLE.PUROHIT);
+        expect(addRoles).toContain(USER_ROLE.ASTROLOGER);
         expect(addRoles).toContain(USER_ROLE.ADMIN);
 
         const listRoles = Reflect.getMetadata('roles', UserController.prototype.getPurohitBankAccounts);
         expect(listRoles).toContain(USER_ROLE.PUROHIT);
+        expect(listRoles).toContain(USER_ROLE.ASTROLOGER);
         expect(listRoles).toContain(USER_ROLE.ADMIN);
 
         const getByIdRoles = Reflect.getMetadata('roles', UserController.prototype.getPurohitBankAccountById);
         expect(getByIdRoles).toContain(USER_ROLE.PUROHIT);
+        expect(getByIdRoles).toContain(USER_ROLE.ASTROLOGER);
         expect(getByIdRoles).toContain(USER_ROLE.ADMIN);
 
         const updateRoles = Reflect.getMetadata('roles', UserController.prototype.updatePurohitBankAccount);
         expect(updateRoles).toContain(USER_ROLE.PUROHIT);
+        expect(updateRoles).toContain(USER_ROLE.ASTROLOGER);
         expect(updateRoles).toContain(USER_ROLE.ADMIN);
 
         const deleteRoles = Reflect.getMetadata('roles', UserController.prototype.deletePurohitBankAccount);
         expect(deleteRoles).toContain(USER_ROLE.PUROHIT);
+        expect(deleteRoles).toContain(USER_ROLE.ASTROLOGER);
         expect(deleteRoles).toContain(USER_ROLE.ADMIN);
       });
     });
@@ -3051,7 +3319,7 @@ describe('UserService - Purohit Verification Rework', () => {
 
         expect(res.success).toBe(true);
         expect(res.data.accountNumber).toBe('9998887776');
-        expect(res.data.purohitId).toBe(testProfile.id);
+        expect(res.data.userId).toBe(testUser.id);
       });
 
       it('2. Purohit can list own bank accounts', async () => {
@@ -3063,7 +3331,7 @@ describe('UserService - Purohit Verification Rework', () => {
 
         expect(res.success).toBe(true);
         expect(res.data.length).toBeGreaterThan(0);
-        expect(res.data[0].purohitId).toBe(testProfile.id);
+        expect(res.data[0].userId).toBe(testUser.id);
       });
 
       it('3. Purohit can get own bank account by id', async () => {
@@ -3080,6 +3348,7 @@ describe('UserService - Purohit Verification Rework', () => {
         // Create an account mapped to profile 201 (another Purohit)
         testBankAccounts.push({
           id: 99,
+          userId: 20,
           purohitId: 201,
           accountHolderName: 'Other Purohit',
           accountNumber: '5554443332',
@@ -3097,6 +3366,7 @@ describe('UserService - Purohit Verification Rework', () => {
       it('5. Purohit cannot update another Purohit bank account', async () => {
         testBankAccounts.push({
           id: 98,
+          userId: 20,
           purohitId: 201,
           accountHolderName: 'Other Purohit',
           accountNumber: '5554443331',
@@ -3115,6 +3385,7 @@ describe('UserService - Purohit Verification Rework', () => {
       it('6. Purohit cannot delete another Purohit bank account', async () => {
         testBankAccounts.push({
           id: 97,
+          userId: 20,
           purohitId: 201,
           accountHolderName: 'Other Purohit',
           accountNumber: '5554443330',
@@ -3146,10 +3417,10 @@ describe('UserService - Purohit Verification Rework', () => {
 
         expect(res.success).toBe(true);
         expect(res.data.upiId).toBe('ramesh@upi');
-        expect(res.data.purohitId).toBe(testProfile.id);
+        expect(res.data.userId).toBe(testUser.id);
       });
 
-      it('8. Admin fails to add bank account without specifying purohitId', async () => {
+      it('8. Admin fails to add bank account without specifying userId', async () => {
         const dto = {
           paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
           upiId: 'unknown@upi',
@@ -3202,7 +3473,7 @@ describe('UserService - Purohit Verification Rework', () => {
         expect(res.data.id).toBe(5);
       });
 
-      it('12. Admin gets 404 when requestedPurohitId does not match bank account owner', async () => {
+      it('12. Admin gets 404 when requestedUserId does not match bank account owner', async () => {
         // Account 5 belongs to testUser (profile 101), but admin asks for user 20 (profile 201)
         await expect(
           service.getPurohitBankAccountById(
@@ -3269,7 +3540,7 @@ describe('UserService - Purohit Verification Rework', () => {
         testBankAccounts = [
           {
             id: 1,
-            purohitId: 101,
+            userId: testUser.id,
             accountNumber: '1001',
             paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
             accountHolderName: 'Acc 1',
@@ -3298,12 +3569,14 @@ describe('UserService - Purohit Verification Rework', () => {
         testBankAccounts = [
           {
             id: 1,
+            userId: testUser.id,
             purohitId: 101,
             accountNumber: '1001',
             isPrimary: true,
           },
           {
             id: 2,
+            userId: testUser.id,
             purohitId: 101,
             accountNumber: '1002',
             isPrimary: false,
@@ -3393,7 +3666,9 @@ describe('UserService - Purohit Verification Rework', () => {
         expect(bankAcc.isPrimary).toBe(false);
 
         // Exactly one primary account exists across BANK and UPI
-        const primaryCount = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary).length;
+        const primaryCount = testBankAccounts.filter(
+          (b) => (b.userId === testUser.id || b.userId === 10 || b.purohitId === 101) && b.isPrimary,
+        ).length;
         expect(primaryCount).toBe(1);
       });
 
@@ -3424,7 +3699,9 @@ describe('UserService - Purohit Verification Rework', () => {
         const upiAcc = testBankAccounts.find((b) => b.id === 1);
         expect(upiAcc.isPrimary).toBe(false);
 
-        const primaryCount = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary).length;
+        const primaryCount = testBankAccounts.filter(
+          (b) => (b.userId === testUser.id || b.userId === 10 || b.purohitId === 101) && b.isPrimary,
+        ).length;
         expect(primaryCount).toBe(1);
       });
 
@@ -3432,6 +3709,7 @@ describe('UserService - Purohit Verification Rework', () => {
         testBankAccounts = [
           {
             id: 1,
+            userId: testUser.id,
             purohitId: 101,
             accountNumber: '1001',
             paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
@@ -3441,6 +3719,7 @@ describe('UserService - Purohit Verification Rework', () => {
           },
           {
             id: 2,
+            userId: testUser.id,
             purohitId: 101,
             upiId: 'secondary@upi',
             paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
@@ -3458,7 +3737,9 @@ describe('UserService - Purohit Verification Rework', () => {
         const bankAcc = testBankAccounts.find((b) => b.id === 1);
         expect(bankAcc.isPrimary).toBe(false);
 
-        const primaryCount = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary).length;
+        const primaryCount = testBankAccounts.filter(
+          (b) => (b.userId === testUser.id || b.userId === 10 || b.purohitId === 101) && b.isPrimary,
+        ).length;
         expect(primaryCount).toBe(1);
       });
 
@@ -3466,6 +3747,7 @@ describe('UserService - Purohit Verification Rework', () => {
         testBankAccounts = [
           {
             id: 1,
+            userId: testUser.id,
             purohitId: 101,
             accountNumber: '1001',
             paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
@@ -3534,7 +3816,9 @@ describe('UserService - Purohit Verification Rework', () => {
         expect(res.data.isPrimary).toBe(true);
         const acc1 = testBankAccounts.find((b) => b.id === 1);
         expect(acc1.isPrimary).toBe(false);
-        const primaries = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary);
+        const primaries = testBankAccounts.filter(
+          (b) => (b.userId === testUser.id || b.userId === 10 || b.purohitId === 101) && b.isPrimary,
+        );
         expect(primaries).toHaveLength(1);
       });
 
@@ -3542,6 +3826,7 @@ describe('UserService - Purohit Verification Rework', () => {
         testBankAccounts = [
           {
             id: 1,
+            userId: testUser.id,
             purohitId: 101,
             upiId: 'upi@primary',
             paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
@@ -3549,6 +3834,7 @@ describe('UserService - Purohit Verification Rework', () => {
           },
           {
             id: 2,
+            userId: testUser.id,
             purohitId: 101,
             accountNumber: '999888777',
             paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
@@ -3567,7 +3853,9 @@ describe('UserService - Purohit Verification Rework', () => {
         const bankAcc = testBankAccounts.find((b) => b.id === 2);
         expect(upiAcc.isPrimary).toBe(false);
         expect(bankAcc.isPrimary).toBe(true);
-        const primaries = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary);
+        const primaries = testBankAccounts.filter(
+          (b) => (b.userId === testUser.id || b.userId === 10 || b.purohitId === 101) && b.isPrimary,
+        );
         expect(primaries).toHaveLength(1);
       });
 
@@ -3575,6 +3863,7 @@ describe('UserService - Purohit Verification Rework', () => {
         testBankAccounts = [
           {
             id: 1,
+            userId: testUser.id,
             purohitId: 101,
             accountNumber: '111222333',
             bankName: 'HDFC',
@@ -3599,6 +3888,7 @@ describe('UserService - Purohit Verification Rework', () => {
         testBankAccounts = [
           {
             id: 1,
+            userId: testUser.id,
             purohitId: 101,
             upiId: 'purohit@upi',
             paymentMethod: PUROHIT_PAYMENT_METHOD.UPI,
@@ -3606,6 +3896,7 @@ describe('UserService - Purohit Verification Rework', () => {
           },
           {
             id: 2,
+            userId: testUser.id,
             purohitId: 101,
             accountNumber: '444555666',
             paymentMethod: PUROHIT_PAYMENT_METHOD.BANK,
@@ -3625,7 +3916,9 @@ describe('UserService - Purohit Verification Rework', () => {
         const bankAcc = testBankAccounts.find((b) => b.id === 2);
         expect(upiAcc.isPrimary).toBe(false);
         expect(bankAcc.isPrimary).toBe(true);
-        const primaries = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary);
+        const primaries = testBankAccounts.filter(
+          (b) => (b.userId === testUser.id || b.userId === 10 || b.purohitId === 101) && b.isPrimary,
+        );
         expect(primaries).toHaveLength(1);
       });
 
@@ -3665,7 +3958,9 @@ describe('UserService - Purohit Verification Rework', () => {
           } as any,
         );
 
-        const primaries = testBankAccounts.filter((b) => b.purohitId === 101 && b.isPrimary);
+        const primaries = testBankAccounts.filter(
+          (b) => (b.userId === testUser.id || b.userId === 10 || b.purohitId === 101) && b.isPrimary,
+        );
         expect(primaries).toHaveLength(1);
         expect(primaries[0].paymentMethod).toBe(PUROHIT_PAYMENT_METHOD.BANK);
       });
@@ -3945,9 +4240,17 @@ describe('UserService - Purohit Verification Rework', () => {
         expect(result.message).toContain('created');
         expect(result.data.value).toBe('https://storage.poojawala.com/logo.png');
         expect(result.data.updatedById).toBe(testAdmin.id);
+        expect(mockAuditLogService.createAuditLog).toHaveBeenCalledWith(
+          expect.objectContaining({
+            actorId: testAdmin.id,
+            action: 'PLATFORM_SETTING_CREATED',
+            entity: 'PlatformSetting',
+            module: AUDIT_MODULE.SETTING,
+          }),
+        );
       });
 
-      it('should update existing platform setting when PLATFORM_LOGO_URL already exists', async () => {
+      it('should update existing platform setting when PLATFORM_LOGO_URL already exists and create audit log', async () => {
         const existing = {
           id: 5,
           key: PLATFORM_SETTING_KEY.PLATFORM_LOGO_URL,
@@ -3971,6 +4274,15 @@ describe('UserService - Purohit Verification Rework', () => {
         expect(result.message).toContain('updated');
         expect(result.data.value).toBe('https://storage.poojawala.com/new-logo.png');
         expect(result.data.updatedById).toBe(testAdmin.id);
+        expect(mockAuditLogService.createAuditLog).toHaveBeenCalledWith(
+          expect.objectContaining({
+            actorId: testAdmin.id,
+            action: 'PLATFORM_SETTING_UPDATED',
+            entity: 'PlatformSetting',
+            module: AUDIT_MODULE.SETTING,
+            entityId: '5',
+          }),
+        );
       });
 
       it('should upload platform logo file to storage and update setting', async () => {
@@ -4011,6 +4323,40 @@ describe('UserService - Purohit Verification Rework', () => {
       it('should reject when logo file is missing', async () => {
         await expect(service.uploadPlatformLogo(null as any, testAdmin.id)).rejects.toThrow(
           BadRequestException,
+        );
+      });
+
+      it('should retrieve platform settings without userId (public access)', async () => {
+        mockPlatformSettingRepo.findOne = jest.fn().mockResolvedValue({ id: 1, key: PLATFORM_SETTING_KEY.PLATFORM_LOGO_URL, value: 'test' });
+        mockPlatformSettingRepo.findAndCount = jest.fn().mockResolvedValue([[{ id: 1, key: PLATFORM_SETTING_KEY.PLATFORM_LOGO_URL, value: 'test' }], 1]);
+
+        const result = await service.getPlatformSetting();
+        expect(result.success).toBe(true);
+        expect(result.data[1]).toBe(1);
+      });
+
+      it('should delete platform setting and record audit log', async () => {
+        const existing = {
+          id: 10,
+          key: PLATFORM_SETTING_KEY.ASTROLOGY_COMMISSION_PRICE,
+          value: '50',
+          description: 'Astrology commission',
+        };
+        mockPlatformSettingRepo.findOne = jest.fn().mockResolvedValue(existing);
+        mockPlatformSettingRepo.delete = jest.fn().mockResolvedValue({ affected: 1 });
+
+        const result = await service.deletePlatformSetting(10, testAdmin.id);
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('deleted');
+        expect(mockPlatformSettingRepo.delete).toHaveBeenCalledWith(10);
+        expect(mockAuditLogService.createAuditLog).toHaveBeenCalledWith(
+          expect.objectContaining({
+            actorId: testAdmin.id,
+            action: 'PLATFORM_SETTING_DELETED',
+            entity: 'PlatformSetting',
+            entityId: '10',
+            module: AUDIT_MODULE.SETTING,
+          }),
         );
       });
     });

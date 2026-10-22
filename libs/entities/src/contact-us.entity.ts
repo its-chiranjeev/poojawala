@@ -5,7 +5,10 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   DeleteDateColumn,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { Service } from './service.entity';
 
 export enum CONTACT_US_STATUS {
   DRAFT = 'DRAFT',
@@ -16,6 +19,13 @@ export enum CONTACT_US_STATUS {
 export class ContactUs {
   @PrimaryGeneratedColumn()
   id!: number;
+
+  @Column({ type: 'int', nullable: true })
+  serviceId?: number | null;
+
+  @ManyToOne(() => Service, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'serviceId' })
+  service?: Service | null;
 
   @Column({ type: 'varchar', length: 150 })
   name!: string;

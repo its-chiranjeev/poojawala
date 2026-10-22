@@ -59,10 +59,11 @@ export class UserRepository extends BaseRepository<User> {
 
     if (isAstrologer) {
       qb.leftJoinAndMapOne('user.profile', 'astrologer_profiles', 'profile', 'profile.userId = user.id');
+      qb.leftJoinAndMapMany('user.bankAccounts', 'bank_accounts', 'bankAccounts', 'bankAccounts.userId = user.id AND bankAccounts.deletedAt IS NULL');
       qb.leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL');
     } else if (isPurohit) {
       qb.leftJoinAndMapOne('user.profile', 'purohit_profiles', 'profile', 'profile.userId = user.id');
-      qb.leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id');
+      qb.leftJoinAndMapMany('user.bankAccounts', 'bank_accounts', 'bankAccounts', 'bankAccounts.userId = user.id AND bankAccounts.deletedAt IS NULL');
       qb.leftJoinAndSelect('user.serviceAreas', 'serviceAreas', 'serviceAreas.deletedAt IS NULL');
       qb.leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL');
       qb.leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id AND purohitServices.deletedAt IS NULL');
@@ -70,7 +71,7 @@ export class UserRepository extends BaseRepository<User> {
     } else {
       qb.leftJoinAndMapOne('user.profile', 'purohit_profiles', 'profile', 'profile.userId = user.id');
       qb.leftJoinAndMapOne('user.astrologerProfile', 'astrologer_profiles', 'astrologerProfile', 'astrologerProfile.userId = user.id');
-      qb.leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id');
+      qb.leftJoinAndMapMany('user.bankAccounts', 'bank_accounts', 'bankAccounts', 'bankAccounts.userId = user.id AND bankAccounts.deletedAt IS NULL');
       qb.leftJoinAndSelect('user.serviceAreas', 'serviceAreas', 'serviceAreas.deletedAt IS NULL');
       qb.leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL');
       qb.leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id AND purohitServices.deletedAt IS NULL');
@@ -276,7 +277,7 @@ export class UserRepository extends BaseRepository<User> {
         'profile',
         'profile.userId = user.id',
       )
-        .leftJoinAndMapMany('user.bankAccounts', 'purohit_bank_accounts', 'bankAccounts', 'bankAccounts.purohitId = profile.id')
+        .leftJoinAndMapMany('user.bankAccounts', 'bank_accounts', 'bankAccounts', 'bankAccounts.userId = user.id AND bankAccounts.deletedAt IS NULL')
         .leftJoinAndSelect('user.serviceAreas', 'serviceAreas', 'serviceAreas.deletedAt IS NULL')
         .leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL')
         .leftJoinAndMapMany('user.purohitServices', 'purohit_services', 'purohitServices', 'purohitServices.purohitId = profile.id AND purohitServices.deletedAt IS NULL').leftJoinAndMapOne('purohitServices.service', 'services', 'service', 'service.id = purohitServices.serviceId')
@@ -293,7 +294,16 @@ export class UserRepository extends BaseRepository<User> {
         'profile',
         'profile.userId = user.id',
       )
+        .leftJoinAndMapOne(
+          'user.astrologerProfile',
+          'astrologer_profiles',
+          'astrologerProfile',
+          'astrologerProfile.userId = user.id',
+        )
+        .leftJoinAndMapMany('user.bankAccounts', 'bank_accounts', 'bankAccounts', 'bankAccounts.userId = user.id AND bankAccounts.deletedAt IS NULL')
         .leftJoinAndSelect('user.addresses', 'addresses', 'addresses.deletedAt IS NULL')
+        .addOrderBy('bankAccounts.isPrimary', 'DESC')
+        .addOrderBy('bankAccounts.createdAt', 'DESC')
         .addOrderBy('addresses.isDefault', 'DESC')
         .addOrderBy('addresses.createdAt', 'DESC');
     } else {
@@ -305,8 +315,40 @@ export class UserRepository extends BaseRepository<User> {
     const user = await qb.getOne();
     if (user && role === USER_ROLE.PUROHIT) {
       this.enrichPurohitServicesPayout(user);
+    } else if (user && role === USER_ROLE.ASTROLOGER) {
+      this.enrichAstrologerPayout(user);
     }
     return user;
+  }
+
+  public enrichAstrologerPayout(user: any): void {
+    if (!user) return;
+    const profile = user.astrologerProfile || user.profile;
+    if (profile) {
+      if (profile.astrologyPrice != null) {
+        const price = Number(profile.astrologyPrice);
+        const commPct =
+          profile.commissionPercentage != null
+            ? Number(profile.commissionPercentage)
+            : 10;
+        const commPrice =
+          profile.commissionPrice != null
+            ? Number(profile.commissionPrice)
+            : Number(((price * commPct) / 100).toFixed(2));
+        if (profile.commissionPrice == null) {
+          profile.commissionPrice = commPrice;
+        } else {
+          profile.commissionPrice = Number(Number(profile.commissionPrice).toFixed(2));
+        }
+        if (profile.astrologerPayout == null) {
+          profile.astrologerPayout = Number((price - commPrice).toFixed(2));
+        } else {
+          profile.astrologerPayout = Number(Number(profile.astrologerPayout).toFixed(2));
+        }
+      }
+      user.astrologerProfile = profile;
+      user.profile = profile;
+    }
   }
 
   public enrichPurohitServicesPayout(user: any): void {

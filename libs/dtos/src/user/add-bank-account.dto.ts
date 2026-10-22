@@ -2,7 +2,7 @@ import { IsEnum, IsOptional, IsString, IsBoolean, IsNotEmpty } from 'class-valid
 import { Transform } from 'class-transformer';
 import { BANK_ACCOUNT_TYPE, PUROHIT_PAYMENT_METHOD } from '@poojawala/entities';
 
-export class CreatePurohitBankAccountDto {
+export class CreateBankAccountDto {
   @IsEnum(PUROHIT_PAYMENT_METHOD)
   @IsNotEmpty()
   paymentMethod!: PUROHIT_PAYMENT_METHOD;
@@ -42,5 +42,5 @@ export class CreatePurohitBankAccountDto {
 
   @IsOptional()
   @Transform(({ value }) => (value !== undefined && value !== null ? Number(value) : undefined))
-  purohitId?: number;
+  userId?: number;
 }

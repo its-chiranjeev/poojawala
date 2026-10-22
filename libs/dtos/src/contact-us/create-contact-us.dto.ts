@@ -1,6 +1,12 @@
-import { IsEmail, IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { IsEmail, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CreateContactUsDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  serviceId?: number;
+
   @IsNotEmpty()
   @IsString()
   @MaxLength(150)

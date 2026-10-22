@@ -651,7 +651,39 @@ export class AuthModuleController {
       (safeUser as any).verificationStatus = (safeUser as any).profile.verificationStatus;
       (safeUser as any).rejectionReason = (safeUser as any).profile.rejectionReason ?? null;
     }
-    if ((safeUser as any).astrologerProfile) {
+
+    if (
+      (safeUser as any).role === USER_ROLE.ASTROLOGER ||
+      req.user?.role === USER_ROLE.ASTROLOGER ||
+      (safeUser as any).astrologerProfile ||
+      ((safeUser as any).profile && ((safeUser as any).profile.astrologyPrice !== undefined || (safeUser as any).profile.commissionPrice !== undefined))
+    ) {
+      const astroProfile = (safeUser as any).astrologerProfile || (safeUser as any).profile;
+      if (astroProfile) {
+        if (astroProfile.astrologyPrice != null) {
+          const price = Number(astroProfile.astrologyPrice);
+          const commPct =
+            astroProfile.commissionPercentage != null
+              ? Number(astroProfile.commissionPercentage)
+              : 10;
+          const commPrice =
+            astroProfile.commissionPrice != null
+              ? Number(astroProfile.commissionPrice)
+              : Number(((price * commPct) / 100).toFixed(2));
+          astroProfile.commissionPrice = commPrice;
+          if (astroProfile.astrologerPayout == null) {
+            astroProfile.astrologerPayout = Number((price - commPrice).toFixed(2));
+          } else {
+            astroProfile.astrologerPayout = Number(
+              Number(astroProfile.astrologerPayout).toFixed(2),
+            );
+          }
+        }
+        astroProfile.state = astroProfile.state || userState;
+        (safeUser as any).astrologerProfile = astroProfile;
+        (safeUser as any).profile = astroProfile;
+      }
+    } else if ((safeUser as any).astrologerProfile) {
       (safeUser as any).astrologerProfile.state = (safeUser as any).astrologerProfile.state || userState;
     }
 

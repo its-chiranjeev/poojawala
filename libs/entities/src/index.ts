@@ -3,7 +3,7 @@ export * from './entities.service';
 export * from './user.entity';
 export * from './otp.entity';
 export * from './purohit-profile.entity';
-export * from './purohit-bank-account.entity';
+export * from './bank-account.entity';
 export * from './purohit-service-area.entity';
 export * from './purohit-media.entity';
 export * from './service.entity';

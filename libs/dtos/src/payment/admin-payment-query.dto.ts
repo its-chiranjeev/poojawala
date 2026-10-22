@@ -90,6 +90,16 @@ export class AdminPaymentQueryDto {
     return value;
   })
   @IsEnum(BOOKING_PAYMENT_STATUS, { each: true })
+  partnerPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.split(',').map((v) => v.trim());
+    }
+    return value;
+  })
+  @IsEnum(BOOKING_PAYMENT_STATUS, { each: true })
   purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
 
   @IsOptional()

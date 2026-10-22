@@ -4,7 +4,7 @@ import { EntitiesModule } from '@poojawala/entities';
 import { UserRepository } from './user.repository';
 import { OtpRepository } from './otp.repository';
 import { PurohitProfileRepository } from './purohit-profile.repository';
-import { PurohitBankAccountRepository } from './purohit-bank-account.repository';
+import { BankAccountRepository } from './bank-account.repository';
 import { PurohitServiceAreaRepository } from './purohit-service-area.repository';
 import { PurohitMediaRepository } from './purohit-media.repository';
 import { ServiceRepository } from './service.repository';
@@ -36,7 +36,7 @@ import { AstrologerProfileRepository } from './astrologer-profile.repository';
     UserRepository,
     OtpRepository,
     PurohitProfileRepository,
-    PurohitBankAccountRepository,
+    BankAccountRepository,
     PurohitServiceAreaRepository,
     PurohitMediaRepository,
     ServiceRepository,
@@ -66,7 +66,7 @@ import { AstrologerProfileRepository } from './astrologer-profile.repository';
     UserRepository,
     OtpRepository,
     PurohitProfileRepository,
-    PurohitBankAccountRepository,
+    BankAccountRepository,
     PurohitServiceAreaRepository,
     PurohitMediaRepository,
     ServiceRepository,

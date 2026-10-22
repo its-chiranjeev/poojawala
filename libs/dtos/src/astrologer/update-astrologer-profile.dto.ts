@@ -77,6 +77,30 @@ export class UpdateAstrologerProfileDto {
   ratePerMinute?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  commissionPrice?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  astrologyPrice?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  commissionPercentage?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  astrologerPayout?: number;
+
+  @IsOptional()
   @IsEnum(PUROHIT_VERIFICATION_STATUS)
   verificationStatus?: PUROHIT_VERIFICATION_STATUS;
 

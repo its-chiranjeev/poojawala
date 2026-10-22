@@ -110,7 +110,55 @@ export class CreateAstrologerByAdminDto {
   commissionPrice?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  astrologyPrice?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  commissionPercentage?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  astrologerPayout?: number;
+
+  @IsOptional()
   @IsString()
   @Transform(({ value }) => value?.trim())
   aadhaarNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentMethod?: string;
+
+  @IsOptional()
+  @IsString()
+  accountHolderName?: string;
+
+  @IsOptional()
+  @IsString()
+  accountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  ifscCode?: string;
+
+  @IsOptional()
+  @IsString()
+  bankName?: string;
+
+  @IsOptional()
+  @IsString()
+  upiId?: string;
+
+  @IsOptional()
+  bankAccount?: any;
+
+  @IsOptional()
+  bankAccounts?: any[];
 }

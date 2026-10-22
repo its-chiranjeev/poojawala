@@ -263,9 +263,12 @@ export class PaymentController {
     @Body() dto: AdminCreatePurohitPayoutDto,
   ) {
     const data = await this.paymentService.adminRecordPurohitPayout(req.user.id, dto);
+    const message = data?.astrologerId
+      ? 'Astrologer payout recorded successfully'
+      : 'Purohit payout recorded successfully';
     return {
       success: true,
-      message: 'Purohit payout recorded successfully',
+      message,
       data,
     };
   }

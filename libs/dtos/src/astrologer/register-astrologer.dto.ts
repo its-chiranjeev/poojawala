@@ -112,4 +112,61 @@ export class RegisterAstrologerDto {
   @IsNumber()
   @Min(0)
   ratePerMinute?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  commissionPrice?: number;
+
+  /** Base astrology consultation price (e.g. ₹500.00) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  astrologyPrice?: number;
+
+  /** Commission percentage applied to astrology consultation (e.g. 10.00%) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  commissionPercentage?: number;
+
+  /** Net astrologer payout (astrologyPrice - commissionPrice) */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  astrologerPayout?: number;
+
+  @IsOptional()
+  @IsString()
+  paymentMethod?: string;
+
+  @IsOptional()
+  @IsString()
+  accountHolderName?: string;
+
+  @IsOptional()
+  @IsString()
+  accountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  ifscCode?: string;
+
+  @IsOptional()
+  @IsString()
+  bankName?: string;
+
+  @IsOptional()
+  @IsString()
+  upiId?: string;
+
+  @IsOptional()
+  bankAccount?: any;
+
+  @IsOptional()
+  bankAccounts?: any[];
 }

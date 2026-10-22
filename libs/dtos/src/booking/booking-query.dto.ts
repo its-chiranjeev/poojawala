@@ -75,6 +75,19 @@ export class BookingQueryDto {
   })
   @IsEnum(BOOKING_PAYMENT_STATUS, {
     each: true,
+    message: 'Partner payout status must be a valid booking payment status',
+  })
+  partnerPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.split(',').map(v => v.trim());
+    }
+    return value;
+  })
+  @IsEnum(BOOKING_PAYMENT_STATUS, {
+    each: true,
     message: 'Purohit payout status must be a valid booking payment status',
   })
   purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];

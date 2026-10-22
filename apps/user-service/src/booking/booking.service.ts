@@ -687,7 +687,7 @@ export class BookingService {
           plan: selectedPlan,
           servicePrice: totalServicePrice,
           platformCommission,
-          purohitPayoutAmount,
+          partnerPayoutAmount: purohitPayoutAmount,
           couponCode: appliedCoupon?.code ?? undefined,
           discountAmount,
           donationAmount,
@@ -1146,20 +1146,38 @@ export class BookingService {
         }
 
         const bookingPrice =
-          astrologer.commissionPrice != null && Number(astrologer.commissionPrice) > 0
-            ? Number(astrologer.commissionPrice)
-            : 50.0;
+          astrologer.astrologyPrice != null && Number(astrologer.astrologyPrice) > 0
+            ? Number(astrologer.astrologyPrice)
+            : astrologer.commissionPrice != null && Number(astrologer.commissionPrice) > 0
+              ? Number(astrologer.commissionPrice)
+              : 50.0;
         const totalServicePrice = Number(bookingPrice.toFixed(2));
         const finalAmount = totalServicePrice;
         const tokenAmount = finalAmount;
         const paidAmount = 0.0;
         const remainingAmount = finalAmount;
 
+        const effectiveCommissionPercentage =
+          astrologer.commissionPercentage != null
+            ? Number(astrologer.commissionPercentage)
+            : 10;
+
+        const effectiveCommissionPrice =
+          astrologer.commissionPrice != null && Number(astrologer.commissionPrice) > 0
+            ? Number(astrologer.commissionPrice)
+            : Number(((bookingPrice * effectiveCommissionPercentage) / 100).toFixed(2));
+
+        const effectiveAstrologerPayout =
+          astrologer.astrologerPayout != null && Number(astrologer.astrologerPayout) >= 0
+            ? Number(astrologer.astrologerPayout)
+            : Number((bookingPrice - effectiveCommissionPrice).toFixed(2));
+
         const priceBreakDown = {
           basePrice: bookingPrice,
           subtotal: totalServicePrice,
-          commissionPrice: bookingPrice,
-          platformCommission: bookingPrice,
+          commissionPrice: effectiveCommissionPrice,
+          platformCommissionPercentage: effectiveCommissionPercentage,
+          astrologerPayout: effectiveAstrologerPayout,
           discountAmount: 0,
           donationAmount: 0,
           finalAmount,
@@ -1340,14 +1358,6 @@ export class BookingService {
       const existingPaymentId = paymentLinkRes?.paymentId ?? null;
       const existingPaymentUrl = paymentLinkRes?.paymentUrl ?? null;
 
-      const platformAccessFee = Number(transactionResult.savedBooking.finalAmount);
-      const ratePerMinute = transactionResult.astrologer.ratePerMinute;
-      const astrologyTransparency = buildAstrologyTransparencyNotices(
-        platformAccessFee,
-        ratePerMinute,
-        false,
-      );
-
       const bookingData: CreateBookingResponse = {
         bookingId: transactionResult.savedBooking.id,
         bookingNumber: transactionResult.savedBooking.bookingNumber,
@@ -1356,13 +1366,8 @@ export class BookingService {
         paymentStatus: transactionResult.savedBooking.paymentStatus,
         paymentId: existingPaymentId,
         paymentUrl: existingPaymentUrl,
-        finalAmount: platformAccessFee,
+        finalAmount: Number(transactionResult.savedBooking.finalAmount),
         priceBreakDown: transactionResult.savedBooking.priceBreakDown ?? null,
-        platformAccessFee: astrologyTransparency.platformAccessFee,
-        ratePerMinute: astrologyTransparency.ratePerMinute,
-        consultationChargesNoticeTitle: astrologyTransparency.consultationChargesNoticeTitle,
-        consultationFeeNotice: astrologyTransparency.consultationFeeNotice,
-        astrologyTransparency,
       };
 
       (bookingData as any).message =
@@ -1478,7 +1483,7 @@ export class BookingService {
         limit,
         status,
         bookingPaymentStatus: query.bookingPaymentStatus,
-        purohitPayoutStatus: query.purohitPayoutStatus,
+        partnerPayoutStatus: query.partnerPayoutStatus ?? query.purohitPayoutStatus,
         bookingType: query.bookingType,
         search,
       },
@@ -1555,8 +1560,10 @@ export class BookingService {
         payments,
         bookingPayment,
         purohitPayout,
-        purohitPayoutStatus: user.role === USER_ROLE.CUSTOMER ? null : booking.purohitPayoutStatus,
-        purohitPayoutAmount: user.role === USER_ROLE.CUSTOMER ? null : booking.purohitPayoutAmount,
+        partnerPayoutStatus: user.role === USER_ROLE.CUSTOMER ? null : booking.partnerPayoutStatus,
+        purohitPayoutStatus: user.role === USER_ROLE.CUSTOMER ? null : booking.partnerPayoutStatus,
+        partnerPayoutAmount: user.role === USER_ROLE.CUSTOMER ? null : (booking.partnerPayoutAmount ?? null),
+        purohitPayoutAmount: user.role === USER_ROLE.CUSTOMER ? null : (booking.partnerPayoutAmount ?? null),
         scheduledAtIst: this.toIstString(booking.scheduledAt),
         createdAtIst: this.toIstString(booking.createdAt),
         updatedAtIst: this.toIstString(booking.updatedAt),
@@ -1693,6 +1700,8 @@ export class BookingService {
               bookingPayment.status !== PAYMENT_STATUS.CREATED
               ? bookingPayment
               : null,
+          partnerPayoutStatus: null,
+          partnerPayoutAmount: null,
           purohitPayout: null,
           purohitPayoutStatus: null,
           purohitPayoutAmount: null,
@@ -1753,8 +1762,10 @@ export class BookingService {
           astrologerProfile,
           bookingPayment,
           purohitPayout: null,
-          purohitPayoutStatus: null,
-          purohitPayoutAmount: null,
+          partnerPayoutStatus: booking.partnerPayoutStatus,
+          purohitPayoutStatus: booking.partnerPayoutStatus,
+          partnerPayoutAmount: booking.partnerPayoutAmount ?? null,
+          purohitPayoutAmount: booking.partnerPayoutAmount ?? null,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),
@@ -1919,11 +1930,11 @@ export class BookingService {
           booking.remainingAmount = Number(
             (booking.finalAmount - Number(booking.paidAmount ?? 0)).toFixed(2),
           );
-        } else if (booking.purohitPayoutAmount != null && booking.platformCommission != null) {
+        } else if (booking.partnerPayoutAmount != null && booking.platformCommission != null) {
           // Legacy fallback for historical bookings lacking servicePrice
           booking.finalAmount = Number(
             (
-              Number(booking.purohitPayoutAmount) +
+              Number(booking.partnerPayoutAmount) +
               Number(booking.platformCommission) -
               Number(booking.discountAmount ?? 0) +
               donationAmount
@@ -2304,7 +2315,7 @@ export class BookingService {
 
           booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
 
-          booking.purohitPayoutAmount = null as unknown as undefined;
+          booking.partnerPayoutAmount = null as unknown as undefined;
           booking.finalAmount = null as unknown as undefined;
 
           /*
@@ -3125,7 +3136,7 @@ export class BookingService {
               );
             }
 
-            booking.purohitPayoutAmount = exactPrice;
+            booking.partnerPayoutAmount = exactPrice;
             booking.platformCommission = Number(
               (exactPrice * (Number(booking.commissionPercentage) / 100)).toFixed(
                 2,
@@ -3286,7 +3297,7 @@ export class BookingService {
                   bookingTime,
                   bookingAddress: 'Online Video / Audio Call',
                   totalAmount: Number(b.finalAmount) || 0,
-                  purohitPayoutAmount: Number(b.purohitPayoutAmount) || 0,
+                  purohitPayoutAmount: Number(b.partnerPayoutAmount) || 0,
                   paymentStatus: b.paymentStatus || 'PAID',
                   bookingStatus: b.status,
                   specialInstructions: b.specialInstructions,
@@ -3584,7 +3595,7 @@ export class BookingService {
       } else {
         // TODO: Legacy minPrice/maxPrice / Purohit custom pricing logic.
         // Retained for backward compatibility with historical bookings that lack servicePrice.
-        booking.purohitPayoutAmount = exactPrice;
+        booking.partnerPayoutAmount = exactPrice;
         booking.platformCommission = Number(
           (exactPrice * (Number(booking.commissionPercentage) / 100)).toFixed(2),
         );
@@ -4896,7 +4907,8 @@ export class BookingService {
           priceRange: booking.service?.minPrice && booking.service?.maxPrice
             ? `${Number(booking.service.minPrice)} - ${Number(booking.service.maxPrice)}`
             : null,
-          purohitPayoutAmount: booking.purohitPayoutAmount ? Number(booking.purohitPayoutAmount) : null,
+          purohitPayoutAmount: booking.partnerPayoutAmount ? Number(booking.partnerPayoutAmount) : null,
+          partnerPayoutAmount: booking.partnerPayoutAmount ? Number(booking.partnerPayoutAmount) : null,
           platformCommission: booking.platformCommission ? Number(booking.platformCommission) : null,
           discountAmount: Number(booking.discountAmount ?? 0),
           donationAmount: Number(booking.donationAmount ?? 0),
@@ -5336,7 +5348,8 @@ export class BookingService {
           ? `${Number(booking.service.minPrice)} - ${Number(booking.service.maxPrice)}`
           : null,
         platformCommission: Number(booking.platformCommission),
-        purohitPayoutAmount: Number(booking.purohitPayoutAmount),
+        purohitPayoutAmount: Number(booking.partnerPayoutAmount),
+        partnerPayoutAmount: Number(booking.partnerPayoutAmount),
         discountAmount: Number(booking.discountAmount ?? 0),
         donationAmount: Number(booking.donationAmount ?? 0),
         finalAmount: Number(booking.finalAmount),
@@ -5921,7 +5934,7 @@ export class BookingService {
           plan: selectedPlan,
           servicePrice: totalServicePrice,
           platformCommission,
-          purohitPayoutAmount,
+          partnerPayoutAmount: purohitPayoutAmount,
           couponCode: appliedCoupon?.code ?? undefined,
           discountAmount,
           donationAmount,
@@ -6168,7 +6181,7 @@ export class BookingService {
             bookingTime,
             bookingAddress: addressString,
             totalAmount: Number(b.finalAmount) || 0,
-            purohitPayoutAmount: Number(b.purohitPayoutAmount) || 0,
+            purohitPayoutAmount: Number(b.partnerPayoutAmount) || 0,
             paymentStatus: b.paymentStatus,
             bookingStatus: b.status,
             specialInstructions: b.specialInstructions,

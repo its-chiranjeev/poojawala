@@ -1,21 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { PurohitBankAccount } from '@poojawala/entities';
+import { BankAccount } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 @Injectable()
-export class PurohitBankAccountRepository extends BaseRepository<PurohitBankAccount> {
+export class BankAccountRepository extends BaseRepository<BankAccount> {
   constructor(
-    @InjectRepository(PurohitBankAccount)
-    repo: Repository<PurohitBankAccount>,
+    @InjectRepository(BankAccount)
+    repo: Repository<BankAccount>,
   ) {
     super(repo);
   }
 
-  async findByPurohitId(purohitId: number) {
+  async findByUserId(userId: number) {
     return this.repo.find({
-      where: { purohitId },
+      where: { userId },
       order: {
         isPrimary: 'DESC',
         createdAt: 'DESC',
@@ -24,14 +24,14 @@ export class PurohitBankAccountRepository extends BaseRepository<PurohitBankAcco
   }
 
   async findBankAccounts(
-    purohitId: number,
+    userId: number,
     page: number = 1,
     limit: number = 10,
     search?: string,
   ) {
     const query = this.repo
       .createQueryBuilder('account')
-      .where('account.purohitId = :purohitId', { purohitId });
+      .where('account.userId = :userId', { userId });
 
     if (search) {
       query.andWhere(
@@ -52,10 +52,10 @@ export class PurohitBankAccountRepository extends BaseRepository<PurohitBankAcco
     return { data, total };
   }
 
-  async findPrimaryAccount(purohitId: number) {
+  async findPrimaryAccount(userId: number) {
     return this.repo.findOne({
       where: {
-        purohitId,
+        userId,
         isPrimary: true,
       },
     });
@@ -73,21 +73,21 @@ export class PurohitBankAccountRepository extends BaseRepository<PurohitBankAcco
     });
   }
 
-  async clearPrimaryAccount(purohitId: number) {
-    await this.repo.update({ purohitId }, { isPrimary: false });
+  async clearPrimaryAccount(userId: number) {
+    await this.repo.update({ userId }, { isPrimary: false });
   }
 
-  async createAccount(data: Partial<PurohitBankAccount>) {
+  async createAccount(data: Partial<BankAccount>) {
     const account = this.repo.create(data);
     return this.repo.save(account);
   }
 
-  async updateAccount(id: number, data: Partial<PurohitBankAccount>) {
+  async updateAccount(id: number, data: Partial<BankAccount>) {
     await this.repo.update(id, data);
     return this.findById(id);
   }
 
   async deleteAccount(id: number) {
-    return this.repo.softDelete(id);
+    await this.repo.softDelete(id);
   }
 }

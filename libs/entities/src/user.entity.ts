@@ -15,6 +15,7 @@ import { CustomerFavorite } from './customer-favorite.entity';
 import { Booking } from './booking.entity';
 import { PurohitServiceArea } from './purohit-service-area.entity';
 import { AstrologerProfile } from './astrologer-profile.entity';
+import { BankAccount } from './bank-account.entity';
 
 export enum USER_ROLE {
   CUSTOMER = 'CUSTOMER',
@@ -136,9 +137,12 @@ export class User {
 
   @Column({ type: 'decimal', precision: 2, scale: 1, default: 0.0 })
   avgRating!: number;
-  
+
   @OneToMany(() => PurohitServiceArea, (serviceArea) => serviceArea.purohit)
   serviceAreas!: PurohitServiceArea[];
+
+  @OneToMany(() => BankAccount, (bankAccount) => bankAccount.user)
+  bankAccounts!: BankAccount[];
 
   @OneToOne(() => AstrologerProfile, (profile) => profile.user)
   astrologerProfile?: AstrologerProfile;
