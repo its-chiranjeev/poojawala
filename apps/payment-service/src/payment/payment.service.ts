@@ -4256,7 +4256,7 @@ export class PaymentService {
 
       const isFullRefund = refundAmountInPaise === remainingPaise;
       const definedRemark = isFullRefund
-        ? 'CUSTOMER_FULLY_REFUND'
+        ? 'CUSTOMER_FULL_REFUND'
         : 'CUSTOMER_PARTIAL_REFUND';
 
       const newRefundPayment = paymentRepo.create({
