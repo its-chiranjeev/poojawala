@@ -131,6 +131,7 @@ describe('TempleService', () => {
 
       expect(mockTempleRepo.create).toHaveBeenCalledWith({
         name: 'Shri Ram Mandir',
+        slug: 'shri-ram-mandir',
         description: 'Magnificent temple',
         imageUrl: 'https://images.poojawala.com/ram.jpg',
         address: 'Ayodhya Dham',
@@ -191,6 +192,7 @@ describe('TempleService', () => {
 
       expect(mockTempleRepo.create).toHaveBeenCalledWith({
         name: 'Simple Mandir',
+        slug: 'simple-mandir',
         description: null,
         imageUrl: null,
         address: null,

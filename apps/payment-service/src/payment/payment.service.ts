@@ -21,6 +21,7 @@ import {
   BOOKING_TYPE,
   BOOKING_PAYMENT_STATUS,
   BOOKING_STATUS,
+  AstrologerProfile,
   BookingProduct,
   Cart,
   CartItem,
@@ -669,6 +670,97 @@ export class PaymentService {
     @Optional() private readonly assignmentService?: AssignmentService,
   ) { }
 
+  /**
+   * Resolves the verified net payout amount for an astrology booking.
+   * Ensures that platform commission is never silently bypassed.
+   *
+   * Resolution hierarchy:
+   * 1. Stored booking.partnerPayoutAmount if valid (number >= 0 and <= finalAmount).
+   * 2. Trusted priceBreakDown.astrologerPayout if mathematically consistent.
+   * 3. Profile-based reconciliation if astrologerProfile exists and matches.
+   * 4. If net payout cannot be safely established, throws BadRequestException.
+   */
+  async resolveAstrologyPayoutAmount(booking: Booking): Promise<number> {
+    const finalAmount = Number(booking.finalAmount ?? 0);
+
+    // 1. Direct persisted partnerPayoutAmount
+    if (booking.partnerPayoutAmount !== null && booking.partnerPayoutAmount !== undefined) {
+      const persistedPayout = Number(booking.partnerPayoutAmount);
+      if (!isNaN(persistedPayout) && persistedPayout >= 0) {
+        // Validate against finalAmount (cannot exceed customer payment + slight rounding margin)
+        if (finalAmount <= 0 || persistedPayout <= finalAmount + 0.05) {
+          return Number(persistedPayout.toFixed(2));
+        }
+      }
+    }
+
+    // 2. Verified priceBreakDown
+    if (booking.priceBreakDown && typeof booking.priceBreakDown === 'object') {
+      const pb = booking.priceBreakDown as Record<string, any>;
+      const pbPayout = pb.astrologerPayout;
+      const pbCommission = pb.commissionPrice;
+      const pbBase = pb.basePrice ?? pb.subtotal ?? finalAmount;
+
+      if (pbPayout !== null && pbPayout !== undefined) {
+        const numPayout = Number(pbPayout);
+        const numCommission = Number(pbCommission ?? 0);
+        const numBase = Number(pbBase);
+
+        if (!isNaN(numPayout) && numPayout >= 0 && !isNaN(numCommission) && numCommission >= 0) {
+          // Verify mathematical consistency: payout + commission == base
+          if (Math.abs((numPayout + numCommission) - numBase) <= 0.05 && (finalAmount <= 0 || numPayout <= finalAmount + 0.05)) {
+            return Number(numPayout.toFixed(2));
+          }
+        }
+      }
+    }
+
+    // 3. Fallback: Reconcile against AstrologerProfile if astrologerId is present
+    if (booking.astrologerId) {
+      const astrologerProfileRepo = this.dataSource.getRepository(AstrologerProfile);
+      const profile = await astrologerProfileRepo.findOne({
+        where: { userId: booking.astrologerId },
+      });
+
+      if (profile) {
+        // A. Profile has explicit astrologerPayout and astrologyPrice matching booking
+        if (
+          profile.astrologerPayout !== null &&
+          profile.astrologerPayout !== undefined &&
+          profile.astrologyPrice !== null &&
+          profile.astrologyPrice !== undefined
+        ) {
+          const profilePayout = Number(profile.astrologerPayout);
+          const profilePrice = Number(profile.astrologyPrice);
+          if (
+            !isNaN(profilePayout) &&
+            profilePayout >= 0 &&
+            Math.abs(profilePrice - finalAmount) <= 0.05
+          ) {
+            return Number(profilePayout.toFixed(2));
+          }
+        }
+
+        // B. Profile has commissionPercentage
+        if (profile.commissionPercentage !== null && profile.commissionPercentage !== undefined) {
+          const commPercent = Number(profile.commissionPercentage);
+          if (!isNaN(commPercent) && commPercent >= 0 && commPercent <= 100) {
+            const calculatedCommission = Number(((finalAmount * commPercent) / 100).toFixed(2));
+            const calculatedPayout = Number((finalAmount - calculatedCommission).toFixed(2));
+            if (calculatedPayout >= 0) {
+              return calculatedPayout;
+            }
+          }
+        }
+      }
+    }
+
+    // 4. If correct amount cannot be established safely, reject payout creation
+    throw new BadRequestException(
+      `Unable to establish verified net payout amount for astrology booking ${booking.bookingNumber || booking.id}. Missing or inconsistent commission and payout data. Manual financial reconciliation required.`,
+    );
+  }
+
   async getPurohitPayoutDetails(bookingId: number) {
     const booking = await this.bookingRepository.findOne({
       where: { id: bookingId },
@@ -703,7 +795,7 @@ export class PaymentService {
       recipientName = booking.astrologer
         ? `${booking.astrologer.firstName} ${booking.astrologer.lastName}`.trim()
         : 'Astrologer';
-      payoutAmount = Number(booking.partnerPayoutAmount || booking.finalAmount || 0);
+      payoutAmount = await this.resolveAstrologyPayoutAmount(booking);
       payoutStatus = booking.partnerPayoutStatus;
     } else {
       if (!booking.purohitId || !booking.purohit) {
@@ -713,7 +805,7 @@ export class PaymentService {
       recipientName = booking.purohit.user
         ? `${booking.purohit.user.firstName} ${booking.purohit.user.lastName}`.trim()
         : 'Unknown';
-      payoutAmount = Number(booking.partnerPayoutAmount || 0);
+      payoutAmount = Number(booking.partnerPayoutAmount ?? 0);
       payoutStatus = booking.partnerPayoutStatus;
     }
 
@@ -798,7 +890,7 @@ export class PaymentService {
       recipientName = booking.astrologer
         ? `${booking.astrologer.firstName} ${booking.astrologer.lastName}`.trim()
         : 'Astrologer';
-      payoutAmount = Number(booking.partnerPayoutAmount || booking.finalAmount || 0);
+      payoutAmount = await this.resolveAstrologyPayoutAmount(booking);
       currentPayoutStatus = booking.partnerPayoutStatus;
     } else {
       if (!booking.purohitId) {
@@ -817,7 +909,7 @@ export class PaymentService {
       recipientName = purohitProfile.user
         ? `${purohitProfile.user.firstName} ${purohitProfile.user.lastName}`.trim()
         : 'Unknown';
-      payoutAmount = Number(booking.partnerPayoutAmount || 0);
+      payoutAmount = Number(booking.partnerPayoutAmount ?? 0);
       currentPayoutStatus = booking.partnerPayoutStatus;
     }
 
@@ -907,6 +999,7 @@ export class PaymentService {
         payoutRecord.paymentMethod = payoutMethod;
         payoutRecord.bankAccountId = bankAccount.id;
         payoutRecord.idempotencyKey = idempotencyKey;
+        payoutRecord.amount = payoutAmount;
         if (dto.remark) {
           payoutRecord.remark = dto.remark;
         }
@@ -932,10 +1025,17 @@ export class PaymentService {
 
       lockedBooking.partnerPayoutStatus = BOOKING_PAYMENT_STATUS.PAID;
       lockedBooking.partnerPayoutId = payoutRecord.id;
+      if (
+        lockedBooking.partnerPayoutAmount == null ||
+        Number(lockedBooking.partnerPayoutAmount) === 0
+      ) {
+        lockedBooking.partnerPayoutAmount = payoutAmount;
+      }
       await bkRepo.save(lockedBooking);
 
       booking.partnerPayoutStatus = BOOKING_PAYMENT_STATUS.PAID;
       booking.partnerPayoutId = payoutRecord.id;
+      booking.partnerPayoutAmount = lockedBooking.partnerPayoutAmount;
 
       await this.auditLogService.createAuditLog(
         {
@@ -5973,12 +6073,19 @@ export class PaymentService {
 
       const partnerName = isAstrology ? astrologerFullName : purohitFullName;
 
-      const payoutAmount = Number(
-        booking.partnerPayoutAmount ??
-          payoutPayment?.amount ??
-          (isAstrology ? booking.finalAmount : 0) ??
-          0,
-      );
+      let resolvedPayout = 0;
+      if (
+        booking.partnerPayoutAmount !== null &&
+        booking.partnerPayoutAmount !== undefined &&
+        Number(booking.partnerPayoutAmount) >= 0
+      ) {
+        resolvedPayout = Number(booking.partnerPayoutAmount);
+      } else if (payoutPayment?.amount != null && Number(payoutPayment.amount) >= 0) {
+        resolvedPayout = Number(payoutPayment.amount);
+      } else if (isAstrology && booking.priceBreakDown?.astrologerPayout != null) {
+        resolvedPayout = Number(booking.priceBreakDown.astrologerPayout);
+      }
+      const payoutAmount = Number(resolvedPayout);
 
       return {
         paymentId: payoutPayment ? payoutPayment.id : null,
@@ -6134,7 +6241,6 @@ export class PaymentService {
                  AND pay."paymentType" = :astrologerPayoutType 
                  AND pay.status = :paymentSuccessStatus 
                LIMIT 1),
-              booking.finalAmount,
               0
             )
           ), 
@@ -6174,7 +6280,7 @@ export class PaymentService {
         '(booking.remainingAmount <= 0 OR booking.remainingAmount IS NULL)',
       )
       .andWhere(
-        '(booking.partnerPayoutAmount > 0 OR (booking.astrologerId IS NOT NULL AND booking.finalAmount > 0))',
+        '(booking.partnerPayoutAmount > 0 OR (booking.astrologerId IS NOT NULL AND (booking."priceBreakDown"->>\'astrologerPayout\')::numeric > 0))',
       )
       .andWhere('booking.partnerPayoutStatus = :payoutStatus', {
         payoutStatus: BOOKING_PAYMENT_STATUS.PENDING,

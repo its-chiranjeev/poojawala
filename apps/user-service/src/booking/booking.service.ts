@@ -172,14 +172,28 @@ export class BookingService {
     name: 'mark-expired-bookings-manual',
   })
   async markExpiredBookingsManual(): Promise<void> {
-    this.logger.log('Checking expired bookings for manual assignment...');
+    // TODO: Standardized cron start log. Previous log format:
+    // this.logger.log('Checking expired bookings for manual assignment...');
+    this.logger.log('[Booking Cron] Started: Checking expired bookings for manual assignment.');
 
     try {
+      const checkedCount = await this.bookingRepository.count({
+        where: {
+          status: BOOKING_STATUS.PENDING,
+          assignmentType: ASSIGNMENT_TYPE.AUTO,
+        },
+      });
+
       const updatedBookings = await this.bookingRepository.markExpiredAsManual();
 
       if (updatedBookings.length > 0) {
+        // TODO: Standardized cron completion log. Previous log format:
+        // this.logger.log(
+        //   `${updatedBookings.length} booking(s) marked for manual assignment`,
+        // );
+        const effectiveChecked = Math.max(checkedCount, updatedBookings.length);
         this.logger.log(
-          `${updatedBookings.length} booking(s) marked for manual assignment`,
+          `[Booking Cron] Completed: Checked ${effectiveChecked} bookings, eligible for manual assignment: ${updatedBookings.length}.`,
         );
 
         for (const booking of updatedBookings) {
@@ -196,11 +210,18 @@ export class BookingService {
             newValue: { assignmentType: 'MANUAL' },
           });
         }
+      } else {
+        this.logger.log('[Booking Cron] Completed: No expired bookings require manual assignment.');
       }
     } catch (error) {
+      // TODO: Standardized cron failure log. Previous log format:
+      // this.logger.error(
+      //   'Failed to update expired bookings',
+      //   error instanceof Error ? error.stack : String(error),
+      // );
       this.logger.error(
-        'Failed to update expired bookings',
-        error instanceof Error ? error.stack : String(error),
+        `[Booking Cron] Failed: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
       );
     }
   }
@@ -1159,18 +1180,18 @@ export class BookingService {
 
         const effectiveCommissionPercentage =
           astrologer.commissionPercentage != null
-            ? Number(astrologer.commissionPercentage)
-            : 10;
+            ? Number(Number(astrologer.commissionPercentage).toFixed(2))
+            : 10.0;
 
         const effectiveCommissionPrice =
-          astrologer.commissionPrice != null && Number(astrologer.commissionPrice) > 0
-            ? Number(astrologer.commissionPrice)
+          astrologer.commissionPrice != null && Number(astrologer.commissionPrice) >= 0
+            ? Number(Number(astrologer.commissionPrice).toFixed(2))
             : Number(((bookingPrice * effectiveCommissionPercentage) / 100).toFixed(2));
 
         const effectiveAstrologerPayout =
           astrologer.astrologerPayout != null && Number(astrologer.astrologerPayout) >= 0
-            ? Number(astrologer.astrologerPayout)
-            : Number((bookingPrice - effectiveCommissionPrice).toFixed(2));
+            ? Number(Number(astrologer.astrologerPayout).toFixed(2))
+            : Number(Math.max(0, bookingPrice - effectiveCommissionPrice).toFixed(2));
 
         const priceBreakDown = {
           basePrice: bookingPrice,
@@ -1196,8 +1217,9 @@ export class BookingService {
           customerId: targetCustomerId,
           astrologerId: dto.astrologerId,
           scheduledAt,
-          commissionPercentage: 0,
-          platformCommission: bookingPrice,
+          commissionPercentage: effectiveCommissionPercentage,
+          platformCommission: effectiveCommissionPrice,
+          partnerPayoutAmount: effectiveAstrologerPayout,
           servicePrice: totalServicePrice,
           discountAmount: 0,
           donationAmount: 0,
@@ -1541,10 +1563,10 @@ export class BookingService {
       const fee = Number(booking.finalAmount ?? booking.platformCommission ?? 50);
       const transparency = isAstrologyBooking
         ? buildAstrologyTransparencyNotices(
-            fee,
-            astrologerProfile?.ratePerMinute,
-            isAstrologyUnlocked,
-          )
+          fee,
+          astrologerProfile?.ratePerMinute,
+          isAstrologyUnlocked,
+        )
         : null;
 
       return {
@@ -1631,10 +1653,10 @@ export class BookingService {
         const adminFee = Number(booking.finalAmount ?? booking.platformCommission ?? 50);
         const adminTransparency = isAdminAstrology
           ? buildAstrologyTransparencyNotices(
-              adminFee,
-              astrologerProfile?.ratePerMinute,
-              true,
-            )
+            adminFee,
+            astrologerProfile?.ratePerMinute,
+            true,
+          )
           : null;
         return {
           ...booking,
@@ -1674,10 +1696,10 @@ export class BookingService {
         const customerFee = Number(booking.finalAmount ?? booking.platformCommission ?? 50);
         const customerTransparency = isAstrology
           ? buildAstrologyTransparencyNotices(
-              customerFee,
-              astrologerProfile?.ratePerMinute,
-              isAstrologyUnlocked,
-            )
+            customerFee,
+            astrologerProfile?.ratePerMinute,
+            isAstrologyUnlocked,
+          )
           : null;
 
         return {

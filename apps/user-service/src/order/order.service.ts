@@ -78,8 +78,10 @@ export class OrderService {
     name: 'materialize-expired-orders',
   })
   async materializeExpiredOrders(): Promise<number> {
-    const startedAt = new Date().toISOString();
-    this.logger.log(`[materialize-expired-orders] Cron started at ${startedAt}`);
+    // TODO: Standardized cron start log. Previous manual timestamp logging commented out.
+    // const startedAt = new Date().toISOString();
+    // this.logger.log(`[materialize-expired-orders] Cron started at ${startedAt}`);
+    this.logger.log('[Order Cron] Started: Checking expired orders for materialization.');
 
     const now = new Date();
     const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
@@ -109,13 +111,24 @@ export class OrderService {
         .execute();
 
       const affected = result.affected || 0;
-      this.logger.log(
-        `[materialize-expired-orders] Completed. Expired orders: ${affected}`,
-      );
+      // TODO: Standardized cron completion log. Previous log format:
+      // this.logger.log(
+      //   `[materialize-expired-orders] Completed. Expired orders: ${affected}`,
+      // );
+      if (affected > 0) {
+        this.logger.log(`[Order Cron] Completed: Materialized ${affected} orders.`);
+      } else {
+        this.logger.log('[Order Cron] Completed: No expired orders require materialization.');
+      }
       return affected;
     } catch (error: any) {
+      // TODO: Standardized cron failure log. Previous log format:
+      // this.logger.error(
+      //   `[materialize-expired-orders] Failed: ${error?.message}`,
+      //   error?.stack,
+      // );
       this.logger.error(
-        `[materialize-expired-orders] Failed: ${error?.message}`,
+        `[Order Cron] Failed: ${error?.message || error}`,
         error?.stack,
       );
       return 0;

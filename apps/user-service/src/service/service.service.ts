@@ -47,7 +47,7 @@ import {
   SERVICE_FEATURE_PLAN,
   SERVICE_FEATURE_TYPE,
 } from '@poojawala/entities';
-import { AuditLogService } from '@poojawala/common';
+import { AuditLogService, generateUniqueSlug } from '@poojawala/common';
 import { NotificationService } from '@poojawala/notification';
 import { EmailService } from '@poojawala/email-services';
 
@@ -574,6 +574,8 @@ export class ServiceService {
         throw new BadRequestException('Service must be available either online, offline, or both.');
       }
 
+      // TODO: Client-supplied slug validation removed. Slugs are now automatically generated server-side from name.
+      /*
       if (dto.slug && dto.slug.trim()) {
         const existingSlug = await this.serviceRepository.findOne({
           where: { slug: dto.slug.trim() },
@@ -582,6 +584,8 @@ export class ServiceService {
           throw new ConflictException('Service with same slug already exists');
         }
       }
+      */
+      const generatedSlug = await generateUniqueSlug(this.serviceRepository, dto.name.trim());
 
       const existingWithName = await this.serviceRepository.find({
         where: { name: dto.name.trim() },
@@ -679,7 +683,7 @@ export class ServiceService {
       let iconUrl: string | undefined;
 
       if (files?.icon?.length) {
-        const uploadKey = dto.slug?.trim() || adminId || 'service';
+        const uploadKey = generatedSlug || adminId || 'service';
         iconUrl = await this.s3Service.uploadFileHelper(
           uploadKey,
           'icon',
@@ -715,7 +719,7 @@ export class ServiceService {
 
       const service = this.serviceRepository.create({
         ...dto,
-        slug: dto.slug?.trim() || null,
+        slug: generatedSlug,
         templeId: dto.templeId ?? null,
         cities: validCities,
         languages: dto.languages ?? [],
@@ -741,7 +745,7 @@ export class ServiceService {
       service.isOnline = resolvedIsOnline;
       service.isOffline = resolvedIsOffline;
       service.templeId = dto.templeId ?? null;
-      service.slug = dto.slug?.trim() || null;
+      service.slug = generatedSlug;
       service.sortOrder = finalSortOrder;
 
       const savedService = await this.serviceRepository.save(service);
@@ -871,6 +875,8 @@ export class ServiceService {
       throw new BadRequestException('Service must be available either online, offline, or both.');
     }
 
+    // TODO: Client-provided slug validation removed. Slugs are regenerated automatically on name change.
+    /*
     if (dto.slug && dto.slug.trim()) {
       const existingSlug = await this.serviceRepository.findOne({
         where: { slug: dto.slug.trim() },
@@ -880,6 +886,7 @@ export class ServiceService {
         throw new ConflictException('Service with same slug already exists');
       }
     }
+    */
 
     const targetName = dto.name !== undefined ? dto.name.trim() : service.name.trim();
     if (targetName) {
@@ -971,6 +978,7 @@ export class ServiceService {
     const oldPlans = service.plans;
     const oldTempleId = service.templeId;
     const oldTemple = service.temple;
+    const oldName = service.name;
     const oldSlug = service.slug;
     const oldSortOrder = service.sortOrder;
 
@@ -1128,13 +1136,29 @@ export class ServiceService {
       service.plans = oldPlans;
     }
 
-    // Safeguard slug and templeId against unintentional overwrites
+    // Regenerate slug if name changed, or self-heal if missing on existing record.
+    // Client-provided slug is ignored.
+    // TODO: Deprecated client-provided slug assignment:
+    /*
     if (dto.slug === undefined) {
       service.slug = oldSlug;
     } else if (dto.slug === null) {
       service.slug = null;
     } else {
       service.slug = dto.slug.trim();
+    }
+    */
+    if (dto.name !== undefined) {
+      const trimmedName = dto.name.trim();
+      if (trimmedName !== oldName) {
+        service.slug = await generateUniqueSlug(this.serviceRepository, trimmedName, service.id);
+      } else {
+        service.slug = oldSlug || (await generateUniqueSlug(this.serviceRepository, trimmedName, service.id));
+      }
+    } else if (!oldSlug) {
+      service.slug = await generateUniqueSlug(this.serviceRepository, service.name, service.id);
+    } else {
+      service.slug = oldSlug;
     }
 
     if (dto.templeId === undefined) {
@@ -1298,7 +1322,8 @@ export class ServiceService {
     if (dto.purohitCarryItems !== undefined) updatedFields.purohitCarryItems = updated.purohitCarryItems;
     if (dto.plans !== undefined) updatedFields.plans = updated.plans;
     if (dto.templeId !== undefined) updatedFields.templeId = updated.templeId;
-    if (dto.slug !== undefined) updatedFields.slug = updated.slug;
+      // TODO: Obsolete client dto.slug check. Slug changes are now tracked via updated.slug !== oldSlug.
+      if (updated.slug !== oldSlug) updatedFields.slug = updated.slug;
     if (isBasicModified && !isStandardModified) updatedFields.plan = 'BASIC';
     if (!isBasicModified && isStandardModified) updatedFields.plan = 'STANDARD';
     if (isBasicModified && isStandardModified) updatedFields.plan = 'BASIC, STANDARD';
@@ -1999,8 +2024,11 @@ export class ServiceService {
       );
     }
 
+    const slug = await generateUniqueSlug(this.categoryRepository, dto.name.trim());
+
     const category = this.categoryRepository.create({
       name: dto.name.trim(),
+      slug,
       description: dto.description?.trim(),
       iconUrl: iconKey ?? dto.iconUrl,
       sortOrder: dto.sortOrder ?? 0,
@@ -2127,7 +2155,14 @@ export class ServiceService {
       }
     }
 
-    if (newName !== undefined) category.name = newName;
+    if (newName !== undefined) {
+      if (newName !== category.name) {
+        category.name = newName;
+        category.slug = await generateUniqueSlug(this.categoryRepository, newName, category.id);
+      }
+    } else if (!category.slug) {
+      category.slug = await generateUniqueSlug(this.categoryRepository, category.name, category.id);
+    }
     if (dto.description !== undefined) category.description = dto.description?.trim();
     if (dto.sortOrder !== undefined) category.sortOrder = dto.sortOrder;
     if (dto.isActive !== undefined) category.isActive = dto.isActive;

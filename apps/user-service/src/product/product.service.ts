@@ -14,7 +14,7 @@ import {
 import { ProductRepository } from '@poojawala/repositories';
 import { CategoryRepository } from '@poojawala/repositories';
 import { S3Service } from '@poojawala/s3';
-import { AuditLogService } from '@poojawala/common';
+import { AuditLogService, generateUniqueSlug } from '@poojawala/common';
 import { ACTOR_TYPE, AUDIT_MODULE, CATEGORY_TYPE, USER_ROLE } from '@poojawala/entities';
 
 @Injectable()
@@ -95,8 +95,11 @@ export class ProductService {
         );
       }
 
+      const slug = await generateUniqueSlug(this.productRepository, dto.name.trim());
+
       const product = this.productRepository.create({
         name: dto.name.trim(),
+        slug,
         description: dto.description?.trim() || undefined,
         imageUrl,
         price: dto.price,
@@ -279,7 +282,15 @@ export class ProductService {
         categoryId: product.categoryId,
       };
 
-      if (dto.name !== undefined) product.name = dto.name.trim();
+      if (dto.name !== undefined) {
+        const trimmedName = dto.name.trim();
+        if (trimmedName !== product.name) {
+          product.name = trimmedName;
+          product.slug = await generateUniqueSlug(this.productRepository, trimmedName, product.id);
+        }
+      } else if (!product.slug) {
+        product.slug = await generateUniqueSlug(this.productRepository, product.name, product.id);
+      }
       if (dto.description !== undefined) product.description = dto.description.trim();
       if (dto.price !== undefined) product.price = dto.price;
       if (dto.pricingUnit !== undefined) product.pricingUnit = dto.pricingUnit;

@@ -7,6 +7,7 @@ import {
   DeleteDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Category } from './service-category.entity';
 
@@ -38,6 +39,10 @@ export class Product {
 
   @Column({ type: 'varchar', length: 255 })
   name!: string;
+
+  @Index({ unique: true })
+  @Column({ type: 'varchar', length: 255, unique: true, nullable: true })
+  slug?: string | null;
 
   @Column({ type: 'text', nullable: true })
   description?: string;

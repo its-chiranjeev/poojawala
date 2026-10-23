@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { TempleRepository } from '@poojawala/repositories';
 import { CreateTempleDto, UpdateTempleDto, GetTemplesQueryDto } from '@poojawala/dtos';
 import { Temple, ACTOR_TYPE, USER_ROLE, AUDIT_MODULE } from '@poojawala/entities';
-import { AuditLogService } from '@poojawala/common';
+import { AuditLogService, generateUniqueSlug } from '@poojawala/common';
 import { S3Service } from '@poojawala/s3';
 
 @Injectable()
@@ -17,6 +17,7 @@ export class TempleService {
     const formatted: any = {
       id: temple.id,
       name: temple.name,
+      slug: temple.slug ?? null,
       description: temple.description,
       imageUrl: temple.imageUrl,
       downloadUrl,
@@ -170,8 +171,11 @@ export class TempleService {
         )) || null;
     }
 
+    const slug = await generateUniqueSlug(this.templeRepository, dto.name.trim());
+
     const temple = this.templeRepository.create({
       name: dto.name.trim(),
+      slug,
       description: dto.description ?? null,
       imageUrl,
       address: dto.address ?? null,
@@ -249,7 +253,14 @@ export class TempleService {
     };
 
     if (dto.name !== undefined) {
-      temple.name = dto.name.trim();
+      const trimmedName = dto.name.trim();
+      if (trimmedName !== temple.name) {
+        temple.name = trimmedName;
+        temple.slug = await generateUniqueSlug(this.templeRepository, trimmedName, temple.id);
+      }
+    } else if (!temple.slug) {
+      // Self-heal slug if missing on existing record
+      temple.slug = await generateUniqueSlug(this.templeRepository, temple.name, temple.id);
     }
     if (dto.description !== undefined) {
       temple.description = dto.description;

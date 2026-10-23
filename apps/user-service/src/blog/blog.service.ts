@@ -17,7 +17,7 @@ import {
   USER_ROLE,
   AUDIT_MODULE,
 } from '@poojawala/entities';
-import { AuditLogService } from '@poojawala/common';
+import { AuditLogService, generateUniqueSlug } from '@poojawala/common';
 import { S3Service } from '@poojawala/s3';
 import {
   CreateBlogCategoryDto,
@@ -99,7 +99,7 @@ export class BlogService {
       // PUBLIC MODE: strictly active categories, non-deleted
       return this.categoryRepo.find({
         where: { isActive: true, deletedAt: IsNull() },
-        select: ['id', 'name', 'description', 'sortOrder'],
+        select: ['id', 'name', 'slug', 'description', 'sortOrder'],
         order: { sortOrder: 'ASC', name: 'ASC' },
       });
     }
@@ -133,6 +133,7 @@ export class BlogService {
     return {
       id: category.id,
       name: category.name,
+      slug: category.slug ?? null,
       description: category.description,
       sortOrder: category.sortOrder,
       posts: postsResult.data,
@@ -154,8 +155,11 @@ export class BlogService {
       throw new ConflictException(`A category with name "${trimmedName}" already exists`);
     }
 
+    const slug = await generateUniqueSlug(this.categoryRepo, trimmedName);
+
     const category = this.categoryRepo.create({
       name: trimmedName,
+      slug,
       description: dto.description?.trim(),
       isActive: dto.isActive !== undefined ? dto.isActive : true,
       sortOrder: dto.sortOrder !== undefined ? dto.sortOrder : 0,
@@ -209,7 +213,12 @@ export class BlogService {
       if (duplicate) {
         throw new ConflictException(`Another category with name "${trimmedName}" already exists`);
       }
-      category.name = trimmedName;
+      if (trimmedName !== category.name) {
+        category.name = trimmedName;
+        category.slug = await generateUniqueSlug(this.categoryRepo, trimmedName, category.id);
+      }
+    } else if (!category.slug) {
+      category.slug = await generateUniqueSlug(this.categoryRepo, category.name, category.id);
     }
 
     if (dto.description !== undefined) {

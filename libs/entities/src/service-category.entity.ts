@@ -46,6 +46,10 @@ export class Category {
   @Column({ type: 'varchar', length: 100 })
   name!: string;
 
+  @Index({ unique: true })
+  @Column({ type: 'varchar', length: 100, unique: true, nullable: true })
+  slug?: string | null;
+
   @Column({ type: 'text', nullable: true })
   description?: string;
 
