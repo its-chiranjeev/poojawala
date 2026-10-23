@@ -260,6 +260,8 @@ export class PaymentController {
     const data = await this.paymentService.getPurohitPayoutFinanceStats();
     return {
       success: true,
+      statusCode: HttpStatus.OK,
+      message: 'Dashboard statistics fetched successfully',
       data,
     };
   }

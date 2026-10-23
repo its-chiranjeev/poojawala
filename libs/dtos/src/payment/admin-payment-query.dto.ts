@@ -16,6 +16,7 @@ import {
   PAYMENT_STATUS,
   PAYMENT_TYPE,
   BOOKING_PAYMENT_STATUS,
+  BOOKING_TYPE,
 } from '@poojawala/entities';
 
 export class AdminPaymentQueryDto {
@@ -67,6 +68,25 @@ export class AdminPaymentQueryDto {
   @IsInt()
   @Min(1)
   purohitId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  astrologerId?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      if (value.includes(',')) {
+        return value.split(',').map((v) => v.trim());
+      }
+      return value.trim();
+    }
+    return value;
+  })
+  @IsEnum(BOOKING_TYPE, { each: true })
+  bookingType?: BOOKING_TYPE | BOOKING_TYPE[];
 
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))

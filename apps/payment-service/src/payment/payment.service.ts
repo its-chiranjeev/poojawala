@@ -5870,39 +5870,130 @@ export class PaymentService {
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.purohit', 'purohit')
       .leftJoinAndSelect('purohit.user', 'purohitUser')
+      .leftJoinAndSelect('booking.astrologer', 'astrologer')
       .leftJoinAndSelect(
         'booking.payments',
         'payments',
-        'payments.paymentType = :payoutType',
-        { payoutType: PAYMENT_TYPE.PUROHIT_PAYOUT },
+        'payments.paymentType IN (:...payoutTypes)',
+        {
+          payoutTypes: [
+            PAYMENT_TYPE.PUROHIT_PAYOUT,
+            PAYMENT_TYPE.ASTROLOGER_PAYOUT,
+          ],
+        },
       )
-      .where('booking.purohitId IS NOT NULL')
+      .where('(booking.purohitId IS NOT NULL OR booking.astrologerId IS NOT NULL)')
       .orderBy('booking.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 
-    qb.andWhere('booking.partnerPayoutStatus = :partnerPayoutStatus', {
-      partnerPayoutStatus: BOOKING_PAYMENT_STATUS.PAID,
-    });
+    const payoutStatusFilter =
+      query.partnerPayoutStatus ??
+      query.purohitPayoutStatus ??
+      BOOKING_PAYMENT_STATUS.PAID;
+
+    if (Array.isArray(payoutStatusFilter)) {
+      qb.andWhere('booking.partnerPayoutStatus IN (:...payoutStatuses)', {
+        payoutStatuses: payoutStatusFilter,
+      });
+    } else {
+      qb.andWhere('booking.partnerPayoutStatus = :partnerPayoutStatus', {
+        partnerPayoutStatus: payoutStatusFilter,
+      });
+    }
+
+    if (query.bookingType) {
+      if (Array.isArray(query.bookingType)) {
+        qb.andWhere('booking.bookingType IN (:...bookingTypes)', {
+          bookingTypes: query.bookingType,
+        });
+      } else {
+        qb.andWhere('booking.bookingType = :bookingType', {
+          bookingType: query.bookingType,
+        });
+      }
+    }
+
+    if (query.purohitId) {
+      qb.andWhere('booking.purohitId = :purohitId', {
+        purohitId: Number(query.purohitId),
+      });
+    }
+
+    if (query.astrologerId) {
+      qb.andWhere('booking.astrologerId = :astrologerId', {
+        astrologerId: Number(query.astrologerId),
+      });
+    }
+
+    if (query.search?.trim()) {
+      const term = `%${query.search.trim()}%`;
+      qb.andWhere(
+        '(booking.bookingNumber ILIKE :term OR purohitUser.firstName ILIKE :term OR purohitUser.lastName ILIKE :term OR astrologer.firstName ILIKE :term OR astrologer.lastName ILIKE :term)',
+        { term },
+      );
+    }
+
+    if (query.fromDate) {
+      qb.andWhere('booking.createdAt >= :fromDate', {
+        fromDate: new Date(query.fromDate),
+      });
+    }
+
+    if (query.toDate) {
+      qb.andWhere('booking.createdAt <= :toDate', {
+        toDate: new Date(query.toDate),
+      });
+    }
 
     const [bookings, total] = await qb.getManyAndCount();
 
     const items = bookings.map((booking) => {
-      const payoutPayment = booking.payments?.[0];
+      const isAstrology =
+        booking.bookingType === BOOKING_TYPE.ASTROLOGY || Boolean(booking.astrologerId);
+
+      const payoutPayment =
+        booking.payments?.find(
+          (p) =>
+            p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT ||
+            p.paymentType === PAYMENT_TYPE.ASTROLOGER_PAYOUT,
+        ) ?? booking.payments?.[0];
+
+      const payoutDate = payoutPayment
+        ? (payoutPayment.paidAt ?? payoutPayment.createdAt)
+        : null;
+
+      const purohitFullName = booking.purohit?.user
+        ? `${booking.purohit.user.firstName} ${booking.purohit.user.lastName}`.trim()
+        : null;
+
+      const astrologerFullName = booking.astrologer
+        ? `${booking.astrologer.firstName} ${booking.astrologer.lastName}`.trim()
+        : null;
+
+      const partnerName = isAstrology ? astrologerFullName : purohitFullName;
+
+      const payoutAmount = Number(
+        booking.partnerPayoutAmount ??
+          payoutPayment?.amount ??
+          (isAstrology ? booking.finalAmount : 0) ??
+          0,
+      );
+
       return {
         paymentId: payoutPayment ? payoutPayment.id : null,
         bookingId: booking.id,
         bookingNumber: booking.bookingNumber,
-        purohitPayoutDate: payoutPayment
-          ? (payoutPayment.paidAt ?? payoutPayment.createdAt)
-          : null,
+        bookingType:
+          booking.bookingType ??
+          (isAstrology ? BOOKING_TYPE.ASTROLOGY : BOOKING_TYPE.POOJA),
+        partnerPayoutDate: payoutDate,
         partnerPayoutStatus: booking.partnerPayoutStatus,
-        purohitPayoutStatus: booking.partnerPayoutStatus,
-        purohitName: booking.purohit?.user
-          ? `${booking.purohit.user.firstName} ${booking.purohit.user.lastName}`.trim()
-          : null,
+        partnerName,
+        purohitId: booking.purohitId ?? null,
+        astrologerId: booking.astrologerId ?? null,
         finalAmount: booking.finalAmount,
-        payoutAmount: booking.partnerPayoutAmount,
+        payoutAmount,
       };
     });
 
@@ -5920,13 +6011,14 @@ export class PaymentService {
   async getPurohitPayoutFinanceStats() {
     const bookingRepo = this.dataSource.getRepository(Booking);
 
-    const { totalRevenue } = await bookingRepo
+    const rawRevenues = await bookingRepo
       .createQueryBuilder('booking')
       .select(
         `COALESCE(
           SUM(
             CASE 
-              WHEN booking."paymentStatus" IN (:...eligiblePaymentStatuses)
+              WHEN (booking."bookingType" = :poojaType OR (booking."bookingType" IS NULL AND booking."purohitId" IS NOT NULL) OR (booking."bookingType" != :astrologyType AND booking."astrologerId" IS NULL))
+                AND booking."paymentStatus" IN (:...eligiblePaymentStatuses)
               THEN GREATEST(
                 0,
                 COALESCE(
@@ -5951,9 +6043,43 @@ export class PaymentService {
           ), 
           0
         )`,
-        'totalRevenue',
+        'poojaRevenue',
+      )
+      .addSelect(
+        `COALESCE(
+          SUM(
+            CASE 
+              WHEN (booking."bookingType" = :astrologyType OR booking."astrologerId" IS NOT NULL)
+                AND booking."paymentStatus" IN (:...eligiblePaymentStatuses)
+              THEN GREATEST(
+                0,
+                COALESCE(
+                  NULLIF(booking."paidAmount", 0),
+                  CASE 
+                    WHEN booking."paymentStatus" = :paid AND booking.status != :cancelled 
+                    THEN booking."finalAmount" 
+                    ELSE 0 
+                  END,
+                  0
+                ) - COALESCE(
+                  (SELECT SUM(rf.amount) 
+                   FROM payments rf 
+                   WHERE rf."bookingId" = booking.id 
+                     AND rf."paymentType" = :refundType 
+                     AND rf.status = :refundSuccessStatus),
+                  0
+                )
+              )
+              ELSE 0 
+            END
+          ), 
+          0
+        )`,
+        'astrologerRevenue',
       )
       .setParameters({
+        poojaType: BOOKING_TYPE.POOJA,
+        astrologyType: BOOKING_TYPE.ASTROLOGY,
         cancelled: BOOKING_STATUS.CANCELLED,
         eligiblePaymentStatuses: [
           BOOKING_PAYMENT_STATUS.PAID,
@@ -5966,14 +6092,75 @@ export class PaymentService {
       })
       .getRawOne();
 
-    const { purohitPayoutsAmount } = await bookingRepo
+    const poojaRevenue = Number(
+      Number(rawRevenues?.poojaRevenue || 0).toFixed(2),
+    );
+    const astrologerRevenue = Number(
+      Number(rawRevenues?.astrologerRevenue || 0).toFixed(2),
+    );
+    const totalRevenue = Number((poojaRevenue + astrologerRevenue).toFixed(2));
+
+    const rawPurohitPayouts = await bookingRepo
       .createQueryBuilder('booking')
-      .select('COALESCE(SUM(booking.partnerPayoutAmount), 0)', 'purohitPayoutsAmount')
+      .select(
+        'COALESCE(SUM(booking.partnerPayoutAmount), 0)',
+        'purohitPayoutsAmount',
+      )
       .where('booking.partnerPayoutStatus = :status', {
         status: BOOKING_PAYMENT_STATUS.PAID,
       })
-      .andWhere('booking.purohitId IS NOT NULL')
+      .andWhere(
+        '(booking.bookingType = :poojaType OR (booking.purohitId IS NOT NULL AND booking.bookingType != :astrologyType))',
+        {
+          poojaType: BOOKING_TYPE.POOJA,
+          astrologyType: BOOKING_TYPE.ASTROLOGY,
+        },
+      )
       .getRawOne();
+    const purohitPayoutsAmount = Number(
+      Number(rawPurohitPayouts?.purohitPayoutsAmount || 0).toFixed(2),
+    );
+
+    const rawAstrologerPayouts = await bookingRepo
+      .createQueryBuilder('booking')
+      .select(
+        `COALESCE(
+          SUM(
+            COALESCE(
+              NULLIF(booking.partnerPayoutAmount, 0),
+              (SELECT pay.amount 
+               FROM payments pay 
+               WHERE pay."bookingId" = booking.id 
+                 AND pay."paymentType" = :astrologerPayoutType 
+                 AND pay.status = :paymentSuccessStatus 
+               LIMIT 1),
+              booking.finalAmount,
+              0
+            )
+          ), 
+          0
+        )`,
+        'astrologerPayoutAmount',
+      )
+      .where('booking.partnerPayoutStatus = :status', {
+        status: BOOKING_PAYMENT_STATUS.PAID,
+      })
+      .andWhere(
+        '(booking.bookingType = :astrologyType OR booking.astrologerId IS NOT NULL)',
+        {
+          astrologyType: BOOKING_TYPE.ASTROLOGY,
+          astrologerPayoutType: PAYMENT_TYPE.ASTROLOGER_PAYOUT,
+          paymentSuccessStatus: PAYMENT_STATUS.SUCCESS,
+        },
+      )
+      .getRawOne();
+    const astrologerPayoutAmount = Number(
+      Number(rawAstrologerPayouts?.astrologerPayoutAmount || 0).toFixed(2),
+    );
+
+    const totalPayoutAmount = Number(
+      (purohitPayoutsAmount + astrologerPayoutAmount).toFixed(2),
+    );
 
     const pendingPayoutsNumber = await bookingRepo
       .createQueryBuilder('booking')
@@ -5986,11 +6173,15 @@ export class PaymentService {
       .andWhere(
         '(booking.remainingAmount <= 0 OR booking.remainingAmount IS NULL)',
       )
-      .andWhere('booking.partnerPayoutAmount > 0')
+      .andWhere(
+        '(booking.partnerPayoutAmount > 0 OR (booking.astrologerId IS NOT NULL AND booking.finalAmount > 0))',
+      )
       .andWhere('booking.partnerPayoutStatus = :payoutStatus', {
         payoutStatus: BOOKING_PAYMENT_STATUS.PENDING,
       })
-      .andWhere('booking.purohitId IS NOT NULL')
+      .andWhere(
+        '(booking.purohitId IS NOT NULL OR booking.astrologerId IS NOT NULL)',
+      )
       .getCount();
 
     const successfulPayoutsNumber = await bookingRepo
@@ -5998,14 +6189,20 @@ export class PaymentService {
       .where('booking.partnerPayoutStatus = :payoutStatus', {
         payoutStatus: BOOKING_PAYMENT_STATUS.PAID,
       })
-      .andWhere('booking.purohitId IS NOT NULL')
+      .andWhere(
+        '(booking.purohitId IS NOT NULL OR booking.astrologerId IS NOT NULL)',
+      )
       .getCount();
 
     return {
-      totalRevenue: Number(Number(totalRevenue || 0).toFixed(2)),
-      purohitPayoutsAmount: Number(Number(purohitPayoutsAmount || 0).toFixed(2)),
-      pendingPayoutsNumber: Number(pendingPayoutsNumber) || 0,
-      successfulPayoutsNumber: Number(successfulPayoutsNumber) || 0,
+      totalRevenue,
+      poojaRevenue,
+      astrologerRevenue,
+      purohitPayoutAmount: purohitPayoutsAmount,
+      astrologerPayoutAmount,
+      totalPayoutAmount,
+      pendingPayoutsCount: Number(pendingPayoutsNumber) || 0,
+      successfulPayoutsCount: Number(successfulPayoutsNumber) || 0,
     };
   }
 
