@@ -360,9 +360,12 @@ export class PaymentRepository extends BaseRepository<Payment> {
         },
       );
 
-      // Exclude purohit payout payment details from customer
-      filterQuery.andWhere('payment."paymentType" != :payoutType', {
-        payoutType: PAYMENT_TYPE.PUROHIT_PAYOUT,
+      // Exclude partner payout payment details from customer (both purohit and astrologer payouts)
+      filterQuery.andWhere('payment."paymentType" NOT IN (:...payoutTypes)', {
+        payoutTypes: [
+          PAYMENT_TYPE.PUROHIT_PAYOUT,
+          PAYMENT_TYPE.ASTROLOGER_PAYOUT,
+        ],
       });
 
       // Do NOT show payments in CREATED status to customer (e.g. payment link generated but not paid)

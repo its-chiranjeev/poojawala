@@ -2120,6 +2120,7 @@ export class PaymentService {
     if (
       user.role === USER_ROLE.CUSTOMER &&
       (payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT ||
+        payment.paymentType === PAYMENT_TYPE.ASTROLOGER_PAYOUT ||
         payment.status === PAYMENT_STATUS.CREATED)
     ) {
       throw new ForbiddenException('You cannot access this payment');
@@ -2189,7 +2190,10 @@ export class PaymentService {
     // });
     let filteredPayments = payments.filter((payment) => {
       if (user.role === USER_ROLE.CUSTOMER) {
-        if (payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) {
+        if (
+          payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT ||
+          payment.paymentType === PAYMENT_TYPE.ASTROLOGER_PAYOUT
+        ) {
           return false;
         }
         if (payment.status === PAYMENT_STATUS.CREATED) {
@@ -2330,6 +2334,7 @@ export class PaymentService {
         (payment) =>
           payment.status !== PAYMENT_STATUS.CREATED &&
           payment.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
+          payment.paymentType !== PAYMENT_TYPE.ASTROLOGER_PAYOUT &&
           (payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
             Boolean(payment.razorpayPaymentLinkId?.trim()) ||
             payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH),
@@ -3013,8 +3018,11 @@ export class PaymentService {
       return false;
     }
 
-    // 2. Skip for purohit payouts (payouts never expose live customer Razorpay details)
-    if (payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) {
+    // 2. Skip for purohit and astrologer payouts (payouts never expose live customer Razorpay details)
+    if (
+      payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT ||
+      payment.paymentType === PAYMENT_TYPE.ASTROLOGER_PAYOUT
+    ) {
       return false;
     }
 
@@ -3711,7 +3719,10 @@ export class PaymentService {
       payment.status,
     );
 
-    if (payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) {
+    if (
+      payment.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT ||
+      payment.paymentType === PAYMENT_TYPE.ASTROLOGER_PAYOUT
+    ) {
       razorpayPayment = null;
     }
 

@@ -1528,6 +1528,7 @@ export class BookingService {
         (p) =>
           (user.role !== USER_ROLE.CUSTOMER ||
             (p.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
+              p.paymentType !== PAYMENT_TYPE.ASTROLOGER_PAYOUT &&
               p.status !== PAYMENT_STATUS.CREATED)) &&
           (p.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT ||
             Boolean(p.razorpayPaymentLinkId?.trim()) ||
@@ -1544,6 +1545,10 @@ export class BookingService {
         user.role === USER_ROLE.CUSTOMER
           ? null
           : (payments.find((p) => p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT) || null);
+      const astrologerPayout =
+        user.role === USER_ROLE.CUSTOMER
+          ? null
+          : (payments.find((p) => p.paymentType === PAYMENT_TYPE.ASTROLOGER_PAYOUT) || null);
 
       this.enrichBookingServicePlans(booking);
       const astrologerProfile =
@@ -1582,10 +1587,13 @@ export class BookingService {
         payments,
         bookingPayment,
         purohitPayout,
+        astrologerPayout,
         partnerPayoutStatus: user.role === USER_ROLE.CUSTOMER ? null : booking.partnerPayoutStatus,
         purohitPayoutStatus: user.role === USER_ROLE.CUSTOMER ? null : booking.partnerPayoutStatus,
+        astrologerPayoutStatus: user.role === USER_ROLE.CUSTOMER ? null : booking.partnerPayoutStatus,
         partnerPayoutAmount: user.role === USER_ROLE.CUSTOMER ? null : (booking.partnerPayoutAmount ?? null),
         purohitPayoutAmount: user.role === USER_ROLE.CUSTOMER ? null : (booking.partnerPayoutAmount ?? null),
+        astrologerPayoutAmount: user.role === USER_ROLE.CUSTOMER ? null : (booking.partnerPayoutAmount ?? null),
         scheduledAtIst: this.toIstString(booking.scheduledAt),
         createdAtIst: this.toIstString(booking.createdAt),
         updatedAtIst: this.toIstString(booking.updatedAt),
@@ -1639,6 +1647,9 @@ export class BookingService {
     const purohitPayout = payments.find(
       (p) => p.paymentType === PAYMENT_TYPE.PUROHIT_PAYOUT
     ) || null;
+    const astrologerPayout = payments.find(
+      (p) => p.paymentType === PAYMENT_TYPE.ASTROLOGER_PAYOUT
+    ) || null;
 
     const astrologerProfile =
       booking.astrologerProfile ||
@@ -1670,6 +1681,7 @@ export class BookingService {
           astrologyTransparency: adminTransparency,
           bookingPayment,
           purohitPayout,
+          astrologerPayout,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),
@@ -1715,6 +1727,7 @@ export class BookingService {
           payments: (booking.payments || []).filter(
             (p) =>
               p.paymentType !== PAYMENT_TYPE.PUROHIT_PAYOUT &&
+              p.paymentType !== PAYMENT_TYPE.ASTROLOGER_PAYOUT &&
               p.status !== PAYMENT_STATUS.CREATED,
           ),
           bookingPayment:
@@ -1727,6 +1740,9 @@ export class BookingService {
           purohitPayout: null,
           purohitPayoutStatus: null,
           purohitPayoutAmount: null,
+          astrologerPayout: null,
+          astrologerPayoutStatus: null,
+          astrologerPayoutAmount: null,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),
@@ -1784,10 +1800,13 @@ export class BookingService {
           astrologerProfile,
           bookingPayment,
           purohitPayout: null,
+          astrologerPayout,
           partnerPayoutStatus: booking.partnerPayoutStatus,
           purohitPayoutStatus: booking.partnerPayoutStatus,
+          astrologerPayoutStatus: booking.partnerPayoutStatus,
           partnerPayoutAmount: booking.partnerPayoutAmount ?? null,
           purohitPayoutAmount: booking.partnerPayoutAmount ?? null,
+          astrologerPayoutAmount: booking.partnerPayoutAmount ?? null,
           scheduledAtIst: this.toIstString(booking.scheduledAt),
           createdAtIst: this.toIstString(booking.createdAt),
           updatedAtIst: this.toIstString(booking.updatedAt),
