@@ -16,6 +16,8 @@ export interface EmailTableRow {
   link?: string;
   /** Custom link text — defaults to value if not provided */
   linkText?: string;
+  /** Optional custom HTML content for the value cell (e.g. styled badges) */
+  rawHtml?: string;
 }
 
 export interface EmailDetailsTable {
@@ -283,9 +285,11 @@ export function renderPoojawalaEmail(options: PoojawalaEmailTemplateOptions): st
       .map((row) => {
         const valColor = row.isHighlight ? '#FF6200' : '#1A1A1A';
         const valWeight = row.isHighlight ? '700' : '600';
-        const cellContent = row.link
-          ? `<a href="${row.link}" target="_blank" rel="noopener noreferrer" style="color: #FF6200; font-weight: 700; text-decoration: underline; word-break: break-all;">${escapeHtml(row.linkText || row.value)}</a>`
-          : escapeHtml(row.value);
+        const cellContent = row.rawHtml
+          ? row.rawHtml
+          : row.link
+            ? `<a href="${row.link}" target="_blank" rel="noopener noreferrer" style="color: #FF6200; font-weight: 700; text-decoration: underline; word-break: break-all;">${escapeHtml(row.linkText || row.value)}</a>`
+            : escapeHtml(row.value);
         const cleanLabel = row.label ? row.label.trim().toLowerCase().replace(/:$/, '') : '';
         const isOrderContext =
           options.detailsTable?.title?.toLowerCase().includes('order') ||

@@ -2,7 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 // import * as nodemailer from 'nodemailer';
 import { ResendProvider } from './providers/resend.provider';
 import { renderPoojawalaEmail, EmailTableRow } from './templates/email-base.template';
-import { platformBrandName } from './config/platform.config';
+import { platformBrandName, getPlatformWebsiteUrl } from './config/platform.config';
 
 export interface SendEmailOptions {
   to: string | string[];
@@ -721,9 +721,61 @@ export class EmailService {
     adminMessage: string;
     subject?: string;
     userOriginalMessage?: string;
+    service?: {
+      id?: number;
+      name?: string;
+      slug?: string | null;
+      isOnline?: boolean;
+      isOffline?: boolean;
+      iconUrl?: string | null;
+    } | null;
   }): Promise<void> {
-    const rows = [
+    const service = data.service;
+    const isServiceQuery = Boolean(service && (service.name || service.id));
+
+    let modeText = '';
+    let modeBadgeHtml = '';
+    let statusBadge = `Inquiry ${data.status}`;
+    let preheaderText = `Update regarding your contact request (${data.status}) - ${platformBrandName}`;
+    let emailSubject = `Update on your contact inquiry [${data.status}] - ${platformBrandName}`;
+    let emailMessage = `Thank you for contacting ${platformBrandName}. Our administrative team has reviewed your query regarding "<strong>${this.escapeHtml(data.subject || 'Inquiry')}</strong>" and updated its status to <strong>${this.escapeHtml(data.status)}</strong>. Please find our response below:`;
+    let detailsTableTitle = 'Inquiry Details';
+
+    if (isServiceQuery && service?.name) {
+      const isOnline = Boolean(service.isOnline);
+      const isOffline = Boolean(service.isOffline);
+
+      if (isOnline && isOffline) {
+        modeText = 'Online & Offline (In-Person)';
+        modeBadgeHtml = `<span style="display: inline-block; background-color: #E8F5E9; color: #2E7D32; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 20px; border: 1px solid #C8E6C9; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 6px;">🌐 Online</span><span style="display: inline-block; background-color: #FFF3E0; color: #E65100; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 20px; border: 1px solid #FFCC80; text-transform: uppercase; letter-spacing: 0.5px;">🏛️ Offline</span>`;
+        statusBadge = `Service Inquiry (${data.status})`;
+      } else if (isOnline) {
+        modeText = 'Online Puja';
+        modeBadgeHtml = `<span style="display: inline-block; background-color: #E8F5E9; color: #2E7D32; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; border: 1px solid #C8E6C9; text-transform: uppercase; letter-spacing: 0.5px;">🌐 Online</span>`;
+        statusBadge = `Online Service Inquiry - ${data.status}`;
+      } else if (isOffline) {
+        modeText = 'Offline (In-Person)';
+        modeBadgeHtml = `<span style="display: inline-block; background-color: #FFF3E0; color: #E65100; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; border: 1px solid #FFCC80; text-transform: uppercase; letter-spacing: 0.5px;">🏛️ Offline</span>`;
+        statusBadge = `Offline Service Inquiry - ${data.status}`;
+      } else {
+        modeText = 'Standard Service';
+        modeBadgeHtml = `<span style="display: inline-block; background-color: #F5F5F5; color: #616161; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; border: 1px solid #E0E0E0; text-transform: uppercase; letter-spacing: 0.5px;">Standard</span>`;
+        statusBadge = `Service Inquiry - ${data.status}`;
+      }
+
+      preheaderText = `Update regarding your inquiry for ${service.name} (${data.status}) - ${platformBrandName}`;
+      emailSubject = `Update on your inquiry for ${service.name} [${data.status}] - ${platformBrandName}`;
+      emailMessage = `Thank you for contacting ${platformBrandName}. Our administrative team has reviewed your query regarding the sacred service "<strong>${this.escapeHtml(service.name)}</strong>"${data.subject ? ` (Subject: <em>${this.escapeHtml(data.subject)}</em>)` : ''} and updated its status to <strong>${this.escapeHtml(data.status)}</strong>. Please find our response and service details below:`;
+      detailsTableTitle = 'Service & Inquiry Details';
+    }
+
+    const rows: EmailTableRow[] = [
       { label: 'Name', value: data.name || 'Valued User' },
+      ...(isServiceQuery && service?.name
+        ? [
+            { label: 'Inquiry Category', value: 'Service Query', isHighlight: true },
+          ]
+        : []),
       { label: 'Inquiry Status', value: data.status, isHighlight: true },
       ...(data.subject ? [{ label: 'Subject', value: data.subject }] : []),
       ...(data.userOriginalMessage
@@ -731,24 +783,65 @@ export class EmailService {
         : []),
     ];
 
+    let additionalContentHtml: string | undefined = undefined;
+    if (isServiceQuery && service?.name) {
+      additionalContentHtml = `
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #FFFFFF; border: 1.5px solid #FFDFC7; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 14px rgba(255, 98, 0, 0.05);">
+          <tr>
+            <td style="padding: 16px 20px; background-color: #FFF9F4; border-bottom: 1px solid #FFEADB;">
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td style="vertical-align: middle;">
+                    <div style="font-size: 11px; font-weight: 700; color: #8C6A5A; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 4px;">
+                      Inquired Service
+                    </div>
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 800; color: #D32F2F; font-family: 'Outfit', -apple-system, sans-serif;">
+                      🪔 ${this.escapeHtml(service.name)}
+                    </h3>
+                  </td>
+                  <td align="right" style="vertical-align: middle;">
+                    ${modeBadgeHtml}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          ${
+            service.slug
+              ? `
+          <tr>
+            <td style="padding: 14px 20px; background-color: #FFFFFF; text-align: right;">
+              <a href="${getPlatformWebsiteUrl()}/services/${service.slug}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background: linear-gradient(135deg, #FF6200 0%, #D32F2F 100%); color: #FFFFFF; font-size: 12px; font-weight: 700; padding: 8px 18px; border-radius: 20px; text-decoration: none; box-shadow: 0 2px 8px rgba(255, 98, 0, 0.25);">
+                Explore Service Details &rarr;
+              </a>
+            </td>
+          </tr>
+          `
+              : ''
+          }
+        </table>
+      `;
+    }
+
     const html = renderPoojawalaEmail({
-      statusBadge: `Inquiry ${data.status}`,
+      statusBadge,
       userName: data.name || 'Devotee',
-      preheaderText: `Update regarding your contact request (${data.status}) - ${platformBrandName}`,
-      emailMessage: `Thank you for contacting ${platformBrandName}. Our administrative team has reviewed your query regarding "<strong>${this.escapeHtml(data.subject || 'Inquiry')}</strong>" and updated its status to <strong>${this.escapeHtml(data.status)}</strong>. Please find our response below:`,
+      preheaderText,
+      emailMessage,
       detailsTable: {
-        title: 'Inquiry Details',
+        title: detailsTableTitle,
         rows,
       },
       highlight: {
         title: `Response from ${platformBrandName} Team`,
         text: data.adminMessage,
       },
+      additionalContentHtml,
     });
 
     await this.sendMail({
       to: data.email,
-      subject: `Update on your contact inquiry [${data.status}] - ${platformBrandName}`,
+      subject: emailSubject,
       html,
     });
   }

@@ -95,6 +95,13 @@ export class ContactUsService {
 
     if (contactUs.email) {
       try {
+        const service =
+          updated?.service ||
+          contactUs.service ||
+          (contactUs.serviceId
+            ? await this.serviceRepo.findById(contactUs.serviceId)
+            : null);
+
         await this.emailService.sendContactUsReplyEmail({
           email: contactUs.email,
           name: contactUs.name,
@@ -102,6 +109,16 @@ export class ContactUsService {
           adminMessage: dto.message,
           subject: contactUs.subject,
           userOriginalMessage: contactUs.message,
+          service: service
+            ? {
+                id: service.id,
+                name: service.name,
+                slug: service.slug,
+                isOnline: service.isOnline,
+                isOffline: service.isOffline,
+                iconUrl: service.iconUrl,
+              }
+            : null,
         });
         this.logger.log(`Status update email sent to ${contactUs.email} for ContactUs #${id}`);
       } catch (error: any) {
