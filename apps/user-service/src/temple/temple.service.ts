@@ -71,10 +71,17 @@ export class TempleService {
     }
 
     if (plans && typeof plans === 'object' && !Array.isArray(plans)) {
-      const enrichedPlans: Record<string, any> = { ...plans };
+      const enrichedPlans: Record<string, any> = {};
       const allFeatures = Array.isArray(serviceFeatures) ? serviceFeatures : [];
 
       for (const [key, plan] of Object.entries(plans)) {
+        if (
+          (key === 'BASIC' && 'basic' in plans) ||
+          (key === 'STANDARD' && 'standard' in plans)
+        ) {
+          continue;
+        }
+        const planKey = key.toLowerCase();
         if (plan && typeof plan === 'object' && !Array.isArray(plan)) {
           const rawPlanRecord = { ...(plan as any) };
 
@@ -145,7 +152,7 @@ export class TempleService {
             }
           }
 
-          enrichedPlans[key] = structuredPlan;
+          enrichedPlans[planKey] = structuredPlan;
         }
       }
 

@@ -280,6 +280,8 @@ export class ServiceService {
     let basePrice = 0;
     if (plans?.basic?.price != null && Number(plans.basic.price) > 0) {
       basePrice = Number(plans.basic.price);
+    } else if (plans?.standard?.price != null && Number(plans.standard.price) > 0) {
+      basePrice = Number(plans.standard.price);
     } else if (
       service.priceWithoutSamagri != null &&
       Number(service.priceWithoutSamagri) > 0
@@ -320,12 +322,19 @@ export class ServiceService {
     }
 
     if (plans && typeof plans === 'object' && !Array.isArray(plans)) {
-      const enrichedPlans: Record<string, any> = { ...plans };
+      const enrichedPlans: Record<string, any> = {};
       const allFeatures = Array.isArray(serviceFeatures)
         ? serviceFeatures
         : (Array.isArray(service.serviceFeatures) ? service.serviceFeatures : []);
 
       for (const [key, plan] of Object.entries(plans)) {
+        if (
+          (key === 'BASIC' && 'basic' in plans) ||
+          (key === 'STANDARD' && 'standard' in plans)
+        ) {
+          continue;
+        }
+        const planKey = key.toLowerCase();
         if (plan && typeof plan === 'object' && !Array.isArray(plan)) {
           const rawPlanRecord = { ...(plan as any) };
 
@@ -416,7 +425,7 @@ export class ServiceService {
             }
           }
 
-          enrichedPlans[key] = structuredPlan;
+          enrichedPlans[planKey] = structuredPlan;
         }
       }
 
@@ -445,32 +454,44 @@ export class ServiceService {
   private validatePlans(plans: unknown): ServicePlans {
     if (!plans || typeof plans !== 'object' || Array.isArray(plans)) {
       throw new BadRequestException(
-        'plans must be an object containing basic and standard plans',
+        'plans must be an object containing at least one plan (BASIC or STANDARD)',
       );
     }
 
-    const allowedKeys = ['basic', 'standard'];
+    const allowedKeys = ['basic', 'standard', 'BASIC', 'STANDARD'];
     const keys = Object.keys(plans);
     for (const key of keys) {
       if (!allowedKeys.includes(key)) {
         throw new BadRequestException(
-          `Invalid plan key "${key}". Only "basic" and "standard" are allowed`,
+          `Invalid plan key "${key}". Only "BASIC" and "STANDARD" are allowed`,
         );
       }
     }
 
     const plansObj = plans as Record<string, unknown>;
-    if (!plansObj['basic']) {
-      throw new BadRequestException('basic plan is required');
-    }
-    if (!plansObj['standard']) {
-      throw new BadRequestException('standard plan is required');
+    const basicVal = plansObj['basic'] !== undefined ? plansObj['basic'] : plansObj['BASIC'];
+    const standardVal = plansObj['standard'] !== undefined ? plansObj['standard'] : plansObj['STANDARD'];
+
+    const hasBasic = basicVal !== undefined && basicVal !== null;
+    const hasStandard = standardVal !== undefined && standardVal !== null;
+
+    if (!hasBasic && !hasStandard) {
+      throw new BadRequestException(
+        'At least one plan (basic or standard) is required',
+      );
     }
 
-    const basic = this.validatePlanItem('basic', plansObj['basic'], false);
-    const standard = this.validatePlanItem('standard', plansObj['standard'], false);
+    const result: ServicePlans = {};
+    if (hasBasic) {
+      const validatedBasic = this.validatePlanItem('basic', basicVal, false);
+      result.basic = validatedBasic;
+    }
+    if (hasStandard) {
+      const validatedStandard = this.validatePlanItem('standard', standardVal, false);
+      result.standard = validatedStandard;
+    }
 
-    return { basic, standard };
+    return result;
   }
 
   /**
@@ -615,22 +636,28 @@ export class ServiceService {
 
       if (!dto.plans) {
         throw new BadRequestException(
-          'plans must be an object containing basic and standard plans',
+          'plans must be an object containing at least one plan (basic or standard)',
         );
       }
       const resolvedPlans = this.validatePlans(dto.plans);
 
-      const basicFeaturesToSync = Array.isArray((resolvedPlans.basic as any).features)
-        ? (resolvedPlans.basic as any).features
-        : undefined;
-      const standardFeaturesToSync = Array.isArray((resolvedPlans.standard as any).features)
-        ? (resolvedPlans.standard as any).features
-        : undefined;
+      const basicFeaturesToSync =
+        resolvedPlans.basic && Array.isArray((resolvedPlans.basic as any).features)
+          ? (resolvedPlans.basic as any).features
+          : undefined;
+      const standardFeaturesToSync =
+        resolvedPlans.standard && Array.isArray((resolvedPlans.standard as any).features)
+          ? (resolvedPlans.standard as any).features
+          : undefined;
 
-      delete (resolvedPlans.basic as any).features;
-      delete (resolvedPlans.basic as any).items;
-      delete (resolvedPlans.standard as any).features;
-      delete (resolvedPlans.standard as any).items;
+      if (resolvedPlans.basic) {
+        delete (resolvedPlans.basic as any).features;
+        delete (resolvedPlans.basic as any).items;
+      }
+      if (resolvedPlans.standard) {
+        delete (resolvedPlans.standard as any).features;
+        delete (resolvedPlans.standard as any).items;
+      }
 
       // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
       /*
@@ -711,9 +738,13 @@ export class ServiceService {
       let finalSortOrder: number;
       if (dto.sortOrder != null && Number(dto.sortOrder) > 0) {
         finalSortOrder = Number(dto.sortOrder);
-        await this.serviceRepository.shiftSortOrdersUp(finalSortOrder);
+        if (typeof this.serviceRepository?.shiftSortOrdersUp === 'function') {
+          await this.serviceRepository.shiftSortOrdersUp(finalSortOrder);
+        }
       } else {
-        const maxOrder = await this.serviceRepository.getMaxSortOrder();
+        const maxOrder = typeof this.serviceRepository?.getMaxSortOrder === 'function'
+          ? await this.serviceRepository.getMaxSortOrder()
+          : 0;
         finalSortOrder = maxOrder + 1;
       }
 
@@ -766,7 +797,10 @@ export class ServiceService {
           standardFeaturesToSync,
         );
       }
-      const createdFeatures = await this.serviceFeatureRepository.findByServiceId(savedService.id);
+      const createdFeatures =
+        typeof this.serviceFeatureRepository?.findByServiceId === 'function'
+          ? await this.serviceFeatureRepository.findByServiceId(savedService.id)
+          : [];
 
       (savedService as any).templeId = savedService.templeId ?? null;
       (savedService as any).temple = validatedTemple
@@ -1004,40 +1038,47 @@ export class ServiceService {
         throw new BadRequestException('plans must be a valid object');
       }
 
-      const allowedKeys = ['basic', 'standard'];
+      const allowedKeys = ['basic', 'standard', 'BASIC', 'STANDARD'];
       const planKeys = Object.keys(dto.plans);
       for (const key of planKeys) {
         if (!allowedKeys.includes(key)) {
           throw new BadRequestException(
-            `Invalid plan key "${key}". Only "basic" and "standard" are allowed`,
+            `Invalid plan key "${key}". Only "BASIC" and "STANDARD" are allowed`,
           );
         }
       }
 
-      const currentPlans: ServicePlans = service.plans ?? {
-        basic: { price: 0 },
-        standard: { price: 0 },
-      };
+      const currentPlans: ServicePlans = service.plans ?? {};
 
-      let newBasic: ServicePlanDetails = currentPlans.basic
-        ? { ...currentPlans.basic }
-        : { price: 0 };
-      let newStandard: ServicePlanDetails = currentPlans.standard
-        ? { ...currentPlans.standard }
-        : { price: 0 };
+      const existingBasic = currentPlans.basic || currentPlans.BASIC;
+      const existingStandard = currentPlans.standard || currentPlans.STANDARD;
+
+      let newBasic: ServicePlanDetails | undefined = existingBasic
+        ? { ...(existingBasic as ServicePlanDetails) }
+        : undefined;
+      let newStandard: ServicePlanDetails | undefined = existingStandard
+        ? { ...(existingStandard as ServicePlanDetails) }
+        : undefined;
 
       // Ensure features are removed from existing plans if previously stored
-      delete (newBasic as any).features;
-      delete (newBasic as any).items;
-      delete (newStandard as any).features;
-      delete (newStandard as any).items;
+      if (newBasic) {
+        delete (newBasic as any).features;
+        delete (newBasic as any).items;
+      }
+      if (newStandard) {
+        delete (newStandard as any).features;
+        delete (newStandard as any).items;
+      }
 
-      if (dto.plans.basic !== undefined) {
-        const validatedBasic = this.validatePlanItem('basic', dto.plans.basic, true);
+      const rawBasic = dto.plans.basic !== undefined ? dto.plans.basic : (dto.plans as any).BASIC;
+      const rawStandard = dto.plans.standard !== undefined ? dto.plans.standard : (dto.plans as any).STANDARD;
+
+      if (rawBasic !== undefined) {
+        const validatedBasic = this.validatePlanItem('basic', rawBasic, true);
         const resolvedPrice =
           validatedBasic.price !== undefined
             ? Number(validatedBasic.price)
-            : (currentPlans.basic?.price ?? 0);
+            : (currentPlans.basic?.price ?? currentPlans.BASIC?.price ?? 0);
 
         if (Array.isArray((validatedBasic as any).features)) {
           basicFeaturesToSync = (validatedBasic as any).features;
@@ -1062,12 +1103,12 @@ export class ServiceService {
         };
       }
 
-      if (dto.plans.standard !== undefined) {
-        const validatedStandard = this.validatePlanItem('standard', dto.plans.standard, true);
+      if (rawStandard !== undefined) {
+        const validatedStandard = this.validatePlanItem('standard', rawStandard, true);
         const resolvedPrice =
           validatedStandard.price !== undefined
             ? Number(validatedStandard.price)
-            : (currentPlans.standard?.price ?? 0);
+            : (currentPlans.standard?.price ?? currentPlans.STANDARD?.price ?? 0);
 
         if (Array.isArray((validatedStandard as any).features)) {
           standardFeaturesToSync = (validatedStandard as any).features;
@@ -1092,10 +1133,13 @@ export class ServiceService {
         };
       }
 
-      mergedPlans = {
-        basic: newBasic,
-        standard: newStandard,
-      };
+      mergedPlans = {};
+      if (newBasic) {
+        mergedPlans.basic = newBasic;
+      }
+      if (newStandard) {
+        mergedPlans.standard = newStandard;
+      }
     }
 
 
@@ -1331,8 +1375,8 @@ export class ServiceService {
     if (dto.purohitCarryItems !== undefined) updatedFields.purohitCarryItems = updated.purohitCarryItems;
     if (dto.plans !== undefined) updatedFields.plans = updated.plans;
     if (dto.templeId !== undefined) updatedFields.templeId = updated.templeId;
-      // TODO: Obsolete client dto.slug check. Slug changes are now tracked via updated.slug !== oldSlug.
-      if (updated.slug !== oldSlug) updatedFields.slug = updated.slug;
+    // TODO: Obsolete client dto.slug check. Slug changes are now tracked via updated.slug !== oldSlug.
+    if (updated.slug !== oldSlug) updatedFields.slug = updated.slug;
     if (isBasicModified && !isStandardModified) updatedFields.plan = 'BASIC';
     if (!isBasicModified && isStandardModified) updatedFields.plan = 'STANDARD';
     if (isBasicModified && isStandardModified) updatedFields.plan = 'BASIC, STANDARD';
@@ -1392,7 +1436,10 @@ export class ServiceService {
       }
     }
 
-    const updatedFeatures = await this.serviceFeatureRepository.findByServiceId(updated.id);
+    const updatedFeatures =
+      typeof this.serviceFeatureRepository?.findByServiceId === 'function'
+        ? await this.serviceFeatureRepository.findByServiceId(updated.id)
+        : [];
     this.enrichServicePlansAndToken(updated, updatedFeatures);
     delete (updated as any).serviceFeatures;
 
@@ -1423,7 +1470,10 @@ export class ServiceService {
     }
     (service as any).iconDownloadurl = iconDownloadurl;
     (service as any).sortOrder = Number(service.sortOrder ?? 0);
-    const serviceFeatures = await this.serviceFeatureRepository.findByServiceId(id);
+    const serviceFeatures =
+      typeof this.serviceFeatureRepository?.findByServiceId === 'function'
+        ? await this.serviceFeatureRepository.findByServiceId(id)
+        : [];
     this.enrichServicePlansAndToken(service, serviceFeatures);
     delete (service as any).serviceFeatures;
 

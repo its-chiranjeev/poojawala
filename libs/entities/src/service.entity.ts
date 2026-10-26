@@ -97,10 +97,10 @@ export class Service {
 
   @Column({
     type: 'jsonb',
-    nullable: false,
+    nullable: true,
     default: () => "'[]'",
   })
-  purohitCarryItems!: any;
+  purohitCarryItems?: any;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   iconUrl?: string;

@@ -98,6 +98,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
   beforeEach(() => {
     mockServiceRepo = {
       findOne: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
       findAndCount: jest.fn(),
       create: jest.fn().mockImplementation((d) => ({ ...d, id: 5 })),
       save: jest.fn().mockImplementation(async (s) => ({ ...s, id: s.id ?? 5 })),
@@ -328,34 +329,47 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       expect(res.data.plans.standard.prasad).toBe(true);
     });
 
-    it('5. Missing Basic is rejected', async () => {
+    it('5. Empty plans object without basic or standard is rejected', async () => {
       mockServiceRepo.findOne.mockResolvedValue(null);
       await expect(
         serviceService.createService(
           {
-            name: 'Missing Basic',
-            slug: 'missing-basic',
-            plans: { standard: { price: 6100 } } as any,
+            name: 'No Plans',
+            slug: 'no-plans',
+            plans: {} as any,
           } as any,
           {},
           1,
         ),
-      ).rejects.toThrow(new BadRequestException('basic plan is required'));
+      ).rejects.toThrow(new BadRequestException('At least one plan (basic or standard) is required'));
     });
 
-    it('6. Missing Standard is rejected', async () => {
+    it('6. Service with single basic plan or single standard plan is accepted', async () => {
       mockServiceRepo.findOne.mockResolvedValue(null);
-      await expect(
-        serviceService.createService(
-          {
-            name: 'Missing Standard',
-            slug: 'missing-standard',
-            plans: { basic: { price: 4100 } } as any,
-          } as any,
-          {},
-          1,
-        ),
-      ).rejects.toThrow(new BadRequestException('standard plan is required'));
+      mockServiceRepo.create.mockImplementation((dto) => ({ ...dto, id: 999 }));
+      mockServiceRepo.save.mockImplementation((entity) => Promise.resolve(entity));
+
+      const resBasic = await serviceService.createService(
+        {
+          name: 'Only Basic',
+          slug: 'only-basic',
+          plans: { basic: { price: 4100 } } as any,
+        } as any,
+        {},
+        1,
+      );
+      expect(resBasic.data.plans.basic.price).toBe(4100);
+
+      const resStandard = await serviceService.createService(
+        {
+          name: 'Only Standard',
+          slug: 'only-standard',
+          plans: { standard: { price: 6100 } } as any,
+        } as any,
+        {},
+        1,
+      );
+      expect(resStandard.data.plans.standard.price).toBe(6100);
     });
 
     it('7. Missing Basic price is rejected', async () => {
