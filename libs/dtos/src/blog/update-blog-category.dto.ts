@@ -22,6 +22,15 @@ export class UpdateBlogCategoryDto {
   description?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(255, { message: 'metaTitle cannot exceed 255 characters' })
+  metaTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  metaDescription?: string;
+
+  @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   isActive?: boolean;

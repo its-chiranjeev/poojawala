@@ -19,6 +19,8 @@ export class TempleService {
       name: temple.name,
       slug: temple.slug ?? null,
       description: temple.description,
+      metaTitle: temple.metaTitle ?? null,
+      metaDescription: temple.metaDescription ?? null,
       imageUrl: temple.imageUrl,
       downloadUrl,
       address: temple.address,
@@ -36,6 +38,8 @@ export class TempleService {
         name: s.name,
         slug: s.slug ?? null,
         description: s.description ?? null,
+        metaTitle: s.metaTitle ?? null,
+        metaDescription: s.metaDescription ?? null,
         iconUrl: s.iconUrl ?? null,
         iconDownloadurl: s.iconDownloadurl ?? null,
         isActive: s.isActive,
@@ -177,6 +181,8 @@ export class TempleService {
       name: dto.name.trim(),
       slug,
       description: dto.description ?? null,
+      metaTitle: dto.metaTitle ?? null,
+      metaDescription: dto.metaDescription ?? null,
       imageUrl,
       address: dto.address ?? null,
       city: dto.city ?? null,
@@ -245,6 +251,8 @@ export class TempleService {
     const oldValue = {
       name: temple.name,
       description: temple.description,
+      metaTitle: temple.metaTitle,
+      metaDescription: temple.metaDescription,
       imageUrl: temple.imageUrl,
       address: temple.address,
       city: temple.city,
@@ -264,6 +272,12 @@ export class TempleService {
     }
     if (dto.description !== undefined) {
       temple.description = dto.description;
+    }
+    if (dto.metaTitle !== undefined) {
+      temple.metaTitle = dto.metaTitle;
+    }
+    if (dto.metaDescription !== undefined) {
+      temple.metaDescription = dto.metaDescription;
     }
     if (dto.address !== undefined) {
       temple.address = dto.address;

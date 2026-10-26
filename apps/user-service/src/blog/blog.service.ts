@@ -86,8 +86,14 @@ export class BlogService {
       qb.skip((page - 1) * limit).take(limit);
       const data = await qb.getMany();
 
+      const formattedData = data.map((cat) => ({
+        ...cat,
+        metaTitle: cat.metaTitle ?? null,
+        metaDescription: cat.metaDescription ?? null,
+      }));
+
       return {
-        data,
+        data: formattedData,
         pagination: {
           page,
           limit,
@@ -97,16 +103,21 @@ export class BlogService {
       };
     } else {
       // PUBLIC MODE: strictly active categories, non-deleted
-      return this.categoryRepo.find({
+      const cats = await this.categoryRepo.find({
         where: { isActive: true, deletedAt: IsNull() },
-        select: ['id', 'name', 'slug', 'description', 'sortOrder'],
+        select: ['id', 'name', 'slug', 'description', 'metaTitle', 'metaDescription', 'sortOrder'],
         order: { sortOrder: 'ASC', name: 'ASC' },
       });
+      return cats.map((cat) => ({
+        ...cat,
+        metaTitle: cat.metaTitle ?? null,
+        metaDescription: cat.metaDescription ?? null,
+      }));
     }
   }
 
   async getCategoryById(id: number, isAdmin: true): Promise<BlogCategory>;
-  async getCategoryById(id: number, isAdmin: false): Promise<{ id: number; name: string; description?: string; sortOrder: number; posts: any[] }>;
+  async getCategoryById(id: number, isAdmin: false): Promise<{ id: number; name: string; slug?: string | null; description?: string; metaTitle?: string | null; metaDescription?: string | null; sortOrder: number; posts: any[] }>;
   async getCategoryById(id: number, isAdmin: boolean): Promise<any>;
   async getCategoryById(id: number, isAdmin: boolean): Promise<any> {
     const whereCondition: any = { id, deletedAt: IsNull() };
@@ -124,7 +135,11 @@ export class BlogService {
     }
 
     if (isAdmin) {
-      return category;
+      return {
+        ...category,
+        metaTitle: category.metaTitle ?? null,
+        metaDescription: category.metaDescription ?? null,
+      };
     }
 
     // Public detail shape: include published posts under this category
@@ -135,6 +150,8 @@ export class BlogService {
       name: category.name,
       slug: category.slug ?? null,
       description: category.description,
+      metaTitle: category.metaTitle ?? null,
+      metaDescription: category.metaDescription ?? null,
       sortOrder: category.sortOrder,
       posts: postsResult.data,
     };
@@ -161,6 +178,8 @@ export class BlogService {
       name: trimmedName,
       slug,
       description: dto.description?.trim(),
+      metaTitle: dto.metaTitle?.trim() || null,
+      metaDescription: dto.metaDescription?.trim() || null,
       isActive: dto.isActive !== undefined ? dto.isActive : true,
       sortOrder: dto.sortOrder !== undefined ? dto.sortOrder : 0,
     });
@@ -223,6 +242,14 @@ export class BlogService {
 
     if (dto.description !== undefined) {
       category.description = dto.description.trim();
+    }
+
+    if (dto.metaTitle !== undefined) {
+      category.metaTitle = dto.metaTitle?.trim() || null;
+    }
+
+    if (dto.metaDescription !== undefined) {
+      category.metaDescription = dto.metaDescription?.trim() || null;
     }
 
     if (dto.isActive !== undefined) {

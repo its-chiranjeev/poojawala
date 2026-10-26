@@ -101,6 +101,8 @@ export class ProductService {
         name: dto.name.trim(),
         slug,
         description: dto.description?.trim() || undefined,
+        metaTitle: dto.metaTitle?.trim() || null,
+        metaDescription: dto.metaDescription?.trim() || null,
         imageUrl,
         price: dto.price,
         pricingUnit: dto.pricingUnit,
@@ -184,10 +186,23 @@ export class ProductService {
         }
       }
 
+      const data = result.data.map((item) => ({
+        ...item,
+        metaTitle: item.metaTitle ?? null,
+        metaDescription: item.metaDescription ?? null,
+        category: item.category
+          ? {
+              ...item.category,
+              metaTitle: item.category.metaTitle ?? null,
+              metaDescription: item.category.metaDescription ?? null,
+            }
+          : null,
+      }));
+
       return {
         success: true,
         message: 'Products fetched successfully',
-        data: result.data,
+        data,
         total: result.total,
         page: result.page,
         limit: result.limit,
@@ -226,7 +241,18 @@ export class ProductService {
     return {
       success: true,
       message: 'Product fetched successfully',
-      data: product,
+      data: {
+        ...product,
+        metaTitle: product.metaTitle ?? null,
+        metaDescription: product.metaDescription ?? null,
+        category: product.category
+          ? {
+              ...product.category,
+              metaTitle: product.category.metaTitle ?? null,
+              metaDescription: product.category.metaDescription ?? null,
+            }
+          : null,
+      },
     };
   }
 
@@ -292,6 +318,8 @@ export class ProductService {
         product.slug = await generateUniqueSlug(this.productRepository, product.name, product.id);
       }
       if (dto.description !== undefined) product.description = dto.description.trim();
+      if (dto.metaTitle !== undefined) product.metaTitle = dto.metaTitle?.trim() || null;
+      if (dto.metaDescription !== undefined) product.metaDescription = dto.metaDescription?.trim() || null;
       if (dto.price !== undefined) product.price = dto.price;
       if (dto.pricingUnit !== undefined) product.pricingUnit = dto.pricingUnit;
       if (dto.quantity !== undefined) product.quantity = dto.quantity;

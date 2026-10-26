@@ -250,6 +250,14 @@ export class CreateServiceDto {
   description?: string;
 
   @IsOptional()
+  @IsString()
+  metaTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  metaDescription?: string;
+
+  @IsOptional()
   @Transform(({ obj, value }) => {
     const raw = obj?.cities !== undefined ? obj.cities : obj?.city !== undefined ? obj.city : value;
     if (raw === undefined || raw === 'undefined') return undefined;
@@ -501,6 +509,14 @@ export class CreateCategoryDto {
 
   @IsOptional()
   @IsString()
+  metaTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  metaDescription?: string;
+
+  @IsOptional()
+  @IsString()
   iconUrl?: string;
 
   @IsOptional()
@@ -536,6 +552,14 @@ export class UpdateCategoryDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsString()
+  metaTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  metaDescription?: string;
 
   @IsOptional()
   @IsString()

@@ -23,6 +23,14 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsString()
+  metaTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  metaDescription?: string;
+
+  @IsOptional()
+  @IsString()
   imageUrl?: string;
 
   @IsOptional()

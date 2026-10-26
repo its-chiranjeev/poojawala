@@ -68,6 +68,12 @@ export class Service {
   @Column({ type: 'text', nullable: true })
   description?: string;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  metaTitle?: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  metaDescription?: string | null;
+
   @Column({
     type: 'jsonb',
     nullable: false,

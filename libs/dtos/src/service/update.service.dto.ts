@@ -47,6 +47,14 @@ export class UpdateServiceDto {
   description?: string;
 
   @IsOptional()
+  @IsString()
+  metaTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  metaDescription?: string;
+
+  @IsOptional()
   @Transform(({ obj, value }) => {
     const raw = obj?.cities !== undefined ? obj.cities : obj?.city !== undefined ? obj.city : value;
     if (raw === undefined || raw === 'undefined') return undefined;

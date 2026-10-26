@@ -379,8 +379,17 @@ export class ServiceRepository extends BaseRepository<Service> {
         return {
           ...service,
           slug: service.slug ?? null,
+          metaTitle: service.metaTitle ?? null,
+          metaDescription: service.metaDescription ?? null,
           templeId: service.templeId ?? null,
-          temple: service.temple ? { id: service.temple.id, name: service.temple.name } : null,
+          temple: service.temple
+            ? {
+                id: service.temple.id,
+                name: service.temple.name,
+                metaTitle: service.temple.metaTitle ?? null,
+                metaDescription: service.temple.metaDescription ?? null,
+              }
+            : null,
           cities: service.cities ?? [],
           languages: service.languages ?? [],
           benefits: service.benefits ?? [],
@@ -395,8 +404,17 @@ export class ServiceRepository extends BaseRepository<Service> {
       servicesWithBookings = services.map((service) => ({
         ...service,
         slug: service.slug ?? null,
+        metaTitle: service.metaTitle ?? null,
+        metaDescription: service.metaDescription ?? null,
         templeId: service.templeId ?? null,
-        temple: service.temple ? { id: service.temple.id, name: service.temple.name } : null,
+        temple: service.temple
+          ? {
+              id: service.temple.id,
+              name: service.temple.name,
+              metaTitle: service.temple.metaTitle ?? null,
+              metaDescription: service.temple.metaDescription ?? null,
+            }
+          : null,
         cities: service.cities ?? [],
         languages: service.languages ?? [],
         benefits: service.benefits ?? [],
@@ -442,6 +460,8 @@ export class ServiceRepository extends BaseRepository<Service> {
         id: true,
         name: true,
         slug: true,
+        metaTitle: true,
+        metaDescription: true,
         templeId: true,
         description: true,
         cities: true,
@@ -469,9 +489,21 @@ export class ServiceRepository extends BaseRepository<Service> {
         createdAt: true,
         updatedAt: true,
         sortOrder: true,
+        category: {
+          id: true,
+          name: true,
+          slug: true,
+          description: true,
+          metaTitle: true,
+          metaDescription: true,
+          iconUrl: true,
+          categoryType: true,
+        },
         temple: {
           id: true,
           name: true,
+          metaTitle: true,
+          metaDescription: true,
         },
       },
     });
@@ -519,8 +551,17 @@ export class ServiceRepository extends BaseRepository<Service> {
       return {
         ...service,
         slug: service.slug ?? null,
+        metaTitle: service.metaTitle ?? null,
+        metaDescription: service.metaDescription ?? null,
         templeId: service.templeId ?? null,
-        temple: service.temple ? { id: service.temple.id, name: service.temple.name } : null,
+        temple: service.temple
+          ? {
+              id: service.temple.id,
+              name: service.temple.name,
+              metaTitle: service.temple.metaTitle ?? null,
+              metaDescription: service.temple.metaDescription ?? null,
+            }
+          : null,
         cities: service.cities ?? [],
         languages: service.languages ?? [],
         benefits: service.benefits ?? [],

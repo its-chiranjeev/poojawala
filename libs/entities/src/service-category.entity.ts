@@ -54,6 +54,12 @@ export class Category {
   description?: string;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
+  metaTitle?: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  metaDescription?: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
   iconUrl?: string;
 
   @Column({ type: 'int', default: 0 })

@@ -48,6 +48,12 @@ export class Product {
   description?: string;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
+  metaTitle?: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  metaDescription?: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
   imageUrl?: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })

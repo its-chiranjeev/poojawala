@@ -730,6 +730,8 @@ export class ServiceService {
         // priceWithoutSamagri: resolvedPlans.basic.price,
         // priceWithSamagri: resolvedPlans.standard.price,
         tokenPercentage: dto.tokenPercentage != null ? Number(dto.tokenPercentage) : 30,
+        metaTitle: dto.metaTitle?.trim() || null,
+        metaDescription: dto.metaDescription?.trim() || null,
         iconUrl,
         isActive: dto.isActive ?? true,
         isGlobal: resolvedIsGlobal,
@@ -1121,6 +1123,13 @@ export class ServiceService {
     }
 
     Object.assign(service, dto);
+
+    if (dto.metaTitle !== undefined) {
+      service.metaTitle = dto.metaTitle?.trim() || null;
+    }
+    if (dto.metaDescription !== undefined) {
+      service.metaDescription = dto.metaDescription?.trim() || null;
+    }
 
     if (dto.sortOrder !== undefined && dto.sortOrder !== null) {
       service.sortOrder = Number(dto.sortOrder);
@@ -1959,7 +1968,12 @@ export class ServiceService {
             console.error('Failed to generate pre-signed URL for category icon:', e);
           }
         }
-        return { ...cat, iconDownloadurl };
+        return {
+          ...cat,
+          metaTitle: cat.metaTitle ?? null,
+          metaDescription: cat.metaDescription ?? null,
+          iconDownloadurl,
+        };
       }),
     );
 
@@ -1995,7 +2009,12 @@ export class ServiceService {
     return {
       success: true,
       message: 'Service category fetched successfully',
-      data: { ...category, iconDownloadurl },
+      data: {
+        ...category,
+        metaTitle: category.metaTitle ?? null,
+        metaDescription: category.metaDescription ?? null,
+        iconDownloadurl,
+      },
     };
   }
 
@@ -2030,6 +2049,8 @@ export class ServiceService {
       name: dto.name.trim(),
       slug,
       description: dto.description?.trim(),
+      metaTitle: dto.metaTitle?.trim() || null,
+      metaDescription: dto.metaDescription?.trim() || null,
       iconUrl: iconKey ?? dto.iconUrl,
       sortOrder: dto.sortOrder ?? 0,
       isActive: dto.isActive !== undefined ? dto.isActive : true,
@@ -2164,6 +2185,8 @@ export class ServiceService {
       category.slug = await generateUniqueSlug(this.categoryRepository, category.name, category.id);
     }
     if (dto.description !== undefined) category.description = dto.description?.trim();
+    if (dto.metaTitle !== undefined) category.metaTitle = dto.metaTitle?.trim() || null;
+    if (dto.metaDescription !== undefined) category.metaDescription = dto.metaDescription?.trim() || null;
     if (dto.sortOrder !== undefined) category.sortOrder = dto.sortOrder;
     if (dto.isActive !== undefined) category.isActive = dto.isActive;
     if (dto.categoryType !== undefined) category.categoryType = dto.categoryType;

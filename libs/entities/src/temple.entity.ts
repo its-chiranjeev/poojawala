@@ -25,6 +25,12 @@ export class Temple {
   description?: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
+  metaTitle?: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  metaDescription?: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
   imageUrl?: string | null;
 
   @Column({ type: 'text', nullable: true })

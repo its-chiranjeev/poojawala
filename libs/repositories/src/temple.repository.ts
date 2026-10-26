@@ -93,6 +93,8 @@ export class TempleRepository extends BaseRepository<Temple> {
         'service.name',
         'service.slug',
         'service.description',
+        'service.metaTitle',
+        'service.metaDescription',
         'service.iconUrl',
         'service.tokenPercentage',
         'service.commissionPercentage',

@@ -23,6 +23,21 @@ export class UpdateTempleDto {
   description?: string;
 
   @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? (value.trim() === '' ? null : value.trim()) : value,
+  )
+  @IsString({ message: 'metaTitle must be a string' })
+  @MaxLength(255, { message: 'metaTitle cannot exceed 255 characters' })
+  metaTitle?: string;
+
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? (value.trim() === '' ? null : value.trim()) : value,
+  )
+  @IsString({ message: 'metaDescription must be a string' })
+  metaDescription?: string;
+
+  @IsOptional()
   @Transform(({ value }) => {
     if (typeof value === 'string') {
       return value.trim() === '' ? undefined : value.trim();

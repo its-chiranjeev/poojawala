@@ -22,6 +22,14 @@ export class CreateProductDto {
 
   @IsOptional()
   @IsString()
+  metaTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  metaDescription?: string;
+
+  @IsOptional()
+  @IsString()
   imageUrl?: string;
 
   @IsOptional()
