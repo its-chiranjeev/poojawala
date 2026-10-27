@@ -74,7 +74,7 @@ export class Payment {
   @Column({ type: 'int' })
   createdById!: number;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @ManyToOne(() => User, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'createdById' })
   createdBy!: User;
 

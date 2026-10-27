@@ -2178,5 +2178,112 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       expect(res.astrologyTransparency?.isUnlocked).toBe(true);
     });
   });
+
+  describe('Historical Booking Snapshots and Data Loss Protection', () => {
+    it('populates serviceNameSnapshot with service.name during createBooking', async () => {
+      const service = createPlanService({ name: 'Shri Ganesh Maha Puja' });
+      mockServiceRepo.findOne.mockResolvedValue(service);
+
+      await bookingService.createBooking(mockCustomerUser, {
+        serviceId: service.id,
+        customerAddressId: mockAddress.id,
+        scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+        bookingMode: 'OFFLINE',
+        plan: 'basic',
+      });
+
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.serviceNameSnapshot).toBe('Shri Ganesh Maha Puja');
+    });
+
+    it('populates serviceNameSnapshot with Astrology Consultation during createAstrologyBooking', async () => {
+      const mockAstrologerRepo = {
+        findOne: jest.fn().mockResolvedValue({
+          id: 10,
+          userId: 42,
+          commissionPrice: 200,
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+          user: { id: 42, firstName: 'Pandit', lastName: 'Jyotish' },
+        }),
+      };
+      const originalGetRepo = mockEntityManager.getRepository;
+      mockEntityManager.getRepository = jest.fn().mockImplementation((entity) => {
+        if (entity === AstrologerProfile) return mockAstrologerRepo;
+        return originalGetRepo(entity);
+      });
+
+      await bookingService.createAstrologyBooking(mockCustomerUser, {
+        astrologerId: 42,
+        scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+      });
+
+      const savedBooking = getLastSavedBooking();
+      expect(savedBooking.serviceNameSnapshot).toBe('Astrology Consultation');
+    });
+
+    it('getBookingById preserves serviceNameSnapshot when service relation is null/soft-deleted', async () => {
+      const historicalBooking = {
+        id: 888,
+        customerId: mockCustomerUser.id,
+        serviceId: 104,
+        serviceNameSnapshot: 'Annaprashan Puja Snapshot',
+        service: null, // Service was soft-deleted / unlinked
+        status: BOOKING_STATUS.COMPLETED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+        payments: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any;
+
+      mockBookingRepository.findBookingById = jest.fn().mockResolvedValue(historicalBooking);
+
+      const res = await bookingService.getBookingById(mockCustomerUser, 888);
+      expect(res.serviceNameSnapshot).toBe('Annaprashan Puja Snapshot');
+      expect(res.serviceId).toBe(104);
+    });
+
+    it('formatBookingResponse prefers serviceNameSnapshot when service relation is null/soft-deleted', async () => {
+      const historicalBooking = {
+        id: 889,
+        customerId: mockCustomerUser.id,
+        serviceId: 184,
+        serviceNameSnapshot: 'Tulsi Vivah Puja Snapshot',
+        service: null,
+        status: BOOKING_STATUS.COMPLETED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+        payments: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any;
+
+      const formatted = await (bookingService as any).formatBookingResponse(historicalBooking);
+      expect(formatted.service.name).toBe('Tulsi Vivah Puja Snapshot');
+      expect(formatted.service.id).toBe(184);
+    });
+
+    it('getBookings returns serviceNameSnapshot on booking records', async () => {
+      const historicalBooking = {
+        id: 890,
+        customerId: mockCustomerUser.id,
+        serviceId: 184,
+        serviceNameSnapshot: 'Tulsi Vivah Puja Snapshot',
+        service: null,
+        status: BOOKING_STATUS.COMPLETED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+        payments: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any;
+
+      mockBookingRepository.findBookingsByRole = jest.fn().mockResolvedValue({
+        bookings: [historicalBooking],
+        total: 1,
+      });
+
+      const res = await bookingService.getBookings(mockCustomerUser, {} as any);
+      expect(res.bookings[0].serviceNameSnapshot).toBe('Tulsi Vivah Puja Snapshot');
+      expect(res.bookings[0].serviceId).toBe(184);
+    });
+  });
 });
 

@@ -110,8 +110,11 @@ export class Booking {
   @Column({ type: 'int', nullable: true })
   serviceId?: number;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  serviceNameSnapshot?: string | null;
+
   @ManyToOne(() => Service, (service) => service.bookings, {
-    onDelete: 'CASCADE',
+    onDelete: 'SET NULL',
     nullable: true,
   })
   @JoinColumn({ name: 'serviceId' })

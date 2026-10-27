@@ -617,7 +617,8 @@ export class ServiceRepository extends BaseRepository<Service> {
   }
 
   async remove(service: Service): Promise<Service> {
-    return this.repo.remove(service);
+    // Production data protection policy: Service removal must always be soft-delete
+    return this.repo.softRemove(service);
   }
 
   async getMaxSortOrder(): Promise<number> {

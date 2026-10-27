@@ -697,6 +697,7 @@ export class BookingService {
           bookingNumber,
           customerId: customer.id,
           serviceId: service.id,
+          serviceNameSnapshot: service.name,
           customerAddressId: customerAddress ? customerAddress.id : undefined,
           addressSnapshot: customerAddress ? this.createAddressSnapshot(customerAddress) : undefined,
           customerPincode: customerPincode || undefined,
@@ -1214,6 +1215,7 @@ export class BookingService {
           bookingNumber,
           bookingType: BOOKING_TYPE.ASTROLOGY,
           bookingMode: BOOKING_MODE.ONLINE,
+          serviceNameSnapshot: 'Astrology Consultation',
           customerId: targetCustomerId,
           astrologerId: dto.astrologerId,
           scheduledAt,
@@ -4864,7 +4866,7 @@ export class BookingService {
 
         service: {
           id: booking.service?.id ?? booking.serviceId,
-          name: booking.service?.name ?? '-',
+          name: booking.serviceNameSnapshot || booking.service?.name || '-',
           iconUrl: serviceIconUrl,
           iconDownloadUrl: serviceIconDownloadUrl,
           durationMinutes: booking.service?.durationMinutes ?? null,
@@ -5317,7 +5319,7 @@ export class BookingService {
 
       service: {
         id: booking.service?.id ?? booking.serviceId,
-        name: booking.service?.name ?? null,
+        name: booking.serviceNameSnapshot || booking.service?.name || null,
         iconUrl: serviceIconUrl,
         iconDownloadUrl: serviceIconDownloadUrl,
         durationMinutes: booking.service?.durationMinutes ?? null,
@@ -5961,6 +5963,7 @@ export class BookingService {
           bookingNumber,
           customerId: customer.id,
           serviceId: service.id,
+          serviceNameSnapshot: service.name,
           customerAddressId: customerAddress ? customerAddress.id : undefined,
           addressSnapshot: customerAddress ? this.createAddressSnapshot(customerAddress) : undefined,
           customerPincode: customerAddress?.pincode?.trim() || undefined,

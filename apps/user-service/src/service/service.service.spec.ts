@@ -142,6 +142,9 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
       findById: jest.fn(),
       getMaxSortOrder: jest.fn().mockResolvedValue(0),
       shiftSortOrdersUp: jest.fn().mockResolvedValue(undefined),
+      softRemove: jest.fn(async (s) => s),
+      remove: jest.fn(async (s) => s),
+      hasBookingsOrPayments: jest.fn().mockResolvedValue({ hasBookings: false, hasPayments: false }),
     };
 
     mockCategoryRepo = {
@@ -988,6 +991,55 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
           }),
         );
       });
+    });
+  });
+
+  describe('Service Deletion Production Data-Loss Prevention', () => {
+    it('always soft-deletes service and never executes hard remove even when no bookings exist', async () => {
+      const mockService = {
+        id: 201,
+        name: 'Ganesh Puja',
+        isActive: true,
+      };
+      mockServiceRepo.findOne.mockResolvedValue(mockService);
+      mockServiceRepo.hasBookingsOrPayments.mockResolvedValue({
+        hasBookings: false,
+        hasPayments: false,
+      });
+
+      const result = await service.deleteService(201, 1);
+
+      expect(mockServiceRepo.softRemove).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 201, isActive: false }),
+      );
+      expect(mockServiceRepo.remove).not.toHaveBeenCalled();
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: true,
+          message: expect.stringContaining('deleted successfully'),
+        }),
+      );
+    });
+
+    it('soft-deletes service when historical bookings or payments exist', async () => {
+      const mockService = {
+        id: 202,
+        name: 'Satyanarayan Puja',
+        isActive: true,
+      };
+      mockServiceRepo.findOne.mockResolvedValue(mockService);
+      mockServiceRepo.hasBookingsOrPayments.mockResolvedValue({
+        hasBookings: true,
+        hasPayments: true,
+      });
+
+      const result = await service.deleteService(202, 1);
+
+      expect(mockServiceRepo.softRemove).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 202, isActive: false }),
+      );
+      expect(mockServiceRepo.remove).not.toHaveBeenCalled();
+      expect(result.success).toBe(true);
     });
   });
 });

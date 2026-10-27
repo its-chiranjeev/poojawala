@@ -1497,18 +1497,12 @@ export class ServiceService {
       const { hasBookings, hasPayments } =
         await this.serviceRepository.hasBookingsOrPayments(id);
 
-      let isSoftDeleted = false;
-
-      if (hasBookings || hasPayments) {
-        // Soft delete: deactivate service and mark deletedAt
-        service.isActive = false;
-        await this.serviceRepository.save(service);
-        await this.serviceRepository.softRemove(service);
-        isSoftDeleted = true;
-      } else {
-        // Hard delete: permanently remove when no booking or payment exists
-        await this.serviceRepository.remove(service);
-      }
+      // Production Data Protection Policy: Services must always be soft-deleted to guarantee
+      // that historical bookings, invoices, payouts, and financial ledgers are preserved forever.
+      service.isActive = false;
+      await this.serviceRepository.save(service);
+      await this.serviceRepository.softRemove(service);
+      const isSoftDeleted = true;
 
       // TODO: SERVICE_MESSAGE_IMPROVEMENT
       // Old message retained for reference; replaced with plan-aware message.

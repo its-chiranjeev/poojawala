@@ -28,7 +28,7 @@ export class PaymentBooking {
   @Column({ type: 'int' })
   bookingId!: number;
 
-  @ManyToOne(() => Booking, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Booking, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'bookingId' })
   booking!: Booking;
 
