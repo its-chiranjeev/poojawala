@@ -1042,4 +1042,134 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
       expect(result.success).toBe(true);
     });
   });
+
+  describe('createService - automatic sortOrder assignment', () => {
+    const baseDto = {
+      name: 'Vedic Shanti Puja',
+      plans: {
+        basic: { price: 1000 },
+        standard: { price: 2000 },
+      },
+      isOnline: false,
+      isOffline: true,
+      durationMinutes: 60,
+      tokenPercentage: 30,
+      commissionPercentage: 10,
+    };
+
+    it('assigns 0 when first service is created without sortOrder and no services exist', async () => {
+      mockServiceRepo.getMaxSortOrder.mockResolvedValue(null);
+      mockServiceRepo.find.mockResolvedValue([]);
+      mockServiceRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.createService(baseDto as CreateServiceDto, {}, 1);
+
+      expect(mockServiceRepo.getMaxSortOrder).toHaveBeenCalled();
+      expect(mockServiceRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ sortOrder: 0 }),
+      );
+      expect(result.data.sortOrder).toBe(0);
+    });
+
+    it('assigns MAX(sortOrder) + 1 when existing maximum sortOrder is 5 and sortOrder is omitted', async () => {
+      mockServiceRepo.getMaxSortOrder.mockResolvedValue(5);
+      mockServiceRepo.find.mockResolvedValue([]);
+      mockServiceRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.createService(baseDto as CreateServiceDto, {}, 1);
+
+      expect(mockServiceRepo.getMaxSortOrder).toHaveBeenCalled();
+      expect(mockServiceRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ sortOrder: 6 }),
+      );
+      expect(result.data.sortOrder).toBe(6);
+    });
+
+    it('preserves explicitly provided sortOrder: 2 and shifts existing items up from 2', async () => {
+      mockServiceRepo.find.mockResolvedValue([]);
+      mockServiceRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.createService(
+        { ...baseDto, sortOrder: 2 } as CreateServiceDto,
+        {},
+        1,
+      );
+
+      expect(mockServiceRepo.shiftSortOrdersUp).toHaveBeenCalledWith(2);
+      expect(mockServiceRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ sortOrder: 2 }),
+      );
+      expect(result.data.sortOrder).toBe(2);
+    });
+
+    it('preserves explicitly provided sortOrder: 0, does not treat as missing, and shifts existing items up from 0', async () => {
+      mockServiceRepo.find.mockResolvedValue([]);
+      mockServiceRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.createService(
+        { ...baseDto, sortOrder: 0 } as CreateServiceDto,
+        {},
+        1,
+      );
+
+      expect(mockServiceRepo.shiftSortOrdersUp).toHaveBeenCalledWith(0);
+      expect(mockServiceRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ sortOrder: 0 }),
+      );
+      expect(result.data.sortOrder).toBe(0);
+    });
+
+    it('assigns MAX(sortOrder) + 1 when existing services have gaps (e.g. max is 5), not the first gap', async () => {
+      mockServiceRepo.getMaxSortOrder.mockResolvedValue(5);
+      mockServiceRepo.find.mockResolvedValue([]);
+      mockServiceRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.createService(baseDto as CreateServiceDto, {}, 1);
+
+      expect(mockServiceRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ sortOrder: 6 }),
+      );
+      expect(result.data.sortOrder).toBe(6);
+    });
+
+    it('excludes soft-deleted services when determining the next sortOrder position', async () => {
+      mockServiceRepo.getMaxSortOrder.mockResolvedValue(3);
+      mockServiceRepo.find.mockResolvedValue([]);
+      mockServiceRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.createService(baseDto as CreateServiceDto, {}, 1);
+
+      expect(mockServiceRepo.getMaxSortOrder).toHaveBeenCalled();
+      expect(result.data.sortOrder).toBe(4);
+    });
+
+    it('returns API response containing the assigned sortOrder in the data object', async () => {
+      mockServiceRepo.getMaxSortOrder.mockResolvedValue(10);
+      mockServiceRepo.find.mockResolvedValue([]);
+      mockServiceRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.createService(baseDto as CreateServiceDto, {}, 1);
+
+      expect(result.success).toBe(true);
+      expect(result.data).toBeDefined();
+      expect(result.data.sortOrder).toBe(11);
+    });
+
+    it('handles concurrent service creation without sortOrder safely', async () => {
+      mockServiceRepo.find.mockResolvedValue([]);
+      mockServiceRepo.findOne.mockResolvedValue(null);
+      let currentMax = 5;
+      mockServiceRepo.getMaxSortOrder.mockImplementation(async () => currentMax++);
+
+      const [res1, res2] = await Promise.all([
+        service.createService({ ...baseDto, name: 'Concurrent Service A' } as CreateServiceDto, {}, 1),
+        service.createService({ ...baseDto, name: 'Concurrent Service B' } as CreateServiceDto, {}, 1),
+      ]);
+
+      expect(res1.success).toBe(true);
+      expect(res2.success).toBe(true);
+      expect(res1.data.sortOrder).not.toBeNull();
+      expect(res2.data.sortOrder).not.toBeNull();
+    });
+  });
 });

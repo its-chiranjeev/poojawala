@@ -180,10 +180,30 @@ export class ServiceRepository extends BaseRepository<Service> {
       qb.andWhere('service.templeId IS NULL');
     }
 
-    if (search) {
+    const resolvedSearch =
+      search !== undefined && search !== null && search.trim() !== ''
+        ? search.trim()
+        : (query as any).s !== undefined && (query as any).s !== null && String((query as any).s).trim() !== ''
+        ? String((query as any).s).trim()
+        : undefined;
+
+    if (resolvedSearch) {
       qb.andWhere(
-        '(CAST(service.id AS TEXT) ILIKE :search OR service.name ILIKE :search OR category.name ILIKE :search OR temple.name ILIKE :search)',
-        { search: `%${search.trim()}%` },
+        `(
+          CAST(service.id AS TEXT) ILIKE :search
+          OR service.name ILIKE :search
+          OR category.name ILIKE :search
+          OR temple.name ILIKE :search
+          OR (
+            jsonb_typeof(service.cities) = 'array'
+            AND EXISTS (
+              SELECT 1 FROM jsonb_array_elements(service.cities) AS sc
+              WHERE LOWER(TRIM(sc->>'name')) ILIKE :search
+                 OR LOWER(TRIM(sc->>'state')) ILIKE :search
+            )
+          )
+        )`,
+        { search: `%${resolvedSearch}%` },
       );
     }
 
@@ -231,50 +251,54 @@ export class ServiceRepository extends BaseRepository<Service> {
     // - When isOffline=true: returns global offline services OR offline services available in the specified city.
     // - When isOnline=true: online services are delivered virtually and available everywhere.
     // - When neither is specified: returns all online services OR (offline services that are global or match the city).
-    const normalizedCity = city ? city.trim() : undefined;
-    const normalizedState = state ? state.trim() : (query.state ? String(query.state).trim() : undefined);
+    // Location parameters: city and state have distinct semantics and must not be interchanged.
+    const rawCity =
+      city !== undefined && city !== null && String(city).trim() !== ''
+        ? String(city).trim()
+        : (query as any).cityName !== undefined && (query as any).cityName !== null && String((query as any).cityName).trim() !== ''
+        ? String((query as any).cityName).trim()
+        : undefined;
+
+    const rawState =
+      state !== undefined && state !== null && String(state).trim() !== ''
+        ? String(state).trim()
+        : (query as any).stateName !== undefined && (query as any).stateName !== null && String((query as any).stateName).trim() !== ''
+        ? String((query as any).stateName).trim()
+        : undefined;
+
+    const normalizedCity = rawCity ? rawCity.trim().replace(/\s+/g, ' ') : undefined;
+    const normalizedState = rawState ? rawState.trim().replace(/\s+/g, ' ') : undefined;
 
     if ((normalizedCity && normalizedCity !== '') || (normalizedState && normalizedState !== '')) {
-      const locationParams: Record<string, any> = {
+      const locationParams: Record<string, string | null> = {
         city: normalizedCity || null,
         cityLike: normalizedCity ? `%${normalizedCity}%` : null,
         state: normalizedState || null,
         stateLike: normalizedState ? `%${normalizedState}%` : null,
       };
 
+      qb.setParameters(locationParams);
+
+      // Generic case-insensitive partial location matching on JSONB service.cities:
+      // - City filter matches c->>'name' (e.g. "Bangalore" matches "Bangalore Urban")
+      // - State filter matches c->>'state' (e.g. "Karnataka" matches "Karnataka")
+      // - City and state remain strictly distinct; no interchanging or hardcoded aliases.
       const locationMatchCondition = `(
         jsonb_typeof(service.cities) = 'array'
         AND EXISTS (
           SELECT 1 FROM jsonb_array_elements(service.cities) AS c
           WHERE (
-            -- Standard match: city matches c->>'name' AND state matches c->>'state'
+            -- City match condition: city matches c->>'name' and, if state is also supplied, state matches c->>'state'
             (
-              (:city::text IS NULL OR LOWER(TRIM(c->>'name')) ILIKE :cityLike OR LOWER(TRIM(:city)) ILIKE '%' || LOWER(TRIM(c->>'name')) || '%')
-              AND
-              (:state::text IS NULL OR LOWER(TRIM(c->>'state')) ILIKE :stateLike OR LOWER(TRIM(:state)) ILIKE '%' || LOWER(TRIM(c->>'state')) || '%')
+              :city::text IS NOT NULL
+              AND LOWER(TRIM(c->>'name')) ILIKE :cityLike
+              AND (:state::text IS NULL OR LOWER(TRIM(c->>'state')) ILIKE :stateLike)
             )
             OR
-            -- Inverted match: user swapped city & state (e.g. city=Karnataka & state=Bangalore Urban)
+            -- State match condition: state matches c->>'state' without requiring a city
             (
-              (:city::text IS NOT NULL AND :state::text IS NOT NULL)
-              AND
-              (LOWER(TRIM(c->>'name')) ILIKE :stateLike OR LOWER(TRIM(:state)) ILIKE '%' || LOWER(TRIM(c->>'name')) || '%')
-              AND
-              (LOWER(TRIM(c->>'state')) ILIKE :cityLike OR LOWER(TRIM(:city)) ILIKE '%' || LOWER(TRIM(c->>'state')) || '%')
-            )
-            OR
-            -- When only city is provided, also check if it matches c->>'state'
-            (
-              :state::text IS NULL AND :city::text IS NOT NULL AND (
-                LOWER(TRIM(c->>'state')) ILIKE :cityLike OR LOWER(TRIM(:city)) ILIKE '%' || LOWER(TRIM(c->>'state')) || '%'
-              )
-            )
-            OR
-            -- When only state is provided, also check if it matches c->>'name'
-            (
-              :city::text IS NULL AND :state::text IS NOT NULL AND (
-                LOWER(TRIM(c->>'name')) ILIKE :stateLike OR LOWER(TRIM(:state)) ILIKE '%' || LOWER(TRIM(c->>'name')) || '%'
-              )
+              :state::text IS NOT NULL
+              AND LOWER(TRIM(c->>'state')) ILIKE :stateLike
             )
           )
         )
@@ -344,10 +368,50 @@ export class ServiceRepository extends BaseRepository<Service> {
       );
     }
 
-    qb.orderBy('service.sortOrder', 'ASC', 'NULLS LAST')
-      .addOrderBy('service.createdAt', 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit);
+    if ((normalizedCity && normalizedCity !== '') || (normalizedState && normalizedState !== '')) {
+      // 3-Tier priority ordering for location-filtered service listings:
+      // Tier 1: City-specific services matching the requested city and, if supplied, state.
+      // Tier 2: State-level matching services when state is provided.
+      // Tier 3: Global services available across locations.
+      // We use addSelect with an alias to avoid TypeORM misinterpreting the dot in service."isGlobal" as a table alias inside orderBy.
+      qb.addSelect(
+        `CASE
+          WHEN (
+            :city::text IS NOT NULL
+            AND service."isGlobal" = false
+            AND service.cities IS NOT NULL
+            AND jsonb_typeof(service.cities) = 'array'
+            AND EXISTS (
+              SELECT 1 FROM jsonb_array_elements(service.cities) AS c
+              WHERE LOWER(TRIM(c->>'name')) ILIKE :cityLike
+                AND (:state::text IS NULL OR LOWER(TRIM(c->>'state')) ILIKE :stateLike)
+            )
+          ) THEN 1
+          WHEN (
+            :state::text IS NOT NULL
+            AND service."isGlobal" = false
+            AND service.cities IS NOT NULL
+            AND jsonb_typeof(service.cities) = 'array'
+            AND EXISTS (
+              SELECT 1 FROM jsonb_array_elements(service.cities) AS c
+              WHERE LOWER(TRIM(c->>'state')) ILIKE :stateLike
+            )
+          ) THEN 2
+          ELSE 3
+        END`,
+        'location_priority',
+      )
+        .orderBy('location_priority', 'ASC')
+        .addOrderBy('service.sortOrder', 'ASC', 'NULLS LAST')
+        .addOrderBy('service.id', 'ASC')
+        .skip((page - 1) * limit)
+        .take(limit);
+    } else {
+      qb.orderBy('service.sortOrder', 'ASC', 'NULLS LAST')
+        .addOrderBy('service.id', 'ASC')
+        .skip((page - 1) * limit)
+        .take(limit);
+    }
 
     const [services, total] = await qb.getManyAndCount();
 
@@ -675,13 +739,19 @@ export class ServiceRepository extends BaseRepository<Service> {
     return this.repo.softRemove(service);
   }
 
-  async getMaxSortOrder(): Promise<number> {
+  async getMaxSortOrder(): Promise<number | null> {
     const result = await this.repo
       .createQueryBuilder('service')
       .select('MAX(service.sortOrder)', 'max')
       .where('service.deletedAt IS NULL')
       .getRawOne();
-    return result?.max != null ? parseInt(result.max, 10) || 0 : 0;
+    // TODO: Obsolete fallback returned 0 when no services existed, preventing assignment of 0 to the first service:
+    // return result?.max != null ? parseInt(result.max, 10) || 0 : 0;
+    if (result?.max == null || result.max === '') {
+      return null;
+    }
+    const parsed = typeof result.max === 'number' ? result.max : parseInt(result.max, 10);
+    return isNaN(parsed) ? null : parsed;
   }
 
   async shiftSortOrdersUp(fromOrder: number, toOrder?: number, excludeServiceId?: number): Promise<void> {

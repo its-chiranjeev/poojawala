@@ -735,6 +735,11 @@ export class ServiceService {
       const resolvedIsGlobal = validCities.length === 0;
 
 
+      // TODO: PREVIOUS_SORT_ORDER_LOGIC
+      // Previously, sortOrder: 0 was incorrectly treated as missing because of `Number(dto.sortOrder) > 0`,
+      // which caused explicit 0 to default to maxOrder + 1. Also, maxOrder defaulted to 0 on an empty table,
+      // creating the first service at position 1 instead of 0.
+      /*
       let finalSortOrder: number;
       if (dto.sortOrder != null && Number(dto.sortOrder) > 0) {
         finalSortOrder = Number(dto.sortOrder);
@@ -746,6 +751,25 @@ export class ServiceService {
           ? await this.serviceRepository.getMaxSortOrder()
           : 0;
         finalSortOrder = maxOrder + 1;
+      }
+      */
+      let finalSortOrder: number;
+      const hasExplicitSortOrder =
+        dto.sortOrder !== undefined &&
+        dto.sortOrder !== null &&
+        !isNaN(Number(dto.sortOrder)) &&
+        Number(dto.sortOrder) >= 0;
+
+      if (hasExplicitSortOrder) {
+        finalSortOrder = Number(dto.sortOrder);
+        if (typeof this.serviceRepository?.shiftSortOrdersUp === 'function') {
+          await this.serviceRepository.shiftSortOrdersUp(finalSortOrder);
+        }
+      } else {
+        const maxOrder = typeof this.serviceRepository?.getMaxSortOrder === 'function'
+          ? await this.serviceRepository.getMaxSortOrder()
+          : null;
+        finalSortOrder = maxOrder === null ? 0 : maxOrder + 1;
       }
 
       const service = this.serviceRepository.create({
