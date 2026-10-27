@@ -29,6 +29,7 @@ export class ServiceRepository extends BaseRepository<Service> {
       temple,
       includeTemple,
       city,
+      state,
       language,
     } = query;
     console.log("=== API REQUEST RECEIVED ===");
@@ -226,51 +227,104 @@ export class ServiceRepository extends BaseRepository<Service> {
     }
     */
     // Production inclusive city & online filter:
-    // When a city filter IS provided:
-    // When isOnline=true: all online services are returned (available globally).
-    // When isOffline=true: all offline services are returned (all global offline + all city-specific offline).
-    // When city filter is provided (without isOnline=true or isOffline=true):
-    // Include online services and offline services matching that city (or global).
+    // Location-based filtering (city / state):
+    // - When isOffline=true: returns global offline services OR offline services available in the specified city.
+    // - When isOnline=true: online services are delivered virtually and available everywhere.
+    // - When neither is specified: returns all online services OR (offline services that are global or match the city).
     const normalizedCity = city ? city.trim() : undefined;
-    if (normalizedCity && normalizedCity !== '' && parsedIsOnline !== true && parsedIsOffline !== true) {
-      const cityFilterJson = JSON.stringify([{ name: normalizedCity }]);
-      qb.andWhere(
-        new Brackets((cityQb) => {
-          cityQb
-            .where('service.isOnline = true')
-            .orWhere(
-              new Brackets((offlineQb) => {
-                offlineQb
-                  .where('(service.isOffline = true OR service.isOffline IS NULL)')
-                  .andWhere(
-                    new Brackets((cityMatchQb) => {
-                      cityMatchQb
-                        .where('service.isGlobal = true')
-                        .orWhere('service.cities IS NULL')
-                        .orWhere("service.cities = '[]'::jsonb")
-                        .orWhere(
-                          "(jsonb_typeof(service.cities) = 'array' AND jsonb_array_length(service.cities) = 0)",
-                        )
-                        .orWhere('service.cities @> :cityFilter::jsonb')
-                        .orWhere(
-                          `(
-                            jsonb_typeof(service.cities) = 'array'
-                            AND EXISTS (
-                              SELECT 1 FROM jsonb_array_elements(service.cities) AS c
-                              WHERE LOWER(TRIM(c->>'name')) = LOWER(TRIM(:city))
-                            )
-                          )`,
-                        );
-                    }),
-                  );
-              }),
-            );
-        }),
-        {
-          city: normalizedCity,
-          cityFilter: cityFilterJson,
-        },
-      );
+    const normalizedState = state ? state.trim() : (query.state ? String(query.state).trim() : undefined);
+
+    if ((normalizedCity && normalizedCity !== '') || (normalizedState && normalizedState !== '')) {
+      const locationParams: Record<string, any> = {
+        city: normalizedCity || null,
+        cityLike: normalizedCity ? `%${normalizedCity}%` : null,
+        state: normalizedState || null,
+        stateLike: normalizedState ? `%${normalizedState}%` : null,
+      };
+
+      const locationMatchCondition = `(
+        jsonb_typeof(service.cities) = 'array'
+        AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements(service.cities) AS c
+          WHERE (
+            -- Standard match: city matches c->>'name' AND state matches c->>'state'
+            (
+              (:city::text IS NULL OR LOWER(TRIM(c->>'name')) ILIKE :cityLike OR LOWER(TRIM(:city)) ILIKE '%' || LOWER(TRIM(c->>'name')) || '%')
+              AND
+              (:state::text IS NULL OR LOWER(TRIM(c->>'state')) ILIKE :stateLike OR LOWER(TRIM(:state)) ILIKE '%' || LOWER(TRIM(c->>'state')) || '%')
+            )
+            OR
+            -- Inverted match: user swapped city & state (e.g. city=Karnataka & state=Bangalore Urban)
+            (
+              (:city::text IS NOT NULL AND :state::text IS NOT NULL)
+              AND
+              (LOWER(TRIM(c->>'name')) ILIKE :stateLike OR LOWER(TRIM(:state)) ILIKE '%' || LOWER(TRIM(c->>'name')) || '%')
+              AND
+              (LOWER(TRIM(c->>'state')) ILIKE :cityLike OR LOWER(TRIM(:city)) ILIKE '%' || LOWER(TRIM(c->>'state')) || '%')
+            )
+            OR
+            -- When only city is provided, also check if it matches c->>'state'
+            (
+              :state::text IS NULL AND :city::text IS NOT NULL AND (
+                LOWER(TRIM(c->>'state')) ILIKE :cityLike OR LOWER(TRIM(:city)) ILIKE '%' || LOWER(TRIM(c->>'state')) || '%'
+              )
+            )
+            OR
+            -- When only state is provided, also check if it matches c->>'name'
+            (
+              :city::text IS NULL AND :state::text IS NOT NULL AND (
+                LOWER(TRIM(c->>'name')) ILIKE :stateLike OR LOWER(TRIM(:state)) ILIKE '%' || LOWER(TRIM(c->>'name')) || '%'
+              )
+            )
+          )
+        )
+      )`;
+
+      if (parsedIsOnline === true && parsedIsOffline !== true) {
+        // Online services are accessible anywhere globally.
+      } else if (parsedIsOffline === true && parsedIsOnline !== true) {
+        // Explicitly offline services: must be global offline or available in the requested location
+        qb.andWhere(
+          new Brackets((locMatchQb) => {
+            locMatchQb
+              .where('service.isGlobal = true')
+              .orWhere('service.cities IS NULL')
+              .orWhere("service.cities = '[]'::jsonb")
+              .orWhere(
+                "(jsonb_typeof(service.cities) = 'array' AND jsonb_array_length(service.cities) = 0)",
+              )
+              .orWhere(locationMatchCondition);
+          }),
+          locationParams,
+        );
+      } else {
+        // Neither or both: return all online services OR (offline services that are global or match the requested location)
+        qb.andWhere(
+          new Brackets((locQb) => {
+            locQb
+              .where('service.isOnline = true')
+              .orWhere(
+                new Brackets((offlineQb) => {
+                  offlineQb
+                    .where('(service.isOffline = true OR service.isOffline IS NULL)')
+                    .andWhere(
+                      new Brackets((locMatchQb) => {
+                        locMatchQb
+                          .where('service.isGlobal = true')
+                          .orWhere('service.cities IS NULL')
+                          .orWhere("service.cities = '[]'::jsonb")
+                          .orWhere(
+                            "(jsonb_typeof(service.cities) = 'array' AND jsonb_array_length(service.cities) = 0)",
+                          )
+                          .orWhere(locationMatchCondition);
+                      }),
+                    );
+                }),
+              );
+          }),
+          locationParams,
+        );
+      }
     }
     // TODO: Deprecated online-only restriction when no city parameter is provided.
     // Retained for reference:
