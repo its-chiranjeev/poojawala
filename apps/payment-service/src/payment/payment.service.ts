@@ -21,6 +21,7 @@ import {
   BOOKING_TYPE,
   BOOKING_PAYMENT_STATUS,
   BOOKING_STATUS,
+  CANCELLED_BY,
   AstrologerProfile,
   BookingProduct,
   Cart,
@@ -1811,6 +1812,27 @@ export class PaymentService {
       }
     }
 
+    const bookingId = payment.bookingId ?? payment.booking?.id;
+    if (
+      bookingId &&
+      (payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT ||
+        payment.paymentType === PAYMENT_TYPE.ASTROLOGY_PAYMENT)
+    ) {
+      const bookingRepo = this.dataSource.getRepository(Booking);
+      const booking = await bookingRepo.findOne({ where: { id: bookingId } });
+      if (
+        booking &&
+        booking.bookingType === BOOKING_TYPE.ASTROLOGY &&
+        booking.status === BOOKING_STATUS.PENDING &&
+        booking.paymentStatus === BOOKING_PAYMENT_STATUS.PENDING
+      ) {
+        await bookingRepo.softDelete(booking.id);
+        this.logger.log(
+          `Soft-deleted unpaid astrology booking #${booking.id} due to payment link failure (${payment.failureReason}).`,
+        );
+      }
+    }
+
     await this.auditLogService.createAuditLog({
       actorId: null,
       actorType: ACTOR_TYPE.SYSTEM,
@@ -2028,6 +2050,27 @@ export class PaymentService {
       if (order && order.paymentStatus !== ORDER_PAYMENT_STATUS.PAID) {
         order.paymentStatus = ORDER_PAYMENT_STATUS.FAILED;
         await orderRepo.save(order);
+      }
+    }
+
+    const bookingId = payment.bookingId ?? payment.booking?.id;
+    if (
+      bookingId &&
+      (payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT ||
+        payment.paymentType === PAYMENT_TYPE.ASTROLOGY_PAYMENT)
+    ) {
+      const bookingRepo = this.dataSource.getRepository(Booking);
+      const booking = await bookingRepo.findOne({ where: { id: bookingId } });
+      if (
+        booking &&
+        booking.bookingType === BOOKING_TYPE.ASTROLOGY &&
+        booking.status === BOOKING_STATUS.PENDING &&
+        booking.paymentStatus === BOOKING_PAYMENT_STATUS.PENDING
+      ) {
+        await bookingRepo.softDelete(booking.id);
+        this.logger.log(
+          `Soft-deleted unpaid astrology booking #${booking.id} due to payment failure.`,
+        );
       }
     }
 
@@ -5305,10 +5348,21 @@ export class PaymentService {
       if (bookingId && isBookingOrAstrology) {
         const booking = await manager.getRepository(Booking).findOne({
           where: { id: bookingId },
+          withDeleted: true,
           lock: { mode: 'pessimistic_write' },
         });
 
         if (booking) {
+          if (booking.deletedAt) {
+            this.logger.warn(
+              `Payment #${payment.id} completed for booking #${booking.id}, but the booking was already soft-deleted (unpaid reservation expired/failed). Booking remains soft-deleted. Flagged for refund/reconciliation.`,
+            );
+            booking.paidAmount = Number(payment.amount);
+            booking.paymentStatus = BOOKING_PAYMENT_STATUS.PAID;
+            booking.bookingPaymentId = payment.id;
+            await manager.getRepository(Booking).save(booking);
+            return;
+          }
           // Idempotent calculation: sum all successful payments for this booking
           const successfulPayments = await manager.getRepository(Payment).find({
             where: {
@@ -5354,6 +5408,10 @@ export class PaymentService {
             if (booking.status === BOOKING_STATUS.ONGOING) {
               booking.status = BOOKING_STATUS.COMPLETED;
               booking.completionConfirmedAt = new Date();
+            } else if (booking.status === BOOKING_STATUS.CANCELLED) {
+              this.logger.warn(
+                `Payment #${payment.id} completed for booking #${booking.id}, but booking was already CANCELLED (reservation expired or cancelled). Status remains CANCELLED.`,
+              );
             } else if (
               booking.bookingType === BOOKING_TYPE.ASTROLOGY &&
               booking.status === BOOKING_STATUS.PENDING

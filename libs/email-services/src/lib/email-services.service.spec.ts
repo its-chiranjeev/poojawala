@@ -224,6 +224,30 @@ describe('EmailService - Centralized Platform Branding', () => {
       expect(sentHtml).not.toContain('Inquired Service');
       expect(sentHtml).not.toContain('🌐 Online');
       expect(sentHtml).not.toContain('🏛️ Offline');
+      expect(sentHtml).not.toContain('Preferred Date &amp; Time');
+      expect(sentHtml).not.toContain('Preferred Date & Time');
+      expect(sentHtml).not.toContain('Address');
+    });
+
+    it('should render preferredDateTime and address in inquiry details table when provided', async () => {
+      await service.sendContactUsReplyEmail({
+        email: 'customer@example.com',
+        name: 'Rahul Sharma',
+        status: 'IN_PROGRESS',
+        adminMessage: 'We have reserved your slot and Panditji will visit the location.',
+        subject: 'Vastu Shanti Pooja',
+        preferredDateTime: '2026-10-29T10:30:00+05:30',
+        address: 'Flat 402, Shanti Niketan, Varanasi, UP - 221001',
+      });
+
+      const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+      expect(sentHtml).toContain('Rahul Sharma');
+      expect(sentHtml).toContain('Preferred Date &amp; Time');
+      expect(sentHtml).toContain('29 Oct 2026');
+      expect(sentHtml).toContain('Address');
+      expect(sentHtml).toContain('Flat 402, Shanti Niketan, Varanasi, UP - 221001');
+      expect(sentHtml).toContain('We have reserved your slot and Panditji will visit the location.');
     });
   });
 });
+

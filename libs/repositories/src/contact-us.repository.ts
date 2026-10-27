@@ -39,7 +39,7 @@ export class ContactUsRepository {
 
     if (search) {
       query.andWhere(
-        '(CAST(contactUs.id AS TEXT) ILIKE :search OR contactUs.name ILIKE :search OR contactUs.email ILIKE :search OR contactUs.subject ILIKE :search OR service.name ILIKE :search)',
+        '(CAST(contactUs.id AS TEXT) ILIKE :search OR contactUs.name ILIKE :search OR contactUs.email ILIKE :search OR contactUs.subject ILIKE :search OR service.name ILIKE :search OR contactUs.address ILIKE :search)',
         { search: `%${search}%` },
       );
     }

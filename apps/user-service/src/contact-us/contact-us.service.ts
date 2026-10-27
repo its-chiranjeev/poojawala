@@ -102,6 +102,10 @@ export class ContactUsService {
             ? await this.serviceRepo.findById(contactUs.serviceId)
             : null);
 
+        const preferredDateTime =
+          updated?.preferredDateTime ?? contactUs.preferredDateTime;
+        const address = updated?.address ?? contactUs.address;
+
         await this.emailService.sendContactUsReplyEmail({
           email: contactUs.email,
           name: contactUs.name,
@@ -109,6 +113,8 @@ export class ContactUsService {
           adminMessage: dto.message,
           subject: contactUs.subject,
           userOriginalMessage: contactUs.message,
+          preferredDateTime: preferredDateTime ?? undefined,
+          address: address ?? undefined,
           service: service
             ? {
                 id: service.id,

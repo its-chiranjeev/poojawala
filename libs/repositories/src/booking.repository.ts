@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
-import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, BOOKING_PAYMENT_TYPE, BOOKING_TYPE, USER_ROLE, ASSIGNMENT_TYPE, PAYMENT_TYPE, PAYMENT_STATUS } from '@poojawala/entities';
+import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, BOOKING_PAYMENT_TYPE, BOOKING_TYPE, USER_ROLE, ASSIGNMENT_TYPE, PAYMENT_TYPE, PAYMENT_STATUS, CANCELLED_BY } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 interface FindBookingsByRoleOptions {
@@ -776,6 +776,29 @@ export class BookingRepository extends BaseRepository<Booking> {
       .execute();
 
     return result.raw as Booking[];
+  }
+
+  async cancelExpiredPendingAstrologyBookings(expirationMinutes = 15): Promise<Booking[]> {
+    const expiredBookings = await this.bookingRepo
+      .createQueryBuilder('booking')
+      .where('booking.bookingType = :bType', { bType: BOOKING_TYPE.ASTROLOGY })
+      .andWhere('booking.status = :status', { status: BOOKING_STATUS.PENDING })
+      .andWhere('booking.paymentStatus = :paymentStatus', { paymentStatus: BOOKING_PAYMENT_STATUS.PENDING })
+      .andWhere('booking.deletedAt IS NULL')
+      .andWhere(
+        `booking.createdAt <= CURRENT_TIMESTAMP - (:minutes || ' minutes')::interval`,
+        { minutes: expirationMinutes },
+      )
+      .getMany();
+
+    if (expiredBookings.length === 0) {
+      return [];
+    }
+
+    const ids = expiredBookings.map((b) => b.id);
+    await this.bookingRepo.softDelete(ids);
+
+    return expiredBookings;
   }
 
   async getPurohitDashboardStats(purohitProfileId: number): Promise<{

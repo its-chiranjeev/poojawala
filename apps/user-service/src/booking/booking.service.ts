@@ -226,6 +226,45 @@ export class BookingService {
     }
   }
 
+  @Cron('0 * * * * *', {
+    name: 'cancel-expired-pending-astrology-bookings',
+  })
+  async cancelExpiredPendingAstrologyBookingsCron(): Promise<void> {
+    this.logger.log('[Astrology Cron] Started: Checking expired unpaid astrology bookings.');
+
+    try {
+      const expired = await this.bookingRepository.cancelExpiredPendingAstrologyBookings(15);
+      if (expired.length > 0) {
+        this.logger.log(
+          `[Astrology Cron] Completed: Soft-deleted ${expired.length} expired pending astrology reservation(s).`,
+        );
+        for (const b of expired) {
+          await this.auditLogService.createAuditLog({
+            actorId: null,
+            actorType: ACTOR_TYPE.SYSTEM,
+            actorRole: undefined,
+            module: AUDIT_MODULE.BOOKING,
+            entity: 'Booking',
+            entityId: String(b.id),
+            action: 'BOOKING_SOFT_DELETED',
+            message: `Astrology booking #${b.id} pending reservation expired after 15 minutes and was soft-deleted by SYSTEM.`,
+            oldValue: { deletedAt: null },
+            newValue: { deletedAt: new Date() },
+          });
+        }
+      } else {
+        this.logger.log(
+          '[Astrology Cron] Completed: No expired unpaid astrology bookings found.',
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `[Astrology Cron] Failed: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
   async createBooking(
     user: User,
     dto: CreateBookingDto,
@@ -1116,11 +1155,9 @@ export class BookingService {
           throw new BadRequestException('Astrologer profile is not approved for bookings');
         }
 
-        const duplicateLockKey = [
-          targetCustomerId,
-          dto.astrologerId,
-          scheduledAt.toISOString(),
-        ].join(':');
+        // Concurrency-safe per-astrologer advisory transaction lock:
+        // Serializes concurrent booking requests for the same astrologer during the transaction.
+        const astrologerLockKey = `astrologer_booking:${dto.astrologerId}`;
 
         if (typeof manager.query === 'function') {
           try {
@@ -1130,40 +1167,71 @@ export class BookingService {
                   hashtext($1)
                 )
               `,
-              [duplicateLockKey],
+              [astrologerLockKey],
             );
           } catch {
             // advisory lock acquisition failed or mock environment
           }
         }
 
-        const activeBookingStatuses = [
+        // Release any expired pending reservations (15 minutes TTL) for this astrologer by soft-deleting
+        if (typeof manager.query === 'function') {
+          try {
+            await manager.query(
+              `
+                UPDATE bookings
+                SET "deletedAt" = CURRENT_TIMESTAMP
+                WHERE "bookingType" = 'ASTROLOGY'
+                  AND "astrologerId" = $1
+                  AND status = 'PENDING'
+                  AND "paymentStatus" = 'PENDING'
+                  AND "deletedAt" IS NULL
+                  AND "createdAt" <= NOW() - INTERVAL '15 minutes'
+              `,
+              [dto.astrologerId],
+            );
+          } catch {
+            // query failed or mock environment
+          }
+        }
+
+        // Active booking statuses that block appointment slots:
+        // Confirmed, accepted, in-progress, or active unexpired pending bookings.
+        const blockingBookingStatuses = [
           BOOKING_STATUS.PENDING,
           BOOKING_STATUS.ACCEPTED,
           BOOKING_STATUS.ENROUTE,
           BOOKING_STATUS.ARRIVED,
           BOOKING_STATUS.ONGOING,
+          BOOKING_STATUS.COMPLETED,
         ];
 
-        const duplicateBookingExists = await bookingRepository
+        // Standard consultation duration is 30 minutes.
+        // Overlap detection rule: existingStart < requestedEnd AND existingEnd > requestedStart.
+        const requestedStart = scheduledAt;
+        const requestedEnd = new Date(scheduledAt.getTime() + 30 * 60 * 1000);
+
+        const overlappingBookingExists = await bookingRepository
           .createQueryBuilder('booking')
-          .where('booking.customerId = :customerId', {
-            customerId: targetCustomerId,
-          })
-          .andWhere('booking.astrologerId = :astrologerId', {
+          .where('booking.astrologerId = :astrologerId', {
             astrologerId: dto.astrologerId,
           })
-          .andWhere('booking.scheduledAt = :scheduledAt', {
-            scheduledAt,
-          })
           .andWhere('booking.status IN (:...statuses)', {
-            statuses: activeBookingStatuses,
+            statuses: blockingBookingStatuses,
           })
+          .andWhere('booking.deletedAt IS NULL')
+          .andWhere('booking.scheduledAt < :requestedEnd', {
+            requestedEnd,
+          })
+          .andWhere(
+            '(booking.scheduledAt + INTERVAL \'30 minutes\') > :requestedStart',
+            { requestedStart },
+          )
           .getExists();
 
-        if (duplicateBookingExists) {
+        if (overlappingBookingExists) {
           throw new ConflictException(
-            'An active booking for this astrologer and scheduled time already exists',
+            'The astrologer is no longer available for the selected time. Please choose another slot.',
           );
         }
 
@@ -1238,7 +1306,22 @@ export class BookingService {
           filteredPurohitIds: [],
         });
 
-        const savedBooking = await bookingRepository.save(booking);
+        let savedBooking: Booking;
+        try {
+          savedBooking = await bookingRepository.save(booking);
+        } catch (saveError: any) {
+          if (
+            saveError?.code === '23P01' ||
+            saveError?.driverError?.code === '23P01' ||
+            (typeof saveError?.message === 'string' &&
+              saveError.message.includes('no_overlapping_astrologer_bookings'))
+          ) {
+            throw new ConflictException(
+              'The astrologer is no longer available for the selected time. Please choose another slot.',
+            );
+          }
+          throw saveError;
+        }
 
         await this.auditLogService.createAuditLog(
           {
@@ -1400,19 +1483,19 @@ export class BookingService {
           : 'Redirecting to the payment page';
 
       return bookingData;
-    } catch (error) {
+    } catch (error: unknown) {
+      const dbErr = error as { code?: string; driverError?: { code?: string }; message?: string };
       if (
-        error instanceof QueryFailedError &&
-        (
-          error as QueryFailedError & {
-            driverError?: {
-              code?: string;
-            };
-          }
-        ).driverError?.code === '23505'
+        (error instanceof QueryFailedError &&
+          (dbErr.driverError?.code === '23505' ||
+            dbErr.driverError?.code === '23P01')) ||
+        dbErr?.code === '23P01' ||
+        dbErr?.driverError?.code === '23P01' ||
+        (typeof dbErr?.message === 'string' &&
+          dbErr.message.includes('no_overlapping_astrologer_bookings'))
       ) {
         throw new ConflictException(
-          'An active booking for this astrologer and scheduled time already exists',
+          'The astrologer is no longer available for the selected time. Please choose another slot.',
         );
       }
 
@@ -5093,31 +5176,101 @@ export class BookingService {
         BOOKING_STATUS.ENROUTE,
         BOOKING_STATUS.ARRIVED,
         BOOKING_STATUS.ONGOING,
+        BOOKING_STATUS.COMPLETED,
       ];
 
-      const duplicateBookingExists = await bookingRepository
-        .createQueryBuilder('duplicateBooking')
-        .where('duplicateBooking.id != :bookingId', {
-          bookingId: booking.id,
-        })
-        .andWhere('duplicateBooking.customerId = :customerId', {
-          customerId: booking.customerId,
-        })
-        .andWhere('duplicateBooking.serviceId = :serviceId', {
-          serviceId: booking.serviceId,
-        })
-        .andWhere('duplicateBooking.scheduledAt = :scheduledAt', {
-          scheduledAt: newScheduledAt,
-        })
-        .andWhere('duplicateBooking.status IN (:...statuses)', {
-          statuses: duplicateStatuses,
-        })
-        .getExists();
+      if (booking.bookingType === BOOKING_TYPE.ASTROLOGY && booking.astrologerId) {
+        const astrologerLockKey = `astrologer_booking:${booking.astrologerId}`;
+        if (typeof manager.query === 'function') {
+          try {
+            await manager.query(
+              `
+                SELECT pg_advisory_xact_lock(
+                  hashtext($1)
+                )
+              `,
+              [astrologerLockKey],
+            );
+          } catch {
+            // advisory lock acquisition failed or mock environment
+          }
+        }
 
-      if (duplicateBookingExists) {
-        throw new ConflictException(
-          'An active booking for this service and scheduled time already exists',
-        );
+        const requestedStart = newScheduledAt;
+        const requestedEnd = new Date(newScheduledAt.getTime() + 30 * 60 * 1000);
+
+        const overlappingBookingExists = await bookingRepository
+          .createQueryBuilder('duplicateBooking')
+          .where('duplicateBooking.id != :bookingId', {
+            bookingId: booking.id,
+          })
+          .andWhere('duplicateBooking.astrologerId = :astrologerId', {
+            astrologerId: booking.astrologerId,
+          })
+          .andWhere('duplicateBooking.status IN (:...statuses)', {
+            statuses: duplicateStatuses,
+          })
+          .andWhere('duplicateBooking.deletedAt IS NULL')
+          .andWhere('duplicateBooking.scheduledAt < :requestedEnd', {
+            requestedEnd,
+          })
+          .andWhere(
+            '(duplicateBooking.scheduledAt + INTERVAL \'30 minutes\') > :requestedStart',
+            { requestedStart },
+          )
+          .getExists();
+
+        if (overlappingBookingExists) {
+          throw new ConflictException(
+            'The astrologer is no longer available for the selected time. Please choose another slot.',
+          );
+        }
+      } else {
+        const rescheduleLockKey = [
+          booking.customerId,
+          booking.serviceId,
+          newScheduledAt.toISOString(),
+        ].join(':');
+
+        if (typeof manager.query === 'function') {
+          try {
+            await manager.query(
+              `
+                SELECT pg_advisory_xact_lock(
+                  hashtext($1)
+                )
+              `,
+              [rescheduleLockKey],
+            );
+          } catch {
+            // advisory lock acquisition failed or mock environment
+          }
+        }
+
+        const duplicateBookingExists = await bookingRepository
+          .createQueryBuilder('duplicateBooking')
+          .where('duplicateBooking.id != :bookingId', {
+            bookingId: booking.id,
+          })
+          .andWhere('duplicateBooking.customerId = :customerId', {
+            customerId: booking.customerId,
+          })
+          .andWhere('duplicateBooking.serviceId = :serviceId', {
+            serviceId: booking.serviceId,
+          })
+          .andWhere('duplicateBooking.scheduledAt = :scheduledAt', {
+            scheduledAt: newScheduledAt,
+          })
+          .andWhere('duplicateBooking.status IN (:...statuses)', {
+            statuses: duplicateStatuses,
+          })
+          .getExists();
+
+        if (duplicateBookingExists) {
+          throw new ConflictException(
+            'An active booking for this service and scheduled time already exists',
+          );
+        }
       }
 
       if (dto.customerAddressId !== undefined) {
@@ -5168,52 +5321,73 @@ export class BookingService {
 
       booking.scheduledAt = newScheduledAt;
 
-      const previousPurohitId = booking.purohitId;
-      const eligiblePurohitIds =
-        await this.assignmentService.findEligiblePurohitIds(manager, booking);
-
       let assignmentChanged = false;
       let message = 'Booking rescheduled successfully';
 
-      if (booking.status === BOOKING_STATUS.ACCEPTED && previousPurohitId) {
-        const assignedPurohitIsAvailable =
-          eligiblePurohitIds.includes(previousPurohitId);
+      if (booking.bookingType === BOOKING_TYPE.ASTROLOGY) {
+        // Astrology bookings maintain their confirmed astrologer.
+        message = 'Booking rescheduled successfully. The assigned Astrologer remains confirmed for the new time';
+      } else {
+        const previousPurohitId = booking.purohitId;
+        const eligiblePurohitIds =
+          await this.assignmentService.findEligiblePurohitIds(manager, booking);
 
-        if (assignedPurohitIsAvailable) {
-          booking.purohitId = previousPurohitId;
-          booking.status = BOOKING_STATUS.ACCEPTED;
-          booking.filteredPurohitIds = [];
+        if (booking.status === BOOKING_STATUS.ACCEPTED && previousPurohitId) {
+          const assignedPurohitIsAvailable =
+            eligiblePurohitIds.includes(previousPurohitId);
 
-          message =
-            'Booking rescheduled successfully. The assigned Purohit remains available';
+          if (assignedPurohitIsAvailable) {
+            booking.purohitId = previousPurohitId;
+            booking.status = BOOKING_STATUS.ACCEPTED;
+            booking.filteredPurohitIds = [];
+
+            message =
+              'Booking rescheduled successfully. The assigned Purohit remains available';
+          } else {
+            assignmentChanged = true;
+            booking.purohitId = null as unknown as undefined;
+            booking.status = BOOKING_STATUS.PENDING;
+            booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
+            booking.filteredPurohitIds = eligiblePurohitIds.filter(
+              (purohitId) => purohitId !== previousPurohitId,
+            );
+
+            message =
+              booking.filteredPurohitIds.length > 0
+                ? 'Booking rescheduled successfully. The previous Purohit is unavailable, so the booking has been sent to other eligible Purohits'
+                : 'Booking rescheduled successfully, but no eligible Purohit is currently available for the new schedule';
+          }
         } else {
-          assignmentChanged = true;
           booking.purohitId = null as unknown as undefined;
           booking.status = BOOKING_STATUS.PENDING;
           booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
-          booking.filteredPurohitIds = eligiblePurohitIds.filter(
-            (purohitId) => purohitId !== previousPurohitId,
-          );
+          booking.filteredPurohitIds = eligiblePurohitIds;
 
           message =
-            booking.filteredPurohitIds.length > 0
-              ? 'Booking rescheduled successfully. The previous Purohit is unavailable, so the booking has been sent to other eligible Purohits'
-              : 'Booking rescheduled successfully, but no eligible Purohit is currently available for the new schedule';
+            eligiblePurohitIds.length > 0
+              ? 'Booking rescheduled successfully and sent to eligible Purohits'
+              : 'Booking rescheduled successfully, but no eligible Purohit is currently available';
         }
-      } else {
-        booking.purohitId = null as unknown as undefined;
-        booking.status = BOOKING_STATUS.PENDING;
-        booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
-        booking.filteredPurohitIds = eligiblePurohitIds;
-
-        message =
-          eligiblePurohitIds.length > 0
-            ? 'Booking rescheduled successfully and sent to eligible Purohits'
-            : 'Booking rescheduled successfully, but no eligible Purohit is currently available';
       }
 
       const reason = dto.reason?.trim() || null;
-      const savedBooking = await bookingRepository.save(booking);
+      let savedBooking: Booking;
+      try {
+        savedBooking = await bookingRepository.save(booking);
+      } catch (saveError: unknown) {
+        const dbErr = saveError as { code?: string; driverError?: { code?: string }; message?: string };
+        if (
+          dbErr?.code === '23P01' ||
+          dbErr?.driverError?.code === '23P01' ||
+          (typeof dbErr?.message === 'string' &&
+            dbErr.message.includes('no_overlapping_astrologer_bookings'))
+        ) {
+          throw new ConflictException(
+            'The astrologer is no longer available for the selected time. Please choose another slot.',
+          );
+        }
+        throw saveError;
+      }
       const rescheduledBooking = await bookingRepository.findOne({
         where: {
           id: savedBooking.id,

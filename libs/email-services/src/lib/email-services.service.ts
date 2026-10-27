@@ -721,6 +721,8 @@ export class EmailService {
     adminMessage: string;
     subject?: string;
     userOriginalMessage?: string;
+    preferredDateTime?: Date | string | null;
+    address?: string | null;
     service?: {
       id?: number;
       name?: string;
@@ -769,6 +771,30 @@ export class EmailService {
       detailsTableTitle = 'Service & Inquiry Details';
     }
 
+    let formattedPreferredDateTime: string | undefined = undefined;
+    if (data.preferredDateTime) {
+      if (data.preferredDateTime instanceof Date) {
+        if (!isNaN(data.preferredDateTime.getTime())) {
+          formattedPreferredDateTime = data.preferredDateTime.toLocaleString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            dateStyle: 'medium',
+            timeStyle: 'short',
+          });
+        }
+      } else if (typeof data.preferredDateTime === 'string') {
+        const parsed = new Date(data.preferredDateTime);
+        if (!isNaN(parsed.getTime())) {
+          formattedPreferredDateTime = parsed.toLocaleString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            dateStyle: 'medium',
+            timeStyle: 'short',
+          });
+        } else {
+          formattedPreferredDateTime = data.preferredDateTime;
+        }
+      }
+    }
+
     const rows: EmailTableRow[] = [
       { label: 'Name', value: data.name || 'Valued User' },
       ...(isServiceQuery && service?.name
@@ -778,6 +804,10 @@ export class EmailService {
         : []),
       { label: 'Inquiry Status', value: data.status, isHighlight: true },
       ...(data.subject ? [{ label: 'Subject', value: data.subject }] : []),
+      ...(formattedPreferredDateTime
+        ? [{ label: 'Preferred Date & Time', value: formattedPreferredDateTime }]
+        : []),
+      ...(data.address ? [{ label: 'Address', value: data.address }] : []),
       ...(data.userOriginalMessage
         ? [{ label: 'Your Original Query', value: data.userOriginalMessage }]
         : []),

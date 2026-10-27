@@ -1,4 +1,4 @@
-import { IsEmail, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsDateString, IsEmail, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateContactUsDto {
@@ -25,4 +25,13 @@ export class CreateContactUsDto {
   @IsNotEmpty()
   @IsString()
   message!: string;
+
+  @IsOptional()
+  @IsDateString()
+  preferredDateTime?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  address?: string;
 }

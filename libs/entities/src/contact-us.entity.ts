@@ -39,6 +39,12 @@ export class ContactUs {
   @Column({ type: 'text' })
   message!: string;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  preferredDateTime?: Date | string | null;
+
+  @Column({ type: 'text', nullable: true })
+  address?: string | null;
+
   @Column({
     type: 'enum',
     enum: CONTACT_US_STATUS,
