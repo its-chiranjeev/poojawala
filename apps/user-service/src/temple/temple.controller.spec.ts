@@ -32,7 +32,17 @@ describe('TempleController', () => {
         message: 'Temple created successfully',
         data: { id: 1, name: 'Hanuman Mandir' },
       }),
+      createTempleWithUser: jest.fn().mockResolvedValue({
+        success: true,
+        message: 'Temple created successfully',
+        data: { id: 1, name: 'Hanuman Mandir' },
+      }),
       updateTemple: jest.fn().mockResolvedValue({
+        success: true,
+        message: 'Temple updated successfully',
+        data: { id: 1, name: 'Updated Mandir' },
+      }),
+      updateTempleWithUser: jest.fn().mockResolvedValue({
         success: true,
         message: 'Temple updated successfully',
         data: { id: 1, name: 'Updated Mandir' },
@@ -73,30 +83,30 @@ describe('TempleController', () => {
   // 5. AUTHORIZATION & ROUTE GUARDS METADATA
   // ─────────────────────────────────────────────────────────────────────────────
   describe('Authorization Metadata', () => {
-    it('22. should protect createTemple with JwtAuthGuard, RolesGuard and USER_ROLE.ADMIN', () => {
+    it('22. should protect createTemple with JwtAuthGuard, RolesGuard and USER_ROLE.ADMIN, USER_ROLE.PUROHIT', () => {
       const target = controller.createTemple;
       const roles = Reflect.getMetadata('roles', target);
-      expect(roles).toEqual([USER_ROLE.ADMIN]);
+      expect(roles).toEqual([USER_ROLE.ADMIN, USER_ROLE.PUROHIT]);
 
       const guards = Reflect.getMetadata('__guards__', target);
       expect(guards).toContain(JwtAuthGuard);
       expect(guards).toContain(RolesGuard);
     });
 
-    it('23. should protect updateTemple with JwtAuthGuard, RolesGuard and USER_ROLE.ADMIN', () => {
+    it('23. should protect updateTemple with JwtAuthGuard, RolesGuard and USER_ROLE.ADMIN, USER_ROLE.PUROHIT', () => {
       const target = controller.updateTemple;
       const roles = Reflect.getMetadata('roles', target);
-      expect(roles).toEqual([USER_ROLE.ADMIN]);
+      expect(roles).toEqual([USER_ROLE.ADMIN, USER_ROLE.PUROHIT]);
 
       const guards = Reflect.getMetadata('__guards__', target);
       expect(guards).toContain(JwtAuthGuard);
       expect(guards).toContain(RolesGuard);
     });
 
-    it('24. should protect deleteTemple with JwtAuthGuard, RolesGuard and USER_ROLE.ADMIN', () => {
+    it('24. should protect deleteTemple with JwtAuthGuard, RolesGuard and USER_ROLE.ADMIN, USER_ROLE.PUROHIT', () => {
       const target = controller.deleteTemple;
       const roles = Reflect.getMetadata('roles', target);
-      expect(roles).toEqual([USER_ROLE.ADMIN]);
+      expect(roles).toEqual([USER_ROLE.ADMIN, USER_ROLE.PUROHIT]);
 
       const guards = Reflect.getMetadata('__guards__', target);
       expect(guards).toContain(JwtAuthGuard);
@@ -122,7 +132,7 @@ describe('TempleController', () => {
 
       const res = await controller.createTemple(req, dto, undefined);
 
-      expect(mockTempleService.createTemple).toHaveBeenCalledWith(dto, undefined, 10);
+      expect(mockTempleService.createTempleWithUser).toHaveBeenCalledWith(dto, undefined, mockAdminUser);
       expect(res.success).toBe(true);
     });
 
@@ -132,7 +142,7 @@ describe('TempleController', () => {
 
       const res = await controller.updateTemple(req, 1, dto, undefined);
 
-      expect(mockTempleService.updateTemple).toHaveBeenCalledWith(1, dto, undefined, 10);
+      expect(mockTempleService.updateTempleWithUser).toHaveBeenCalledWith(1, dto, undefined, mockAdminUser);
       expect(res.success).toBe(true);
     });
 
@@ -141,7 +151,17 @@ describe('TempleController', () => {
 
       const res = await controller.deleteTemple(req, 1);
 
-      expect(mockTempleService.deleteTemple).toHaveBeenCalledWith(1, 10);
+      expect(mockTempleService.deleteTemple).toHaveBeenCalledWith(1, mockAdminUser);
+      expect(res.success).toBe(true);
+    });
+
+    it('should delete temple when called by purohit', async () => {
+      const mockPurohitUser = { id: 30, role: USER_ROLE.PUROHIT } as User;
+      const req = { user: mockPurohitUser } as unknown as Parameters<typeof controller.deleteTemple>[0];
+
+      const res = await controller.deleteTemple(req, 1);
+
+      expect(mockTempleService.deleteTemple).toHaveBeenCalledWith(1, mockPurohitUser);
       expect(res.success).toBe(true);
     });
 
@@ -165,12 +185,12 @@ describe('TempleController', () => {
       expect(res.success).toBe(true);
     });
 
-    it('should handle public getTempleById without auth (isAdmin = false)', async () => {
+    it('should handle public getTempleById without auth (req.user = undefined)', async () => {
       const req: any = { user: undefined };
 
       const res = await controller.getTempleById(req, 1);
 
-      expect(mockTempleService.getTempleById).toHaveBeenCalledWith(1, false);
+      expect(mockTempleService.getTempleById).toHaveBeenCalledWith(1, undefined);
       expect(res.success).toBe(true);
     });
 
@@ -183,7 +203,7 @@ describe('TempleController', () => {
 
       await controller.createTemple(req, dto, undefined);
 
-      expect(mockTempleService.createTemple).toHaveBeenCalledWith(dto, undefined, 10);
+      expect(mockTempleService.createTempleWithUser).toHaveBeenCalledWith(dto, undefined, mockAdminUser);
     });
 
     it('should pass aartis to templeService on updateTemple', async () => {
@@ -194,7 +214,7 @@ describe('TempleController', () => {
 
       await controller.updateTemple(req, 1, dto, undefined);
 
-      expect(mockTempleService.updateTemple).toHaveBeenCalledWith(1, dto, undefined, 10);
+      expect(mockTempleService.updateTempleWithUser).toHaveBeenCalledWith(1, dto, undefined, mockAdminUser);
     });
 
     it('TempleUpdatePipe should transform array payload into object with aartis property', async () => {

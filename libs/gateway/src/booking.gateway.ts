@@ -23,19 +23,24 @@ export class BookingGateway
       console.log(`User ${userId} connected and joined room user:${userId}`);
     }
 
-    if (
+    const isAdmin =
       role === 'ADMIN' ||
       auth.isAdmin === true ||
       auth.isAdmin === 'true' ||
-      query.isAdmin === 'true'
-    ) {
+      query.isAdmin === 'true';
+
+    if (isAdmin) {
       client.join('admin');
       console.log(`Admin ${userId || client.id} connected and joined room admin`);
     }
 
     client.on('join_admin_room', () => {
-      client.join('admin');
-      console.log(`Socket ${client.id} explicitly joined room admin`);
+      if (isAdmin) {
+        client.join('admin');
+        console.log(`Socket ${client.id} explicitly joined room admin`);
+      } else {
+        console.warn(`Unauthorized attempt by socket ${client.id} to join admin room`);
+      }
     });
   }
 
@@ -50,24 +55,24 @@ export class BookingGateway
   notifyUser(
     userId: string | number,
     eventName: string,
-    data: any,
+    data: unknown,
   ): void {
-    this.server.to(`user:${userId}`).emit(eventName, data);
+    this.server?.to(`user:${userId}`).emit(eventName, data);
   }
 
-  emitNotification(userId: string | number, data: any): void {
-    this.server.to(`user:${userId}`).emit('notification:new', data);
+  emitNotification(userId: string | number, data: unknown): void {
+    this.server?.to(`user:${userId}`).emit('notification:new', data);
   }
 
-  notifyAdmin(eventName: string, data: any): void {
-    this.server.to('admin').emit(eventName, data);
+  notifyAdmin(eventName: string, data: unknown): void {
+    this.server?.to('admin').emit(eventName, data);
   }
 
-  emitAdminNotification(data: any): void {
-    this.server.to('admin').emit('notification:new', data);
+  emitAdminNotification(data: unknown): void {
+    this.server?.to('admin').emit('notification:new', data);
   }
 
   dismissNotification(userId: string | number) {
-    this.server.to(`user:${userId}`).emit('booking_taken');
+    this.server?.to(`user:${userId}`).emit('booking_taken');
   }
 }

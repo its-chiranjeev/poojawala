@@ -249,5 +249,69 @@ describe('EmailService - Centralized Platform Branding', () => {
       expect(sentHtml).toContain('We have reserved your slot and Panditji will visit the location.');
     });
   });
+
+  describe('Temple Verification Emails', () => {
+    it('should send Temple Approval email without remarks section when remarks are omitted', async () => {
+      await service.sendTempleApprovalEmail({
+        email: 'purohit@example.com',
+        templeName: 'Somnath Temple',
+        purohitName: 'Acharya Shastri',
+      });
+
+      expect(mockResendProvider.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'purohit@example.com',
+          subject: 'Temple Submission Approved - Somnath Temple | 1Pooja',
+        }),
+      );
+      const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+      expect(sentHtml).toContain('Somnath Temple');
+      expect(sentHtml).toContain('Temple Approved');
+      expect(sentHtml).toContain('Approved');
+      expect(sentHtml).not.toContain('Verification Remarks');
+    });
+
+    it('should send Temple Approval email with remarks section when remarks are provided', async () => {
+      await service.sendTempleApprovalEmail({
+        email: 'purohit@example.com',
+        templeName: 'Somnath Temple',
+        purohitName: 'Acharya Shastri',
+        remarks: 'Physical documents verified and trust verified.',
+      });
+
+      expect(mockResendProvider.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'purohit@example.com',
+          subject: 'Temple Submission Approved - Somnath Temple | 1Pooja',
+        }),
+      );
+      const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+      expect(sentHtml).toContain('Somnath Temple');
+      expect(sentHtml).toContain('Verification Remarks');
+      expect(sentHtml).toContain('Physical documents verified and trust verified.');
+    });
+
+    it('should send Temple Rejection email with mandatory rejection reason and badge', async () => {
+      await service.sendTempleRejectionEmail({
+        email: 'purohit@example.com',
+        templeName: 'Old Shiv Mandir',
+        rejectionReason: 'Trust registration certificate is expired.',
+        purohitName: 'Acharya Shastri',
+      });
+
+      expect(mockResendProvider.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'purohit@example.com',
+          subject: 'Temple Submission Update - Old Shiv Mandir | 1Pooja',
+        }),
+      );
+      const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+      expect(sentHtml).toContain('Old Shiv Mandir');
+      expect(sentHtml).toContain('Temple Submission Rejected');
+      expect(sentHtml).toContain('Rejected');
+      expect(sentHtml).toContain('Rejection Reason');
+      expect(sentHtml).toContain('Trust registration certificate is expired.');
+    });
+  });
 });
 

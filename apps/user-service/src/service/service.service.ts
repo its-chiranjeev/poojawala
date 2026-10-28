@@ -44,6 +44,7 @@ import {
   ServiceCity,
   CATEGORY_TYPE,
   Temple,
+  TEMPLE_VERIFICATION_STATUS,
   SERVICE_FEATURE_PLAN,
   SERVICE_FEATURE_TYPE,
 } from '@poojawala/entities';
@@ -1482,6 +1483,22 @@ export class ServiceService {
 
     if (!service) {
       throw new NotFoundException('Service not found');
+    }
+
+    if (service.templeId) {
+      if (
+        !service.temple ||
+        service.temple.deletedAt ||
+        !service.temple.isActive ||
+        (service.temple.verificationStatus &&
+          service.temple.verificationStatus !== TEMPLE_VERIFICATION_STATUS.APPROVED)
+      ) {
+        throw new NotFoundException('Service not found');
+      }
+      const templeObj = service.temple as unknown as Record<string, unknown>;
+      delete templeObj.deletedAt;
+      delete templeObj.isActive;
+      delete templeObj.verificationStatus;
     }
 
     let iconDownloadurl: string | null = null;

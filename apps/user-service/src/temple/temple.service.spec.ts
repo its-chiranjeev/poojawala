@@ -1,8 +1,17 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TempleService } from './temple.service';
 import { TempleRepository } from '@poojawala/repositories';
-import { Temple, TempleAarti, ACTOR_TYPE, USER_ROLE, AUDIT_MODULE } from '@poojawala/entities';
+import {
+  Temple,
+  TempleAarti,
+  ACTOR_TYPE,
+  USER_ROLE,
+  AUDIT_MODULE,
+  TEMPLE_VERIFICATION_STATUS,
+  NOTIFICATION_TYPE,
+  User,
+} from '@poojawala/entities';
 import { AuditLogService } from '@poojawala/common';
 import { S3Service } from '@poojawala/s3';
 import { validate } from 'class-validator';
@@ -15,6 +24,8 @@ import {
   UpdateTempleAartiDto,
 } from '@poojawala/dtos';
 import { DataSource } from 'typeorm';
+import { EmailService } from '@poojawala/email-services';
+import { NotificationService } from '@poojawala/notification';
 
 describe('TempleService', () => {
   let service: TempleService;
@@ -35,6 +46,17 @@ describe('TempleService', () => {
     findOne: jest.Mock;
     find: jest.Mock;
     update: jest.Mock;
+  };
+  let mockUserRepo: {
+    findOne: jest.Mock;
+  };
+  let mockEmailService: {
+    sendTempleApprovalEmail: jest.Mock;
+    sendTempleRejectionEmail: jest.Mock;
+  };
+  let mockNotificationService: {
+    notifyAdmins: jest.Mock;
+    createNotification: jest.Mock;
   };
   let mockDataSource: {
     transaction: jest.Mock;
@@ -109,10 +131,33 @@ describe('TempleService', () => {
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
 
+    mockUserRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 50,
+        email: 'purohit@example.com',
+        firstName: 'Acharya',
+        lastName: 'Sharma',
+        role: USER_ROLE.PUROHIT,
+      }),
+    };
+
+    mockEmailService = {
+      sendTempleApprovalEmail: jest.fn().mockResolvedValue(undefined),
+      sendTempleRejectionEmail: jest.fn().mockResolvedValue(undefined),
+    };
+
+    mockNotificationService = {
+      notifyAdmins: jest.fn().mockResolvedValue([]),
+      createNotification: jest.fn().mockResolvedValue({ id: 1 }),
+    };
+
     const mockManager = {
       getRepository: jest.fn((entity) => {
         if (entity === TempleAarti) {
           return mockAartiRepo;
+        }
+        if (entity === User) {
+          return mockUserRepo;
         }
         return mockTempleRepo;
       }),
@@ -152,6 +197,14 @@ describe('TempleService', () => {
           provide: S3Service,
           useValue: mockS3Service,
         },
+        {
+          provide: EmailService,
+          useValue: mockEmailService,
+        },
+        {
+          provide: NotificationService,
+          useValue: mockNotificationService,
+        },
       ],
     }).compile();
 
@@ -179,28 +232,21 @@ describe('TempleService', () => {
 
       const result = await service.createTemple(dto, undefined, 99);
 
-      expect(mockTempleRepo.create).toHaveBeenCalledWith({
-        name: 'Shri Ram Mandir',
-        slug: 'shri-ram-mandir',
-        description: 'Magnificent temple',
-        metaTitle: null,
-        metaDescription: null,
-        imageUrl: 'https://images.poojawala.com/ram.jpg',
-        address: 'Ayodhya Dham',
-        city: 'Ayodhya',
-        state: 'Uttar Pradesh',
-        primaryDeity: null,
-        trustName: null,
-        contactName: null,
-        phone: null,
-        email: null,
-        openingTime: null,
-        closingTime: null,
-        trustRegNo: null,
-        trustDocUrl: null,
-        deityPhotoUrl: null,
-        isActive: true,
-      });
+      expect(mockTempleRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Shri Ram Mandir',
+          slug: 'shri-ram-mandir',
+          description: 'Magnificent temple',
+          imageUrl: 'https://images.poojawala.com/ram.jpg',
+          address: 'Ayodhya Dham',
+          city: 'Ayodhya',
+          state: 'Uttar Pradesh',
+          isActive: true,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED,
+          submittedByUserId: null,
+          verificationRemarks: null,
+        }),
+      );
       expect(mockTempleRepo.save).toHaveBeenCalled();
       expect(mockAuditLogService.createAuditLog).toHaveBeenCalledWith({
         actorId: 99,
@@ -252,28 +298,18 @@ describe('TempleService', () => {
 
       const result = await service.createTemple(dto, undefined, 99);
 
-      expect(mockTempleRepo.create).toHaveBeenCalledWith({
-        name: 'Simple Mandir',
-        slug: 'simple-mandir',
-        description: null,
-        metaTitle: null,
-        metaDescription: null,
-        imageUrl: null,
-        address: null,
-        city: null,
-        state: null,
-        primaryDeity: null,
-        trustName: null,
-        contactName: null,
-        phone: null,
-        email: null,
-        openingTime: null,
-        closingTime: null,
-        trustRegNo: null,
-        trustDocUrl: null,
-        deityPhotoUrl: null,
-        isActive: true,
-      });
+      expect(mockTempleRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Simple Mandir',
+          slug: 'simple-mandir',
+          description: null,
+          imageUrl: null,
+          isActive: true,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED,
+          submittedByUserId: null,
+          verificationRemarks: null,
+        }),
+      );
       expect(mockAuditLogService.createAuditLog).toHaveBeenCalled();
       expect(result.success).toBe(true);
       expect(result.data.name).toBe('Simple Mandir');
@@ -1436,6 +1472,723 @@ describe('TempleService', () => {
         expect(result.data.trustRegNo).toBe('TR-12345');
         expect(result.data.trustDocUrl).toBe('https://storage.poojawala.com/doc.pdf');
         expect(result.data.deityPhotoUrl).toBe('https://storage.poojawala.com/deity.jpg');
+      });
+    });
+
+    describe('Purohit Temple Registration & Verification', () => {
+      const mockPurohitUser = {
+        id: 50,
+        role: USER_ROLE.PUROHIT,
+      } as User;
+
+      const mockAdminUser = {
+        id: 99,
+        role: USER_ROLE.ADMIN,
+      } as User;
+
+      const mockOtherPurohitUser = {
+        id: 77,
+        role: USER_ROLE.PUROHIT,
+      } as User;
+
+      it('should default Purohit-created submissions to PENDING and assign submittedByUserId from auth user', async () => {
+        const dto: CreateTempleDto = {
+          name: 'Purohit Registered Temple',
+          city: 'Varanasi',
+        };
+
+        const result = await service.createTempleWithUser(dto, undefined, mockPurohitUser);
+
+        expect(mockTempleRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: 'Purohit Registered Temple',
+            submittedByUserId: 50,
+            verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+            verificationRemarks: null,
+          }),
+        );
+        expect(mockAuditLogService.createAuditLog).toHaveBeenCalledWith(
+          expect.objectContaining({
+            actorId: 50,
+            actorRole: USER_ROLE.PUROHIT,
+            action: 'TEMPLE_CREATED',
+          }),
+        );
+        expect(result.success).toBe(true);
+        expect(mockNotificationService.notifyAdmins).toHaveBeenCalledWith(
+          'New Temple Submitted for Verification',
+          'A Purohit has submitted "Purohit Registered Temple" for Admin review.',
+          NOTIFICATION_TYPE.SYSTEM,
+          1,
+          'TEMPLE',
+          expect.objectContaining({
+            templeId: 1,
+            templeName: 'Purohit Registered Temple',
+            submittedByUserId: 50,
+            action: 'TEMPLE_SUBMISSION_CREATED',
+          }),
+        );
+      });
+
+      it('1 & 2. Purohit creates a Temple: notification references the correct Temple ID, name, and is persisted', async () => {
+        mockTempleRepo.save.mockImplementationOnce(async (entity) => ({
+          ...entity,
+          id: 42,
+          name: 'Shree Krishna Temple',
+          submittedByUserId: 50,
+        }));
+
+        const dto: CreateTempleDto = {
+          name: 'Shree Krishna Temple',
+          city: 'Mathura',
+        };
+
+        const result = await service.createTempleWithUser(dto, undefined, mockPurohitUser);
+
+        expect(result.success).toBe(true);
+        expect(mockNotificationService.notifyAdmins).toHaveBeenCalledTimes(1);
+        expect(mockNotificationService.notifyAdmins).toHaveBeenCalledWith(
+          'New Temple Submitted for Verification',
+          'A Purohit has submitted "Shree Krishna Temple" for Admin review.',
+          NOTIFICATION_TYPE.SYSTEM,
+          42,
+          'TEMPLE',
+          expect.objectContaining({
+            templeId: 42,
+            templeName: 'Shree Krishna Temple',
+            submittedByUserId: 50,
+          }),
+        );
+      });
+
+      it('4 & 5. Failed Temple creation (transaction error/rollback) does not generate a notification', async () => {
+        mockTempleRepo.save.mockRejectedValueOnce(new Error('Unique slug collision or database timeout'));
+
+        const dto: CreateTempleDto = {
+          name: 'Failed Temple',
+        };
+
+        await expect(
+          service.createTempleWithUser(dto, undefined, mockPurohitUser),
+        ).rejects.toThrow('Unique slug collision or database timeout');
+
+        expect(mockNotificationService.notifyAdmins).not.toHaveBeenCalled();
+      });
+
+      it('6. Failed notification persistence is handled gracefully according to existing error conventions without failing temple creation', async () => {
+        mockNotificationService.notifyAdmins.mockRejectedValueOnce(
+          new Error('Notification service unreachable'),
+        );
+
+        const dto: CreateTempleDto = {
+          name: 'Resilient Temple',
+        };
+
+        const result = await service.createTempleWithUser(dto, undefined, mockPurohitUser);
+
+        expect(result.success).toBe(true);
+        expect(result.statusCode).toBe(201);
+      });
+
+      it('does not send submission notification when Admin creates a temple', async () => {
+        const dto: CreateTempleDto = {
+          name: 'Admin Created Temple',
+        };
+
+        const result = await service.createTempleWithUser(dto, undefined, mockAdminUser);
+
+        expect(result.success).toBe(true);
+        expect(mockNotificationService.notifyAdmins).not.toHaveBeenCalled();
+      });
+
+      it('should prevent Purohit from spoofing submitter ID or setting APPROVED status on creation', async () => {
+        const dto: Partial<CreateTempleDto> & { submittedByUserId?: number } = {
+          name: 'Spoofed Temple',
+          submittedByUserId: 12345, // Client attempts to spoof
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED, // Client attempts to self-approve
+        };
+
+        const result = await service.createTempleWithUser(dto as CreateTempleDto, undefined, mockPurohitUser);
+
+        expect(mockTempleRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: 'Spoofed Temple',
+            submittedByUserId: 50, // Derived from auth user!
+            verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING, // Enforced PENDING!
+          }),
+        );
+        expect(result.success).toBe(true);
+      });
+
+      it('should allow Admin to create temple with APPROVED status by default', async () => {
+        const dto: CreateTempleDto = {
+          name: 'Admin Mandir',
+        };
+
+        const result = await service.createTempleWithUser(dto, undefined, mockAdminUser);
+
+        expect(mockTempleRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: 'Admin Mandir',
+            submittedByUserId: null,
+            verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED,
+          }),
+        );
+        expect(result.success).toBe(true);
+      });
+
+      it('should allow Purohit to update their own submitted temple', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          name: 'Original Name',
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        const dto: UpdateTempleDto = {
+          name: 'Updated By Submitting Purohit',
+        };
+
+        const result = await service.updateTempleWithUser(10, dto, undefined, mockPurohitUser);
+
+        expect(result.success).toBe(true);
+        expect(existingTemple.name).toBe('Updated By Submitting Purohit');
+      });
+
+      it('should throw ForbiddenException if Purohit attempts to update a temple submitted by another user', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          submittedByUserId: 50, // Owned by user 50
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        const dto: UpdateTempleDto = {
+          name: 'Hacked Name',
+        };
+
+        await expect(
+          service.updateTempleWithUser(10, dto, undefined, mockOtherPurohitUser), // user 77
+        ).rejects.toThrow(ForbiddenException);
+      });
+
+      it('should throw ForbiddenException if Purohit attempts to change verificationStatus or verificationRemarks', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        const dto: UpdateTempleDto = {
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED,
+        };
+
+        await expect(
+          service.updateTempleWithUser(10, dto, undefined, mockPurohitUser),
+        ).rejects.toThrow(ForbiddenException);
+
+        const dtoWithRemarks: UpdateTempleDto = {
+          verificationRemarks: 'Admin comment',
+        };
+
+        await expect(
+          service.updateTempleWithUser(10, dtoWithRemarks, undefined, mockPurohitUser),
+        ).rejects.toThrow(ForbiddenException);
+      });
+
+      it('should allow Admin to approve a pending temple submission', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        const dto: UpdateTempleDto = {
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED,
+          verificationRemarks: 'Documents verified',
+        };
+
+        const result = await service.updateTempleWithUser(10, dto, undefined, mockAdminUser);
+
+        expect(result.success).toBe(true);
+        expect(existingTemple.verificationStatus).toBe(TEMPLE_VERIFICATION_STATUS.APPROVED);
+        expect(existingTemple.verificationRemarks).toBe('Documents verified');
+      });
+
+      it('1. Admin rejection without remarks fails and does not update the status', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+          verificationRemarks: null,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        // Missing remarks
+        await expect(
+          service.updateTempleWithUser(
+            10,
+            { verificationStatus: TEMPLE_VERIFICATION_STATUS.REJECTED },
+            undefined,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expect(existingTemple.verificationStatus).toBe(TEMPLE_VERIFICATION_STATUS.PENDING);
+        expect(mockEmailService.sendTempleRejectionEmail).not.toHaveBeenCalled();
+
+        // Empty remarks
+        await expect(
+          service.updateTempleWithUser(
+            10,
+            { verificationStatus: TEMPLE_VERIFICATION_STATUS.REJECTED, verificationRemarks: '' },
+            undefined,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expect(existingTemple.verificationStatus).toBe(TEMPLE_VERIFICATION_STATUS.PENDING);
+
+        // Whitespace-only remarks
+        await expect(
+          service.updateTempleWithUser(
+            10,
+            { verificationStatus: TEMPLE_VERIFICATION_STATUS.REJECTED, verificationRemarks: '   ' },
+            undefined,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expect(existingTemple.verificationStatus).toBe(TEMPLE_VERIFICATION_STATUS.PENDING);
+      });
+
+      it('2. Admin rejection with valid remarks succeeds', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          name: 'Somnath Temple',
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        const dto: UpdateTempleDto = {
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.REJECTED,
+          verificationRemarks: 'Trust certificate could not be verified with authorities',
+        };
+
+        const result = await service.updateTempleWithUser(10, dto, undefined, mockAdminUser);
+
+        expect(result.success).toBe(true);
+        expect(existingTemple.verificationStatus).toBe(TEMPLE_VERIFICATION_STATUS.REJECTED);
+        expect(existingTemple.verificationRemarks).toBe(
+          'Trust certificate could not be verified with authorities',
+        );
+        expect(mockEmailService.sendTempleRejectionEmail).toHaveBeenCalledWith(
+          expect.objectContaining({
+            email: 'purohit@example.com',
+            templeName: 'Somnath Temple',
+            rejectionReason: 'Trust certificate could not be verified with authorities',
+          }),
+        );
+      });
+
+      it('3. Admin approval without remarks succeeds', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          name: 'Somnath Temple',
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+          verificationRemarks: null,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        const result = await service.updateTempleWithUser(
+          10,
+          { verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED },
+          undefined,
+          mockAdminUser,
+        );
+
+        expect(result.success).toBe(true);
+        expect(existingTemple.verificationStatus).toBe(TEMPLE_VERIFICATION_STATUS.APPROVED);
+        expect(existingTemple.verificationRemarks).toBeNull();
+        expect(mockEmailService.sendTempleApprovalEmail).toHaveBeenCalledWith(
+          expect.objectContaining({
+            email: 'purohit@example.com',
+            templeName: 'Somnath Temple',
+            remarks: null,
+          }),
+        );
+      });
+
+      it('4. Approval with remarks includes them in the email', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          name: 'Somnath Temple',
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+          verificationRemarks: null,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        const result = await service.updateTempleWithUser(
+          10,
+          {
+            verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED,
+            verificationRemarks: 'All physical trust documents successfully verified on-site.',
+          },
+          undefined,
+          mockAdminUser,
+        );
+
+        expect(result.success).toBe(true);
+        expect(existingTemple.verificationStatus).toBe(TEMPLE_VERIFICATION_STATUS.APPROVED);
+        expect(existingTemple.verificationRemarks).toBe(
+          'All physical trust documents successfully verified on-site.',
+        );
+        expect(mockEmailService.sendTempleApprovalEmail).toHaveBeenCalledWith(
+          expect.objectContaining({
+            email: 'purohit@example.com',
+            templeName: 'Somnath Temple',
+            remarks: 'All physical trust documents successfully verified on-site.',
+          }),
+        );
+      });
+
+      it('5. Rejection email contains the required remarks', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          name: 'Old Mandir',
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+          verificationRemarks: null,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        await service.updateTempleWithUser(
+          10,
+          {
+            verificationStatus: TEMPLE_VERIFICATION_STATUS.REJECTED,
+            verificationRemarks: 'Deity photo does not meet Vedic authenticity guidelines',
+          },
+          undefined,
+          mockAdminUser,
+        );
+
+        expect(mockEmailService.sendTempleRejectionEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendTempleRejectionEmail).toHaveBeenCalledWith(
+          expect.objectContaining({
+            email: 'purohit@example.com',
+            templeName: 'Old Mandir',
+            rejectionReason: 'Deity photo does not meet Vedic authenticity guidelines',
+          }),
+        );
+      });
+
+      it('6. Emails are sent only on actual verification status transitions', async () => {
+        // PENDING -> APPROVED sends email
+        const templePending: Temple = {
+          ...sampleActiveTemple,
+          id: 11,
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(templePending);
+        await service.updateTempleWithUser(
+          11,
+          { verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED },
+          undefined,
+          mockAdminUser,
+        );
+        expect(mockEmailService.sendTempleApprovalEmail).toHaveBeenCalledTimes(1);
+        mockEmailService.sendTempleApprovalEmail.mockClear();
+
+        // REJECTED -> APPROVED sends email
+        const templeRejected: Temple = {
+          ...sampleActiveTemple,
+          id: 12,
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.REJECTED,
+          verificationRemarks: 'Old reason',
+        };
+        mockTempleRepo.findOne.mockResolvedValue(templeRejected);
+        await service.updateTempleWithUser(
+          12,
+          { verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED },
+          undefined,
+          mockAdminUser,
+        );
+        expect(mockEmailService.sendTempleApprovalEmail).toHaveBeenCalledTimes(1);
+        mockEmailService.sendTempleApprovalEmail.mockClear();
+
+        // APPROVED -> REJECTED sends email
+        const templeApproved: Temple = {
+          ...sampleActiveTemple,
+          id: 13,
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(templeApproved);
+        await service.updateTempleWithUser(
+          13,
+          {
+            verificationStatus: TEMPLE_VERIFICATION_STATUS.REJECTED,
+            verificationRemarks: 'Revoked due to trust ownership dispute',
+          },
+          undefined,
+          mockAdminUser,
+        );
+        expect(mockEmailService.sendTempleRejectionEmail).toHaveBeenCalledTimes(1);
+        mockEmailService.sendTempleRejectionEmail.mockClear();
+
+        // APPROVED -> APPROVED does not send email
+        const templeAlreadyApproved: Temple = {
+          ...sampleActiveTemple,
+          id: 14,
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(templeAlreadyApproved);
+        await service.updateTempleWithUser(
+          14,
+          { verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED },
+          undefined,
+          mockAdminUser,
+        );
+        expect(mockEmailService.sendTempleApprovalEmail).not.toHaveBeenCalled();
+
+        // REJECTED -> REJECTED with updated remarks does not send email
+        const templeAlreadyRejected: Temple = {
+          ...sampleActiveTemple,
+          id: 15,
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.REJECTED,
+          verificationRemarks: 'Old reason',
+        };
+        mockTempleRepo.findOne.mockResolvedValue(templeAlreadyRejected);
+        await service.updateTempleWithUser(
+          15,
+          {
+            verificationStatus: TEMPLE_VERIFICATION_STATUS.REJECTED,
+            verificationRemarks: 'Updated reason for rejection',
+          },
+          undefined,
+          mockAdminUser,
+        );
+        expect(mockEmailService.sendTempleRejectionEmail).not.toHaveBeenCalled();
+      });
+
+      it('7. Unrelated Temple updates do not trigger verification emails', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        await service.updateTempleWithUser(
+          10,
+          {
+            name: 'Updated Temple Name',
+            description: 'Updated Description',
+            city: 'New City',
+          },
+          undefined,
+          mockAdminUser,
+        );
+
+        expect(mockEmailService.sendTempleApprovalEmail).not.toHaveBeenCalled();
+        expect(mockEmailService.sendTempleRejectionEmail).not.toHaveBeenCalled();
+      });
+
+      it('8. Email failure does not incorrectly roll back an already committed verification update', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+        mockEmailService.sendTempleApprovalEmail.mockRejectedValueOnce(
+          new Error('SES Connection timeout'),
+        );
+
+        const result = await service.updateTempleWithUser(
+          10,
+          { verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED },
+          undefined,
+          mockAdminUser,
+        );
+
+        expect(result.success).toBe(true);
+        expect(existingTemple.verificationStatus).toBe(TEMPLE_VERIFICATION_STATUS.APPROVED);
+        expect(mockTempleRepo.save).toHaveBeenCalled();
+      });
+
+      it('should safely log warning and not crash when submitter has no valid email', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+        mockUserRepo.findOne.mockResolvedValueOnce({
+          id: 50,
+          email: null,
+        });
+
+        const result = await service.updateTempleWithUser(
+          10,
+          { verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED },
+          undefined,
+          mockAdminUser,
+        );
+
+        expect(result.success).toBe(true);
+        expect(mockEmailService.sendTempleApprovalEmail).not.toHaveBeenCalled();
+      });
+
+      it('9. A Purohit can delete their own Temple', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          name: 'Purohit Temple',
+          submittedByUserId: 50,
+          deletedAt: null,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        const result = await service.deleteTemple(10, mockPurohitUser);
+
+        expect(result.success).toBe(true);
+        expect(existingTemple.deletedAt).toBeInstanceOf(Date);
+        expect(mockAartiRepo.update).toHaveBeenCalledWith(
+          expect.objectContaining({ templeId: 10 }),
+          expect.objectContaining({ deletedAt: expect.any(Date) }),
+        );
+        expect(mockAuditLogService.createAuditLog).toHaveBeenCalledWith(
+          expect.objectContaining({
+            actorId: 50,
+            actorRole: USER_ROLE.PUROHIT,
+            action: 'TEMPLE_DELETED',
+          }),
+        );
+      });
+
+      it("10. A Purohit cannot delete another Purohit's Temple", async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          name: 'Other Purohit Temple',
+          submittedByUserId: 77,
+          deletedAt: null,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        await expect(
+          service.deleteTemple(10, mockPurohitUser),
+        ).rejects.toThrow(ForbiddenException);
+
+        expect(existingTemple.deletedAt).toBeNull();
+      });
+
+      it('11. Unauthorized roles cannot delete Temples', async () => {
+        const mockCustomerUser = {
+          id: 88,
+          role: USER_ROLE.CUSTOMER,
+        } as User;
+
+        await expect(
+          service.deleteTemple(10, mockCustomerUser),
+        ).rejects.toThrow(ForbiddenException);
+      });
+
+      it('12. Soft-deleted Temples and aartis are no longer publicly visible', async () => {
+        mockTempleRepo.findTempleById.mockResolvedValue(null);
+
+        await expect(
+          service.getTempleById(10, false),
+        ).rejects.toThrow(NotFoundException);
+
+        expect(mockTempleRepo.findTempleById).toHaveBeenCalledWith(10, false);
+      });
+
+      it('13. Related booking and financial records remain intact on temple soft deletion', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          submittedByUserId: 50,
+          deletedAt: null,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        await service.deleteTemple(10, mockPurohitUser);
+
+        expect(existingTemple.deletedAt).toBeDefined();
+        expect(mockTempleRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ id: 10, deletedAt: expect.any(Date) }),
+        );
+      });
+
+      it('14. Existing Admin CRUD and Temple verification behavior continues working', async () => {
+        const existingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 10,
+          submittedByUserId: 77,
+          deletedAt: null,
+        };
+        mockTempleRepo.findOne.mockResolvedValue(existingTemple);
+
+        const deleteResult = await service.deleteTemple(10, mockAdminUser);
+        expect(deleteResult.success).toBe(true);
+        expect(existingTemple.deletedAt).toBeInstanceOf(Date);
+        expect(mockAuditLogService.createAuditLog).toHaveBeenCalledWith(
+          expect.objectContaining({
+            actorId: 99,
+            actorRole: USER_ROLE.ADMIN,
+            action: 'TEMPLE_DELETED',
+          }),
+        );
+
+        // Backward compatibility: passing number adminId directly
+        existingTemple.deletedAt = null;
+        const legacyDeleteResult = await service.deleteTemple(10, 99);
+        expect(legacyDeleteResult.success).toBe(true);
+        expect(existingTemple.deletedAt).toBeInstanceOf(Date);
+      });
+
+      it('should validate invalid status values in UpdateTempleDto validation pipe', async () => {
+        const invalidDto = plainToInstance(UpdateTempleDto, {
+          verificationStatus: 'INVALID_STATUS',
+        });
+        const errors = await validate(invalidDto);
+        expect(errors.length).toBeGreaterThan(0);
+        expect(errors[0].property).toBe('verificationStatus');
+      });
+
+      it('should reject rejection in UpdateTempleDto when verificationRemarks is empty or missing', async () => {
+        const missingRemarksDto = plainToInstance(UpdateTempleDto, {
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.REJECTED,
+        });
+        const errors1 = await validate(missingRemarksDto);
+        expect(errors1.some((e) => e.property === 'verificationRemarks')).toBe(true);
+
+        const emptyRemarksDto = plainToInstance(UpdateTempleDto, {
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.REJECTED,
+          verificationRemarks: '   ',
+        });
+        const errors2 = await validate(emptyRemarksDto);
+        expect(errors2.some((e) => e.property === 'verificationRemarks')).toBe(true);
       });
     });
   });

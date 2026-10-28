@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Temple, Service, ServiceFeature, TempleAarti } from '@poojawala/entities';
+import { Temple, Service, ServiceFeature, TempleAarti, TEMPLE_VERIFICATION_STATUS, User, USER_ROLE } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 import { GetTemplesQueryDto } from '@poojawala/dtos';
 
@@ -47,6 +47,24 @@ export class TempleRepository extends BaseRepository<Temple> {
       qb.andWhere('temple.isActive = :isActive', { isActive: true });
     }
 
+    if (!isAdmin) {
+      qb.andWhere(
+        '(temple.verificationStatus = :approvedStatus OR temple.verificationStatus IS NULL)',
+        { approvedStatus: TEMPLE_VERIFICATION_STATUS.APPROVED },
+      );
+    } else {
+      if (query.verificationStatus) {
+        qb.andWhere('temple.verificationStatus = :vStatus', {
+          vStatus: query.verificationStatus,
+        });
+      }
+      if (query.submittedByUserId) {
+        qb.andWhere('temple.submittedByUserId = :subUserId', {
+          subUserId: query.submittedByUserId,
+        });
+      }
+    }
+
     if (search && search.trim()) {
       qb.andWhere(
         '(CAST(temple.id AS TEXT) ILIKE :search OR temple.name ILIKE :search OR temple.city ILIKE :search OR temple.state ILIKE :search)',
@@ -62,7 +80,20 @@ export class TempleRepository extends BaseRepository<Temple> {
       qb.andWhere('temple.state ILIKE :state', { state: `%${state.trim()}%` });
     }
 
-    if (query.includeAartis === true) {
+    let isIncludeAartisTrue = false;
+    if (
+      query.includeAartis !== undefined &&
+      query.includeAartis !== null &&
+      (query.includeAartis as any) !== ''
+    ) {
+      if (typeof query.includeAartis === 'boolean') {
+        isIncludeAartisTrue = query.includeAartis;
+      } else {
+        const str = String(query.includeAartis).trim().toLowerCase();
+        if (str === 'true' || str === '1') isIncludeAartisTrue = true;
+      }
+    }
+    if (isIncludeAartisTrue) {
       qb.andWhere((subQb) => {
         const subQuery = subQb
           .subQuery()
@@ -76,21 +107,6 @@ export class TempleRepository extends BaseRepository<Temple> {
         }
 
         return `EXISTS (${subQuery.getQuery()})`;
-      });
-    } else if (query.includeAartis === false) {
-      qb.andWhere((subQb) => {
-        const subQuery = subQb
-          .subQuery()
-          .select('1')
-          .from(TempleAarti, 'aarti')
-          .where('aarti.templeId = temple.id')
-          .andWhere('aarti.deletedAt IS NULL');
-
-        if (!isAdmin) {
-          subQuery.andWhere('aarti.isActive = true');
-        }
-
-        return `NOT EXISTS (${subQuery.getQuery()})`;
       });
     }
 
@@ -109,13 +125,34 @@ export class TempleRepository extends BaseRepository<Temple> {
     };
   }
 
-  async findTempleById(id: number, isAdmin: boolean = false): Promise<Temple | null> {
+  async findTempleById(id: number, userOrIsAdmin: User | boolean = false): Promise<Temple | null> {
     const qb = this.repo.createQueryBuilder('temple');
     qb.where('temple.id = :id', { id });
     qb.andWhere('temple.deletedAt IS NULL');
 
+    const isAdmin =
+      typeof userOrIsAdmin === 'boolean'
+        ? userOrIsAdmin
+        : userOrIsAdmin?.role === USER_ROLE.ADMIN;
+
+    const user = typeof userOrIsAdmin === 'object' ? userOrIsAdmin : undefined;
+
     if (!isAdmin) {
-      qb.andWhere('temple.isActive = :isActive', { isActive: true });
+      if (user?.role === USER_ROLE.PUROHIT) {
+        qb.andWhere(
+          '((temple.isActive = true AND (temple.verificationStatus = :approvedStatus OR temple.verificationStatus IS NULL)) OR temple.submittedByUserId = :purohitUserId)',
+          {
+            approvedStatus: TEMPLE_VERIFICATION_STATUS.APPROVED,
+            purohitUserId: user.id,
+          },
+        );
+      } else {
+        qb.andWhere('temple.isActive = :isActive', { isActive: true });
+        qb.andWhere(
+          '(temple.verificationStatus = :approvedStatus OR temple.verificationStatus IS NULL)',
+          { approvedStatus: TEMPLE_VERIFICATION_STATUS.APPROVED },
+        );
+      }
     }
 
     return qb.getOne();

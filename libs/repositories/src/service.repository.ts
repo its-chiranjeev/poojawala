@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, ILike, Repository } from 'typeorm';
-import { Service, Booking, PurohitService, Payment } from '@poojawala/entities';
+import { Service, Booking, PurohitService, Payment, TEMPLE_VERIFICATION_STATUS } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 import { GetServicesQueryDto } from '@poojawala/dtos';
 
@@ -83,6 +83,13 @@ export class ServiceRepository extends BaseRepository<Service> {
       qb.andWhere('service.isActive = :isActive', { isActive: parsedIsActive });
     } else if (!isAdmin) {
       qb.andWhere('service.isActive = :isActive', { isActive: true });
+    }
+
+    if (!isAdmin) {
+      qb.andWhere(
+        '(service.templeId IS NULL OR (temple.id IS NOT NULL AND temple.isActive = true AND (temple.verificationStatus = :templeApprovedStatus OR temple.verificationStatus IS NULL)))',
+        { templeApprovedStatus: TEMPLE_VERIFICATION_STATUS.APPROVED },
+      );
     }
 
     if (parsedIsOnline !== undefined) {
@@ -622,6 +629,9 @@ export class ServiceRepository extends BaseRepository<Service> {
           name: true,
           metaTitle: true,
           metaDescription: true,
+          isActive: true,
+          verificationStatus: true,
+          deletedAt: true,
         },
       },
     });

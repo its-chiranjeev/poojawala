@@ -4,6 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsEmail,
+  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -12,6 +13,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import { TEMPLE_VERIFICATION_STATUS } from '@poojawala/entities';
 import { UpdateTempleAartiDto } from './temple-aarti.dto';
 
 export class UpdateTempleDto {
@@ -217,4 +219,25 @@ export class UpdateTempleDto {
   @ValidateNested({ each: true })
   @Type(() => UpdateTempleAartiDto)
   aartis?: UpdateTempleAartiDto[];
+
+  @IsOptional()
+  @IsEnum(TEMPLE_VERIFICATION_STATUS, {
+    message: 'verificationStatus must be PENDING, APPROVED, or REJECTED',
+  })
+  verificationStatus?: TEMPLE_VERIFICATION_STATUS;
+
+  @ValidateIf((o: UpdateTempleDto) => o.verificationStatus === TEMPLE_VERIFICATION_STATUS.REJECTED)
+  @IsNotEmpty({
+    message: 'verificationRemarks is required and cannot be empty when rejecting a temple',
+  })
+  @ValidateIf(
+    (o: UpdateTempleDto) =>
+      o.verificationStatus === TEMPLE_VERIFICATION_STATUS.REJECTED ||
+      (o.verificationRemarks !== undefined && o.verificationRemarks !== null),
+  )
+  @Transform(({ value }) =>
+    typeof value === 'string' ? (value.trim() === '' ? null : value.trim()) : value,
+  )
+  @IsString({ message: 'verificationRemarks must be a string' })
+  verificationRemarks?: string | null;
 }

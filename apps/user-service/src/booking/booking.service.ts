@@ -49,6 +49,7 @@ import {
   ServiceFeature,
   SERVICE_FEATURE_TYPE,
   AstrologerProfile,
+  TEMPLE_VERIFICATION_STATUS,
 } from '@poojawala/entities';
 import { BookingRepository } from '@poojawala/repositories';
 import {
@@ -395,6 +396,20 @@ export class BookingService {
 
         if (!service.isActive) {
           throw new BadRequestException('Service is currently inactive');
+        }
+
+        if (service.templeId) {
+          if (
+            !service.temple ||
+            service.temple.deletedAt ||
+            !service.temple.isActive ||
+            (service.temple.verificationStatus &&
+              service.temple.verificationStatus !== TEMPLE_VERIFICATION_STATUS.APPROVED)
+          ) {
+            throw new BadRequestException(
+              'The temple associated with this service is not approved or available for booking',
+            );
+          }
         }
 
         if (isOnlineBooking && !service.isOnline) {
@@ -5818,6 +5833,20 @@ export class BookingService {
 
         if (!service.isActive) {
           throw new BadRequestException('Service is currently inactive');
+        }
+
+        if (service.templeId) {
+          if (
+            !service.temple ||
+            service.temple.deletedAt ||
+            !service.temple.isActive ||
+            (service.temple.verificationStatus &&
+              service.temple.verificationStatus !== TEMPLE_VERIFICATION_STATUS.APPROVED)
+          ) {
+            throw new BadRequestException(
+              'The temple associated with this service is not approved or available for booking',
+            );
+          }
         }
 
         if (isOnlineAdminBooking && !service.isOnline) {

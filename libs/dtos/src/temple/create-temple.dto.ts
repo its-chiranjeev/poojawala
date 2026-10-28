@@ -4,6 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsEmail,
+  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -12,6 +13,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import { TEMPLE_VERIFICATION_STATUS } from '@poojawala/entities';
 import { CreateTempleAartiDto } from './temple-aarti.dto';
 
 export class CreateTempleDto {
@@ -216,4 +218,10 @@ export class CreateTempleDto {
   @ValidateNested({ each: true })
   @Type(() => CreateTempleAartiDto)
   aartis?: CreateTempleAartiDto[];
+
+  @IsOptional()
+  @IsEnum(TEMPLE_VERIFICATION_STATUS, {
+    message: 'verificationStatus must be PENDING, APPROVED, or REJECTED',
+  })
+  verificationStatus?: TEMPLE_VERIFICATION_STATUS;
 }

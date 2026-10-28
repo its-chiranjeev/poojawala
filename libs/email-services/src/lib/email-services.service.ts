@@ -1096,5 +1096,88 @@ export class EmailService {
       html,
     });
   }
+
+  async sendTempleApprovalEmail(data: {
+    email: string;
+    templeName: string;
+    purohitName?: string;
+    remarks?: string | null;
+  }): Promise<void> {
+    const statusBadge = 'Temple Approved';
+    const userName = data.purohitName || 'Purohit';
+    const preheaderText = `Congratulations! Your submitted temple "${data.templeName}" has been approved.`;
+    const emailMessage = `Congratulations! Your temple submission for <strong>${this.escapeHtml(data.templeName)}</strong> has been verified and approved by the ${platformBrandName} administrative team. It is now active and listed on the ${platformBrandName} platform.`;
+
+    const detailsRows: EmailTableRow[] = [
+      { label: 'Temple Name', value: data.templeName },
+      { label: 'Verification Status', value: 'Approved', isHighlight: true },
+    ];
+    if (data.remarks && data.remarks.trim()) {
+      detailsRows.push({ label: 'Admin Remarks', value: data.remarks.trim() });
+    }
+
+    const html = renderPoojawalaEmail({
+      statusBadge,
+      userName,
+      preheaderText,
+      emailMessage,
+      detailsTable: {
+        title: 'Temple Verification Summary',
+        rows: detailsRows,
+      },
+      highlight:
+        data.remarks && data.remarks.trim()
+          ? {
+              title: 'Verification Remarks',
+              text: data.remarks.trim(),
+            }
+          : undefined,
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject: `Temple Submission Approved - ${data.templeName} | ${platformBrandName}`,
+      html,
+    });
+  }
+
+  async sendTempleRejectionEmail(data: {
+    email: string;
+    templeName: string;
+    rejectionReason: string;
+    purohitName?: string;
+  }): Promise<void> {
+    const statusBadge = 'Temple Submission Rejected';
+    const userName = data.purohitName || 'Purohit';
+    const preheaderText = `Update regarding your temple submission "${data.templeName}".`;
+    const emailMessage = `Thank you for submitting <strong>${this.escapeHtml(data.templeName)}</strong> to ${platformBrandName}. After careful review by our administrative team, the temple submission could not be approved at this time.`;
+
+    const detailsRows: EmailTableRow[] = [
+      { label: 'Temple Name', value: data.templeName },
+      { label: 'Verification Status', value: 'Rejected', isHighlight: true },
+      { label: 'Rejection Reason', value: data.rejectionReason },
+    ];
+
+    const html = renderPoojawalaEmail({
+      statusBadge,
+      userName,
+      preheaderText,
+      emailMessage,
+      detailsTable: {
+        title: 'Temple Verification Summary',
+        rows: detailsRows,
+      },
+      highlight: {
+        title: 'Rejection Reason',
+        text: data.rejectionReason,
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject: `Temple Submission Update - ${data.templeName} | ${platformBrandName}`,
+      html,
+    });
+  }
 }
 

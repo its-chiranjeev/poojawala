@@ -102,11 +102,11 @@ interface OptionalAuthRequest extends Request {
 export class TempleController {
   constructor(private readonly templeService: TempleService) { }
 
-  // ─── ADMIN WRITE ENDPOINTS ──────────────────────────────────────────────────
+  // ─── WRITE ENDPOINTS (ADMIN & PUROHIT) ──────────────────────────────────────
 
   @Post('add')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(USER_ROLE.ADMIN)
+  @Roles(USER_ROLE.ADMIN, USER_ROLE.PUROHIT)
   @UseInterceptors(
     FileFieldsInterceptor([
       { name: 'image', maxCount: 1 },
@@ -132,13 +132,12 @@ export class TempleController {
       deityPhotoUrl?: Express.Multer.File[];
     },
   ) {
-    return this.templeService.createTemple(dto, files, req.user?.id);
+    return this.templeService.createTempleWithUser(dto, files, req.user);
   }
 
   @Patch(':id')
-  @Put(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(USER_ROLE.ADMIN)
+  @Roles(USER_ROLE.ADMIN, USER_ROLE.PUROHIT)
   @UseInterceptors(
     FileFieldsInterceptor([
       { name: 'image', maxCount: 1 },
@@ -165,18 +164,18 @@ export class TempleController {
       deityPhotoUrl?: Express.Multer.File[];
     },
   ) {
-    return this.templeService.updateTemple(id, dto, files, req.user?.id);
+    return this.templeService.updateTempleWithUser(id, dto, files, req.user);
   }
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(USER_ROLE.ADMIN)
+  @Roles(USER_ROLE.ADMIN, USER_ROLE.PUROHIT)
   @HttpCode(HttpStatus.OK)
   async deleteTemple(
     @Req() req: AuthenticatedRequest,
     @Param('id', ParseIntPipe) id: number,
   ) {
-    return this.templeService.deleteTemple(id, req.user?.id);
+    return this.templeService.deleteTemple(id, req.user);
   }
 
   // ─── SHARED READ ENDPOINTS (ADMIN & PUBLIC) ─────────────────────────────────
@@ -199,7 +198,6 @@ export class TempleController {
     @Req() req: OptionalAuthRequest,
     @Param('id', ParseIntPipe) id: number,
   ) {
-    const isAdmin = req.user?.role === USER_ROLE.ADMIN;
-    return this.templeService.getTempleById(id, isAdmin);
+    return this.templeService.getTempleById(id, req.user);
   }
 }

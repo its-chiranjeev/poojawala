@@ -1,11 +1,11 @@
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, isString, IsString, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { TEMPLE_VERIFICATION_STATUS } from '@poojawala/entities';
 
 export class GetTemplesQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  @Min(1)
   page: number = 1;
 
   @IsOptional()
@@ -47,6 +47,14 @@ export class GetTemplesQueryDto {
     if (str === 'true' || str === '1') return true;
     return undefined;
   })
-  @IsBoolean()
-  includeAartis?: boolean;
+  includeAartis?: boolean | string;
+
+  @IsOptional()
+  @IsEnum(TEMPLE_VERIFICATION_STATUS)
+  verificationStatus?: TEMPLE_VERIFICATION_STATUS;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  submittedByUserId?: number;
 }

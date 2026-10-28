@@ -7,8 +7,17 @@ import {
   DeleteDateColumn,
   Index,
   OneToMany,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
 import { TempleAarti } from './temple-aarti.entity';
+import { User } from './user.entity';
+
+export enum TEMPLE_VERIFICATION_STATUS {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+}
 
 @Entity('temples')
 export class Temple {
@@ -76,6 +85,23 @@ export class Temple {
 
   @Column({ type: 'boolean', default: true })
   isActive!: boolean;
+
+  @Column({ type: 'int', nullable: true })
+  submittedByUserId?: number | null;
+
+  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'submittedByUserId' })
+  submittedByUser?: User | null;
+
+  @Column({
+    type: 'enum',
+    enum: TEMPLE_VERIFICATION_STATUS,
+    default: TEMPLE_VERIFICATION_STATUS.APPROVED,
+  })
+  verificationStatus!: TEMPLE_VERIFICATION_STATUS;
+
+  @Column({ type: 'text', nullable: true })
+  verificationRemarks?: string | null;
 
   @CreateDateColumn()
   createdAt!: Date;

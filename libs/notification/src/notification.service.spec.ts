@@ -158,5 +158,108 @@ describe('NotificationService - Duplicate Delivery & Persistence Verification', 
       );
       expect(mockBookingGateway.notifyUser).toHaveBeenCalledTimes(2);
     });
+
+    it('3. selects only active Admin recipients', async () => {
+      await service.notifyAdmins(
+        'New Temple Submitted for Verification',
+        'A Purohit has submitted "Shri Ram Mandir" for Admin review.',
+        NOTIFICATION_TYPE.SYSTEM,
+        1,
+        'TEMPLE',
+      );
+
+      expect(mockUserRepository.find).toHaveBeenCalledWith({
+        where: {
+          role: USER_ROLE.ADMIN,
+          status: USER_STATUS.ACTIVE,
+        },
+      });
+    });
+
+    it('4. persists notifications before emitting Socket.IO event', async () => {
+      const callOrder: string[] = [];
+      mockNotificationRepository.save.mockImplementation(async (entity: unknown) => {
+        callOrder.push('persistence');
+        return entity;
+      });
+
+      const emitSpy = jest.fn().mockImplementation(() => {
+        callOrder.push('socket_emit');
+      });
+      mockBookingGateway.server.to.mockReturnValue({ emit: emitSpy });
+
+      await service.notifyAdmins(
+        'New Temple Submitted for Verification',
+        'A Purohit has submitted "Shri Ram Mandir" for Admin review.',
+        NOTIFICATION_TYPE.SYSTEM,
+        1,
+        'TEMPLE',
+      );
+
+      expect(callOrder).toContain('persistence');
+      expect(callOrder).toContain('socket_emit');
+      expect(callOrder.indexOf('persistence')).toBeLessThan(callOrder.indexOf('socket_emit'));
+    });
+
+    it('7. retains persisted notification if Socket.IO delivery throws an error', async () => {
+      const emitSpy = jest.fn().mockImplementation(() => {
+        throw new Error('Socket.IO connection disconnected');
+      });
+      mockBookingGateway.server.to.mockReturnValue({ emit: emitSpy });
+
+      let result;
+      try {
+        result = await service.notifyAdmins(
+          'New Temple Submitted for Verification',
+          'A Purohit has submitted "Shri Ram Mandir" for Admin review.',
+          NOTIFICATION_TYPE.SYSTEM,
+          1,
+          'TEMPLE',
+        );
+      } catch {
+        // Socket delivery exception caught
+      }
+
+      // Persisted notifications were saved and remain intact in the database
+      expect(mockNotificationRepository.save).toHaveBeenCalled();
+    });
+
+    it('9. allows Admin to reconnect and read notifications without creating duplicates', async () => {
+      const mockNotifications = [
+        { id: 1, userId: 101, title: 'New Temple Submitted for Verification', isRead: false },
+      ];
+      mockNotificationRepository.findAndCount.mockResolvedValue([mockNotifications, 1]);
+
+      const res = await service.getUserNotifications(101, { page: 1, limit: 10 });
+
+      expect(res.success).toBe(true);
+      expect(res.data.items).toEqual(mockNotifications);
+      // Read query does not save any new notifications
+      expect(mockNotificationRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('10. verifies notification list, unread count, and mark-as-read lifecycle behavior', async () => {
+      const notif = {
+        id: 1,
+        userId: 101,
+        isRead: false,
+        readAt: null as Date | null,
+      };
+      mockNotificationRepository.findOne.mockResolvedValue(notif);
+      mockNotificationRepository.count.mockResolvedValue(2);
+
+      const markRes = await service.markAsRead(101, 1);
+
+      expect(markRes.isRead).toBe(true);
+      expect(markRes.readAt).toBeInstanceOf(Date);
+      expect(mockNotificationRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1, isRead: true }),
+      );
+      expect(mockBookingGateway.notifyUser).toHaveBeenCalledWith(
+        101,
+        'notification:unread-count',
+        { unreadCount: 2 },
+      );
+    });
   });
 });

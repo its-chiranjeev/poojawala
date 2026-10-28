@@ -1,4 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { TempleRepository } from '@poojawala/repositories';
 import { CreateTempleDto, UpdateTempleDto, GetTemplesQueryDto } from '@poojawala/dtos';
 import {
@@ -8,9 +15,14 @@ import {
   ACTOR_TYPE,
   USER_ROLE,
   AUDIT_MODULE,
+  TEMPLE_VERIFICATION_STATUS,
+  NOTIFICATION_TYPE,
+  User,
 } from '@poojawala/entities';
 import { AuditLogService, generateUniqueSlug } from '@poojawala/common';
 import { S3Service } from '@poojawala/s3';
+import { EmailService } from '@poojawala/email-services';
+import { NotificationService } from '@poojawala/notification';
 import { DataSource, EntityManager, In, IsNull } from 'typeorm';
 
 export interface FormattedAartiResponse {
@@ -49,6 +61,9 @@ export interface FormattedTempleResponse {
   deityPhotoUrl: string | null;
   deityPhotoDownloadUrl: string | null;
   isActive: boolean;
+  submittedByUserId?: number | null;
+  verificationStatus?: TEMPLE_VERIFICATION_STATUS;
+  verificationRemarks?: string | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date | null;
@@ -58,10 +73,14 @@ export interface FormattedTempleResponse {
 
 @Injectable()
 export class TempleService {
+  private readonly logger = new Logger(TempleService.name);
+
   constructor(
     private readonly templeRepository: TempleRepository,
     private readonly auditLogService: AuditLogService,
     private readonly s3Service: S3Service,
+    @Optional() private readonly emailService?: EmailService,
+    @Optional() private readonly notificationService?: NotificationService,
     @Optional() private readonly dataSource?: DataSource,
   ) { }
 
@@ -110,6 +129,9 @@ export class TempleService {
       deityPhotoUrl: temple.deityPhotoUrl ?? null,
       deityPhotoDownloadUrl: deityPhotoDownloadUrl !== undefined ? deityPhotoDownloadUrl : (temple.deityPhotoUrl ?? null),
       isActive: temple.isActive,
+      submittedByUserId: temple.submittedByUserId ?? null,
+      verificationStatus: temple.verificationStatus,
+      verificationRemarks: temple.verificationRemarks ?? null,
       createdAt: temple.createdAt,
       updatedAt: temple.updatedAt,
       deletedAt: temple.deletedAt,
@@ -273,12 +295,45 @@ export class TempleService {
     },
     adminId?: number,
   ) {
+    return this.createTempleWithUser(dto, files, adminId);
+  }
+
+  async createTempleWithUser(
+    dto: CreateTempleDto,
+    files?: {
+      image?: Express.Multer.File[];
+      imageUrl?: Express.Multer.File[];
+      trustDoc?: Express.Multer.File[];
+      trustDocUrl?: Express.Multer.File[];
+      deityPhoto?: Express.Multer.File[];
+      deityPhotoUrl?: Express.Multer.File[];
+    },
+    userOrAdminId?: User | number,
+  ) {
+    const user = typeof userOrAdminId === 'object' ? userOrAdminId : undefined;
+    const actorId = user ? user.id : (typeof userOrAdminId === 'number' ? userOrAdminId : undefined);
+    const isPurohit = user?.role === USER_ROLE.PUROHIT;
+
+    let submittedByUserId: number | null = null;
+    let verificationStatus: TEMPLE_VERIFICATION_STATUS;
+    let verificationRemarks: string | null = null;
+
+    if (isPurohit) {
+      submittedByUserId = user!.id;
+      verificationStatus = TEMPLE_VERIFICATION_STATUS.PENDING;
+      verificationRemarks = null;
+    } else {
+      submittedByUserId = null;
+      verificationStatus = dto.verificationStatus || TEMPLE_VERIFICATION_STATUS.APPROVED;
+      verificationRemarks = null;
+    }
+
     let imageUrl: string | null = dto.imageUrl ? dto.imageUrl.trim() : null;
     const fileToUpload = files?.imageUrl || files?.image;
     if (fileToUpload?.length) {
       imageUrl =
         (await this.s3Service.uploadFileHelper(
-          adminId || 'temple',
+          actorId || 'temple',
           'temple',
           fileToUpload,
         )) || null;
@@ -289,7 +344,7 @@ export class TempleService {
     if (trustDocFile?.length) {
       trustDocUrl =
         (await this.s3Service.uploadFileHelper(
-          adminId || 'temple',
+          actorId || 'temple',
           'temple/docs',
           trustDocFile,
         )) || null;
@@ -300,7 +355,7 @@ export class TempleService {
     if (deityPhotoFile?.length) {
       deityPhotoUrl =
         (await this.s3Service.uploadFileHelper(
-          adminId || 'temple',
+          actorId || 'temple',
           'temple/deity',
           deityPhotoFile,
         )) || null;
@@ -336,6 +391,9 @@ export class TempleService {
           trustDocUrl,
           deityPhotoUrl,
           isActive: dto.isActive !== undefined ? dto.isActive : true,
+          submittedByUserId,
+          verificationStatus,
+          verificationRemarks,
         });
 
         const saved = await templeRepo.save(temple);
@@ -365,14 +423,16 @@ export class TempleService {
         }
 
         await this.auditLogService.createAuditLog({
-          actorId: adminId,
+          actorId,
           actorType: ACTOR_TYPE.USER,
-          actorRole: USER_ROLE.ADMIN,
+          actorRole: isPurohit ? USER_ROLE.PUROHIT : USER_ROLE.ADMIN,
           module: AUDIT_MODULE.TEMPLE,
           entity: 'Temple',
           entityId: String(saved.id),
           action: 'TEMPLE_CREATED',
-          message: `Admin created new temple ${saved.name}.`,
+          message: isPurohit
+            ? `Purohit registered temple submission ${saved.name}.`
+            : `Admin created new temple ${saved.name}.`,
           oldValue: undefined,
           newValue: {
             name: saved.name,
@@ -382,12 +442,37 @@ export class TempleService {
             city: saved.city,
             state: saved.state,
             isActive: saved.isActive,
+            verificationStatus: saved.verificationStatus,
+            submittedByUserId: saved.submittedByUserId,
           },
         });
 
         return { savedTemple: saved, savedAartis: aartisList };
       },
     );
+
+    if (isPurohit && this.notificationService) {
+      try {
+        await this.notificationService.notifyAdmins(
+          'New Temple Submitted for Verification',
+          `A Purohit has submitted "${savedTemple.name}" for Admin review.`,
+          NOTIFICATION_TYPE.SYSTEM,
+          savedTemple.id,
+          'TEMPLE',
+          {
+            templeId: savedTemple.id,
+            templeName: savedTemple.name,
+            submittedByUserId: savedTemple.submittedByUserId,
+            action: 'TEMPLE_SUBMISSION_CREATED',
+          },
+        );
+      } catch (error: unknown) {
+        const errMessage = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `Failed to notify admins of temple submission for temple ${savedTemple.id}: ${errMessage}`,
+        );
+      }
+    }
 
     let downloadUrl: string | null = null;
     if (savedTemple.imageUrl) {
@@ -444,8 +529,29 @@ export class TempleService {
     },
     adminId?: number,
   ) {
-    const { updated, aartisList } = await this.runInTransaction(
-      async (manager: EntityManager) => {
+    return this.updateTempleWithUser(id, dto, files, adminId);
+  }
+
+  async updateTempleWithUser(
+    id: number,
+    dto: UpdateTempleDto,
+    files?: {
+      image?: Express.Multer.File[];
+      imageUrl?: Express.Multer.File[];
+      trustDoc?: Express.Multer.File[];
+      trustDocUrl?: Express.Multer.File[];
+      deityPhoto?: Express.Multer.File[];
+      deityPhotoUrl?: Express.Multer.File[];
+    },
+    userOrAdminId?: User | number,
+  ) {
+    const user = typeof userOrAdminId === 'object' ? userOrAdminId : undefined;
+    const actorId = user ? user.id : (typeof userOrAdminId === 'number' ? userOrAdminId : undefined);
+    const isPurohit = user?.role === USER_ROLE.PUROHIT;
+    const isAdmin = !user || user.role === USER_ROLE.ADMIN;
+
+    const { updated, aartisList, statusTransition, submitterUser, finalRemarks } =
+      await this.runInTransaction(async (manager: EntityManager) => {
         const templeRepo = manager.getRepository(Temple);
         const aartiRepo = manager.getRepository(TempleAarti);
 
@@ -458,6 +564,75 @@ export class TempleService {
           throw new NotFoundException(`Temple with id ${id} not found`);
         }
 
+        if (isPurohit) {
+          if (temple.submittedByUserId !== user!.id) {
+            throw new ForbiddenException('You are not authorized to update this temple');
+          }
+          if (dto.verificationStatus !== undefined || dto.verificationRemarks !== undefined) {
+            throw new ForbiddenException('Purohits cannot change verification status or remarks');
+          }
+        } else if (!isAdmin) {
+          throw new ForbiddenException('You are not authorized to update this temple');
+        }
+
+        const previousStatus = temple.verificationStatus;
+        let transition: 'APPROVED' | 'REJECTED' | null = null;
+
+        if (isAdmin) {
+          if (dto.verificationStatus !== undefined) {
+            const targetStatus = dto.verificationStatus;
+
+            if (targetStatus === TEMPLE_VERIFICATION_STATUS.REJECTED) {
+              const remarks = dto.verificationRemarks;
+              if (!remarks || typeof remarks !== 'string' || !remarks.trim()) {
+                throw new BadRequestException(
+                  'A non-empty reason/remarks is required when rejecting a temple submission',
+                );
+              }
+              if (previousStatus !== TEMPLE_VERIFICATION_STATUS.REJECTED) {
+                transition = 'REJECTED';
+              }
+              temple.verificationStatus = TEMPLE_VERIFICATION_STATUS.REJECTED;
+              temple.verificationRemarks = remarks.trim();
+            } else if (targetStatus === TEMPLE_VERIFICATION_STATUS.APPROVED) {
+              if (
+                previousStatus === TEMPLE_VERIFICATION_STATUS.PENDING ||
+                previousStatus === TEMPLE_VERIFICATION_STATUS.REJECTED
+              ) {
+                transition = 'APPROVED';
+              }
+              temple.verificationStatus = TEMPLE_VERIFICATION_STATUS.APPROVED;
+              if (dto.verificationRemarks !== undefined) {
+                temple.verificationRemarks =
+                  dto.verificationRemarks &&
+                  typeof dto.verificationRemarks === 'string' &&
+                  dto.verificationRemarks.trim() !== ''
+                    ? dto.verificationRemarks.trim()
+                    : null;
+              } else {
+                temple.verificationRemarks = null;
+              }
+            } else if (targetStatus === TEMPLE_VERIFICATION_STATUS.PENDING) {
+              temple.verificationStatus = TEMPLE_VERIFICATION_STATUS.PENDING;
+              if (dto.verificationRemarks !== undefined) {
+                temple.verificationRemarks =
+                  dto.verificationRemarks &&
+                  typeof dto.verificationRemarks === 'string' &&
+                  dto.verificationRemarks.trim() !== ''
+                    ? dto.verificationRemarks.trim()
+                    : null;
+              }
+            }
+          } else if (dto.verificationRemarks !== undefined) {
+            temple.verificationRemarks =
+              dto.verificationRemarks &&
+              typeof dto.verificationRemarks === 'string' &&
+              dto.verificationRemarks.trim() !== ''
+                ? dto.verificationRemarks.trim()
+                : null;
+          }
+        }
+
         const oldValue = {
           name: temple.name,
           description: temple.description,
@@ -468,6 +643,8 @@ export class TempleService {
           city: temple.city,
           state: temple.state,
           isActive: temple.isActive,
+          verificationStatus: temple.verificationStatus,
+          verificationRemarks: temple.verificationRemarks,
         };
 
         if (dto.name !== undefined) {
@@ -567,7 +744,7 @@ export class TempleService {
         if (hasImageFile && fileToUpload) {
           temple.imageUrl =
             (await this.s3Service.uploadFileHelper(
-              adminId || 'temple',
+              actorId || 'temple',
               'temple',
               fileToUpload,
             )) || null;
@@ -601,7 +778,7 @@ export class TempleService {
         if (hasTrustDocFile && trustDocFile) {
           temple.trustDocUrl =
             (await this.s3Service.uploadFileHelper(
-              adminId || 'temple',
+              actorId || 'temple',
               'temple/docs',
               trustDocFile,
             )) || null;
@@ -616,7 +793,7 @@ export class TempleService {
         if (hasDeityPhotoFile && deityPhotoFile) {
           temple.deityPhotoUrl =
             (await this.s3Service.uploadFileHelper(
-              adminId || 'temple',
+              actorId || 'temple',
               'temple/deity',
               deityPhotoFile,
             )) || null;
@@ -724,14 +901,16 @@ export class TempleService {
         }
 
         await this.auditLogService.createAuditLog({
-          actorId: adminId,
+          actorId,
           actorType: ACTOR_TYPE.USER,
-          actorRole: USER_ROLE.ADMIN,
+          actorRole: isPurohit ? USER_ROLE.PUROHIT : USER_ROLE.ADMIN,
           module: AUDIT_MODULE.TEMPLE,
           entity: 'Temple',
           entityId: String(id),
           action: 'TEMPLE_UPDATED',
-          message: `Admin updated temple ${savedTemple.name}.`,
+          message: isPurohit
+            ? `Purohit updated temple ${savedTemple.name}.`
+            : `Admin updated temple ${savedTemple.name}.`,
           oldValue,
           newValue: {
             name: savedTemple.name,
@@ -741,12 +920,62 @@ export class TempleService {
             city: savedTemple.city,
             state: savedTemple.state,
             isActive: savedTemple.isActive,
+            verificationStatus: savedTemple.verificationStatus,
+            verificationRemarks: savedTemple.verificationRemarks,
           },
         });
 
-        return { updated: savedTemple, aartisList: activeAartis };
+        let submitterUser: User | null = null;
+        if (transition && savedTemple.submittedByUserId) {
+          submitterUser = await manager.getRepository(User).findOne({
+            where: { id: savedTemple.submittedByUserId },
+          });
+        }
+
+        return {
+          updated: savedTemple,
+          aartisList: activeAartis,
+          statusTransition: transition,
+          submitterUser,
+          finalRemarks: savedTemple.verificationRemarks,
+        };
       },
     );
+
+    if (statusTransition && this.emailService) {
+      if (!submitterUser || !submitterUser.email || !submitterUser.email.trim()) {
+        this.logger.warn(
+          `Temple ${updated.id} (${updated.name}) verification status updated to ${statusTransition}, but submitting user ${updated.submittedByUserId} has no valid email address; skipping email delivery.`,
+        );
+      } else {
+        const submitterEmail = submitterUser.email.trim();
+        const submitterName =
+          [submitterUser.firstName, submitterUser.lastName].filter(Boolean).join(' ') ||
+          'Purohit';
+        try {
+          if (statusTransition === 'APPROVED') {
+            await this.emailService.sendTempleApprovalEmail({
+              email: submitterEmail,
+              templeName: updated.name,
+              purohitName: submitterName,
+              remarks: finalRemarks,
+            });
+          } else if (statusTransition === 'REJECTED') {
+            await this.emailService.sendTempleRejectionEmail({
+              email: submitterEmail,
+              templeName: updated.name,
+              rejectionReason: finalRemarks || '',
+              purohitName: submitterName,
+            });
+          }
+        } catch (error: unknown) {
+          const errMessage = error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `Failed to deliver temple verification ${statusTransition} email for temple ${updated.id} to submitter ${updated.submittedByUserId}: ${errMessage}`,
+          );
+        }
+      }
+    }
 
     let downloadUrl: string | null = null;
     if (updated.imageUrl) {
@@ -790,7 +1019,16 @@ export class TempleService {
     };
   }
 
-  async deleteTemple(id: number, adminId?: number) {
+  async deleteTemple(id: number, userOrAdminId?: User | number) {
+    const user = typeof userOrAdminId === 'object' ? userOrAdminId : undefined;
+    const actorId = user ? user.id : (typeof userOrAdminId === 'number' ? userOrAdminId : undefined);
+    const isPurohit = user?.role === USER_ROLE.PUROHIT;
+    const isAdmin = !user || user.role === USER_ROLE.ADMIN;
+
+    if (!isAdmin && !isPurohit) {
+      throw new ForbiddenException('You are not authorized to delete temples');
+    }
+
     await this.runInTransaction(async (manager: EntityManager) => {
       const templeRepo = manager.getRepository(Temple);
       const aartiRepo = manager.getRepository(TempleAarti);
@@ -804,6 +1042,12 @@ export class TempleService {
         throw new NotFoundException(`Temple with id ${id} not found`);
       }
 
+      if (isPurohit) {
+        if (temple.submittedByUserId !== user!.id) {
+          throw new ForbiddenException('You are not authorized to delete this temple');
+        }
+      }
+
       const now = new Date();
       temple.deletedAt = now;
       await templeRepo.save(temple);
@@ -814,17 +1058,21 @@ export class TempleService {
       );
 
       await this.auditLogService.createAuditLog({
-        actorId: adminId,
+        actorId,
         actorType: ACTOR_TYPE.USER,
-        actorRole: USER_ROLE.ADMIN,
+        actorRole: isPurohit ? USER_ROLE.PUROHIT : USER_ROLE.ADMIN,
         module: AUDIT_MODULE.TEMPLE,
         entity: 'Temple',
         entityId: String(id),
         action: 'TEMPLE_DELETED',
-        message: `Admin soft deleted temple ${temple.name}.`,
+        message: isPurohit
+          ? `Purohit soft deleted temple ${temple.name}.`
+          : `Admin soft deleted temple ${temple.name}.`,
         oldValue: {
           name: temple.name,
           isActive: temple.isActive,
+          submittedByUserId: temple.submittedByUserId,
+          verificationStatus: temple.verificationStatus,
         },
         newValue: {
           deleted: true,
@@ -842,7 +1090,19 @@ export class TempleService {
   async getTemples(query: GetTemplesQueryDto, isAdmin: boolean = false) {
     const result = await this.templeRepository.findAllTemples(query, isAdmin);
 
-    const shouldIncludeAartis = query.includeAartis !== false;
+    let shouldIncludeAartis = false;
+    if (
+      query.includeAartis !== undefined &&
+      query.includeAartis !== null &&
+      (query.includeAartis as unknown) !== ''
+    ) {
+      if (typeof query.includeAartis === 'boolean') {
+        shouldIncludeAartis = query.includeAartis;
+      } else {
+        const str = String(query.includeAartis).trim().toLowerCase();
+        if (str === 'true' || str === '1') shouldIncludeAartis = true;
+      }
+    }
     let aartisByTempleId: Map<number, TempleAarti[]> | undefined = undefined;
     if (
       shouldIncludeAartis &&
@@ -911,8 +1171,13 @@ export class TempleService {
     };
   }
 
-  async getTempleById(id: number, isAdmin: boolean = false) {
-    const temple = await this.templeRepository.findTempleById(id, isAdmin);
+  async getTempleById(id: number, userOrIsAdmin: User | boolean = false) {
+    const isAdmin =
+      typeof userOrIsAdmin === 'boolean'
+        ? userOrIsAdmin
+        : userOrIsAdmin?.role === USER_ROLE.ADMIN;
+
+    const temple = await this.templeRepository.findTempleById(id, userOrIsAdmin);
 
     if (!temple) {
       throw new NotFoundException(`Temple with id ${id} not found`);
