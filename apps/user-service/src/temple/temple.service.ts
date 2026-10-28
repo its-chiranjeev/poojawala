@@ -1,9 +1,60 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { TempleRepository } from '@poojawala/repositories';
 import { CreateTempleDto, UpdateTempleDto, GetTemplesQueryDto } from '@poojawala/dtos';
-import { Temple, ACTOR_TYPE, USER_ROLE, AUDIT_MODULE } from '@poojawala/entities';
+import {
+  Temple,
+  TempleAarti,
+  ServiceFeature,
+  ACTOR_TYPE,
+  USER_ROLE,
+  AUDIT_MODULE,
+} from '@poojawala/entities';
 import { AuditLogService, generateUniqueSlug } from '@poojawala/common';
 import { S3Service } from '@poojawala/s3';
+import { DataSource, EntityManager, In, IsNull } from 'typeorm';
+
+export interface FormattedAartiResponse {
+  id: number;
+  templeId: number;
+  name: string | null;
+  slug: string | null;
+  time: string | null;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface FormattedTempleResponse {
+  id: number;
+  name: string;
+  slug: string | null;
+  description: string | null;
+  metaTitle: string | null;
+  metaDescription: string | null;
+  imageUrl: string | null;
+  downloadUrl: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  primaryDeity: string | null;
+  trustName: string | null;
+  contactName: string | null;
+  phone: string | null;
+  email: string | null;
+  openingTime: string | null;
+  closingTime: string | null;
+  trustRegNo: string | null;
+  trustDocUrl: string | null;
+  trustDocDownloadUrl: string | null;
+  deityPhotoUrl: string | null;
+  deityPhotoDownloadUrl: string | null;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt?: Date | null;
+  services?: Record<string, unknown>[];
+  aartis?: FormattedAartiResponse[];
+}
 
 @Injectable()
 export class TempleService {
@@ -11,21 +62,53 @@ export class TempleService {
     private readonly templeRepository: TempleRepository,
     private readonly auditLogService: AuditLogService,
     private readonly s3Service: S3Service,
+    @Optional() private readonly dataSource?: DataSource,
   ) { }
 
-  private formatTempleResponse(temple: Temple, downloadUrl: string | null, services?: any[]) {
-    const formatted: any = {
+  private async runInTransaction<T>(
+    operation: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    if (this.dataSource && typeof this.dataSource.transaction === 'function') {
+      return this.dataSource.transaction(operation);
+    }
+    if (this.templeRepository?.manager && typeof this.templeRepository.manager.transaction === 'function') {
+      return this.templeRepository.manager.transaction(operation);
+    }
+    throw new Error('No transaction manager available');
+  }
+
+  private formatTempleResponse(
+    temple: Temple,
+    downloadUrl: string | null,
+    services?: Record<string, unknown>[],
+    aartis?: TempleAarti[],
+    trustDocDownloadUrl?: string | null,
+    deityPhotoDownloadUrl?: string | null,
+  ): FormattedTempleResponse {
+    const formatted: FormattedTempleResponse = {
       id: temple.id,
       name: temple.name,
       slug: temple.slug ?? null,
-      description: temple.description,
+      description: temple.description ?? null,
       metaTitle: temple.metaTitle ?? null,
       metaDescription: temple.metaDescription ?? null,
-      imageUrl: temple.imageUrl,
+      imageUrl: temple.imageUrl ?? null,
       downloadUrl,
-      address: temple.address,
-      city: temple.city,
-      state: temple.state,
+      address: temple.address ?? null,
+      city: temple.city ?? null,
+      state: temple.state ?? null,
+      primaryDeity: temple.primaryDeity ?? null,
+      trustName: temple.trustName ?? null,
+      contactName: temple.contactName ?? null,
+      phone: temple.phone ?? null,
+      email: temple.email ?? null,
+      openingTime: temple.openingTime ?? null,
+      closingTime: temple.closingTime ?? null,
+      trustRegNo: temple.trustRegNo ?? null,
+      trustDocUrl: temple.trustDocUrl ?? null,
+      trustDocDownloadUrl: trustDocDownloadUrl !== undefined ? trustDocDownloadUrl : (temple.trustDocUrl ?? null),
+      deityPhotoUrl: temple.deityPhotoUrl ?? null,
+      deityPhotoDownloadUrl: deityPhotoDownloadUrl !== undefined ? deityPhotoDownloadUrl : (temple.deityPhotoUrl ?? null),
       isActive: temple.isActive,
       createdAt: temple.createdAt,
       updatedAt: temple.updatedAt,
@@ -34,36 +117,52 @@ export class TempleService {
 
     if (services !== undefined) {
       formatted.services = services.map((s) => ({
-        id: s.id,
-        name: s.name,
-        slug: s.slug ?? null,
-        description: s.description ?? null,
-        metaTitle: s.metaTitle ?? null,
-        metaDescription: s.metaDescription ?? null,
-        iconUrl: s.iconUrl ?? null,
-        iconDownloadurl: s.iconDownloadurl ?? null,
-        isActive: s.isActive,
-        plans: s.plans ?? null,
+        id: s['id'],
+        name: s['name'],
+        slug: s['slug'] ?? null,
+        description: s['description'] ?? null,
+        metaTitle: s['metaTitle'] ?? null,
+        metaDescription: s['metaDescription'] ?? null,
+        iconUrl: s['iconUrl'] ?? null,
+        iconDownloadurl: s['iconDownloadurl'] ?? null,
+        isActive: s['isActive'],
+        plans: s['plans'] ?? null,
       }));
+    }
+
+    const effectiveAartis = aartis !== undefined ? aartis : temple.aartis;
+    if (effectiveAartis !== undefined) {
+      formatted.aartis = effectiveAartis
+        .filter((a) => !a.deletedAt)
+        .map((a) => ({
+          id: a.id,
+          templeId: a.templeId,
+          name: a.name ?? null,
+          slug: a.slug ?? null,
+          time: a.time ?? null,
+          isActive: a.isActive,
+          createdAt: a.createdAt,
+          updatedAt: a.updatedAt,
+        }));
     }
 
     return formatted;
   }
 
-  private enrichServicePlansAndToken(service: any, serviceFeatures?: any[]) {
-    if (!service || !service.plans) return null;
+  private enrichServicePlansAndToken(service: Record<string, unknown>, serviceFeatures?: ServiceFeature[]) {
+    if (!service || !service['plans']) return null;
 
     const effectiveTokenPercentage =
-      service.tokenPercentage != null && Number(service.tokenPercentage) > 0
-        ? Number(service.tokenPercentage)
+      service['tokenPercentage'] != null && Number(service['tokenPercentage']) > 0
+        ? Number(service['tokenPercentage'])
         : 30;
 
     const effectiveCommissionPercentage =
-      service.commissionPercentage != null
-        ? Number(service.commissionPercentage)
+      service['commissionPercentage'] != null
+        ? Number(service['commissionPercentage'])
         : 10;
 
-    let plans = service.plans;
+    let plans = service['plans'];
     if (typeof plans === 'string') {
       try {
         plans = JSON.parse(plans);
@@ -71,7 +170,7 @@ export class TempleService {
     }
 
     if (plans && typeof plans === 'object' && !Array.isArray(plans)) {
-      const enrichedPlans: Record<string, any> = {};
+      const enrichedPlans: Record<string, unknown> = {};
       const allFeatures = Array.isArray(serviceFeatures) ? serviceFeatures : [];
 
       for (const [key, plan] of Object.entries(plans)) {
@@ -83,22 +182,22 @@ export class TempleService {
         }
         const planKey = key.toLowerCase();
         if (plan && typeof plan === 'object' && !Array.isArray(plan)) {
-          const rawPlanRecord = { ...(plan as any) };
+          const rawPlanRecord: Record<string, unknown> = { ...(plan as Record<string, unknown>) };
 
-          const structuredPlan: Record<string, any> = {};
+          const structuredPlan: Record<string, unknown> = {};
 
           if (
-            rawPlanRecord.price != null &&
-            !isNaN(Number(rawPlanRecord.price)) &&
-            Number(rawPlanRecord.price) > 0
+            rawPlanRecord['price'] != null &&
+            !isNaN(Number(rawPlanRecord['price'])) &&
+            Number(rawPlanRecord['price']) > 0
           ) {
-            const planPrice = Number(rawPlanRecord.price);
-            structuredPlan.price = planPrice;
+            const planPrice = Number(rawPlanRecord['price']);
+            structuredPlan['price'] = planPrice;
 
             const tokenAmount = Number(
               ((planPrice * effectiveTokenPercentage) / 100).toFixed(2),
             );
-            structuredPlan.tokenAmount = tokenAmount;
+            structuredPlan['tokenAmount'] = tokenAmount;
 
             const planPayoutFieldKey = `${key}PurohitPayoutAmount`;
             const platformCommission = Number(
@@ -108,35 +207,35 @@ export class TempleService {
               (planPrice - platformCommission).toFixed(2),
             );
           } else {
-            if (rawPlanRecord.price != null) {
-              structuredPlan.price = rawPlanRecord.price;
+            if (rawPlanRecord['price'] != null) {
+              structuredPlan['price'] = rawPlanRecord['price'];
             }
           }
 
           const pricingKeys = new Set(['price', 'tokenAmount', `${key}PurohitPayoutAmount`]);
           const planDbFeatures = allFeatures.filter(
-            (f: any) => String(f.plan).toLowerCase() === key.toLowerCase(),
+            (f: ServiceFeature) => String(f.plan).toLowerCase() === key.toLowerCase(),
           );
 
           if (planDbFeatures.length > 0) {
-            structuredPlan.features = planDbFeatures;
-          } else if (Array.isArray(rawPlanRecord.features) && rawPlanRecord.features.length > 0) {
-            structuredPlan.features = rawPlanRecord.features;
+            structuredPlan['features'] = planDbFeatures;
+          } else if (Array.isArray(rawPlanRecord['features']) && rawPlanRecord['features'].length > 0) {
+            structuredPlan['features'] = rawPlanRecord['features'];
           } else {
-            const features: Record<string, any> = {};
+            const features: Record<string, unknown> = {};
             if (
-              rawPlanRecord.features &&
-              typeof rawPlanRecord.features === 'object' &&
-              !Array.isArray(rawPlanRecord.features)
+              rawPlanRecord['features'] &&
+              typeof rawPlanRecord['features'] === 'object' &&
+              !Array.isArray(rawPlanRecord['features'])
             ) {
-              Object.assign(features, rawPlanRecord.features);
+              Object.assign(features, rawPlanRecord['features']);
             }
             if (
-              rawPlanRecord.items &&
-              typeof rawPlanRecord.items === 'object' &&
-              !Array.isArray(rawPlanRecord.items)
+              rawPlanRecord['items'] &&
+              typeof rawPlanRecord['items'] === 'object' &&
+              !Array.isArray(rawPlanRecord['items'])
             ) {
-              Object.assign(features, rawPlanRecord.items);
+              Object.assign(features, rawPlanRecord['items']);
             }
             for (const [featureKey, featureValue] of Object.entries(rawPlanRecord)) {
               if (
@@ -148,7 +247,7 @@ export class TempleService {
               }
             }
             if (Object.keys(features).length > 0) {
-              structuredPlan.features = features;
+              structuredPlan['features'] = features;
             }
           }
 
@@ -167,11 +266,14 @@ export class TempleService {
     files?: {
       image?: Express.Multer.File[];
       imageUrl?: Express.Multer.File[];
+      trustDoc?: Express.Multer.File[];
+      trustDocUrl?: Express.Multer.File[];
+      deityPhoto?: Express.Multer.File[];
+      deityPhotoUrl?: Express.Multer.File[];
     },
     adminId?: number,
   ) {
     let imageUrl: string | null = dto.imageUrl ? dto.imageUrl.trim() : null;
-
     const fileToUpload = files?.imageUrl || files?.image;
     if (fileToUpload?.length) {
       imageUrl =
@@ -182,58 +284,150 @@ export class TempleService {
         )) || null;
     }
 
-    const slug = await generateUniqueSlug(this.templeRepository, dto.name.trim());
+    let trustDocUrl: string | null = dto.trustDocUrl ? dto.trustDocUrl.trim() : null;
+    const trustDocFile = files?.trustDocUrl || files?.trustDoc;
+    if (trustDocFile?.length) {
+      trustDocUrl =
+        (await this.s3Service.uploadFileHelper(
+          adminId || 'temple',
+          'temple/docs',
+          trustDocFile,
+        )) || null;
+    }
 
-    const temple = this.templeRepository.create({
-      name: dto.name.trim(),
-      slug,
-      description: dto.description ?? null,
-      metaTitle: dto.metaTitle ?? null,
-      metaDescription: dto.metaDescription ?? null,
-      imageUrl,
-      address: dto.address ?? null,
-      city: dto.city ?? null,
-      state: dto.state ?? null,
-      isActive: dto.isActive !== undefined ? dto.isActive : true,
-    });
+    let deityPhotoUrl: string | null = dto.deityPhotoUrl ? dto.deityPhotoUrl.trim() : null;
+    const deityPhotoFile = files?.deityPhotoUrl || files?.deityPhoto;
+    if (deityPhotoFile?.length) {
+      deityPhotoUrl =
+        (await this.s3Service.uploadFileHelper(
+          adminId || 'temple',
+          'temple/deity',
+          deityPhotoFile,
+        )) || null;
+    }
 
-    const saved = await this.templeRepository.save(temple);
+    const { savedTemple, savedAartis } = await this.runInTransaction(
+      async (manager: EntityManager) => {
+        const templeRepo = manager.getRepository(Temple);
+        const aartiRepo = manager.getRepository(TempleAarti);
+
+        const slug = dto.slug?.trim()
+          ? await generateUniqueSlug(templeRepo, dto.slug.trim())
+          : await generateUniqueSlug(templeRepo, dto.name.trim());
+
+        const temple = templeRepo.create({
+          name: dto.name.trim(),
+          slug,
+          description: dto.description ?? null,
+          metaTitle: dto.metaTitle ?? null,
+          metaDescription: dto.metaDescription ?? null,
+          imageUrl,
+          address: dto.address ?? null,
+          city: dto.city ?? null,
+          state: dto.state ?? null,
+          primaryDeity: dto.primaryDeity ?? null,
+          trustName: dto.trustName ?? null,
+          contactName: dto.contactName ?? null,
+          phone: dto.phone ?? null,
+          email: dto.email ?? null,
+          openingTime: dto.openingTime ?? null,
+          closingTime: dto.closingTime ?? null,
+          trustRegNo: dto.trustRegNo ?? null,
+          trustDocUrl,
+          deityPhotoUrl,
+          isActive: dto.isActive !== undefined ? dto.isActive : true,
+        });
+
+        const saved = await templeRepo.save(temple);
+
+        const aartisList: TempleAarti[] = [];
+        if (dto.aartis && dto.aartis.length > 0) {
+          for (const aartiDto of dto.aartis) {
+            if (!aartiDto.name || !aartiDto.name.trim()) {
+              throw new BadRequestException('Aarti name is required and cannot be empty');
+            }
+            const aartiName = aartiDto.name.trim();
+            const aartiSlug = aartiDto.slug?.trim()
+              ? aartiDto.slug.trim()
+              : await generateUniqueSlug(aartiRepo, aartiName);
+
+            const aarti = aartiRepo.create({
+              templeId: saved.id,
+              name: aartiName,
+              slug: aartiSlug,
+              time: aartiDto.time ? aartiDto.time.trim() : null,
+              isActive: aartiDto.isActive !== undefined ? aartiDto.isActive : true,
+            });
+
+            const savedAarti = await aartiRepo.save(aarti);
+            aartisList.push(savedAarti);
+          }
+        }
+
+        await this.auditLogService.createAuditLog({
+          actorId: adminId,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: USER_ROLE.ADMIN,
+          module: AUDIT_MODULE.TEMPLE,
+          entity: 'Temple',
+          entityId: String(saved.id),
+          action: 'TEMPLE_CREATED',
+          message: `Admin created new temple ${saved.name}.`,
+          oldValue: undefined,
+          newValue: {
+            name: saved.name,
+            description: saved.description,
+            imageUrl: saved.imageUrl,
+            address: saved.address,
+            city: saved.city,
+            state: saved.state,
+            isActive: saved.isActive,
+          },
+        });
+
+        return { savedTemple: saved, savedAartis: aartisList };
+      },
+    );
 
     let downloadUrl: string | null = null;
-    if (saved.imageUrl) {
+    if (savedTemple.imageUrl) {
       try {
-        downloadUrl = await this.s3Service.getDownloadUrl(saved.imageUrl);
+        downloadUrl = await this.s3Service.getDownloadUrl(savedTemple.imageUrl);
       } catch {
-        downloadUrl = saved.imageUrl;
+        downloadUrl = savedTemple.imageUrl;
       }
     }
 
-    await this.auditLogService.createAuditLog({
-      actorId: adminId,
-      actorType: ACTOR_TYPE.USER,
-      actorRole: USER_ROLE.ADMIN,
-      module: AUDIT_MODULE.TEMPLE,
-      entity: 'Temple',
-      entityId: String(saved.id),
-      action: 'TEMPLE_CREATED',
-      message: `Admin created new temple ${saved.name}.`,
-      oldValue: undefined,
-      newValue: {
-        name: saved.name,
-        description: saved.description,
-        imageUrl: saved.imageUrl,
-        address: saved.address,
-        city: saved.city,
-        state: saved.state,
-        isActive: saved.isActive,
-      },
-    });
+    let trustDocDownloadUrl: string | null = null;
+    if (savedTemple.trustDocUrl) {
+      try {
+        trustDocDownloadUrl = await this.s3Service.getDownloadUrl(savedTemple.trustDocUrl);
+      } catch {
+        trustDocDownloadUrl = savedTemple.trustDocUrl;
+      }
+    }
+
+    let deityPhotoDownloadUrl: string | null = null;
+    if (savedTemple.deityPhotoUrl) {
+      try {
+        deityPhotoDownloadUrl = await this.s3Service.getDownloadUrl(savedTemple.deityPhotoUrl);
+      } catch {
+        deityPhotoDownloadUrl = savedTemple.deityPhotoUrl;
+      }
+    }
 
     return {
       success: true,
       statusCode: 201,
       message: 'Temple created successfully',
-      data: this.formatTempleResponse(saved, downloadUrl),
+      data: this.formatTempleResponse(
+        savedTemple,
+        downloadUrl,
+        undefined,
+        dto.aartis !== undefined ? savedAartis : undefined,
+        trustDocDownloadUrl,
+        deityPhotoDownloadUrl,
+      ),
     };
   }
 
@@ -243,99 +437,316 @@ export class TempleService {
     files?: {
       image?: Express.Multer.File[];
       imageUrl?: Express.Multer.File[];
+      trustDoc?: Express.Multer.File[];
+      trustDocUrl?: Express.Multer.File[];
+      deityPhoto?: Express.Multer.File[];
+      deityPhotoUrl?: Express.Multer.File[];
     },
     adminId?: number,
   ) {
-    const temple = await this.templeRepository.findOne({
-      where: { id },
-      withDeleted: true,
-    });
+    const { updated, aartisList } = await this.runInTransaction(
+      async (manager: EntityManager) => {
+        const templeRepo = manager.getRepository(Temple);
+        const aartiRepo = manager.getRepository(TempleAarti);
 
-    if (!temple || temple.deletedAt) {
-      throw new NotFoundException(`Temple with id ${id} not found`);
-    }
+        const temple = await templeRepo.findOne({
+          where: { id },
+          withDeleted: true,
+        });
 
-    const oldValue = {
-      name: temple.name,
-      description: temple.description,
-      metaTitle: temple.metaTitle,
-      metaDescription: temple.metaDescription,
-      imageUrl: temple.imageUrl,
-      address: temple.address,
-      city: temple.city,
-      state: temple.state,
-      isActive: temple.isActive,
-    };
+        if (!temple || temple.deletedAt) {
+          throw new NotFoundException(`Temple with id ${id} not found`);
+        }
 
-    if (dto.name !== undefined) {
-      const trimmedName = dto.name.trim();
-      if (trimmedName !== temple.name) {
-        temple.name = trimmedName;
-        temple.slug = await generateUniqueSlug(this.templeRepository, trimmedName, temple.id);
-      }
-    } else if (!temple.slug) {
-      // Self-heal slug if missing on existing record
-      temple.slug = await generateUniqueSlug(this.templeRepository, temple.name, temple.id);
-    }
-    if (dto.description !== undefined) {
-      temple.description = dto.description;
-    }
-    if (dto.metaTitle !== undefined) {
-      temple.metaTitle = dto.metaTitle;
-    }
-    if (dto.metaDescription !== undefined) {
-      temple.metaDescription = dto.metaDescription;
-    }
-    if (dto.address !== undefined) {
-      temple.address = dto.address;
-    }
-    if (dto.city !== undefined) {
-      temple.city = dto.city;
-    }
-    if (dto.state !== undefined) {
-      temple.state = dto.state;
-    }
-    if (dto.isActive !== undefined) {
-      temple.isActive = dto.isActive;
-    }
+        const oldValue = {
+          name: temple.name,
+          description: temple.description,
+          metaTitle: temple.metaTitle,
+          metaDescription: temple.metaDescription,
+          imageUrl: temple.imageUrl,
+          address: temple.address,
+          city: temple.city,
+          state: temple.state,
+          isActive: temple.isActive,
+        };
 
-    const oldImageUrl = temple.imageUrl;
-    const fileToUpload = files?.imageUrl || files?.image;
-    const hasImageFile = Boolean(
-      fileToUpload && fileToUpload.length > 0 && fileToUpload[0]?.buffer && fileToUpload[0].buffer.length > 0,
+        if (dto.name !== undefined) {
+          const trimmedName = dto.name.trim();
+          if (trimmedName !== temple.name) {
+            temple.name = trimmedName;
+            temple.slug = await generateUniqueSlug(templeRepo, trimmedName, temple.id);
+          }
+        } else if (!temple.slug) {
+          // Self-heal slug if missing on existing record
+          temple.slug = await generateUniqueSlug(templeRepo, temple.name, temple.id);
+        }
+
+        if (dto.slug !== undefined) {
+          const trimmedSlug = dto.slug ? dto.slug.trim() : '';
+          if (trimmedSlug && trimmedSlug !== temple.slug) {
+            temple.slug = await generateUniqueSlug(templeRepo, trimmedSlug, temple.id);
+          }
+        }
+
+        if (dto.description !== undefined) {
+          temple.description = dto.description;
+        }
+        if (dto.metaTitle !== undefined) {
+          temple.metaTitle = dto.metaTitle;
+        }
+        if (dto.metaDescription !== undefined) {
+          temple.metaDescription = dto.metaDescription;
+        }
+        if (dto.address !== undefined) {
+          temple.address = dto.address;
+        }
+        if (dto.city !== undefined) {
+          temple.city = dto.city;
+        }
+        if (dto.state !== undefined) {
+          temple.state = dto.state;
+        }
+        if (dto.primaryDeity !== undefined) {
+          temple.primaryDeity =
+            dto.primaryDeity && typeof dto.primaryDeity === 'string' && dto.primaryDeity.trim() !== ''
+              ? dto.primaryDeity.trim()
+              : null;
+        }
+        if (dto.trustName !== undefined) {
+          temple.trustName =
+            dto.trustName && typeof dto.trustName === 'string' && dto.trustName.trim() !== ''
+              ? dto.trustName.trim()
+              : null;
+        }
+        if (dto.contactName !== undefined) {
+          temple.contactName =
+            dto.contactName && typeof dto.contactName === 'string' && dto.contactName.trim() !== ''
+              ? dto.contactName.trim()
+              : null;
+        }
+        if (dto.phone !== undefined) {
+          temple.phone =
+            dto.phone && typeof dto.phone === 'string' && dto.phone.trim() !== ''
+              ? dto.phone.trim()
+              : null;
+        }
+        if (dto.email !== undefined) {
+          temple.email =
+            dto.email && typeof dto.email === 'string' && dto.email.trim() !== ''
+              ? dto.email.trim().toLowerCase()
+              : null;
+        }
+        if (dto.openingTime !== undefined) {
+          temple.openingTime =
+            dto.openingTime && typeof dto.openingTime === 'string' && dto.openingTime.trim() !== ''
+              ? dto.openingTime.trim()
+              : null;
+        }
+        if (dto.closingTime !== undefined) {
+          temple.closingTime =
+            dto.closingTime && typeof dto.closingTime === 'string' && dto.closingTime.trim() !== ''
+              ? dto.closingTime.trim()
+              : null;
+        }
+        if (dto.trustRegNo !== undefined) {
+          temple.trustRegNo =
+            dto.trustRegNo && typeof dto.trustRegNo === 'string' && dto.trustRegNo.trim() !== ''
+              ? dto.trustRegNo.trim()
+              : null;
+        }
+        if (dto.isActive !== undefined) {
+          temple.isActive = dto.isActive;
+        }
+
+        const oldImageUrl = temple.imageUrl;
+        const fileToUpload = files?.imageUrl || files?.image;
+        const hasImageFile = Boolean(
+          fileToUpload && fileToUpload.length > 0 && fileToUpload[0]?.buffer && fileToUpload[0].buffer.length > 0,
+        );
+
+        if (hasImageFile && fileToUpload) {
+          temple.imageUrl =
+            (await this.s3Service.uploadFileHelper(
+              adminId || 'temple',
+              'temple',
+              fileToUpload,
+            )) || null;
+          if (
+            oldImageUrl &&
+            oldImageUrl !== temple.imageUrl &&
+            typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+            this.s3Service.isVercelBlobUrl(oldImageUrl) &&
+            typeof this.s3Service?.deleteByUrl === 'function'
+          ) {
+            await this.s3Service.deleteByUrl(oldImageUrl);
+          }
+        } else if (typeof dto.imageUrl === 'string' && dto.imageUrl.trim().length > 0) {
+          temple.imageUrl = dto.imageUrl.trim();
+        } else {
+          temple.imageUrl = null;
+          if (
+            oldImageUrl &&
+            typeof this.s3Service?.isVercelBlobUrl === 'function' &&
+            this.s3Service.isVercelBlobUrl(oldImageUrl) &&
+            typeof this.s3Service?.deleteByUrl === 'function'
+          ) {
+            await this.s3Service.deleteByUrl(oldImageUrl);
+          }
+        }
+
+        const trustDocFile = files?.trustDocUrl || files?.trustDoc;
+        const hasTrustDocFile = Boolean(
+          trustDocFile && trustDocFile.length > 0 && trustDocFile[0]?.buffer && trustDocFile[0].buffer.length > 0,
+        );
+        if (hasTrustDocFile && trustDocFile) {
+          temple.trustDocUrl =
+            (await this.s3Service.uploadFileHelper(
+              adminId || 'temple',
+              'temple/docs',
+              trustDocFile,
+            )) || null;
+        } else if (dto.trustDocUrl !== undefined) {
+          temple.trustDocUrl = dto.trustDocUrl ? dto.trustDocUrl.trim() : null;
+        }
+
+        const deityPhotoFile = files?.deityPhotoUrl || files?.deityPhoto;
+        const hasDeityPhotoFile = Boolean(
+          deityPhotoFile && deityPhotoFile.length > 0 && deityPhotoFile[0]?.buffer && deityPhotoFile[0].buffer.length > 0,
+        );
+        if (hasDeityPhotoFile && deityPhotoFile) {
+          temple.deityPhotoUrl =
+            (await this.s3Service.uploadFileHelper(
+              adminId || 'temple',
+              'temple/deity',
+              deityPhotoFile,
+            )) || null;
+        } else if (dto.deityPhotoUrl !== undefined) {
+          temple.deityPhotoUrl = dto.deityPhotoUrl ? dto.deityPhotoUrl.trim() : null;
+        }
+
+        const savedTemple = await templeRepo.save(temple);
+
+        let activeAartis: TempleAarti[] | undefined = undefined;
+
+        if (dto.aartis !== undefined) {
+          const incomingIds = dto.aartis
+            .map((a) => a.id)
+            .filter((aId): aId is number => typeof aId === 'number' && !isNaN(aId));
+
+          const existingMap = new Map<number, TempleAarti>();
+          if (incomingIds.length > 0) {
+            const existingRecords = await aartiRepo.find({
+              where: { id: In(incomingIds) },
+              withDeleted: true,
+            });
+            for (const r of existingRecords) {
+              existingMap.set(r.id, r);
+            }
+
+            for (const aId of incomingIds) {
+              const record = existingMap.get(aId);
+              if (!record) {
+                throw new BadRequestException(`Aarti with id ${aId} not found`);
+              }
+              if (record.templeId !== id) {
+                throw new BadRequestException(
+                  `Aarti with id ${aId} does not belong to temple ${id}`,
+                );
+              }
+              if (record.deletedAt) {
+                throw new BadRequestException(
+                  `Aarti with id ${aId} has already been deleted and cannot be modified`,
+                );
+              }
+            }
+          }
+
+          for (const item of dto.aartis) {
+            if (item.id) {
+              const existingAarti = existingMap.get(item.id)!;
+              if (item.isDeleted === true || item.delete === true) {
+                existingAarti.deletedAt = new Date();
+                await aartiRepo.save(existingAarti);
+                continue;
+              }
+
+              if (item.name !== undefined) {
+                const trimmedName = item.name.trim();
+                if (!trimmedName) {
+                  throw new BadRequestException('Aarti name cannot be empty');
+                }
+                if (trimmedName !== existingAarti.name) {
+                  existingAarti.name = trimmedName;
+                  existingAarti.slug = await generateUniqueSlug(
+                    aartiRepo,
+                    trimmedName,
+                    existingAarti.id,
+                  );
+                }
+              }
+              if (item.slug !== undefined) {
+                existingAarti.slug = item.slug ? item.slug.trim() : existingAarti.slug;
+              }
+              if (item.time !== undefined) {
+                existingAarti.time = item.time ? item.time.trim() : null;
+              }
+              if (item.isActive !== undefined) {
+                existingAarti.isActive = item.isActive;
+              }
+              await aartiRepo.save(existingAarti);
+            } else {
+              if (item.isDeleted === true || item.delete === true) {
+                throw new BadRequestException('Cannot delete an aarti without providing an id');
+              }
+              if (!item.name || !item.name.trim()) {
+                throw new BadRequestException('Aarti name is required for new aartis');
+              }
+              const aartiName = item.name.trim();
+              const aartiSlug = item.slug?.trim()
+                ? item.slug.trim()
+                : await generateUniqueSlug(aartiRepo, aartiName);
+
+              const newAarti = aartiRepo.create({
+                templeId: id,
+                name: aartiName,
+                slug: aartiSlug,
+                time: item.time ? item.time.trim() : null,
+                isActive: item.isActive !== undefined ? item.isActive : true,
+              });
+              await aartiRepo.save(newAarti);
+            }
+          }
+
+          activeAartis = await aartiRepo.find({
+            where: { templeId: id, deletedAt: IsNull() },
+            order: { time: 'ASC', id: 'ASC' },
+          });
+        }
+
+        await this.auditLogService.createAuditLog({
+          actorId: adminId,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: USER_ROLE.ADMIN,
+          module: AUDIT_MODULE.TEMPLE,
+          entity: 'Temple',
+          entityId: String(id),
+          action: 'TEMPLE_UPDATED',
+          message: `Admin updated temple ${savedTemple.name}.`,
+          oldValue,
+          newValue: {
+            name: savedTemple.name,
+            description: savedTemple.description,
+            imageUrl: savedTemple.imageUrl,
+            address: savedTemple.address,
+            city: savedTemple.city,
+            state: savedTemple.state,
+            isActive: savedTemple.isActive,
+          },
+        });
+
+        return { updated: savedTemple, aartisList: activeAartis };
+      },
     );
-
-    if (hasImageFile && fileToUpload) {
-      temple.imageUrl =
-        (await this.s3Service.uploadFileHelper(
-          adminId || 'temple',
-          'temple',
-          fileToUpload,
-        )) || null;
-      if (
-        oldImageUrl &&
-        oldImageUrl !== temple.imageUrl &&
-        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
-        this.s3Service.isVercelBlobUrl(oldImageUrl) &&
-        typeof this.s3Service?.deleteByUrl === 'function'
-      ) {
-        await this.s3Service.deleteByUrl(oldImageUrl);
-      }
-    } else if (typeof dto.imageUrl === 'string' && dto.imageUrl.trim().length > 0) {
-      temple.imageUrl = dto.imageUrl.trim();
-    } else {
-      temple.imageUrl = null;
-      if (
-        oldImageUrl &&
-        typeof this.s3Service?.isVercelBlobUrl === 'function' &&
-        this.s3Service.isVercelBlobUrl(oldImageUrl) &&
-        typeof this.s3Service?.deleteByUrl === 'function'
-      ) {
-        await this.s3Service.deleteByUrl(oldImageUrl);
-      }
-    }
-
-    const updated = await this.templeRepository.save(temple);
 
     let downloadUrl: string | null = null;
     if (updated.imageUrl) {
@@ -346,64 +757,79 @@ export class TempleService {
       }
     }
 
-    await this.auditLogService.createAuditLog({
-      actorId: adminId,
-      actorType: ACTOR_TYPE.USER,
-      actorRole: USER_ROLE.ADMIN,
-      module: AUDIT_MODULE.TEMPLE,
-      entity: 'Temple',
-      entityId: String(id),
-      action: 'TEMPLE_UPDATED',
-      message: `Admin updated temple ${updated.name}.`,
-      oldValue,
-      newValue: {
-        name: updated.name,
-        description: updated.description,
-        imageUrl: updated.imageUrl,
-        address: updated.address,
-        city: updated.city,
-        state: updated.state,
-        isActive: updated.isActive,
-      },
-    });
+    let trustDocDownloadUrl: string | null = null;
+    if (updated.trustDocUrl) {
+      try {
+        trustDocDownloadUrl = await this.s3Service.getDownloadUrl(updated.trustDocUrl);
+      } catch {
+        trustDocDownloadUrl = updated.trustDocUrl;
+      }
+    }
+
+    let deityPhotoDownloadUrl: string | null = null;
+    if (updated.deityPhotoUrl) {
+      try {
+        deityPhotoDownloadUrl = await this.s3Service.getDownloadUrl(updated.deityPhotoUrl);
+      } catch {
+        deityPhotoDownloadUrl = updated.deityPhotoUrl;
+      }
+    }
 
     return {
       success: true,
       statusCode: 200,
       message: 'Temple updated successfully',
-      data: this.formatTempleResponse(updated, downloadUrl),
+      data: this.formatTempleResponse(
+        updated,
+        downloadUrl,
+        undefined,
+        aartisList,
+        trustDocDownloadUrl,
+        deityPhotoDownloadUrl,
+      ),
     };
   }
 
   async deleteTemple(id: number, adminId?: number) {
-    const temple = await this.templeRepository.findOne({
-      where: { id },
-      withDeleted: true,
-    });
+    await this.runInTransaction(async (manager: EntityManager) => {
+      const templeRepo = manager.getRepository(Temple);
+      const aartiRepo = manager.getRepository(TempleAarti);
 
-    if (!temple || temple.deletedAt) {
-      throw new NotFoundException(`Temple with id ${id} not found`);
-    }
+      const temple = await templeRepo.findOne({
+        where: { id },
+        withDeleted: true,
+      });
 
-    temple.deletedAt = new Date();
-    await this.templeRepository.save(temple);
+      if (!temple || temple.deletedAt) {
+        throw new NotFoundException(`Temple with id ${id} not found`);
+      }
 
-    await this.auditLogService.createAuditLog({
-      actorId: adminId,
-      actorType: ACTOR_TYPE.USER,
-      actorRole: USER_ROLE.ADMIN,
-      module: AUDIT_MODULE.TEMPLE,
-      entity: 'Temple',
-      entityId: String(id),
-      action: 'TEMPLE_DELETED',
-      message: `Admin soft deleted temple ${temple.name}.`,
-      oldValue: {
-        name: temple.name,
-        isActive: temple.isActive,
-      },
-      newValue: {
-        deleted: true,
-      },
+      const now = new Date();
+      temple.deletedAt = now;
+      await templeRepo.save(temple);
+
+      await aartiRepo.update(
+        { templeId: id, deletedAt: IsNull() },
+        { deletedAt: now },
+      );
+
+      await this.auditLogService.createAuditLog({
+        actorId: adminId,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: USER_ROLE.ADMIN,
+        module: AUDIT_MODULE.TEMPLE,
+        entity: 'Temple',
+        entityId: String(id),
+        action: 'TEMPLE_DELETED',
+        message: `Admin soft deleted temple ${temple.name}.`,
+        oldValue: {
+          name: temple.name,
+          isActive: temple.isActive,
+        },
+        newValue: {
+          deleted: true,
+        },
+      });
     });
 
     return {
@@ -416,6 +842,23 @@ export class TempleService {
   async getTemples(query: GetTemplesQueryDto, isAdmin: boolean = false) {
     const result = await this.templeRepository.findAllTemples(query, isAdmin);
 
+    const shouldIncludeAartis = query.includeAartis !== false;
+    let aartisByTempleId: Map<number, TempleAarti[]> | undefined = undefined;
+    if (
+      shouldIncludeAartis &&
+      result.data.length > 0 &&
+      typeof this.templeRepository.findAartisByTempleIds === 'function'
+    ) {
+      const templeIds = result.data.map((t) => t.id);
+      const allAartis = await this.templeRepository.findAartisByTempleIds(templeIds, isAdmin);
+      aartisByTempleId = new Map();
+      for (const aarti of allAartis) {
+        const list = aartisByTempleId.get(aarti.templeId) || [];
+        list.push(aarti);
+        aartisByTempleId.set(aarti.templeId, list);
+      }
+    }
+
     const dataWithDownloadUrls = await Promise.all(
       result.data.map(async (item: Temple) => {
         let downloadUrl: string | null = null;
@@ -426,7 +869,31 @@ export class TempleService {
             downloadUrl = item.imageUrl;
           }
         }
-        return this.formatTempleResponse(item, downloadUrl);
+        let trustDocDownloadUrl: string | null = null;
+        if (item.trustDocUrl) {
+          try {
+            trustDocDownloadUrl = await this.s3Service.getDownloadUrl(item.trustDocUrl);
+          } catch {
+            trustDocDownloadUrl = item.trustDocUrl;
+          }
+        }
+        let deityPhotoDownloadUrl: string | null = null;
+        if (item.deityPhotoUrl) {
+          try {
+            deityPhotoDownloadUrl = await this.s3Service.getDownloadUrl(item.deityPhotoUrl);
+          } catch {
+            deityPhotoDownloadUrl = item.deityPhotoUrl;
+          }
+        }
+        const aartis = shouldIncludeAartis && aartisByTempleId ? (aartisByTempleId.get(item.id) || []) : undefined;
+        return this.formatTempleResponse(
+          item,
+          downloadUrl,
+          undefined,
+          aartis,
+          trustDocDownloadUrl,
+          deityPhotoDownloadUrl,
+        );
       }),
     );
 
@@ -460,12 +927,30 @@ export class TempleService {
       }
     }
 
+    let trustDocDownloadUrl: string | null = null;
+    if (temple.trustDocUrl) {
+      try {
+        trustDocDownloadUrl = await this.s3Service.getDownloadUrl(temple.trustDocUrl);
+      } catch {
+        trustDocDownloadUrl = temple.trustDocUrl;
+      }
+    }
+
+    let deityPhotoDownloadUrl: string | null = null;
+    if (temple.deityPhotoUrl) {
+      try {
+        deityPhotoDownloadUrl = await this.s3Service.getDownloadUrl(temple.deityPhotoUrl);
+      } catch {
+        deityPhotoDownloadUrl = temple.deityPhotoUrl;
+      }
+    }
+
     const services = await this.templeRepository.findActiveServicesByTempleId(id);
 
-    let enrichedServices: any[] | undefined = undefined;
+    let enrichedServices: Record<string, unknown>[] | undefined = undefined;
     if (services !== undefined && Array.isArray(services)) {
       const serviceIds = services.map((s) => s.id).filter(Boolean);
-      const featuresByServiceId = new Map<number, any[]>();
+      const featuresByServiceId = new Map<number, ServiceFeature[]>();
       if (
         serviceIds.length > 0 &&
         typeof this.templeRepository.findFeaturesByServiceIds === 'function'
@@ -498,13 +983,18 @@ export class TempleService {
           }
 
           const features = featuresByServiceId.get(s.id) || [];
-          const plans = this.enrichServicePlansAndToken(s, features);
+          const plans = this.enrichServicePlansAndToken(
+            s as unknown as Record<string, unknown>,
+            features,
+          );
 
           return {
             id: s.id,
             name: s.name,
             slug: s.slug ?? null,
             description: s.description ?? null,
+            metaTitle: s.metaTitle ?? null,
+            metaDescription: s.metaDescription ?? null,
             iconUrl: s.iconUrl ?? null,
             iconDownloadurl: iconDownloadurl ?? null,
             isActive: s.isActive,
@@ -514,11 +1004,22 @@ export class TempleService {
       );
     }
 
+    const aartis = typeof this.templeRepository.findAartisByTempleId === 'function'
+      ? await this.templeRepository.findAartisByTempleId(id, isAdmin)
+      : [];
+
     return {
       success: true,
       statusCode: 200,
       message: 'Temple fetched successfully',
-      data: this.formatTempleResponse(temple, downloadUrl, enrichedServices),
+      data: this.formatTempleResponse(
+        temple,
+        downloadUrl,
+        enrichedServices,
+        aartis,
+        trustDocDownloadUrl,
+        deityPhotoDownloadUrl,
+      ),
     };
   }
 }

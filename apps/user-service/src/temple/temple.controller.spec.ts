@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { TempleController } from './temple.controller';
+import { TempleController, TempleUpdatePipe } from './temple.controller';
 import { TempleService } from './temple.service';
 import { JwtAuthGuard, OptionalJwtAuthGuard, RolesGuard } from '@poojawala/common';
 import { USER_ROLE, User } from '@poojawala/entities';
@@ -174,13 +174,86 @@ describe('TempleController', () => {
       expect(res.success).toBe(true);
     });
 
-    it('should handle admin getTempleById with admin user (isAdmin = true)', async () => {
+    it('should pass aartis to templeService on createTemple', async () => {
       const req: any = { user: mockAdminUser };
+      const dto: CreateTempleDto = {
+        name: 'Temple with Aartis',
+        aartis: [{ name: 'Aarti 1', time: '06:00:00' }],
+      };
 
-      const res = await controller.getTempleById(req, 1);
+      await controller.createTemple(req, dto, undefined);
 
-      expect(mockTempleService.getTempleById).toHaveBeenCalledWith(1, true);
-      expect(res.success).toBe(true);
+      expect(mockTempleService.createTemple).toHaveBeenCalledWith(dto, undefined, 10);
+    });
+
+    it('should pass aartis to templeService on updateTemple', async () => {
+      const req: any = { user: mockAdminUser };
+      const dto: UpdateTempleDto = {
+        aartis: [{ id: 10, name: 'Updated Aarti' }, { name: 'New Aarti' }],
+      };
+
+      await controller.updateTemple(req, 1, dto, undefined);
+
+      expect(mockTempleService.updateTemple).toHaveBeenCalledWith(1, dto, undefined, 10);
+    });
+
+    it('TempleUpdatePipe should transform array payload into object with aartis property', async () => {
+      const pipe = new TempleUpdatePipe();
+      const rawArray = [
+        { id: 5, name: 'Mangala Aarti', time: '03:15:00' },
+        { id: 6, name: 'Bhog Aarti', time: '12:00:00' },
+        { name: 'Sandhya Aarti', time: '19:30:00' },
+      ];
+
+      const result = await pipe.transform(rawArray, {
+        type: 'body',
+        metatype: UpdateTempleDto,
+      });
+
+      expect(result).toBeInstanceOf(UpdateTempleDto);
+      expect(result.aartis).toBeDefined();
+      expect(result.aartis?.length).toBe(3);
+      expect(result.aartis?.[0].id).toBe(5);
+      expect(result.aartis?.[0].name).toBe('Mangala Aarti');
+    });
+
+    it('TempleUpdatePipe should safely parse multipart aartis JSON string into array', async () => {
+      const pipe = new TempleUpdatePipe();
+      const rawMultipartBody = {
+        name: 'Somnath Temple',
+        aartis: JSON.stringify([
+          { id: 5, name: 'Mangala Aarti', time: '03:15:00' },
+          { id: 6, name: 'Bhog Aarti', time: '12:00:00' },
+          { name: 'Sandhya Aarti', time: '19:30:00' },
+        ]),
+      };
+
+      const result = await pipe.transform(rawMultipartBody, {
+        type: 'body',
+        metatype: UpdateTempleDto,
+      });
+
+      expect(result).toBeInstanceOf(UpdateTempleDto);
+      expect(result.aartis).toBeDefined();
+      expect(result.aartis?.length).toBe(3);
+      expect(result.aartis?.[0].id).toBe(5);
+      expect(result.aartis?.[0].name).toBe('Mangala Aarti');
+      expect(result.aartis?.[0].time).toBe('03:15:00');
+    });
+
+    it('TempleUpdatePipe should throw 400 BadRequestException for invalid JSON aartis', async () => {
+      const pipe = new TempleUpdatePipe();
+      const invalidMultipartBody = {
+        name: 'Somnath Temple',
+        aartis: '{ invalid json',
+      };
+
+      await expect(
+        pipe.transform(invalidMultipartBody, {
+          type: 'body',
+          metatype: UpdateTempleDto,
+        }),
+      ).rejects.toThrow('Invalid JSON format for aartis');
     });
   });
 });

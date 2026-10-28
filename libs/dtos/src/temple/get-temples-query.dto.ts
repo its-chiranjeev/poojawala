@@ -37,4 +37,16 @@ export class GetTemplesQueryDto {
     return undefined;
   })
   isActive?: boolean | string;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return undefined;
+    if (typeof value === 'boolean') return value;
+    const str = String(value).trim().toLowerCase();
+    if (str === 'false' || str === '0') return false;
+    if (str === 'true' || str === '1') return true;
+    return undefined;
+  })
+  @IsBoolean()
+  includeAartis?: boolean;
 }

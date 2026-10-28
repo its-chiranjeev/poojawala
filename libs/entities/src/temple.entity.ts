@@ -6,7 +6,9 @@ import {
   UpdateDateColumn,
   DeleteDateColumn,
   Index,
+  OneToMany,
 } from 'typeorm';
+import { TempleAarti } from './temple-aarti.entity';
 
 @Entity('temples')
 export class Temple {
@@ -42,6 +44,36 @@ export class Temple {
   @Column({ type: 'varchar', length: 100, nullable: true })
   state?: string | null;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  primaryDeity?: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  trustName?: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  contactName?: string | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  phone?: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  email?: string | null;
+
+  @Column({ type: 'time', nullable: true })
+  openingTime?: string | null;
+
+  @Column({ type: 'time', nullable: true })
+  closingTime?: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  trustRegNo?: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  trustDocUrl?: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  deityPhotoUrl?: string | null;
+
   @Column({ type: 'boolean', default: true })
   isActive!: boolean;
 
@@ -53,4 +85,7 @@ export class Temple {
 
   @DeleteDateColumn()
   deletedAt?: Date | null;
+
+  @OneToMany(() => TempleAarti, (aarti) => aarti.temple)
+  aartis!: TempleAarti[];
 }

@@ -31,6 +31,7 @@ export * from './order-item.entity';
 export * from './blog-category.entity';
 export * from './blog-post.entity';
 export * from './temple.entity';
+export * from './temple-aarti.entity';
 export * from './service-feature.entity';
 export * from './astrologer-profile.entity';
 

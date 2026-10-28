@@ -1,14 +1,19 @@
 import {
+  ArgumentMetadata,
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
   HttpCode,
   HttpStatus,
+  Injectable,
   Param,
   ParseIntPipe,
   Patch,
+  PipeTransform,
   Post,
+  Put,
   Query,
   Req,
   UploadedFiles,
@@ -32,6 +37,59 @@ import {
 } from '@poojawala/dtos';
 import { TempleService } from './temple.service';
 
+@Injectable()
+export class TempleUpdatePipe implements PipeTransform {
+  private readonly validationPipe = new ValidationPipe({
+    whitelist: true,
+    transform: true,
+    forbidNonWhitelisted: true,
+  });
+
+  async transform(value: unknown, metadata: ArgumentMetadata) {
+    if (value === null || value === undefined) {
+      return this.validationPipe.transform(value, metadata);
+    }
+
+    let parsedBody: unknown = value;
+
+    if (Array.isArray(parsedBody)) {
+      parsedBody = { aartis: parsedBody };
+    } else if (typeof parsedBody === 'string') {
+      const trimmed = parsedBody.trim();
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        try {
+          parsedBody = { aartis: JSON.parse(trimmed) };
+        } catch {
+          throw new BadRequestException('Invalid JSON format for aartis');
+        }
+      }
+    }
+
+    if (
+      parsedBody &&
+      typeof parsedBody === 'object' &&
+      !Array.isArray(parsedBody) &&
+      'aartis' in (parsedBody as Record<string, unknown>)
+    ) {
+      const rawAartis = (parsedBody as Record<string, unknown>)['aartis'];
+      if (typeof rawAartis === 'string') {
+        const trimmed = rawAartis.trim();
+        if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') {
+          (parsedBody as Record<string, unknown>)['aartis'] = undefined;
+        } else {
+          try {
+            (parsedBody as Record<string, unknown>)['aartis'] = JSON.parse(trimmed);
+          } catch {
+            throw new BadRequestException('Invalid JSON format for aartis');
+          }
+        }
+      }
+    }
+
+    return this.validationPipe.transform(parsedBody, metadata);
+  }
+}
+
 interface AuthenticatedRequest extends Request {
   user: User;
 }
@@ -53,41 +111,58 @@ export class TempleController {
     FileFieldsInterceptor([
       { name: 'image', maxCount: 1 },
       { name: 'imageUrl', maxCount: 1 },
+      { name: 'trustDoc', maxCount: 1 },
+      { name: 'trustDocUrl', maxCount: 1 },
+      { name: 'deityPhoto', maxCount: 1 },
+      { name: 'deityPhotoUrl', maxCount: 1 },
     ]),
   )
   @HttpCode(HttpStatus.CREATED)
   async createTemple(
     @Req() req: AuthenticatedRequest,
-    @Body(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }))
+    @Body(new TempleUpdatePipe())
     dto: CreateTempleDto,
     @UploadedFiles()
     files?: {
       image?: Express.Multer.File[];
       imageUrl?: Express.Multer.File[];
+      trustDoc?: Express.Multer.File[];
+      trustDocUrl?: Express.Multer.File[];
+      deityPhoto?: Express.Multer.File[];
+      deityPhotoUrl?: Express.Multer.File[];
     },
   ) {
     return this.templeService.createTemple(dto, files, req.user?.id);
   }
 
   @Patch(':id')
+  @Put(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(USER_ROLE.ADMIN)
   @UseInterceptors(
     FileFieldsInterceptor([
       { name: 'image', maxCount: 1 },
       { name: 'imageUrl', maxCount: 1 },
+      { name: 'trustDoc', maxCount: 1 },
+      { name: 'trustDocUrl', maxCount: 1 },
+      { name: 'deityPhoto', maxCount: 1 },
+      { name: 'deityPhotoUrl', maxCount: 1 },
     ]),
   )
   @HttpCode(HttpStatus.OK)
   async updateTemple(
     @Req() req: AuthenticatedRequest,
     @Param('id', ParseIntPipe) id: number,
-    @Body(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }))
+    @Body(new TempleUpdatePipe())
     dto: UpdateTempleDto,
     @UploadedFiles()
     files?: {
       image?: Express.Multer.File[];
       imageUrl?: Express.Multer.File[];
+      trustDoc?: Express.Multer.File[];
+      trustDocUrl?: Express.Multer.File[];
+      deityPhoto?: Express.Multer.File[];
+      deityPhotoUrl?: Express.Multer.File[];
     },
   ) {
     return this.templeService.updateTemple(id, dto, files, req.user?.id);

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Temple, Service, ServiceFeature } from '@poojawala/entities';
+import { Temple, Service, ServiceFeature, TempleAarti } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 import { GetTemplesQueryDto } from '@poojawala/dtos';
 
@@ -12,6 +12,10 @@ export class TempleRepository extends BaseRepository<Temple> {
     repo: Repository<Temple>,
   ) {
     super(repo);
+  }
+
+  get manager() {
+    return this.repo.manager;
   }
 
   async findAllTemples(query: GetTemplesQueryDto, isAdmin: boolean = false) {
@@ -56,6 +60,38 @@ export class TempleRepository extends BaseRepository<Temple> {
 
     if (state && state.trim()) {
       qb.andWhere('temple.state ILIKE :state', { state: `%${state.trim()}%` });
+    }
+
+    if (query.includeAartis === true) {
+      qb.andWhere((subQb) => {
+        const subQuery = subQb
+          .subQuery()
+          .select('1')
+          .from(TempleAarti, 'aarti')
+          .where('aarti.templeId = temple.id')
+          .andWhere('aarti.deletedAt IS NULL');
+
+        if (!isAdmin) {
+          subQuery.andWhere('aarti.isActive = true');
+        }
+
+        return `EXISTS (${subQuery.getQuery()})`;
+      });
+    } else if (query.includeAartis === false) {
+      qb.andWhere((subQb) => {
+        const subQuery = subQb
+          .subQuery()
+          .select('1')
+          .from(TempleAarti, 'aarti')
+          .where('aarti.templeId = temple.id')
+          .andWhere('aarti.deletedAt IS NULL');
+
+        if (!isAdmin) {
+          subQuery.andWhere('aarti.isActive = true');
+        }
+
+        return `NOT EXISTS (${subQuery.getQuery()})`;
+      });
     }
 
     qb.orderBy('temple.createdAt', 'DESC')
@@ -117,5 +153,38 @@ export class TempleRepository extends BaseRepository<Temple> {
       .andWhere('feature.isActive = :isActive', { isActive: true })
       .orderBy('feature.id', 'ASC')
       .getMany();
+  }
+
+  async findAartisByTempleId(templeId: number, isAdmin: boolean = false): Promise<TempleAarti[]> {
+    const qb = this.repo.manager
+      .createQueryBuilder(TempleAarti, 'aarti')
+      .where('aarti.templeId = :templeId', { templeId })
+      .andWhere('aarti.deletedAt IS NULL');
+
+    if (!isAdmin) {
+      qb.andWhere('aarti.isActive = :isActive', { isActive: true });
+    }
+
+    qb.orderBy('aarti.time', 'ASC')
+      .addOrderBy('aarti.id', 'ASC');
+
+    return qb.getMany();
+  }
+
+  async findAartisByTempleIds(templeIds: number[], isAdmin: boolean = false): Promise<TempleAarti[]> {
+    if (!templeIds || templeIds.length === 0) return [];
+    const qb = this.repo.manager
+      .createQueryBuilder(TempleAarti, 'aarti')
+      .where('aarti.templeId IN (:...templeIds)', { templeIds })
+      .andWhere('aarti.deletedAt IS NULL');
+
+    if (!isAdmin) {
+      qb.andWhere('aarti.isActive = :isActive', { isActive: true });
+    }
+
+    qb.orderBy('aarti.time', 'ASC')
+      .addOrderBy('aarti.id', 'ASC');
+
+    return qb.getMany();
   }
 }
