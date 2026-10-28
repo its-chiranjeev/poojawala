@@ -361,7 +361,7 @@ export class TempleService {
         )) || null;
     }
 
-    const { savedTemple, savedAartis } = await this.runInTransaction(
+    const { savedTemple, savedAartis, submitterUser } = await this.runInTransaction(
       async (manager: EntityManager) => {
         const templeRepo = manager.getRepository(Temple);
         const aartiRepo = manager.getRepository(TempleAarti);
@@ -447,9 +447,18 @@ export class TempleService {
           },
         });
 
-        return { savedTemple: saved, savedAartis: aartisList };
+        let submitterUser: User | null = null;
+        if (isPurohit && saved.submittedByUserId) {
+          submitterUser = await manager.getRepository(User).findOne({
+            where: { id: saved.submittedByUserId },
+          });
+        }
+
+        return { savedTemple: saved, savedAartis: aartisList, submitterUser };
       },
     );
+
+    const effectiveSubmitterUser = submitterUser || (user && user.email ? user : null);
 
     if (isPurohit && this.notificationService) {
       try {
@@ -471,6 +480,31 @@ export class TempleService {
         this.logger.error(
           `Failed to notify admins of temple submission for temple ${savedTemple.id}: ${errMessage}`,
         );
+      }
+    }
+
+    if (isPurohit && this.emailService) {
+      if (!effectiveSubmitterUser || !effectiveSubmitterUser.email || !effectiveSubmitterUser.email.trim()) {
+        this.logger.warn(
+          `Purohit created temple ${savedTemple.id} (${savedTemple.name}), but submitting user ${savedTemple.submittedByUserId} has no valid email address; skipping registration email delivery.`,
+        );
+      } else {
+        const submitterEmail = effectiveSubmitterUser.email.trim();
+        const submitterName =
+          [effectiveSubmitterUser.firstName, effectiveSubmitterUser.lastName].filter(Boolean).join(' ') ||
+          'Purohit';
+        try {
+          await this.emailService.sendTempleSubmittedEmail({
+            email: submitterEmail,
+            templeName: savedTemple.name,
+            purohitName: submitterName,
+          });
+        } catch (error: unknown) {
+          const errMessage = error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `Failed to deliver temple registration confirmation email for temple ${savedTemple.id} to submitter ${savedTemple.submittedByUserId}: ${errMessage}`,
+          );
+        }
       }
     }
 
@@ -576,7 +610,7 @@ export class TempleService {
         }
 
         const previousStatus = temple.verificationStatus;
-        let transition: 'APPROVED' | 'REJECTED' | null = null;
+        let transition: 'APPROVED' | 'REJECTED' | 'PENDING' | null = null;
 
         if (isAdmin) {
           if (dto.verificationStatus !== undefined) {
@@ -613,6 +647,9 @@ export class TempleService {
                 temple.verificationRemarks = null;
               }
             } else if (targetStatus === TEMPLE_VERIFICATION_STATUS.PENDING) {
+              if (previousStatus !== TEMPLE_VERIFICATION_STATUS.PENDING) {
+                transition = 'PENDING';
+              }
               temple.verificationStatus = TEMPLE_VERIFICATION_STATUS.PENDING;
               if (dto.verificationRemarks !== undefined) {
                 temple.verificationRemarks =
@@ -974,6 +1011,63 @@ export class TempleService {
             `Failed to deliver temple verification ${statusTransition} email for temple ${updated.id} to submitter ${updated.submittedByUserId}: ${errMessage}`,
           );
         }
+      }
+    }
+
+    if (statusTransition && updated.submittedByUserId && this.notificationService) {
+      try {
+        let notifTitle = 'Temple Verification Status Updated';
+        let notifMessage = `Your temple "${updated.name}" verification status has been updated to ${updated.verificationStatus}.`;
+
+        if (statusTransition === 'APPROVED') {
+          notifTitle = 'Temple Submission Approved';
+          notifMessage = finalRemarks
+            ? `Your temple "${updated.name}" has been approved. Remarks: ${finalRemarks}`
+            : `Your temple "${updated.name}" has been approved by the administrator.`;
+        } else if (statusTransition === 'REJECTED') {
+          notifTitle = 'Temple Submission Rejected';
+          notifMessage = finalRemarks
+            ? `Your temple "${updated.name}" submission has been rejected. Reason: ${finalRemarks}`
+            : `Your temple "${updated.name}" submission has been rejected by the administrator.`;
+        } else if (statusTransition === 'PENDING') {
+          notifTitle = 'Temple Verification Pending';
+          notifMessage = `Your temple "${updated.name}" verification status is set to pending admin review.`;
+        }
+
+        await this.notificationService.createNotification(
+          updated.submittedByUserId,
+          notifTitle,
+          notifMessage,
+          NOTIFICATION_TYPE.SYSTEM,
+          updated.id,
+          'TEMPLE',
+          true,
+          {
+            templeId: updated.id,
+            templeName: updated.name,
+            verificationStatus: updated.verificationStatus,
+            verificationRemarks: finalRemarks,
+            action: 'TEMPLE_VERIFICATION_STATUS_CHANGED',
+          },
+        );
+
+        if (typeof this.notificationService.getGateway === 'function') {
+          this.notificationService.getGateway()?.notifyUser(
+            updated.submittedByUserId,
+            'temple:verification_status',
+            {
+              templeId: updated.id,
+              templeName: updated.name,
+              verificationStatus: updated.verificationStatus,
+              verificationRemarks: finalRemarks,
+            },
+          );
+        }
+      } catch (error: unknown) {
+        const errMessage = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `Failed to notify submitter ${updated.submittedByUserId} of verification status update for temple ${updated.id}: ${errMessage}`,
+        );
       }
     }
 

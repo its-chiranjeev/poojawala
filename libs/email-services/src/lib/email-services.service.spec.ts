@@ -251,6 +251,26 @@ describe('EmailService - Centralized Platform Branding', () => {
   });
 
   describe('Temple Verification Emails', () => {
+    it('should send Temple Submission/Registration confirmation email with pending approval badge and instructions', async () => {
+      await service.sendTempleSubmittedEmail({
+        email: 'purohit@example.com',
+        templeName: 'Kashi Vishwanath Temple',
+        purohitName: 'Pandit Ramesh',
+      });
+
+      expect(mockResendProvider.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'purohit@example.com',
+          subject: 'Temple Registered Successfully - Kashi Vishwanath Temple | 1Pooja',
+        }),
+      );
+      const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+      expect(sentHtml).toContain('Kashi Vishwanath Temple');
+      expect(sentHtml).toContain('Temple Registered Successfully');
+      expect(sentHtml).toContain('Pending Approval');
+      expect(sentHtml).toContain('wait for the administration verification approval');
+    });
+
     it('should send Temple Approval email without remarks section when remarks are omitted', async () => {
       await service.sendTempleApprovalEmail({
         email: 'purohit@example.com',

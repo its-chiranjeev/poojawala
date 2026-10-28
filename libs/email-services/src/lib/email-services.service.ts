@@ -1097,6 +1097,43 @@ export class EmailService {
     });
   }
 
+  async sendTempleSubmittedEmail(data: {
+    email: string;
+    templeName: string;
+    purohitName?: string;
+  }): Promise<void> {
+    const statusBadge = 'Temple Registered Successfully';
+    const userName = data.purohitName || 'Purohit';
+    const preheaderText = `Your temple "${data.templeName}" has been registered successfully.`;
+    const emailMessage = `Your temple <strong>${this.escapeHtml(data.templeName)}</strong> has been registered successfully. It is currently under review by our administration. Please wait for the administration verification approval.`;
+
+    const detailsRows: EmailTableRow[] = [
+      { label: 'Temple Name', value: data.templeName },
+      { label: 'Verification Status', value: 'Pending Approval', isHighlight: true },
+    ];
+
+    const html = renderPoojawalaEmail({
+      statusBadge,
+      userName,
+      preheaderText,
+      emailMessage,
+      detailsTable: {
+        title: 'Temple Registration Details',
+        rows: detailsRows,
+      },
+      highlight: {
+        title: 'Pending Verification',
+        text: 'Your temple registration is currently pending administration verification. We will notify you once it has been reviewed and approved.',
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject: `Temple Registered Successfully - ${data.templeName} | ${platformBrandName}`,
+      html,
+    });
+  }
+
   async sendTempleApprovalEmail(data: {
     email: string;
     templeName: string;

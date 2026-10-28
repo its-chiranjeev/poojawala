@@ -51,12 +51,18 @@ describe('TempleService', () => {
     findOne: jest.Mock;
   };
   let mockEmailService: {
+    sendTempleSubmittedEmail: jest.Mock;
     sendTempleApprovalEmail: jest.Mock;
     sendTempleRejectionEmail: jest.Mock;
   };
   let mockNotificationService: {
     notifyAdmins: jest.Mock;
     createNotification: jest.Mock;
+    getGateway: jest.Mock;
+  };
+  let mockGateway: {
+    notifyUser: jest.Mock;
+    emitNotification: jest.Mock;
   };
   let mockDataSource: {
     transaction: jest.Mock;
@@ -141,7 +147,13 @@ describe('TempleService', () => {
       }),
     };
 
+    mockGateway = {
+      notifyUser: jest.fn(),
+      emitNotification: jest.fn(),
+    };
+
     mockEmailService = {
+      sendTempleSubmittedEmail: jest.fn().mockResolvedValue(undefined),
       sendTempleApprovalEmail: jest.fn().mockResolvedValue(undefined),
       sendTempleRejectionEmail: jest.fn().mockResolvedValue(undefined),
     };
@@ -149,6 +161,7 @@ describe('TempleService', () => {
     mockNotificationService = {
       notifyAdmins: jest.fn().mockResolvedValue([]),
       createNotification: jest.fn().mockResolvedValue({ id: 1 }),
+      getGateway: jest.fn().mockReturnValue(mockGateway),
     };
 
     const mockManager = {
@@ -1559,6 +1572,14 @@ describe('TempleService', () => {
             submittedByUserId: 50,
           }),
         );
+        expect(mockEmailService.sendTempleSubmittedEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendTempleSubmittedEmail).toHaveBeenCalledWith(
+          expect.objectContaining({
+            email: 'purohit@example.com',
+            templeName: 'Shree Krishna Temple',
+            purohitName: 'Acharya Sharma',
+          }),
+        );
       });
 
       it('4 & 5. Failed Temple creation (transaction error/rollback) does not generate a notification', async () => {
@@ -1860,6 +1881,31 @@ describe('TempleService', () => {
             remarks: 'All physical trust documents successfully verified on-site.',
           }),
         );
+        expect(mockNotificationService.createNotification).toHaveBeenCalledWith(
+          50,
+          'Temple Submission Approved',
+          expect.stringContaining('All physical trust documents successfully verified on-site.'),
+          NOTIFICATION_TYPE.SYSTEM,
+          10,
+          'TEMPLE',
+          true,
+          expect.objectContaining({
+            templeId: 10,
+            templeName: 'Somnath Temple',
+            verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED,
+            verificationRemarks: 'All physical trust documents successfully verified on-site.',
+          }),
+        );
+        expect(mockGateway.notifyUser).toHaveBeenCalledWith(
+          50,
+          'temple:verification_status',
+          expect.objectContaining({
+            templeId: 10,
+            templeName: 'Somnath Temple',
+            verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED,
+            verificationRemarks: 'All physical trust documents successfully verified on-site.',
+          }),
+        );
       });
 
       it('5. Rejection email contains the required remarks', async () => {
@@ -1889,6 +1935,31 @@ describe('TempleService', () => {
             email: 'purohit@example.com',
             templeName: 'Old Mandir',
             rejectionReason: 'Deity photo does not meet Vedic authenticity guidelines',
+          }),
+        );
+        expect(mockNotificationService.createNotification).toHaveBeenCalledWith(
+          50,
+          'Temple Submission Rejected',
+          expect.stringContaining('Deity photo does not meet Vedic authenticity guidelines'),
+          NOTIFICATION_TYPE.SYSTEM,
+          10,
+          'TEMPLE',
+          true,
+          expect.objectContaining({
+            templeId: 10,
+            templeName: 'Old Mandir',
+            verificationStatus: TEMPLE_VERIFICATION_STATUS.REJECTED,
+            verificationRemarks: 'Deity photo does not meet Vedic authenticity guidelines',
+          }),
+        );
+        expect(mockGateway.notifyUser).toHaveBeenCalledWith(
+          50,
+          'temple:verification_status',
+          expect.objectContaining({
+            templeId: 10,
+            templeName: 'Old Mandir',
+            verificationStatus: TEMPLE_VERIFICATION_STATUS.REJECTED,
+            verificationRemarks: 'Deity photo does not meet Vedic authenticity guidelines',
           }),
         );
       });
