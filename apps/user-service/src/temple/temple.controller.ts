@@ -180,15 +180,19 @@ export class TempleController {
 
   // ─── SHARED READ ENDPOINTS (ADMIN & PUBLIC) ─────────────────────────────────
 
-  @Get('all')
+  @Get(['all', ''])
   @UseGuards(OptionalJwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async getTemples(
     @Req() req: OptionalAuthRequest,
     @Query() query: GetTemplesQueryDto,
   ) {
+    // TODO: Replaced boolean isAdmin parameter with req.user so that role-based temple visibility (Admin, Purohit, Public/Customer) is enforced by the service/repository layer
+    /*
     const isAdmin = req.user?.role === USER_ROLE.ADMIN;
     return this.templeService.getTemples(query, isAdmin);
+    */
+    return this.templeService.getTemples(query, req.user);
   }
 
   @Get(':id')

@@ -2262,6 +2262,175 @@ describe('TempleService', () => {
         expect(errors2.some((e) => e.property === 'verificationRemarks')).toBe(true);
       });
     });
+
+    describe('Role-Based Temple Visibility for GET APIs', () => {
+      const mockAdminUser = { id: 1, role: USER_ROLE.ADMIN } as User;
+      const mockPurohitUser = { id: 50, role: USER_ROLE.PUROHIT } as User;
+      const mockCustomerUser = { id: 200, role: USER_ROLE.CUSTOMER } as User;
+
+      it('1. Anonymous user sees only active, approved, non-deleted temples', async () => {
+        const query: GetTemplesQueryDto = { page: 1, limit: 10 };
+        mockTempleRepo.findAllTemples.mockResolvedValueOnce({
+          data: [sampleActiveTemple],
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+        });
+
+        const res = await service.getTemples(query, false);
+        expect(mockTempleRepo.findAllTemples).toHaveBeenCalledWith(query, false);
+        expect(res.success).toBe(true);
+        expect(res.data).toHaveLength(1);
+      });
+
+      it('2. Anonymous user cannot retrieve a pending, rejected, inactive, or deleted temple by ID', async () => {
+        // When repo filters out pending/rejected/inactive/deleted, findTempleById returns null
+        mockTempleRepo.findTempleById.mockResolvedValueOnce(null);
+        await expect(service.getTempleById(99, false)).rejects.toThrow(NotFoundException);
+        expect(mockTempleRepo.findTempleById).toHaveBeenCalledWith(99, false);
+      });
+
+      it('3. Admin sees all non-deleted temples, including pending, rejected, and inactive temples', async () => {
+        const pendingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 20,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+          isActive: false,
+        };
+        mockTempleRepo.findTempleById.mockResolvedValueOnce(pendingTemple);
+
+        const res = await service.getTempleById(20, mockAdminUser);
+        expect(mockTempleRepo.findTempleById).toHaveBeenCalledWith(20, mockAdminUser);
+        expect(res.success).toBe(true);
+        expect(res.data.id).toBe(20);
+        expect(res.data.verificationStatus).toBe(TEMPLE_VERIFICATION_STATUS.PENDING);
+        expect(res.data.isActive).toBe(false);
+      });
+
+      it('4. Admin cannot retrieve a soft-deleted temple', async () => {
+        mockTempleRepo.findTempleById.mockResolvedValueOnce(null);
+
+        await expect(service.getTempleById(3, mockAdminUser)).rejects.toThrow(NotFoundException);
+        expect(mockTempleRepo.findTempleById).toHaveBeenCalledWith(3, mockAdminUser);
+      });
+
+      it('5. Purohit sees only their own non-deleted temples', async () => {
+        const query: GetTemplesQueryDto = { page: 1, limit: 10 };
+        mockTempleRepo.findAllTemples.mockResolvedValueOnce({
+          data: [{ ...sampleActiveTemple, submittedByUserId: 50 }],
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+        });
+
+        const res = await service.getTemples(query, mockPurohitUser);
+        expect(mockTempleRepo.findAllTemples).toHaveBeenCalledWith(query, mockPurohitUser);
+        expect(res.success).toBe(true);
+        expect(res.data[0].submittedByUserId).toBe(50);
+      });
+
+      it('6. Purohit can retrieve their own pending/rejected/inactive temple by ID', async () => {
+        const ownPendingTemple: Temple = {
+          ...sampleActiveTemple,
+          id: 55,
+          submittedByUserId: 50,
+          verificationStatus: TEMPLE_VERIFICATION_STATUS.PENDING,
+          isActive: false,
+        };
+        mockTempleRepo.findTempleById.mockResolvedValueOnce(ownPendingTemple);
+
+        const res = await service.getTempleById(55, mockPurohitUser);
+        expect(mockTempleRepo.findTempleById).toHaveBeenCalledWith(55, mockPurohitUser);
+        expect(res.success).toBe(true);
+        expect(res.data.id).toBe(55);
+        expect(res.data.submittedByUserId).toBe(50);
+      });
+
+      it('7. Purohit cannot retrieve another Purohit temple by ID (returns 404)', async () => {
+        // Repository filters out temples not owned by this Purohit and returns null
+        mockTempleRepo.findTempleById.mockResolvedValueOnce(null);
+
+        await expect(service.getTempleById(77, mockPurohitUser)).rejects.toThrow(NotFoundException);
+        expect(mockTempleRepo.findTempleById).toHaveBeenCalledWith(77, mockPurohitUser);
+      });
+
+      it('8. Customer receives only public-approved temple data', async () => {
+        const query: GetTemplesQueryDto = { page: 1, limit: 10 };
+        mockTempleRepo.findAllTemples.mockResolvedValueOnce({
+          data: [sampleActiveTemple],
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+        });
+
+        const res = await service.getTemples(query, mockCustomerUser);
+        expect(mockTempleRepo.findAllTemples).toHaveBeenCalledWith(query, mockCustomerUser);
+        expect(res.success).toBe(true);
+
+        mockTempleRepo.findTempleById.mockResolvedValueOnce(sampleActiveTemple);
+        const detailRes = await service.getTempleById(1, mockCustomerUser);
+        expect(mockTempleRepo.findTempleById).toHaveBeenCalledWith(1, mockCustomerUser);
+        expect(detailRes.success).toBe(true);
+      });
+
+      it('9. Invalid/expired authentication defaults to public visibility', async () => {
+        const query: GetTemplesQueryDto = { page: 1, limit: 10 };
+        mockTempleRepo.findAllTemples.mockResolvedValueOnce({
+          data: [sampleActiveTemple],
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+        });
+
+        const res = await service.getTemples(query, undefined);
+        expect(mockTempleRepo.findAllTemples).toHaveBeenCalledWith(query, false);
+        expect(res.success).toBe(true);
+
+        mockTempleRepo.findTempleById.mockResolvedValueOnce(null);
+        await expect(service.getTempleById(99, undefined)).rejects.toThrow(NotFoundException);
+      });
+
+      it('10. Existing filters, pagination, response shape, and Aarti behavior remain intact', async () => {
+        const query: GetTemplesQueryDto = {
+          page: 2,
+          limit: 5,
+          search: 'Hanuman',
+          city: 'Ghaziabad',
+          includeAartis: true,
+        };
+        mockTempleRepo.findAllTemples.mockResolvedValueOnce({
+          data: [sampleActiveTemple],
+          page: 2,
+          limit: 5,
+          total: 15,
+          totalPages: 3,
+        });
+        mockTempleRepo.findAartisByTempleIds.mockResolvedValueOnce([
+          {
+            id: 1,
+            templeId: sampleActiveTemple.id,
+            name: 'Morning Aarti',
+            slug: 'morning-aarti',
+            time: '06:00:00',
+            isActive: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            deletedAt: null,
+          } as TempleAarti,
+        ]);
+
+        const res = await service.getTemples(query, false);
+        expect(res.pagination.page).toBe(2);
+        expect(res.pagination.limit).toBe(5);
+        expect(res.pagination.total).toBe(15);
+        expect(res.data[0].aartis).toHaveLength(1);
+        expect(res.data[0].aartis?.[0].name).toBe('Morning Aarti');
+      });
+    });
   });
 });
 

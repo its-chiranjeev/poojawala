@@ -1181,8 +1181,21 @@ export class TempleService {
     };
   }
 
+  // TODO: Updated getTemples to accept userOrIsAdmin (User | boolean) instead of only boolean isAdmin to support role-based temple visibility
+  /*
   async getTemples(query: GetTemplesQueryDto, isAdmin: boolean = false) {
     const result = await this.templeRepository.findAllTemples(query, isAdmin);
+  */
+  async getTemples(query: GetTemplesQueryDto, userOrIsAdmin: User | boolean = false) {
+    const isAdmin =
+      typeof userOrIsAdmin === 'boolean'
+        ? userOrIsAdmin
+        : userOrIsAdmin?.role === USER_ROLE.ADMIN;
+
+    const user = typeof userOrIsAdmin === 'object' ? userOrIsAdmin : undefined;
+    const isPurohit = user?.role === USER_ROLE.PUROHIT;
+
+    const result = await this.templeRepository.findAllTemples(query, userOrIsAdmin);
 
     let shouldIncludeAartis = false;
     if (
@@ -1204,7 +1217,7 @@ export class TempleService {
       typeof this.templeRepository.findAartisByTempleIds === 'function'
     ) {
       const templeIds = result.data.map((t) => t.id);
-      const allAartis = await this.templeRepository.findAartisByTempleIds(templeIds, isAdmin);
+      const allAartis = await this.templeRepository.findAartisByTempleIds(templeIds, isAdmin || isPurohit);
       aartisByTempleId = new Map();
       for (const aarti of allAartis) {
         const list = aartisByTempleId.get(aarti.templeId) || [];
@@ -1363,8 +1376,11 @@ export class TempleService {
       );
     }
 
+    const user = typeof userOrIsAdmin === 'object' ? userOrIsAdmin : undefined;
+    const isPurohit = user?.role === USER_ROLE.PUROHIT;
+
     const aartis = typeof this.templeRepository.findAartisByTempleId === 'function'
-      ? await this.templeRepository.findAartisByTempleId(id, isAdmin)
+      ? await this.templeRepository.findAartisByTempleId(id, isAdmin || isPurohit)
       : [];
 
     return {

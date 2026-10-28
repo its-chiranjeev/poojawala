@@ -18,7 +18,7 @@ export class TempleRepository extends BaseRepository<Temple> {
     return this.repo.manager;
   }
 
-  async findAllTemples(query: GetTemplesQueryDto, isAdmin: boolean = false) {
+  async findAllTemples(query: GetTemplesQueryDto, userOrIsAdmin: User | boolean = false) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
     const { search, city, state } = query;
@@ -26,11 +26,19 @@ export class TempleRepository extends BaseRepository<Temple> {
     const qb = this.repo.createQueryBuilder('temple');
     qb.where('temple.deletedAt IS NULL');
 
+    const isAdmin =
+      typeof userOrIsAdmin === 'boolean'
+        ? userOrIsAdmin
+        : userOrIsAdmin?.role === USER_ROLE.ADMIN;
+
+    const user = typeof userOrIsAdmin === 'object' ? userOrIsAdmin : undefined;
+    const isPurohit = user?.role === USER_ROLE.PUROHIT;
+
     let parsedIsActive: boolean | undefined = undefined;
     if (
       query.isActive !== undefined &&
       query.isActive !== null &&
-      (query.isActive as any) !== ''
+      (query.isActive as unknown) !== ''
     ) {
       if (typeof query.isActive === 'boolean') {
         parsedIsActive = query.isActive;
@@ -41,6 +49,11 @@ export class TempleRepository extends BaseRepository<Temple> {
       }
     }
 
+    // TODO: Replaced legacy visibility filter with role-based temple visibility:
+    // - Admin: sees all non-deleted temples regardless of status (respects explicit query filters).
+    // - Purohit: sees only non-deleted temples submitted by their own account (submittedByUserId = user.id) regardless of active/verification status.
+    // - Public / Customer / Other roles: sees only active, approved, non-deleted temples.
+    /*
     if (parsedIsActive !== undefined) {
       qb.andWhere('temple.isActive = :isActive', { isActive: parsedIsActive });
     } else if (!isAdmin) {
@@ -64,6 +77,40 @@ export class TempleRepository extends BaseRepository<Temple> {
         });
       }
     }
+    */
+    if (isAdmin) {
+      if (parsedIsActive !== undefined) {
+        qb.andWhere('temple.isActive = :isActive', { isActive: parsedIsActive });
+      }
+      if (query.verificationStatus) {
+        qb.andWhere('temple.verificationStatus = :vStatus', {
+          vStatus: query.verificationStatus,
+        });
+      }
+      if (query.submittedByUserId) {
+        qb.andWhere('temple.submittedByUserId = :subUserId', {
+          subUserId: query.submittedByUserId,
+        });
+      }
+    } else if (isPurohit) {
+      qb.andWhere('temple.submittedByUserId = :purohitUserId', {
+        purohitUserId: user!.id,
+      });
+      if (parsedIsActive !== undefined) {
+        qb.andWhere('temple.isActive = :isActive', { isActive: parsedIsActive });
+      }
+      if (query.verificationStatus) {
+        qb.andWhere('temple.verificationStatus = :vStatus', {
+          vStatus: query.verificationStatus,
+        });
+      }
+    } else {
+      qb.andWhere('temple.isActive = :isActive', { isActive: true });
+      qb.andWhere(
+        '(temple.verificationStatus = :approvedStatus OR temple.verificationStatus IS NULL)',
+        { approvedStatus: TEMPLE_VERIFICATION_STATUS.APPROVED },
+      );
+    }
 
     if (search && search.trim()) {
       qb.andWhere(
@@ -84,7 +131,7 @@ export class TempleRepository extends BaseRepository<Temple> {
     if (
       query.includeAartis !== undefined &&
       query.includeAartis !== null &&
-      (query.includeAartis as any) !== ''
+      (query.includeAartis as unknown) !== ''
     ) {
       if (typeof query.includeAartis === 'boolean') {
         isIncludeAartisTrue = query.includeAartis;
@@ -102,7 +149,13 @@ export class TempleRepository extends BaseRepository<Temple> {
           .where('aarti.templeId = temple.id')
           .andWhere('aarti.deletedAt IS NULL');
 
+        // TODO: Retained isActive check for public, allowing admin and purohit to include all non-deleted aartis
+        /*
         if (!isAdmin) {
+          subQuery.andWhere('aarti.isActive = true');
+        }
+        */
+        if (!isAdmin && !isPurohit) {
           subQuery.andWhere('aarti.isActive = true');
         }
 
@@ -136,7 +189,13 @@ export class TempleRepository extends BaseRepository<Temple> {
         : userOrIsAdmin?.role === USER_ROLE.ADMIN;
 
     const user = typeof userOrIsAdmin === 'object' ? userOrIsAdmin : undefined;
+    const isPurohit = user?.role === USER_ROLE.PUROHIT;
 
+    // TODO: Replaced legacy findTempleById visibility logic.
+    // - Admin: any non-deleted temple.
+    // - Purohit: ONLY their own submitted temple (submittedByUserId matches auth user id).
+    // - Public / Customer / Other roles: ONLY active, approved, non-deleted temple.
+    /*
     if (!isAdmin) {
       if (user?.role === USER_ROLE.PUROHIT) {
         qb.andWhere(
@@ -153,6 +212,22 @@ export class TempleRepository extends BaseRepository<Temple> {
           { approvedStatus: TEMPLE_VERIFICATION_STATUS.APPROVED },
         );
       }
+    }
+    */
+    if (isAdmin) {
+      // Admin sees any non-deleted temple
+    } else if (isPurohit) {
+      // Purohit sees ONLY their own submitted temple
+      qb.andWhere('temple.submittedByUserId = :purohitUserId', {
+        purohitUserId: user!.id,
+      });
+    } else {
+      // Public / Customer / Other roles see only active, approved, non-deleted temple
+      qb.andWhere('temple.isActive = :isActive', { isActive: true });
+      qb.andWhere(
+        '(temple.verificationStatus = :approvedStatus OR temple.verificationStatus IS NULL)',
+        { approvedStatus: TEMPLE_VERIFICATION_STATUS.APPROVED },
+      );
     }
 
     return qb.getOne();
@@ -192,13 +267,13 @@ export class TempleRepository extends BaseRepository<Temple> {
       .getMany();
   }
 
-  async findAartisByTempleId(templeId: number, isAdmin: boolean = false): Promise<TempleAarti[]> {
+  async findAartisByTempleId(templeId: number, isAdminOrPurohit: boolean = false): Promise<TempleAarti[]> {
     const qb = this.repo.manager
       .createQueryBuilder(TempleAarti, 'aarti')
       .where('aarti.templeId = :templeId', { templeId })
       .andWhere('aarti.deletedAt IS NULL');
 
-    if (!isAdmin) {
+    if (!isAdminOrPurohit) {
       qb.andWhere('aarti.isActive = :isActive', { isActive: true });
     }
 
@@ -208,14 +283,14 @@ export class TempleRepository extends BaseRepository<Temple> {
     return qb.getMany();
   }
 
-  async findAartisByTempleIds(templeIds: number[], isAdmin: boolean = false): Promise<TempleAarti[]> {
+  async findAartisByTempleIds(templeIds: number[], isAdminOrPurohit: boolean = false): Promise<TempleAarti[]> {
     if (!templeIds || templeIds.length === 0) return [];
     const qb = this.repo.manager
       .createQueryBuilder(TempleAarti, 'aarti')
       .where('aarti.templeId IN (:...templeIds)', { templeIds })
       .andWhere('aarti.deletedAt IS NULL');
 
-    if (!isAdmin) {
+    if (!isAdminOrPurohit) {
       qb.andWhere('aarti.isActive = :isActive', { isActive: true });
     }
 

@@ -25,6 +25,11 @@ describe('TempleController', () => {
     role: USER_ROLE.CUSTOMER,
   } as User;
 
+  const mockPurohitUser = {
+    id: 50,
+    role: USER_ROLE.PUROHIT,
+  } as User;
+
   beforeEach(async () => {
     mockTempleService = {
       createTemple: jest.fn().mockResolvedValue({
@@ -165,23 +170,33 @@ describe('TempleController', () => {
       expect(res.success).toBe(true);
     });
 
-    it('should handle public getTemples without auth (isAdmin = false)', async () => {
+    it('should handle public getTemples without auth (req.user = undefined)', async () => {
       const req: any = { user: undefined };
       const query: GetTemplesQueryDto = { page: 1, limit: 10 };
 
       const res = await controller.getTemples(req, query);
 
-      expect(mockTempleService.getTemples).toHaveBeenCalledWith(query, false);
+      expect(mockTempleService.getTemples).toHaveBeenCalledWith(query, undefined);
       expect(res.success).toBe(true);
     });
 
-    it('should handle admin getTemples with admin user (isAdmin = true)', async () => {
+    it('should handle admin getTemples with admin user (req.user = mockAdminUser)', async () => {
       const req: any = { user: mockAdminUser };
       const query: GetTemplesQueryDto = { page: 1, limit: 10 };
 
       const res = await controller.getTemples(req, query);
 
-      expect(mockTempleService.getTemples).toHaveBeenCalledWith(query, true);
+      expect(mockTempleService.getTemples).toHaveBeenCalledWith(query, mockAdminUser);
+      expect(res.success).toBe(true);
+    });
+
+    it('should handle purohit getTemples with purohit user (req.user = mockPurohitUser)', async () => {
+      const req: any = { user: mockPurohitUser };
+      const query: GetTemplesQueryDto = { page: 1, limit: 10 };
+
+      const res = await controller.getTemples(req, query);
+
+      expect(mockTempleService.getTemples).toHaveBeenCalledWith(query, mockPurohitUser);
       expect(res.success).toBe(true);
     });
 
