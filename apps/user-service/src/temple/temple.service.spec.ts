@@ -5,6 +5,7 @@ import { TempleRepository } from '@poojawala/repositories';
 import {
   Temple,
   TempleAarti,
+  Service,
   ACTOR_TYPE,
   USER_ROLE,
   AUDIT_MODULE,
@@ -23,6 +24,7 @@ import {
   CreateTempleAartiDto,
   UpdateTempleAartiDto,
   CreateServiceDto,
+  UpdateTempleServiceDto,
 } from '@poojawala/dtos';
 import { DataSource } from 'typeorm';
 import { EmailService } from '@poojawala/email-services';
@@ -51,6 +53,12 @@ describe('TempleService', () => {
   };
   let mockUserRepo: {
     findOne: jest.Mock;
+  };
+  let mockServiceRepo: {
+    find: jest.Mock;
+    findOne: jest.Mock;
+    save: jest.Mock;
+    update: jest.Mock;
   };
   let mockEmailService: {
     sendTempleSubmittedEmail: jest.Mock;
@@ -169,10 +177,20 @@ describe('TempleService', () => {
       getGateway: jest.fn().mockReturnValue(mockGateway),
     };
 
+    mockServiceRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+      save: jest.fn().mockImplementation(async (s) => s),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+
     const mockManager = {
       getRepository: jest.fn((entity) => {
         if (entity === TempleAarti) {
           return mockAartiRepo;
+        }
+        if (entity === Service) {
+          return mockServiceRepo;
         }
         if (entity === User) {
           return mockUserRepo;
@@ -2717,5 +2735,454 @@ describe('TempleService', () => {
       expect(mockServiceService.createService).not.toHaveBeenCalled();
     });
   });
-});
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // TEMPLE PATCH API: REMOVE AN ASSOCIATED SERVICE
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe('Temple PATCH API: Remove an Associated Service', () => {
+    const mockAdmin: User = {
+      id: 99,
+      email: 'admin@poojawala.com',
+      role: USER_ROLE.ADMIN,
+    } as User;
+
+    const mockPurohit: User = {
+      id: 42,
+      email: 'purohit@poojawala.com',
+      role: USER_ROLE.PUROHIT,
+    } as User;
+
+    const testTemple: Temple = {
+      id: 1,
+      name: 'Shri Hanuman Mandir',
+      slug: 'shri-hanuman-mandir',
+      description: 'Ancient temple',
+      isActive: true,
+      verificationStatus: TEMPLE_VERIFICATION_STATUS.APPROVED,
+      submittedByUserId: 42,
+      createdAt: new Date('2026-01-01'),
+      updatedAt: new Date('2026-01-01'),
+      deletedAt: null,
+    } as Temple;
+
+    beforeEach(() => {
+      mockTempleRepo.findOne.mockResolvedValue({ ...testTemple });
+      mockTempleRepo.save.mockImplementation(async (t) => ({ ...t, updatedAt: new Date() }));
+    });
+
+    it('1. should remove a single associated service from a temple when remove is true (templeId becomes null)', async () => {
+      const existingService: Service = {
+        id: 10,
+        name: 'Ganga Aarti Online',
+        slug: 'ganga-aarti-online',
+        templeId: 1,
+        deletedAt: null,
+        isActive: true,
+      } as Service;
+
+      mockServiceRepo.find
+        .mockResolvedValueOnce([existingService])
+        .mockResolvedValueOnce([]);
+
+      const dto: UpdateTempleDto = {
+        services: [{ id: 10, remove: true }],
+      };
+
+      const result = await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+      expect(result.success).toBe(true);
+      expect(result.statusCode).toBe(200);
+      expect(mockServiceRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 10,
+          templeId: null,
+        }),
+      );
+      // Service record is NOT deleted
+      expect(existingService.deletedAt).toBeNull();
+      // Returned services is empty (since service 10 was detached)
+      expect(result.data.services).toEqual([]);
+    });
+
+    it('2. should soft-delete the service when delete is true', async () => {
+      const existingService: Service = {
+        id: 10,
+        name: 'Ganga Aarti Online',
+        slug: 'ganga-aarti-online',
+        templeId: 1,
+        deletedAt: null,
+        isActive: true,
+      } as Service;
+
+      mockServiceRepo.find
+        .mockResolvedValueOnce([existingService])
+        .mockResolvedValueOnce([]);
+
+      const dto: UpdateTempleDto = {
+        services: [{ id: 10, delete: true }],
+      };
+
+      const result = await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+      expect(result.success).toBe(true);
+      expect(result.statusCode).toBe(200);
+      expect(mockServiceRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 10,
+          deletedAt: expect.any(Date),
+          isActive: false,
+        }),
+      );
+      expect(existingService.deletedAt).toBeInstanceOf(Date);
+      expect(existingService.isActive).toBe(false);
+      // Returned services is empty (since service 10 was soft-deleted)
+      expect(result.data.services).toEqual([]);
+    });
+
+    it('3. should handle multiple services simultaneously (one removed/detached and one soft-deleted)', async () => {
+      const serviceA: Service = {
+        id: 10,
+        name: 'Service A',
+        templeId: 1,
+        deletedAt: null,
+        isActive: true,
+      } as Service;
+      const serviceB: Service = {
+        id: 11,
+        name: 'Service B',
+        templeId: 1,
+        deletedAt: null,
+        isActive: true,
+      } as Service;
+
+      mockServiceRepo.find
+        .mockResolvedValueOnce([serviceA, serviceB])
+        .mockResolvedValueOnce([]);
+
+      const dto: UpdateTempleDto = {
+        services: [
+          { id: 10, remove: true },
+          { id: 11, delete: true },
+        ],
+      };
+
+      const result = await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+      expect(result.success).toBe(true);
+      // Service A is detached (templeId: null, deletedAt remains null)
+      expect(mockServiceRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 10, templeId: null }),
+      );
+      expect(serviceA.deletedAt).toBeNull();
+
+      // Service B is soft-deleted (deletedAt: not null, isActive: false)
+      expect(mockServiceRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 11, deletedAt: expect.any(Date), isActive: false }),
+      );
+      expect(serviceB.deletedAt).toBeInstanceOf(Date);
+      expect(serviceB.isActive).toBe(false);
+    });
+
+    it('4. should reject removing a service that belongs to another temple (HTTP 400 Bad Request)', async () => {
+      const foreignService: Service = {
+        id: 20,
+        name: 'Foreign Temple Service',
+        templeId: 2, // belongs to temple 2, but we are updating temple 1
+        deletedAt: null,
+        isActive: true,
+      } as Service;
+
+      mockServiceRepo.find.mockResolvedValue([foreignService]);
+
+      const dto: UpdateTempleDto = {
+        services: [{ id: 20, remove: true }],
+      };
+
+      await expect(
+        service.updateTempleWithUser(1, dto, undefined, mockAdmin),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.updateTempleWithUser(1, dto, undefined, mockAdmin),
+      ).rejects.toThrow('Service with id 20 does not belong to temple 1');
+
+      expect(mockServiceRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('5. should reject a nonexistent service ID (HTTP 400 Bad Request)', async () => {
+      mockServiceRepo.find.mockResolvedValue([]); // service 999 not found
+
+      const dto: UpdateTempleDto = {
+        services: [{ id: 999, remove: true }],
+      };
+
+      await expect(
+        service.updateTempleWithUser(1, dto, undefined, mockAdmin),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.updateTempleWithUser(1, dto, undefined, mockAdmin),
+      ).rejects.toThrow('Service with id 999 not found');
+
+      expect(mockServiceRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('6. should reject modifying an already deleted service (HTTP 400 Bad Request)', async () => {
+      const deletedService: Service = {
+        id: 30,
+        name: 'Soft Deleted Service',
+        templeId: 1,
+        deletedAt: new Date('2026-01-01'),
+        isActive: false,
+      } as Service;
+
+      mockServiceRepo.find.mockResolvedValue([deletedService]);
+
+      const dto: UpdateTempleDto = {
+        services: [{ id: 30, remove: true }],
+      };
+
+      await expect(
+        service.updateTempleWithUser(1, dto, undefined, mockAdmin),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.updateTempleWithUser(1, dto, undefined, mockAdmin),
+      ).rejects.toThrow('Service with id 30 has already been deleted and cannot be modified');
+
+      expect(mockServiceRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('7. should preserve unrelated services belonging to the temple', async () => {
+      const serviceToRemove: Service = {
+        id: 10,
+        name: 'Service To Remove',
+        templeId: 1,
+        deletedAt: null,
+        isActive: true,
+      } as Service;
+      const unrelatedService: Service = {
+        id: 11,
+        name: 'Unrelated Active Service',
+        slug: 'unrelated-active-service',
+        templeId: 1,
+        deletedAt: null,
+        isActive: true,
+      } as Service;
+
+      mockServiceRepo.find
+        .mockResolvedValueOnce([serviceToRemove])
+        .mockResolvedValueOnce([unrelatedService]);
+
+      const dto: UpdateTempleDto = {
+        services: [{ id: 10, remove: true }],
+      };
+
+      const result = await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+      expect(result.success).toBe(true);
+      expect(mockServiceRepo.save).toHaveBeenCalledTimes(1);
+      expect(mockServiceRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 10, templeId: null }),
+      );
+
+      // Remaining services contains the untouched unrelatedService
+      expect(result.data.services).toHaveLength(1);
+      expect(result.data.services[0].id).toBe(11);
+      expect(result.data.services[0].name).toBe('Unrelated Active Service');
+    });
+
+    it('8. should preserve service entity and historical data when remove is used (detachment only, no cascade delete)', async () => {
+      const existingService: Service = {
+        id: 10,
+        name: 'Historical Service',
+        templeId: 1,
+        deletedAt: null,
+        isActive: true,
+      } as Service;
+
+      mockServiceRepo.find
+        .mockResolvedValueOnce([existingService])
+        .mockResolvedValueOnce([]);
+
+      const dto: UpdateTempleDto = {
+        services: [{ id: 10, remove: true }],
+      };
+
+      await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+      expect(mockServiceRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 10,
+          templeId: null,
+          deletedAt: null,
+          isActive: true,
+        }),
+      );
+      expect(existingService.deletedAt).toBeNull();
+    });
+
+    it('9. should rollback transaction if one service in a batch fails validation', async () => {
+      const validService: Service = {
+        id: 10,
+        name: 'Valid Service',
+        templeId: 1,
+        deletedAt: null,
+        isActive: true,
+      } as Service;
+
+      mockServiceRepo.find.mockResolvedValueOnce([validService]);
+
+      const dto: UpdateTempleDto = {
+        services: [
+          { id: 10, remove: true },
+          { id: 999, remove: true },
+        ],
+      };
+
+      await expect(
+        service.updateTempleWithUser(1, dto, undefined, mockAdmin),
+      ).rejects.toThrow('Service with id 999 not found');
+
+      expect(mockServiceRepo.save).not.toHaveBeenCalled();
+      expect(validService.templeId).toBe(1);
+    });
+
+    it('10. should reject Purohit attempting to remove or delete services from a temple (HTTP 403 Forbidden)', async () => {
+      const dto: UpdateTempleDto = {
+        services: [{ id: 10, remove: true }],
+      };
+
+      await expect(
+        service.updateTempleWithUser(1, dto, undefined, mockPurohit),
+      ).rejects.toThrow(ForbiddenException);
+
+      await expect(
+        service.updateTempleWithUser(1, dto, undefined, mockPurohit),
+      ).rejects.toThrow('Purohits cannot remove services from a temple');
+
+      expect(mockServiceRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('11. should keep existing Temple PATCH backward-compatible when services is omitted', async () => {
+      const dto: UpdateTempleDto = {
+        name: 'Updated Mandir Name Only',
+      };
+
+      const result = await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+      expect(result.success).toBe(true);
+      expect(result.statusCode).toBe(200);
+      expect(mockTempleRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Updated Mandir Name Only' }),
+      );
+      expect(result.data.services).toBeUndefined();
+      expect(mockServiceRepo.find).not.toHaveBeenCalled();
+      expect(mockServiceRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('12. should keep existing Aarti add/update/remove behavior intact alongside service operations', async () => {
+      const existingAarti: TempleAarti = {
+        id: 101,
+        templeId: 1,
+        name: 'Sandhya Aarti',
+        time: '19:00',
+        isActive: true,
+        deletedAt: null,
+      } as TempleAarti;
+
+      const existingService: Service = {
+        id: 10,
+        name: 'Special Pooja Service',
+        templeId: 1,
+        deletedAt: null,
+        isActive: true,
+      } as Service;
+
+      mockAartiRepo.find
+        .mockResolvedValueOnce([existingAarti])
+        .mockResolvedValueOnce([]); // remaining aartis
+      mockServiceRepo.find
+        .mockResolvedValueOnce([existingService])
+        .mockResolvedValueOnce([]); // remaining services
+
+      const dto: UpdateTempleDto = {
+        aartis: [{ id: 101, isDeleted: true }],
+        services: [{ id: 10, remove: true }],
+      };
+
+      const result = await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+      expect(result.success).toBe(true);
+      expect(mockAartiRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 101,
+          deletedAt: expect.any(Date),
+        }),
+      );
+      expect(mockServiceRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 10,
+          templeId: null,
+        }),
+      );
+    });
+
+    describe('UpdateTempleServiceDto & UpdateTempleDto validation', () => {
+      it('should validate valid UpdateTempleServiceDto with remove', async () => {
+        const dto = plainToInstance(UpdateTempleServiceDto, {
+          id: 5,
+          remove: true,
+        });
+        const errors = await validate(dto);
+        expect(errors).toHaveLength(0);
+        expect(dto.id).toBe(5);
+        expect(dto.remove).toBe(true);
+      });
+
+      it('should validate valid UpdateTempleServiceDto with delete', async () => {
+        const dto = plainToInstance(UpdateTempleServiceDto, {
+          id: 5,
+          delete: true,
+        });
+        const errors = await validate(dto);
+        expect(errors).toHaveLength(0);
+        expect(dto.id).toBe(5);
+        expect(dto.delete).toBe(true);
+      });
+
+      it('should reject non-integer id in UpdateTempleServiceDto', async () => {
+        const dto = plainToInstance(UpdateTempleServiceDto, {
+          id: 'invalid-id',
+          remove: true,
+        });
+        const errors = await validate(dto);
+        expect(errors.length).toBeGreaterThan(0);
+        expect(errors.some((e) => e.property === 'id')).toBe(true);
+      });
+
+      it('should reject id <= 0 in UpdateTempleServiceDto', async () => {
+        const dto = plainToInstance(UpdateTempleServiceDto, {
+          id: 0,
+          remove: true,
+        });
+        const errors = await validate(dto);
+        expect(errors.length).toBeGreaterThan(0);
+        expect(errors.some((e) => e.property === 'id')).toBe(true);
+      });
+
+      it('should transform and validate JSON-stringified services in UpdateTempleDto', async () => {
+        const payload = {
+          name: 'Test Temple',
+          services: JSON.stringify([{ id: 15, remove: 'true' }]),
+        };
+        const dto = plainToInstance(UpdateTempleDto, payload);
+        const errors = await validate(dto);
+        expect(errors).toHaveLength(0);
+        expect(Array.isArray(dto.services)).toBe(true);
+        expect(dto.services![0].id).toBe(15);
+        expect(dto.services![0].remove).toBe(true);
+      });
+    });
+  });
+});

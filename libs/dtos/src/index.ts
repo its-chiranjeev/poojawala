@@ -79,9 +79,9 @@ export * from './temple/create-temple.dto';
 export * from './temple/update-temple.dto';
 export * from './temple/get-temples-query.dto';
 export * from './temple/temple-aarti.dto';
+export * from './temple/temple-service.dto';
 
 export * from './service/create.service.dto';
 export * from './service/update.service.dto';
 export * from './service/get.services.query.dto';
 export * from './astrologer';
-

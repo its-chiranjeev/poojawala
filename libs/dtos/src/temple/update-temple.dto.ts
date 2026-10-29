@@ -15,6 +15,8 @@ import {
 } from 'class-validator';
 import { TEMPLE_VERIFICATION_STATUS } from '@poojawala/entities';
 import { UpdateTempleAartiDto } from './temple-aarti.dto';
+import { UpdateTempleServiceDto } from './temple-service.dto';
+export { UpdateTempleServiceDto } from './temple-service.dto';
 
 export class UpdateTempleDto {
   @IsOptional()
@@ -219,6 +221,42 @@ export class UpdateTempleDto {
   @ValidateNested({ each: true })
   @Type(() => UpdateTempleAartiDto)
   aartis?: UpdateTempleAartiDto[];
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    let parsed = value;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return undefined;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        return value;
+      }
+    }
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => {
+        if (item && typeof item === 'object') {
+          const itemObj = { ...(item as Record<string, unknown>) };
+          if (itemObj.delete !== undefined && itemObj.delete !== null) {
+            itemObj.delete = itemObj.delete === true || itemObj.delete === 'true';
+          }
+          if (itemObj.remove !== undefined && itemObj.remove !== null) {
+            itemObj.remove = itemObj.remove === true || itemObj.remove === 'true';
+          }
+          return !(item instanceof UpdateTempleServiceDto)
+            ? plainToInstance(UpdateTempleServiceDto, itemObj)
+            : item;
+        }
+        return item;
+      });
+    }
+    return parsed;
+  })
+  @IsArray({ message: 'services must be an array' })
+  @ValidateNested({ each: true })
+  @Type(() => UpdateTempleServiceDto)
+  services?: UpdateTempleServiceDto[];
 
   @IsOptional()
   @IsEnum(TEMPLE_VERIFICATION_STATUS, {

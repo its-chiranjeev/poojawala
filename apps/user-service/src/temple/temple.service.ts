@@ -12,6 +12,7 @@ import { CreateTempleDto, UpdateTempleDto, GetTemplesQueryDto } from '@poojawala
 import {
   Temple,
   TempleAarti,
+  Service,
   ServiceFeature,
   ACTOR_TYPE,
   USER_ROLE,
@@ -646,7 +647,7 @@ export class TempleService {
     const isPurohit = user?.role === USER_ROLE.PUROHIT;
     const isAdmin = !user || user.role === USER_ROLE.ADMIN;
 
-    const { updated, aartisList, statusTransition, submitterUser, finalRemarks } =
+    const { updated, aartisList, servicesList, statusTransition, submitterUser, finalRemarks } =
       await this.runInTransaction(async (manager: EntityManager) => {
         const templeRepo = manager.getRepository(Temple);
         const aartiRepo = manager.getRepository(TempleAarti);
@@ -666,6 +667,9 @@ export class TempleService {
           }
           if (dto.verificationStatus !== undefined || dto.verificationRemarks !== undefined) {
             throw new ForbiddenException('Purohits cannot change verification status or remarks');
+          }
+          if (dto.services !== undefined && dto.services.length > 0) {
+            throw new ForbiddenException('Purohits cannot remove services from a temple');
           }
         } else if (!isAdmin) {
           throw new ForbiddenException('You are not authorized to update this temple');
@@ -701,8 +705,8 @@ export class TempleService {
               if (dto.verificationRemarks !== undefined) {
                 temple.verificationRemarks =
                   dto.verificationRemarks &&
-                  typeof dto.verificationRemarks === 'string' &&
-                  dto.verificationRemarks.trim() !== ''
+                    typeof dto.verificationRemarks === 'string' &&
+                    dto.verificationRemarks.trim() !== ''
                     ? dto.verificationRemarks.trim()
                     : null;
               } else {
@@ -716,8 +720,8 @@ export class TempleService {
               if (dto.verificationRemarks !== undefined) {
                 temple.verificationRemarks =
                   dto.verificationRemarks &&
-                  typeof dto.verificationRemarks === 'string' &&
-                  dto.verificationRemarks.trim() !== ''
+                    typeof dto.verificationRemarks === 'string' &&
+                    dto.verificationRemarks.trim() !== ''
                     ? dto.verificationRemarks.trim()
                     : null;
               }
@@ -725,8 +729,8 @@ export class TempleService {
           } else if (dto.verificationRemarks !== undefined) {
             temple.verificationRemarks =
               dto.verificationRemarks &&
-              typeof dto.verificationRemarks === 'string' &&
-              dto.verificationRemarks.trim() !== ''
+                typeof dto.verificationRemarks === 'string' &&
+                dto.verificationRemarks.trim() !== ''
                 ? dto.verificationRemarks.trim()
                 : null;
           }
@@ -999,6 +1003,73 @@ export class TempleService {
           });
         }
 
+        let servicesList: Record<string, unknown>[] | undefined = undefined;
+
+        if (dto.services !== undefined) {
+          if (dto.services.length > 0) {
+            if (isPurohit) {
+              throw new ForbiddenException('Purohits cannot remove services from a temple');
+            }
+
+            const incomingServiceIds = dto.services
+              .map((s) => s.id)
+              .filter((sId): sId is number => typeof sId === 'number' && !isNaN(sId));
+
+            for (const item of dto.services) {
+              if (!item.id) {
+                throw new BadRequestException('Cannot remove a service without providing an id');
+              }
+            }
+
+            const serviceRepo = manager.getRepository(Service);
+            const existingServiceRecords = await serviceRepo.find({
+              where: { id: In(incomingServiceIds) },
+              withDeleted: true,
+            });
+
+            const existingServiceMap = new Map<number, Service>();
+            for (const r of existingServiceRecords) {
+              existingServiceMap.set(r.id, r);
+            }
+
+            for (const sId of incomingServiceIds) {
+              const record = existingServiceMap.get(sId);
+              if (!record) {
+                throw new BadRequestException(`Service with id ${sId} not found`);
+              }
+              if (record.templeId !== id) {
+                throw new BadRequestException(
+                  `Service with id ${sId} does not belong to temple ${id}`,
+                );
+              }
+              if (record.deletedAt) {
+                throw new BadRequestException(
+                  `Service with id ${sId} has already been deleted and cannot be modified`,
+                );
+              }
+            }
+
+            for (const item of dto.services) {
+              if (item.delete === true) {
+                const existingService = existingServiceMap.get(item.id)!;
+                existingService.deletedAt = new Date();
+                existingService.isActive = false;
+                await serviceRepo.save(existingService);
+              } else if (item.remove === true) {
+                const existingService = existingServiceMap.get(item.id)!;
+                existingService.templeId = null;
+                await serviceRepo.save(existingService);
+              }
+            }
+          }
+
+          const remainingServices = await manager.getRepository(Service).find({
+            where: { templeId: id, deletedAt: IsNull() },
+            order: { sortOrder: 'ASC', id: 'ASC' },
+          });
+          servicesList = remainingServices as unknown as Record<string, unknown>[];
+        }
+
         await this.auditLogService.createAuditLog({
           actorId,
           actorType: ACTOR_TYPE.USER,
@@ -1034,12 +1105,13 @@ export class TempleService {
         return {
           updated: savedTemple,
           aartisList: activeAartis,
+          servicesList,
           statusTransition: transition,
           submitterUser,
           finalRemarks: savedTemple.verificationRemarks,
         };
       },
-    );
+      );
 
     if (statusTransition && this.emailService) {
       if (!submitterUser || !submitterUser.email || !submitterUser.email.trim()) {
@@ -1167,7 +1239,7 @@ export class TempleService {
       data: this.formatTempleResponse(
         updated,
         downloadUrl,
-        undefined,
+        dto.services !== undefined ? servicesList : undefined,
         aartisList,
         trustDocDownloadUrl,
         deityPhotoDownloadUrl,
