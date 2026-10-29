@@ -210,10 +210,20 @@ export class ServiceService {
       if (rawPrice === null || rawPrice === undefined || rawPrice === '') {
         throw new BadRequestException(`${planKey} plan price is required`);
       }
+      if (typeof rawPrice === 'string' && /[eE]/.test(rawPrice)) {
+        throw new BadRequestException(
+          `${planKey} plan price must be a valid standard decimal number without scientific notation`,
+        );
+      }
       const price = Number(rawPrice);
       if (!Number.isFinite(price) || Number.isNaN(price) || price <= 0) {
         throw new BadRequestException(
           `${planKey} plan price must be a finite positive number greater than 0`,
+        );
+      }
+      if (price > 99999999.99) {
+        throw new BadRequestException(
+          `${planKey} plan price must not exceed 99,999,999.99`,
         );
       }
       const parts = price.toString().split('.');
@@ -233,6 +243,13 @@ export class ServiceService {
         throw new BadRequestException(
           `Feature "${key}" in ${planKey} plan contains an unsupported non-JSON value`,
         );
+      }
+      if (typeof value === 'number') {
+        if (!Number.isFinite(value) || Number.isNaN(value) || value < 0 || value > 99999999.99) {
+          throw new BadRequestException(
+            `Property "${key}" in ${planKey} plan must be a valid finite number between 0 and 99,999,999.99`,
+          );
+        }
       }
     }
 
@@ -777,14 +794,16 @@ export class ServiceService {
       }
       */
       let finalSortOrder: number;
-      const hasExplicitSortOrder =
-        dto.sortOrder !== undefined &&
-        dto.sortOrder !== null &&
-        !isNaN(Number(dto.sortOrder)) &&
-        Number(dto.sortOrder) >= 0;
-
-      if (hasExplicitSortOrder) {
-        finalSortOrder = Number(dto.sortOrder);
+      const isExplicitSortOrderProvided = dto.sortOrder !== undefined && dto.sortOrder !== null;
+      if (isExplicitSortOrderProvided) {
+        if (typeof dto.sortOrder === 'string' && /[eE]/.test(dto.sortOrder)) {
+          throw new BadRequestException('Sort order must be an integer between 0 and 2147483647');
+        }
+        const numericSortOrder = Number(dto.sortOrder);
+        if (!Number.isInteger(numericSortOrder) || numericSortOrder < 0 || numericSortOrder > 2147483647) {
+          throw new BadRequestException('Sort order must be an integer between 0 and 2147483647');
+        }
+        finalSortOrder = numericSortOrder;
         if (manager) {
           await manager
             .createQueryBuilder()
@@ -1217,7 +1236,13 @@ export class ServiceService {
 
 
     if (dto.sortOrder !== undefined && dto.sortOrder !== null) {
+      if (typeof dto.sortOrder === 'string' && /[eE]/.test(dto.sortOrder)) {
+        throw new BadRequestException('Sort order must be an integer between 0 and 2147483647');
+      }
       const newSortOrder = Number(dto.sortOrder);
+      if (!Number.isInteger(newSortOrder) || newSortOrder < 0 || newSortOrder > 2147483647) {
+        throw new BadRequestException('Sort order must be an integer between 0 and 2147483647');
+      }
       if (newSortOrder !== oldSortOrder) {
         if (oldSortOrder != null && oldSortOrder > 0) {
           if (newSortOrder < oldSortOrder) {

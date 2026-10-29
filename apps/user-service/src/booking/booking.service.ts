@@ -631,7 +631,13 @@ export class BookingService {
           );
         }
 
+        if (typeof dto.donationAmount === 'string' && /[eE]/.test(dto.donationAmount)) {
+          throw new BadRequestException('Donation amount must be a valid standard decimal number without scientific notation');
+        }
         const donationAmount = Number(dto.donationAmount ?? 0);
+        if (donationAmount > 99999999.99) {
+          throw new BadRequestException('Donation amount cannot exceed 99,999,999.99');
+        }
 
         if (!Number.isFinite(donationAmount) || donationAmount < 0) {
           throw new BadRequestException(
@@ -2077,7 +2083,13 @@ export class BookingService {
       }
 
       if (dto.donationAmount !== undefined) {
+        if (typeof dto.donationAmount === 'string' && /[eE]/.test(dto.donationAmount)) {
+          throw new BadRequestException('Donation amount must be a valid standard decimal number without scientific notation');
+        }
         const donationAmount = Number(dto.donationAmount);
+        if (donationAmount > 99999999.99) {
+          throw new BadRequestException('Donation amount cannot exceed 99,999,999.99');
+        }
 
         if (!Number.isFinite(donationAmount) || donationAmount < 0) {
           throw new BadRequestException(
@@ -6041,7 +6053,13 @@ export class BookingService {
           );
         }
 
+        if (typeof dto.donationAmount === 'string' && /[eE]/.test(dto.donationAmount)) {
+          throw new BadRequestException('Donation amount must be a valid standard decimal number without scientific notation');
+        }
         const donationAmount = Number(dto.donationAmount ?? 0);
+        if (donationAmount > 99999999.99) {
+          throw new BadRequestException('Donation amount cannot exceed 99,999,999.99');
+        }
         if (!Number.isFinite(donationAmount) || donationAmount < 0) {
           throw new BadRequestException(
             'Donation amount must be zero or greater',

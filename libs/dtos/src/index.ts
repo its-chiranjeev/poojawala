@@ -31,6 +31,8 @@ export * from './contact-us/get-all-contact-us.dto';
 export * from './contact-us/update-contact-us-status.dto';
 
 export * from './coupon/create-coupon.dto';
+export * from './coupon/update-coupon.dto';
+export * from './coupon/apply-coupon.dto';
 
 export * from './dtos.module';
 export * from './dtos.service';

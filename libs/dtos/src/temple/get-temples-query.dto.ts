@@ -1,30 +1,34 @@
 import { Transform, Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Max, Min, MaxLength } from 'class-validator';
 import { TEMPLE_VERIFICATION_STATUS } from '@poojawala/entities';
 
 export class GetTemplesQueryDto {
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
+  @IsInt({ message: 'Page must be an integer' })
+  @Min(1, { message: 'Page must be at least 1' })
   page: number = 1;
 
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
+  @IsInt({ message: 'Limit must be an integer' })
+  @Min(1, { message: 'Limit must be at least 1' })
+  @Max(100, { message: 'Limit cannot exceed 100' })
   limit: number = 10;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'Search must be a string' })
+  @MaxLength(100, { message: 'Search cannot exceed 100 characters' })
   search?: string;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'City must be a string' })
+  @MaxLength(100, { message: 'City cannot exceed 100 characters' })
   city?: string;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'State must be a string' })
+  @MaxLength(100, { message: 'State cannot exceed 100 characters' })
   state?: string;
 
   @IsOptional()
@@ -50,11 +54,15 @@ export class GetTemplesQueryDto {
   includeAartis?: boolean | string;
 
   @IsOptional()
-  @IsEnum(TEMPLE_VERIFICATION_STATUS)
+  @IsEnum(TEMPLE_VERIFICATION_STATUS, {
+    message: 'verificationStatus must be PENDING, APPROVED, or REJECTED',
+  })
   verificationStatus?: TEMPLE_VERIFICATION_STATUS;
 
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
+  @IsInt({ message: 'submittedByUserId must be an integer' })
+  @Min(1, { message: 'submittedByUserId must be at least 1' })
+  @Max(2147483647, { message: 'submittedByUserId cannot exceed 2147483647' })
   submittedByUserId?: number;
 }

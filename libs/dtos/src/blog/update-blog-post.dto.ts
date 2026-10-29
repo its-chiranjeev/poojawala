@@ -8,6 +8,7 @@ import {
   IsString,
   MaxLength,
   Min,
+  Max,
   MinLength,
   ValidateIf,
   ValidateNested,
@@ -46,6 +47,7 @@ export class UpdateBlogPostDto {
   @ValidateIf((object, value) => value !== null && value !== undefined)
   @IsInt({ message: 'categoryId must be an integer' })
   @Min(1, { message: 'categoryId must be valid' })
+  @Max(2147483647, { message: 'categoryId cannot exceed 2147483647' })
   categoryId?: number | null;
 
   @IsOptional()
@@ -76,6 +78,7 @@ export class UpdateBlogPostDto {
   @ValidateIf((object, value) => value !== null && value !== undefined)
   @IsInt({ message: 'readTime must be an integer' })
   @Min(1, { message: 'readTime must be at least 1 minute' })
+  @Max(10080, { message: 'readTime cannot exceed 10080 minutes' })
   readTime?: number | null;
 
   @IsOptional()

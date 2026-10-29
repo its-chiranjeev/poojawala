@@ -1,12 +1,10 @@
 import { Type } from 'class-transformer';
-import {
-  IsInt,
-  Min,
-} from 'class-validator';
+import { IsInt, Min, Max } from 'class-validator';
 
 export class AssignBookingDto {
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'purohitId must be an integer' })
+  @Min(1, { message: 'purohitId must be at least 1' })
+  @Max(2147483647, { message: 'purohitId cannot exceed 2147483647' })
   purohitId!: number;
 }

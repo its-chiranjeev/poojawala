@@ -2,6 +2,8 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsNumber,
+  IsInt,
+  Max,
   IsOptional,
   IsString,
   MaxLength,
@@ -11,7 +13,9 @@ import {
 export class CreateAstrologerProfileDto {
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt({ message: 'userId must be an integer' })
+  @Min(1, { message: 'userId must be at least 1' })
+  @Max(2147483647, { message: 'userId cannot exceed 2147483647' })
   userId?: number;
 
   @IsOptional()
@@ -75,7 +79,8 @@ export class CreateAstrologerProfileDto {
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @Min(0)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 }, { message: 'ratePerMinute must be a valid number with at most 2 decimal places' })
+  @Min(0, { message: 'ratePerMinute cannot be negative' })
+  @Max(99999999.99, { message: 'ratePerMinute cannot exceed 99,999,999.99' })
   ratePerMinute?: number;
 }

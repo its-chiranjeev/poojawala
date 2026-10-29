@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, Max, Min, MaxLength } from 'class-validator';
 
 export class GetCartQueryDto {
   @IsOptional()
@@ -17,5 +17,6 @@ export class GetCartQueryDto {
 
   @IsOptional()
   @IsString({ message: 'search must be a string' })
+  @MaxLength(100, { message: 'search cannot exceed 100 characters' })
   search?: string;
 }

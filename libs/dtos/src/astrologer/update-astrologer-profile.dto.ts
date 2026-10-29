@@ -7,6 +7,7 @@ import {
   IsString,
   MaxLength,
   Min,
+  Max,
 } from 'class-validator';
 import { PUROHIT_VERIFICATION_STATUS } from '@poojawala/entities';
 
@@ -72,32 +73,37 @@ export class UpdateAstrologerProfileDto {
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @Min(0)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 }, { message: 'ratePerMinute must be a valid number with at most 2 decimal places' })
+  @Min(0, { message: 'ratePerMinute cannot be negative' })
+  @Max(99999999.99, { message: 'ratePerMinute cannot exceed 99,999,999.99' })
   ratePerMinute?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @Min(0)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 }, { message: 'commissionPrice must be a valid number with at most 2 decimal places' })
+  @Min(0, { message: 'commissionPrice cannot be negative' })
+  @Max(99999999.99, { message: 'commissionPrice cannot exceed 99,999,999.99' })
   commissionPrice?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @Min(0)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 }, { message: 'astrologyPrice must be a valid number with at most 2 decimal places' })
+  @Min(0, { message: 'astrologyPrice cannot be negative' })
+  @Max(99999999.99, { message: 'astrologyPrice cannot exceed 99,999,999.99' })
   astrologyPrice?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @Min(0)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 }, { message: 'commissionPercentage must be a valid number with at most 2 decimal places' })
+  @Min(0, { message: 'commissionPercentage cannot be negative' })
+  @Max(100, { message: 'commissionPercentage cannot exceed 100' })
   commissionPercentage?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @Min(0)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 }, { message: 'astrologerPayout must be a valid number with at most 2 decimal places' })
+  @Min(0, { message: 'astrologerPayout cannot be negative' })
+  @Max(99999999.99, { message: 'astrologerPayout cannot exceed 99,999,999.99' })
   astrologerPayout?: number;
 
   @IsOptional()

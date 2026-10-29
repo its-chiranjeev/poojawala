@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, ILike, Repository } from 'typeorm';
 import { Service, Booking, PurohitService, Payment, TEMPLE_VERIFICATION_STATUS } from '@poojawala/entities';
@@ -765,6 +765,12 @@ export class ServiceRepository extends BaseRepository<Service> {
   }
 
   async shiftSortOrdersUp(fromOrder: number, toOrder?: number, excludeServiceId?: number): Promise<void> {
+    if (!Number.isInteger(fromOrder) || fromOrder < 0 || fromOrder > 2147483647) {
+      throw new BadRequestException('fromOrder must be a valid integer between 0 and 2147483647');
+    }
+    if (toOrder !== undefined && (!Number.isInteger(toOrder) || toOrder < 0 || toOrder > 2147483647)) {
+      throw new BadRequestException('toOrder must be a valid integer between 0 and 2147483647');
+    }
     const qb = this.repo
       .createQueryBuilder()
       .update(Service)
@@ -782,6 +788,12 @@ export class ServiceRepository extends BaseRepository<Service> {
   }
 
   async shiftSortOrdersDown(fromOrder: number, toOrder: number, excludeServiceId?: number): Promise<void> {
+    if (!Number.isInteger(fromOrder) || fromOrder < 0 || fromOrder > 2147483647) {
+      throw new BadRequestException('fromOrder must be a valid integer between 0 and 2147483647');
+    }
+    if (!Number.isInteger(toOrder) || toOrder < 0 || toOrder > 2147483647) {
+      throw new BadRequestException('toOrder must be a valid integer between 0 and 2147483647');
+    }
     const qb = this.repo
       .createQueryBuilder()
       .update(Service)

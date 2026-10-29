@@ -9,12 +9,14 @@ import {
   IsString,
   MaxLength,
   Min,
-  IsIn,
+  Max,
+  IsNotEmpty,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { SERVICE_PLAN } from '@poojawala/entities';
 
 export class RepeatBookingDto {
+  @IsNotEmpty({ message: 'scheduledAt is required' })
   @IsDateString(
     {},
     {
@@ -31,36 +33,53 @@ export class RepeatBookingDto {
   @Min(1, {
     message: 'customerAddressId must be greater than zero',
   })
+  @Max(2147483647, {
+    message: 'customerAddressId cannot exceed 2147483647',
+  })
   customerAddressId?: number;
 
   @IsOptional()
-  @IsString()
+  @IsString({
+    message: 'Special instructions must be a string',
+  })
   @MaxLength(1000, {
     message: 'Special instructions cannot exceed 1000 characters',
   })
   specialInstructions?: string;
 
   @IsOptional()
-  @IsObject()
+  @IsObject({
+    message: 'customFields must be an object',
+  })
   customFields?: Record<string, unknown>;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber(
     {
+      allowNaN: false,
+      allowInfinity: false,
       maxDecimalPlaces: 2,
     },
     {
-      message: 'Donation amount must be a valid number',
+      message: 'Donation amount must be a valid number with at most 2 decimal places',
     },
   )
   @Min(0, {
     message: 'Donation amount cannot be negative',
   })
+  @Max(99999999.99, {
+    message: 'Donation amount cannot exceed 99,999,999.99',
+  })
   donationAmount?: number;
 
   @IsOptional()
-  @IsString()
+  @IsString({
+    message: 'couponCode must be a string',
+  })
+  @MaxLength(30, {
+    message: 'couponCode cannot exceed 30 characters',
+  })
   couponCode?: string;
 
   @IsOptional()

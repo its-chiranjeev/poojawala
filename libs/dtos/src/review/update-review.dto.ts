@@ -1,13 +1,16 @@
-import { IsOptional, IsString, IsInt, Min, Max } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsOptional, IsString, IsInt, Min, Max, MaxLength } from 'class-validator';
 
 export class UpdateReviewDto {
   @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(5)
+  @Type(() => Number)
+  @IsInt({ message: 'Rating must be an integer' })
+  @Min(1, { message: 'Rating must be at least 1' })
+  @Max(5, { message: 'Rating cannot exceed 5' })
   rating?: number;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'Comment must be a string' })
+  @MaxLength(1000, { message: 'Comment cannot exceed 1000 characters' })
   comment?: string;
 }

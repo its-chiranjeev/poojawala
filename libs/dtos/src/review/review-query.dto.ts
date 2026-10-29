@@ -5,19 +5,19 @@ import { REVIEW_STATUS, BOOKING_TYPE } from '@poojawala/entities';
 export class ReviewQueryDto {
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'Page must be an integer' })
+  @Min(1, { message: 'Page must be at least 1' })
   page: number = 1;
 
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
+  @IsInt({ message: 'Limit must be an integer' })
+  @Min(1, { message: 'Limit must be at least 1' })
+  @Max(100, { message: 'Limit cannot exceed 100' })
   limit: number = 10;
 
   @IsOptional()
-  @IsEnum(REVIEW_STATUS)
+  @IsEnum(REVIEW_STATUS, { message: `status must be one of: ${Object.values(REVIEW_STATUS).join(', ')}` })
   status?: REVIEW_STATUS;
 
   @IsOptional()
@@ -45,4 +45,4 @@ export class ReviewQueryDto {
     message: 'Booking type must be a valid booking type (POOJA or ASTROLOGY)',
   })
   bookingType?: BOOKING_TYPE | BOOKING_TYPE[];
-}   
+}

@@ -1,74 +1,80 @@
 import { Type, Transform } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min, IsBoolean } from 'class-validator';
+import { IsInt, IsOptional, IsString, Max, Min, MaxLength } from 'class-validator';
 
 export class GetServicesQueryDto {
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'Page must be an integer' })
+  @Min(1, { message: 'Page must be at least 1' })
   page = 1;
 
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
+  @IsInt({ message: 'Limit must be an integer' })
+  @Min(1, { message: 'Limit must be at least 1' })
+  @Max(100, { message: 'Limit cannot exceed 100' })
   limit = 10;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'Search must be a string' })
+  @MaxLength(100, { message: 'Search cannot exceed 100 characters' })
   search?: string;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'isActive must be a string or boolean representation' })
   isActive?: string;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'isUpcomingFestival must be a string or boolean representation' })
   isUpcomingFestival?: string;
 
   /** Filter by global availability (true = no city restriction, false = city-specific). */
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'isGlobal must be a string or boolean representation' })
   isGlobal?: string;
 
   /** Filter by online availability (true = offered online, false = not online). */
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'isOnline must be a string or boolean representation' })
   isOnline?: string;
 
   /** Filter by offline availability (true = offered offline, false = not offline). */
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'isOffline must be a string or boolean representation' })
   isOffline?: string;
 
   /** Filter services belonging to a specific category by ID. */
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'categoryId must be an integer' })
+  @Min(1, { message: 'categoryId must be at least 1' })
+  @Max(2147483647, { message: 'categoryId cannot exceed 2147483647' })
   categoryId?: number;
 
   /** Filter services by category name, slug or ID. */
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'category must be a string' })
+  @MaxLength(100, { message: 'category cannot exceed 100 characters' })
   category?: string;
 
   /** Filter services by multiple category IDs (e.g. "1,2,3"). */
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'categories must be a comma-separated string of IDs' })
+  @MaxLength(255, { message: 'categories cannot exceed 255 characters' })
   categories?: string;
 
   /** Filter services belonging to a specific temple by ID. */
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'templeId must be an integer' })
+  @Min(1, { message: 'templeId must be at least 1' })
+  @Max(2147483647, { message: 'templeId cannot exceed 2147483647' })
   templeId?: number;
 
   /** Filter services by temple name, ID, or 'all'. */
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'temple must be a string' })
+  @MaxLength(100, { message: 'temple cannot exceed 100 characters' })
   temple?: string;
 
   /**
@@ -78,36 +84,41 @@ export class GetServicesQueryDto {
    * When omitted: return services as-is without filtering by templeId presence.
    */
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'includeTemple must be a string' })
   includeTemple?: string;
 
   /** Filter categories containing a specific service by ID. */
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'serviceId must be an integer' })
+  @Min(1, { message: 'serviceId must be at least 1' })
+  @Max(2147483647, { message: 'serviceId cannot exceed 2147483647' })
   serviceId?: number;
 
   /** Filter categories by service ID or slug. */
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'service must be a string' })
+  @MaxLength(100, { message: 'service cannot exceed 100 characters' })
   service?: string;
 
   /** Whether to include child services in category results (e.g. "true"). */
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'includeServices must be a string' })
   includeServices?: string;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'city must be a string' })
+  @MaxLength(100, { message: 'city cannot exceed 100 characters' })
   city?: string;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'state must be a string' })
+  @MaxLength(100, { message: 'state cannot exceed 100 characters' })
   state?: string;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'language must be a string' })
+  @MaxLength(50, { message: 'language cannot exceed 50 characters' })
   language?: string;
 
   /**
@@ -115,7 +126,7 @@ export class GetServicesQueryDto {
    * When omitted or ALL, returns categories of all types (both SERVICE and PRODUCT).
    */
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'categoryType must be a string' })
+  @MaxLength(50, { message: 'categoryType cannot exceed 50 characters' })
   categoryType?: string;
 }
-

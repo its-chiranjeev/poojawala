@@ -1,6 +1,6 @@
 import { USER_ROLE, PUROHIT_PAYMENT_METHOD, VENUE_TYPE } from '@poojawala/entities';
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, ValidateIf, IsNumber, Min, Max, IsArray } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength, registerDecorator, ValidationOptions, ValidationArguments, ValidateIf, IsNumber, IsInt, Min, Max, IsArray } from 'class-validator';
 
 export function parseStringArray(value: unknown): string[] | undefined {
   if (value === undefined || value === null || value === '' || value === 'null' || value === 'undefined') {
@@ -115,8 +115,10 @@ export class RegisterUserDto extends OtpDto { }
 
 export class RegisterNormalUserDto {
   @IsOptional()
-  @IsNumber()
-  @Transform(({ value }) => value ? Number(value) : undefined)
+  @Type(() => Number)
+  @IsInt({ message: 'User ID must be an integer' })
+  @Min(1, { message: 'User ID must be at least 1' })
+  @Max(2147483647, { message: 'User ID cannot exceed 2147483647' })
   id?: number;
 
   @ValidateIf(o => !o.id)
@@ -144,32 +146,37 @@ export class RegisterNormalUserDto {
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @Min(0)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 }, { message: 'ratePerMinute must be a valid number with at most 2 decimal places' })
+  @Min(0, { message: 'ratePerMinute cannot be negative' })
+  @Max(99999999.99, { message: 'ratePerMinute cannot exceed 99,999,999.99' })
   ratePerMinute?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @Min(0)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 }, { message: 'commissionPrice must be a valid number with at most 2 decimal places' })
+  @Min(0, { message: 'commissionPrice cannot be negative' })
+  @Max(99999999.99, { message: 'commissionPrice cannot exceed 99,999,999.99' })
   commissionPrice?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @Min(0)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 }, { message: 'astrologyPrice must be a valid number with at most 2 decimal places' })
+  @Min(0, { message: 'astrologyPrice cannot be negative' })
+  @Max(99999999.99, { message: 'astrologyPrice cannot exceed 99,999,999.99' })
   astrologyPrice?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @Min(0)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 }, { message: 'commissionPercentage must be a valid number with at most 2 decimal places' })
+  @Min(0, { message: 'commissionPercentage cannot be negative' })
+  @Max(100, { message: 'commissionPercentage cannot exceed 100' })
   commissionPercentage?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @Min(0)
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 }, { message: 'astrologerPayout must be a valid number with at most 2 decimal places' })
+  @Min(0, { message: 'astrologerPayout cannot be negative' })
+  @Max(99999999.99, { message: 'astrologerPayout cannot exceed 99,999,999.99' })
   astrologerPayout?: number;
 
   @IsOptional()
@@ -376,9 +383,9 @@ export class RegisterNormalUserDto {
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @Min(1)
-  @Max(100)
+  @IsNumber({ allowNaN: false, allowInfinity: false }, { message: 'serviceRadiusKm must be a valid number' })
+  @Min(1, { message: 'serviceRadiusKm must be at least 1' })
+  @Max(1000, { message: 'serviceRadiusKm cannot exceed 1000' })
   serviceRadiusKm?: number;
 
   @IsOptional()

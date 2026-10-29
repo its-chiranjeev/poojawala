@@ -5,15 +5,15 @@ import { PAYMENT_STATUS, PAYMENT_TYPE, BOOKING_PAYMENT_STATUS } from '@poojawala
 export class PaymentQueryDto {
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'Page must be an integer' })
+  @Min(1, { message: 'Page must be at least 1' })
   page: number = 1;
 
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
+  @IsInt({ message: 'Limit must be an integer' })
+  @Min(1, { message: 'Limit must be at least 1' })
+  @Max(100, { message: 'Limit cannot exceed 100' })
   limit: number = 10;
 
   @IsOptional()
@@ -23,17 +23,17 @@ export class PaymentQueryDto {
     }
     return value;
   })
-  @IsEnum(PAYMENT_STATUS, { each: true })
+  @IsEnum(PAYMENT_STATUS, { each: true, message: 'Status must be a valid payment status' })
   status?: PAYMENT_STATUS | PAYMENT_STATUS[];
 
   @IsOptional()
-  @IsEnum(PAYMENT_TYPE)
+  @IsEnum(PAYMENT_TYPE, { message: 'paymentType must be a valid payment type' })
   paymentType?: PAYMENT_TYPE;
 
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @IsString()
-  @MaxLength(100)
+  @IsString({ message: 'search must be a string' })
+  @MaxLength(100, { message: 'search cannot exceed 100 characters' })
   search?: string;
 
   @IsOptional()
@@ -43,7 +43,7 @@ export class PaymentQueryDto {
     }
     return value;
   })
-  @IsEnum(BOOKING_PAYMENT_STATUS, { each: true })
+  @IsEnum(BOOKING_PAYMENT_STATUS, { each: true, message: 'partnerPayoutStatus must be a valid booking payment status' })
   partnerPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
 
   @IsOptional()
@@ -53,7 +53,7 @@ export class PaymentQueryDto {
     }
     return value;
   })
-  @IsEnum(BOOKING_PAYMENT_STATUS, { each: true })
+  @IsEnum(BOOKING_PAYMENT_STATUS, { each: true, message: 'purohitPayoutStatus must be a valid booking payment status' })
   purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
 
   @IsOptional()
@@ -63,6 +63,6 @@ export class PaymentQueryDto {
     }
     return value;
   })
-  @IsEnum(BOOKING_PAYMENT_STATUS, { each: true })
+  @IsEnum(BOOKING_PAYMENT_STATUS, { each: true, message: 'bookingPaymentStatus must be a valid booking payment status' })
   bookingPaymentStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
 }

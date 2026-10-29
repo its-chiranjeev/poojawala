@@ -1,22 +1,21 @@
 import { Transform } from 'class-transformer';
 import {
-  IsEmail,
   IsNotEmpty,
-  IsOptional,
   IsString,
+  MaxLength,
   MinLength,
-  ValidateIf,
 } from 'class-validator';
 
 export class LoginDto {
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: 'Email or username must be a string' })
+  @IsNotEmpty({ message: 'Email or username is required' })
+  @MaxLength(150, { message: 'Email or username cannot exceed 150 characters' })
   @Transform(({ value }) => value?.trim())
   email!: string; // email OR username
 
-  @IsString()
-  @IsNotEmpty()
-  @MinLength(6)
+  @IsString({ message: 'Password must be a string' })
+  @IsNotEmpty({ message: 'Password is required' })
+  @MinLength(6, { message: 'Password must be at least 6 characters' })
   @Transform(({ value }) => value?.trim())
   password!: string;
 }
