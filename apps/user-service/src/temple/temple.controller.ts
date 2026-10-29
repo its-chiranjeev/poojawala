@@ -86,6 +86,27 @@ export class TempleUpdatePipe implements PipeTransform {
       }
     }
 
+    if (
+      parsedBody &&
+      typeof parsedBody === 'object' &&
+      !Array.isArray(parsedBody) &&
+      'services' in (parsedBody as Record<string, unknown>)
+    ) {
+      const rawServices = (parsedBody as Record<string, unknown>)['services'];
+      if (typeof rawServices === 'string') {
+        const trimmed = rawServices.trim();
+        if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') {
+          (parsedBody as Record<string, unknown>)['services'] = undefined;
+        } else {
+          try {
+            (parsedBody as Record<string, unknown>)['services'] = JSON.parse(trimmed);
+          } catch {
+            throw new BadRequestException('Invalid JSON format for services');
+          }
+        }
+      }
+    }
+
     return this.validationPipe.transform(parsedBody, metadata);
   }
 }

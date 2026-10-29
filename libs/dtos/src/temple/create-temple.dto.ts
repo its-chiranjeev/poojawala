@@ -15,6 +15,7 @@ import {
 } from 'class-validator';
 import { TEMPLE_VERIFICATION_STATUS } from '@poojawala/entities';
 import { CreateTempleAartiDto } from './temple-aarti.dto';
+import { CreateServiceDto } from '../service/create.service.dto';
 
 export class CreateTempleDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
@@ -218,6 +219,35 @@ export class CreateTempleDto {
   @ValidateNested({ each: true })
   @Type(() => CreateTempleAartiDto)
   aartis?: CreateTempleAartiDto[];
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    let parsed = value;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return undefined;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        return value;
+      }
+    }
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => {
+        if (item && typeof item === 'object') {
+          return !(item instanceof CreateServiceDto)
+            ? plainToInstance(CreateServiceDto, item)
+            : item;
+        }
+        return item;
+      });
+    }
+    return parsed;
+  })
+  @IsArray({ message: 'services must be an array' })
+  @ValidateNested({ each: true })
+  @Type(() => CreateServiceDto)
+  services?: CreateServiceDto[];
 
   @IsOptional()
   @IsEnum(TEMPLE_VERIFICATION_STATUS, {

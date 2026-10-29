@@ -22,10 +22,12 @@ import {
   GetTemplesQueryDto,
   CreateTempleAartiDto,
   UpdateTempleAartiDto,
+  CreateServiceDto,
 } from '@poojawala/dtos';
 import { DataSource } from 'typeorm';
 import { EmailService } from '@poojawala/email-services';
 import { NotificationService } from '@poojawala/notification';
+import { ServiceService } from '../service/service.service';
 
 describe('TempleService', () => {
   let service: TempleService;
@@ -73,6 +75,9 @@ describe('TempleService', () => {
   let mockS3Service: {
     uploadFileHelper: jest.Mock;
     getDownloadUrl: jest.Mock;
+  };
+  let mockServiceService: {
+    createService: jest.Mock;
   };
 
   const sampleActiveTemple: Temple = {
@@ -191,6 +196,25 @@ describe('TempleService', () => {
       getDownloadUrl: jest.fn().mockImplementation(async (url) => url),
     };
 
+    mockServiceService = {
+      createService: jest.fn().mockImplementation(async (dto, files, adminId, manager, options) => {
+        return {
+          success: true,
+          message: `Service '${dto.name}' was created successfully.`,
+          data: {
+            id: 101,
+            name: dto.name,
+            slug: 'mock-service-slug',
+            description: dto.description || null,
+            templeId: dto.templeId,
+            plans: dto.plans,
+            isActive: true,
+            iconUrl: dto.iconUrl || null,
+          },
+        };
+      }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TempleService,
@@ -217,6 +241,10 @@ describe('TempleService', () => {
         {
           provide: NotificationService,
           useValue: mockNotificationService,
+        },
+        {
+          provide: ServiceService,
+          useValue: mockServiceService,
         },
       ],
     }).compile();
@@ -2430,6 +2458,263 @@ describe('TempleService', () => {
         expect(res.data[0].aartis).toHaveLength(1);
         expect(res.data[0].aartis?.[0].name).toBe('Morning Aarti');
       });
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MULTIPLE SERVICE CREATION DURING TEMPLE CREATION
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe('Multiple Service Creation During Temple Creation', () => {
+    const mockAdmin = { id: 1, role: USER_ROLE.ADMIN } as User;
+    const mockPurohit = { id: 50, role: USER_ROLE.PUROHIT, email: 'purohit@example.com' } as User;
+
+    it('should create a temple without services (backward compatibility)', async () => {
+      const dto: CreateTempleDto = {
+        name: 'Shiv Mandir Without Services',
+      };
+
+      const result = await service.createTempleWithUser(dto, undefined, mockAdmin);
+
+      expect(result.success).toBe(true);
+      expect(result.statusCode).toBe(201);
+      expect(result.data.name).toBe('Shiv Mandir Without Services');
+      expect(result.data.services).toBeUndefined();
+      expect(mockServiceService.createService).not.toHaveBeenCalled();
+    });
+
+    it('should create a temple with services: [] without creating any services', async () => {
+      const dto: CreateTempleDto = {
+        name: 'Shiv Mandir Empty Services',
+        services: [],
+      };
+
+      const result = await service.createTempleWithUser(dto, undefined, mockAdmin);
+
+      expect(result.success).toBe(true);
+      expect(result.statusCode).toBe(201);
+      expect(result.data.services).toEqual([]);
+      expect(mockServiceService.createService).not.toHaveBeenCalled();
+    });
+
+    it('should successfully create multiple services and associate them with the new temple', async () => {
+      const dto: CreateTempleDto = {
+        name: 'Kashi Vishwanath Mandir',
+        services: [
+          {
+            name: 'Rudrabhishek Pooja',
+            plans: { basic: { price: 2100 } },
+            commissionPercentage: 10,
+            durationMinutes: 60,
+            requiresVenue: false,
+          } as CreateServiceDto,
+          {
+            name: 'Maha Mrityunjaya Jaap',
+            plans: { basic: { price: 5100 } },
+            commissionPercentage: 15,
+            durationMinutes: 120,
+            requiresVenue: true,
+          } as CreateServiceDto,
+        ],
+      };
+
+      mockServiceService.createService
+        .mockResolvedValueOnce({
+          success: true,
+          data: {
+            id: 101,
+            name: 'Rudrabhishek Pooja',
+            slug: 'rudrabhishek-pooja',
+            templeId: 1,
+            plans: { basic: { price: 2100 } },
+            isActive: true,
+            iconUrl: 'https://storage.poojawala.com/icon1.png',
+          },
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          data: {
+            id: 102,
+            name: 'Maha Mrityunjaya Jaap',
+            slug: 'maha-mrityunjaya-jaap',
+            templeId: 1,
+            plans: { basic: { price: 5100 } },
+            isActive: true,
+            iconUrl: 'https://storage.poojawala.com/icon2.png',
+          },
+        });
+
+      const result = await service.createTempleWithUser(dto, undefined, mockAdmin);
+
+      expect(result.success).toBe(true);
+      expect(result.statusCode).toBe(201);
+      expect(mockServiceService.createService).toHaveBeenCalledTimes(2);
+
+      // Verify templeId is set to the newly created temple's id (1)
+      expect(mockServiceService.createService).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          name: 'Rudrabhishek Pooja',
+          templeId: 1,
+        }),
+        undefined,
+        1,
+        expect.anything(),
+        { skipNotifications: true, skipTempleValidation: true },
+      );
+
+      expect(mockServiceService.createService).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          name: 'Maha Mrityunjaya Jaap',
+          templeId: 1,
+        }),
+        undefined,
+        1,
+        expect.anything(),
+        { skipNotifications: true, skipTempleValidation: true },
+      );
+
+      // Verify response includes both created services
+      expect(result.data.services).toHaveLength(2);
+      expect(result.data.services?.[0].name).toBe('Rudrabhishek Pooja');
+      expect(result.data.services?.[1].name).toBe('Maha Mrityunjaya Jaap');
+
+      // Verify admin notifications are dispatched for each service after commit
+      expect(mockNotificationService.notifyAdmins).toHaveBeenCalledTimes(2);
+      expect(mockNotificationService.notifyAdmins).toHaveBeenCalledWith(
+        'Service Created',
+        `Service 'Rudrabhishek Pooja' was created successfully.`,
+        NOTIFICATION_TYPE.SYSTEM,
+        101,
+        'SERVICE',
+        expect.objectContaining({ serviceId: 101, templeId: 1 }),
+      );
+    });
+
+    it('should override any client-provided templeId in nested service payloads', async () => {
+      const dto: CreateTempleDto = {
+        name: 'Mahakal Mandir',
+        services: [
+          {
+            name: 'Bhasma Aarti Service',
+            templeId: 99999, // Client attempts to link to a different temple
+            plans: { basic: { price: 1500 } },
+            commissionPercentage: 10,
+            durationMinutes: 45,
+            requiresVenue: true,
+          } as CreateServiceDto,
+        ],
+      };
+
+      await service.createTempleWithUser(dto, undefined, mockAdmin);
+
+      expect(mockServiceService.createService).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Bhasma Aarti Service',
+          templeId: 1, // Overridden by newly created temple's id
+        }),
+        undefined,
+        1,
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('should roll back and NOT emit notifications if any service fails validation or persistence', async () => {
+      const dto: CreateTempleDto = {
+        name: 'Rollback Temple',
+        services: [
+          {
+            name: 'Valid Service 1',
+            plans: { basic: { price: 1000 } },
+            commissionPercentage: 10,
+            durationMinutes: 60,
+            requiresVenue: false,
+          } as CreateServiceDto,
+          {
+            name: 'Invalid Service 2',
+            plans: { basic: { price: -50 } }, // Invalid price
+            commissionPercentage: 10,
+            durationMinutes: 60,
+            requiresVenue: false,
+          } as CreateServiceDto,
+        ],
+      };
+
+      mockServiceService.createService
+        .mockResolvedValueOnce({
+          success: true,
+          data: { id: 101, name: 'Valid Service 1', templeId: 1 },
+        })
+        .mockRejectedValueOnce(new BadRequestException('basic plan price must be a finite positive number greater than 0'));
+
+      await expect(service.createTempleWithUser(dto, undefined, mockAdmin)).rejects.toThrow(
+        BadRequestException,
+      );
+
+      // Verify no notifications were emitted for any service
+      expect(mockNotificationService.notifyAdmins).not.toHaveBeenCalled();
+    });
+
+    it('should roll back if service duplicate name conflict occurs', async () => {
+      const dto: CreateTempleDto = {
+        name: 'Duplicate Check Temple',
+        services: [
+          {
+            name: 'Existing Online Service',
+            plans: { basic: { price: 1000 } },
+            commissionPercentage: 10,
+            durationMinutes: 60,
+            requiresVenue: false,
+          } as CreateServiceDto,
+        ],
+      };
+
+      mockServiceService.createService.mockRejectedValueOnce(
+        new BadRequestException('An offline service with name "Existing Online Service" already exists'),
+      );
+
+      await expect(service.createTempleWithUser(dto, undefined, mockAdmin)).rejects.toThrow(
+        BadRequestException,
+      );
+
+      expect(mockNotificationService.notifyAdmins).not.toHaveBeenCalled();
+    });
+
+    it('should reject Purohit submitting a temple with non-empty services with HTTP 403 ForbiddenException', async () => {
+      const dto: CreateTempleDto = {
+        name: 'Purohit Temple With Services',
+        services: [
+          {
+            name: 'Unauthorized Service',
+            plans: { basic: { price: 1000 } },
+            commissionPercentage: 10,
+            durationMinutes: 60,
+            requiresVenue: false,
+          } as CreateServiceDto,
+        ],
+      };
+
+      await expect(
+        service.createTempleWithUser(dto, undefined, mockPurohit),
+      ).rejects.toThrow(ForbiddenException);
+
+      // Neither temple nor service should be created
+      expect(mockTempleRepo.save).not.toHaveBeenCalled();
+      expect(mockServiceService.createService).not.toHaveBeenCalled();
+    });
+
+    it('should allow Purohit submitting a temple with empty or omitted services array', async () => {
+      const dto: CreateTempleDto = {
+        name: 'Purohit Temple With Empty Services',
+        services: [],
+      };
+
+      const result = await service.createTempleWithUser(dto, undefined, mockPurohit);
+
+      expect(result.success).toBe(true);
+      expect(result.statusCode).toBe(201);
+      expect(mockServiceService.createService).not.toHaveBeenCalled();
     });
   });
 });

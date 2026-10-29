@@ -43,5 +43,6 @@ import { EmailServicesModule } from '@poojawala/email-services';
     TempleRepository,
     ServiceFeatureRepository,
   ],
+  exports: [ServiceService, ServiceRepository],
 })
 export class ServiceModule {}

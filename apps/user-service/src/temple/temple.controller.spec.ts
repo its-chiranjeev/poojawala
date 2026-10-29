@@ -290,5 +290,63 @@ describe('TempleController', () => {
         }),
       ).rejects.toThrow('Invalid JSON format for aartis');
     });
+
+    it('TempleUpdatePipe should safely parse multipart services JSON string into array', async () => {
+      const pipe = new TempleUpdatePipe();
+      const rawMultipartBody = {
+        name: 'Somnath Temple',
+        services: JSON.stringify([
+          {
+            name: 'Special Rudrabhishek',
+            plans: { basic: { price: 2100 } },
+            commissionPercentage: 10,
+            durationMinutes: 60,
+            requiresVenue: false,
+          },
+        ]),
+      };
+
+      const result = await pipe.transform(rawMultipartBody, {
+        type: 'body',
+        metatype: CreateTempleDto,
+      });
+
+      expect(result).toBeInstanceOf(CreateTempleDto);
+      expect(result.services).toBeDefined();
+      expect(result.services?.length).toBe(1);
+      expect(result.services?.[0].name).toBe('Special Rudrabhishek');
+      expect(result.services?.[0].commissionPercentage).toBe(10);
+    });
+
+    it('TempleUpdatePipe should throw 400 BadRequestException for invalid JSON services', async () => {
+      const pipe = new TempleUpdatePipe();
+      const invalidMultipartBody = {
+        name: 'Somnath Temple',
+        services: '{ invalid json for services',
+      };
+
+      await expect(
+        pipe.transform(invalidMultipartBody, {
+          type: 'body',
+          metatype: CreateTempleDto,
+        }),
+      ).rejects.toThrow('Invalid JSON format for services');
+    });
+
+    it('TempleUpdatePipe should ignore null or empty string for services', async () => {
+      const pipe = new TempleUpdatePipe();
+      const bodyWithEmpty = {
+        name: 'Somnath Temple',
+        services: '   ',
+      };
+
+      const result = await pipe.transform(bodyWithEmpty, {
+        type: 'body',
+        metatype: CreateTempleDto,
+      });
+
+      expect(result).toBeInstanceOf(CreateTempleDto);
+      expect(result.services).toBeUndefined();
+    });
   });
 });

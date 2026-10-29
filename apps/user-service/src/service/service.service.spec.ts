@@ -13,7 +13,7 @@ import { AuditLogService } from '@poojawala/common';
 import { NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { CreateServiceDto } from '@poojawala/dtos/service/create.service.dto';
 import { UpdateServiceDto } from '@poojawala/dtos/service/update.service.dto';
-import { Temple, Service } from '@poojawala/entities';
+import { Temple, Service, ServiceFeature } from '@poojawala/entities';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 
@@ -1170,6 +1170,113 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
       expect(res2.success).toBe(true);
       expect(res1.data.sortOrder).not.toBeNull();
       expect(res2.data.sortOrder).not.toBeNull();
+    });
+  });
+
+  describe('Transactional createService Execution', () => {
+    it('uses transaction-bound repositories when EntityManager is supplied', async () => {
+      const mockTxServiceRepo = {
+        findOne: jest.fn().mockResolvedValue(null),
+        find: jest.fn().mockResolvedValue([]),
+        create: jest.fn((data) => ({ ...data, id: 999 })),
+        save: jest.fn(async (entity) => ({ ...entity, id: entity.id || 999 })),
+      };
+
+      const mockTxFeatureRepo = {
+        delete: jest.fn().mockResolvedValue({ affected: 0 }),
+        create: jest.fn((data) => data),
+        save: jest.fn(async (data) => data),
+        find: jest.fn().mockResolvedValue([]),
+      };
+
+      const mockTxTempleRepo = {
+        findOne: jest.fn().mockResolvedValue(sampleTemple),
+      };
+
+      const mockTxCategoryRepo = {
+        findOne: jest.fn().mockResolvedValue({ id: 1, isActive: true, categoryType: 'SERVICE' }),
+      };
+
+      const mockManager: any = {
+        getRepository: jest.fn((entity) => {
+          if (entity === Service) return mockTxServiceRepo;
+          if (entity === ServiceFeature) return mockTxFeatureRepo;
+          if (entity === Temple) return mockTxTempleRepo;
+          return mockTxCategoryRepo;
+        }),
+        createQueryBuilder: jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          getRawOne: jest.fn().mockResolvedValue({ max: 5 }),
+        }),
+      };
+
+      const dto: CreateServiceDto = {
+        name: 'Tx Service Test',
+        plans: {
+          basic: {
+            price: 1500,
+            features: [{ title: 'Special Puja Item', type: 'NORMAL', value: 'yes' }],
+          },
+        },
+        commissionPercentage: 12,
+        durationMinutes: 45,
+        requiresVenue: false,
+        templeId: 10,
+        categoryId: 1,
+      } as any;
+
+      const result = await service.createService(
+        dto,
+        undefined,
+        1,
+        mockManager,
+        { skipNotifications: true, skipTempleValidation: true },
+      );
+
+      expect(result.success).toBe(true);
+      expect(mockManager.getRepository).toHaveBeenCalledWith(Service);
+      expect(mockTxServiceRepo.save).toHaveBeenCalled();
+      expect(mockManager.getRepository).toHaveBeenCalledWith(ServiceFeature);
+      expect(mockTxFeatureRepo.save).toHaveBeenCalled();
+      expect(result.data.templeId).toBe(10);
+    });
+
+    it('bypasses notifications when skipNotifications option is true', async () => {
+      const mockTxServiceRepo = {
+        findOne: jest.fn().mockResolvedValue(null),
+        find: jest.fn().mockResolvedValue([]),
+        create: jest.fn((data) => ({ ...data, id: 888 })),
+        save: jest.fn(async (entity) => ({ ...entity, id: entity.id || 888 })),
+      };
+
+      const mockManager: any = {
+        getRepository: jest.fn().mockReturnValue(mockTxServiceRepo),
+        createQueryBuilder: jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          getRawOne: jest.fn().mockResolvedValue({ max: 0 }),
+        }),
+      };
+
+      const dto: CreateServiceDto = {
+        name: 'No Notification Tx Service',
+        plans: { basic: { price: 500 } },
+        commissionPercentage: 10,
+        durationMinutes: 30,
+        requiresVenue: false,
+      } as any;
+
+      const result = await service.createService(
+        dto,
+        undefined,
+        1,
+        mockManager,
+        { skipNotifications: true },
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.data.id).toBe(888);
     });
   });
 });

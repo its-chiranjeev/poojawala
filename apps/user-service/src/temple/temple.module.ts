@@ -8,6 +8,7 @@ import { EmailServicesModule } from '@poojawala/email-services';
 import { NotificationModule } from '@poojawala/notification';
 import { TempleController } from './temple.controller';
 import { TempleService } from './temple.service';
+import { ServiceModule } from '../service/service.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { TempleService } from './temple.service';
     S3Module,
     EmailServicesModule,
     NotificationModule,
+    ServiceModule,
   ],
   controllers: [TempleController],
   providers: [

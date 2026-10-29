@@ -31,13 +31,15 @@ import {
 } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { QueryFailedError, ILike } from 'typeorm';
+import { QueryFailedError, ILike, EntityManager } from 'typeorm';
 import {
   USER_ROLE,
   AUDIT_MODULE,
   ACTOR_TYPE,
   PUROHIT_VERIFICATION_STATUS,
+  Category,
   Service,
+  ServiceFeature,
   ServicePlans,
   ServicePlanDetails,
   NOTIFICATION_TYPE,
@@ -152,11 +154,16 @@ export class ServiceService {
     serviceId: number,
     plan: SERVICE_FEATURE_PLAN,
     rawFeatures: any[],
+    manager?: EntityManager,
   ) {
     if (!Array.isArray(rawFeatures)) return;
 
+    const featureRepo = manager
+      ? manager.getRepository(ServiceFeature)
+      : this.serviceFeatureRepository;
+
     // Delete existing features for this service and plan
-    await this.serviceFeatureRepository.delete({
+    await featureRepo.delete({
       serviceId,
       plan,
     } as any);
@@ -174,7 +181,7 @@ export class ServiceService {
           ? String(item.value)
           : 'true';
 
-      return this.serviceFeatureRepository.create({
+      return featureRepo.create({
         serviceId,
         plan,
         title: item.title ? String(item.title).trim() : '',
@@ -185,7 +192,7 @@ export class ServiceService {
       });
     });
 
-    await this.serviceFeatureRepository.save(featureEntities as any);
+    await featureRepo.save(featureEntities as any);
   }
 
   private validatePlanItem(
@@ -499,8 +506,9 @@ export class ServiceService {
    * Validates that a given categoryId references an active, non-deleted SERVICE-type category.
    * Throws BadRequestException if validation fails.
    */
-  private async validateServiceCategory(categoryId: number): Promise<void> {
-    const category = await this.categoryRepository.findOne({
+  private async validateServiceCategory(categoryId: number, manager?: EntityManager): Promise<void> {
+    const categoryRepo = manager ? manager.getRepository(Category) : this.categoryRepository;
+    const category = await categoryRepo.findOne({
       where: { id: categoryId },
     });
 
@@ -527,8 +535,9 @@ export class ServiceService {
    * Validates that a given templeId references an existing, non-deleted, and active Temple.
    * Throws NotFoundException if not found or deleted, and BadRequestException if inactive.
    */
-  private async validateTemple(templeId: number): Promise<Temple> {
-    const temple = await this.templeRepository.findOne({
+  private async validateTemple(templeId: number, manager?: EntityManager): Promise<Temple> {
+    const templeRepo = manager ? manager.getRepository(Temple) : this.templeRepository;
+    const temple = await templeRepo.findOne({
       where: { id: templeId },
       withDeleted: true,
     });
@@ -567,19 +576,30 @@ export class ServiceService {
 
   async createService(
     dto: CreateServiceDto,
-    files: {
+    files?: {
       icon?: Express.Multer.File[];
     },
-    adminId: number,
+    adminId?: number,
+    manager?: EntityManager,
+    options?: {
+      skipNotifications?: boolean;
+      skipTempleValidation?: boolean;
+    },
   ) {
     try {
       if (dto.categoryId !== undefined && dto.categoryId !== null) {
-        await this.validateServiceCategory(dto.categoryId);
+        await this.validateServiceCategory(dto.categoryId, manager);
       }
 
       let validatedTemple: Temple | null = null;
       if (dto.templeId !== undefined && dto.templeId !== null) {
-        validatedTemple = await this.validateTemple(dto.templeId);
+        if (!options?.skipTempleValidation) {
+          validatedTemple = await this.validateTemple(dto.templeId, manager);
+        } else if (manager) {
+          validatedTemple = await manager.getRepository(Temple).findOne({
+            where: { id: dto.templeId },
+          });
+        }
       }
 
       // Availability modes (isOnline, isOffline):
@@ -607,9 +627,11 @@ export class ServiceService {
         }
       }
       */
-      const generatedSlug = await generateUniqueSlug(this.serviceRepository, dto.name.trim());
+      const serviceRepo = manager ? manager.getRepository(Service) : this.serviceRepository;
 
-      const existingWithName = await this.serviceRepository.find({
+      const generatedSlug = await generateUniqueSlug(serviceRepo as any, dto.name.trim());
+
+      const existingWithName = await serviceRepo.find({
         where: { name: dto.name.trim() },
       });
 
@@ -763,17 +785,33 @@ export class ServiceService {
 
       if (hasExplicitSortOrder) {
         finalSortOrder = Number(dto.sortOrder);
-        if (typeof this.serviceRepository?.shiftSortOrdersUp === 'function') {
+        if (manager) {
+          await manager
+            .createQueryBuilder()
+            .update(Service)
+            .set({ sortOrder: () => '"sortOrder" + 1' })
+            .where('"deletedAt" IS NULL')
+            .andWhere('"sortOrder" >= :fromOrder', { fromOrder: finalSortOrder })
+            .execute();
+        } else if (typeof this.serviceRepository?.shiftSortOrdersUp === 'function') {
           await this.serviceRepository.shiftSortOrdersUp(finalSortOrder);
         }
       } else {
-        const maxOrder = typeof this.serviceRepository?.getMaxSortOrder === 'function'
-          ? await this.serviceRepository.getMaxSortOrder()
-          : null;
+        let maxOrder: number | null = null;
+        if (manager) {
+          const result = await manager
+            .createQueryBuilder(Service, 'service')
+            .select('MAX(service.sortOrder)', 'max')
+            .where('service.deletedAt IS NULL')
+            .getRawOne();
+          maxOrder = result?.max != null && result.max !== '' ? parseInt(result.max, 10) : null;
+        } else if (typeof this.serviceRepository?.getMaxSortOrder === 'function') {
+          maxOrder = await this.serviceRepository.getMaxSortOrder();
+        }
         finalSortOrder = maxOrder === null ? 0 : maxOrder + 1;
       }
 
-      const service = this.serviceRepository.create({
+      const service = serviceRepo.create({
         ...dto,
         slug: generatedSlug,
         templeId: dto.templeId ?? null,
@@ -806,13 +844,14 @@ export class ServiceService {
       service.slug = generatedSlug;
       service.sortOrder = finalSortOrder;
 
-      const savedService = await this.serviceRepository.save(service);
+      const savedService = await serviceRepo.save(service);
 
       if (basicFeaturesToSync) {
         await this.syncServiceFeatures(
           savedService.id,
           SERVICE_FEATURE_PLAN.BASIC,
           basicFeaturesToSync,
+          manager,
         );
       }
       if (standardFeaturesToSync) {
@@ -820,12 +859,17 @@ export class ServiceService {
           savedService.id,
           SERVICE_FEATURE_PLAN.STANDARD,
           standardFeaturesToSync,
+          manager,
         );
       }
-      const createdFeatures =
-        typeof this.serviceFeatureRepository?.findByServiceId === 'function'
-          ? await this.serviceFeatureRepository.findByServiceId(savedService.id)
-          : [];
+      const createdFeatures = manager
+        ? await manager.getRepository(ServiceFeature).find({
+            where: { serviceId: savedService.id },
+            order: { id: 'ASC' },
+          })
+        : (typeof this.serviceFeatureRepository?.findByServiceId === 'function'
+            ? await this.serviceFeatureRepository.findByServiceId(savedService.id)
+            : []);
 
       (savedService as any).templeId = savedService.templeId ?? null;
       (savedService as any).temple = validatedTemple
@@ -842,28 +886,32 @@ export class ServiceService {
           console.error('Failed to generate signed URL:', e);
         }
       }
+      (savedService as any).iconDownloadurl = savedService.iconUrl ?? null;
 
       // TODO: SERVICE_MESSAGE_IMPROVEMENT
       // Old message retained for reference; replaced with plan-aware message.
       // message: `Admin created new service ${savedService.name}.`,
-      await this.auditLogService?.createAuditLog?.({
-        actorId: adminId,
-        actorType: ACTOR_TYPE.USER,
-        actorRole: USER_ROLE.ADMIN,
-        module: AUDIT_MODULE.SERVICE,
-        entity: 'Service',
-        entityId: String(savedService.id),
-        action: 'SERVICE_CREATED',
-        message: `Service '${savedService.name}' was created successfully.`,
-        oldValue: undefined,
-        newValue: {
-          name: savedService.name,
-          slug: savedService.slug,
-          templeId: savedService.templeId,
+      await this.auditLogService?.createAuditLog?.(
+        {
+          actorId: adminId,
+          actorType: ACTOR_TYPE.USER,
+          actorRole: USER_ROLE.ADMIN,
+          module: AUDIT_MODULE.SERVICE,
+          entity: 'Service',
+          entityId: String(savedService.id),
+          action: 'SERVICE_CREATED',
+          message: `Service '${savedService.name}' was created successfully.`,
+          oldValue: undefined,
+          newValue: {
+            name: savedService.name,
+            slug: savedService.slug,
+            templeId: savedService.templeId,
+          },
         },
-      });
+        manager ? { manager } : undefined,
+      );
 
-      if (this.notificationService) {
+      if (!options?.skipNotifications && this.notificationService) {
         try {
           await this.notificationService.notifyAdmins(
             'Service Created',

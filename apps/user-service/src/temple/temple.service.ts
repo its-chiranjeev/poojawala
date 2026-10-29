@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
   Optional,
@@ -24,6 +25,7 @@ import { S3Service } from '@poojawala/s3';
 import { EmailService } from '@poojawala/email-services';
 import { NotificationService } from '@poojawala/notification';
 import { DataSource, EntityManager, In, IsNull } from 'typeorm';
+import { ServiceService } from '../service/service.service';
 
 export interface FormattedAartiResponse {
   id: number;
@@ -82,6 +84,7 @@ export class TempleService {
     @Optional() private readonly emailService?: EmailService,
     @Optional() private readonly notificationService?: NotificationService,
     @Optional() private readonly dataSource?: DataSource,
+    @Optional() private readonly serviceService?: ServiceService,
   ) { }
 
   private async runInTransaction<T>(
@@ -146,7 +149,7 @@ export class TempleService {
         metaTitle: s['metaTitle'] ?? null,
         metaDescription: s['metaDescription'] ?? null,
         iconUrl: s['iconUrl'] ?? null,
-        iconDownloadurl: s['iconDownloadurl'] ?? null,
+        iconDownloadurl: s['iconDownloadurl'] ?? s['iconUrl'] ?? null,
         isActive: s['isActive'],
         plans: s['plans'] ?? null,
       }));
@@ -314,6 +317,12 @@ export class TempleService {
     const actorId = user ? user.id : (typeof userOrAdminId === 'number' ? userOrAdminId : undefined);
     const isPurohit = user?.role === USER_ROLE.PUROHIT;
 
+    if (dto.services && dto.services.length > 0) {
+      if (isPurohit || (user && user.role !== USER_ROLE.ADMIN)) {
+        throw new ForbiddenException('Only admins can create services with temple registration');
+      }
+    }
+
     let submittedByUserId: number | null = null;
     let verificationStatus: TEMPLE_VERIFICATION_STATUS;
     let verificationRemarks: string | null = null;
@@ -361,7 +370,7 @@ export class TempleService {
         )) || null;
     }
 
-    const { savedTemple, savedAartis, submitterUser } = await this.runInTransaction(
+    const { savedTemple, savedAartis, savedServices, submitterUser } = await this.runInTransaction(
       async (manager: EntityManager) => {
         const templeRepo = manager.getRepository(Temple);
         const aartiRepo = manager.getRepository(TempleAarti);
@@ -422,30 +431,53 @@ export class TempleService {
           }
         }
 
-        await this.auditLogService.createAuditLog({
-          actorId,
-          actorType: ACTOR_TYPE.USER,
-          actorRole: isPurohit ? USER_ROLE.PUROHIT : USER_ROLE.ADMIN,
-          module: AUDIT_MODULE.TEMPLE,
-          entity: 'Temple',
-          entityId: String(saved.id),
-          action: 'TEMPLE_CREATED',
-          message: isPurohit
-            ? `Purohit registered temple submission ${saved.name}.`
-            : `Admin created new temple ${saved.name}.`,
-          oldValue: undefined,
-          newValue: {
-            name: saved.name,
-            description: saved.description,
-            imageUrl: saved.imageUrl,
-            address: saved.address,
-            city: saved.city,
-            state: saved.state,
-            isActive: saved.isActive,
-            verificationStatus: saved.verificationStatus,
-            submittedByUserId: saved.submittedByUserId,
+        const servicesList: Record<string, unknown>[] = [];
+        if (dto.services && dto.services.length > 0) {
+          if (!this.serviceService) {
+            throw new InternalServerErrorException('ServiceService is not available');
+          }
+          for (const serviceDto of dto.services) {
+            // Override templeId with the newly created temple ID
+            serviceDto.templeId = saved.id;
+            const serviceResult = await this.serviceService.createService(
+              serviceDto,
+              undefined,
+              actorId,
+              manager,
+              { skipNotifications: true, skipTempleValidation: true },
+            );
+            if (serviceResult && serviceResult.data) {
+              servicesList.push(serviceResult.data as unknown as Record<string, unknown>);
+            }
+          }
+        }
+
+        await this.auditLogService.createAuditLog(
+          {
+            actorId,
+            actorType: ACTOR_TYPE.USER,
+            actorRole: isPurohit ? USER_ROLE.PUROHIT : USER_ROLE.ADMIN,
+            module: AUDIT_MODULE.TEMPLE,
+            entity: 'Temple',
+            entityId: String(saved.id),
+            action: 'TEMPLE_CREATED',
+            message: isPurohit
+              ? `Purohit registered temple submission ${saved.name}.`
+              : `Admin created new temple ${saved.name}.`,
+            oldValue: undefined,
+            newValue: {
+              name: saved.name,
+              description: saved.description,
+              imageUrl: saved.imageUrl,
+              address: saved.address,
+              city: saved.city,
+              state: saved.state,
+              isActive: saved.isActive,
+              verificationStatus: saved.verificationStatus,
+              submittedByUserId: saved.submittedByUserId,
+            },
           },
-        });
+        );
 
         let submitterUser: User | null = null;
         if (isPurohit && saved.submittedByUserId) {
@@ -454,11 +486,41 @@ export class TempleService {
           });
         }
 
-        return { savedTemple: saved, savedAartis: aartisList, submitterUser };
+        return {
+          savedTemple: saved,
+          savedAartis: aartisList,
+          savedServices: dto.services !== undefined ? servicesList : undefined,
+          submitterUser,
+        };
       },
     );
 
     const effectiveSubmitterUser = submitterUser || (user && user.email ? user : null);
+
+    if (savedServices && savedServices.length > 0 && this.notificationService) {
+      for (const s of savedServices) {
+        try {
+          await this.notificationService.notifyAdmins(
+            'Service Created',
+            `Service '${s['name']}' was created successfully.`,
+            NOTIFICATION_TYPE.SYSTEM,
+            Number(s['id']),
+            'SERVICE',
+            {
+              serviceId: s['id'],
+              serviceName: s['name'],
+              templeId: savedTemple.id,
+              action: 'CREATED',
+            },
+          );
+        } catch (err: unknown) {
+          const errMessage = err instanceof Error ? err.message : String(err);
+          this.logger.error(
+            `Failed to notify admins of service creation for service ${s['id']}: ${errMessage}`,
+          );
+        }
+      }
+    }
 
     if (isPurohit && this.notificationService) {
       try {
@@ -542,7 +604,7 @@ export class TempleService {
       data: this.formatTempleResponse(
         savedTemple,
         downloadUrl,
-        undefined,
+        dto.services !== undefined ? savedServices : undefined,
         dto.aartis !== undefined ? savedAartis : undefined,
         trustDocDownloadUrl,
         deityPhotoDownloadUrl,
