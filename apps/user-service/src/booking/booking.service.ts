@@ -169,7 +169,90 @@ export class BookingService {
     });
   }
 
-  @Cron('0 * * * * *', {
+
+  /**
+   * Robustly parses a scheduledAt input into a valid Date in UTC.
+   * - If the input is already a Date object, returns it.
+   * - If the input is an ISO string with an explicit timezone offset (e.g. "Z", "+05:30", "-04:00"),
+   *   it is parsed directly as an absolute point in time without manual offset addition or subtraction.
+   * - If the input is a timezone-less string (e.g. "2026-10-29T10:00:00", "2026-10-29 10:00:00", "2026-10-29T10:00", "2026-10-29"),
+   *   the intended contract is Indian Standard Time (IST, UTC+05:30). It is normalized and parsed with "+05:30",
+   *   avoiding silent misinterpretation as UTC by server runtimes.
+   */
+  public parseScheduledAt(rawScheduledAt: string | Date): Date {
+    if (rawScheduledAt instanceof Date) {
+      return rawScheduledAt;
+    }
+
+    if (typeof rawScheduledAt !== 'string') {
+      return new Date(NaN);
+    }
+
+    const trimmed = rawScheduledAt.trim();
+    if (!trimmed) {
+      return new Date(NaN);
+    }
+
+    // Check if an explicit timezone offset (Z, z, +HH:mm, -HH:mm, +HHmm, -HHmm, +HH, -HH) is present
+    const hasTimezoneOffset = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/i.test(trimmed);
+
+    if (hasTimezoneOffset) {
+      return new Date(trimmed);
+    }
+
+    // Date-only string: YYYY-MM-DD -> Start of the day in Indian Standard Time (IST, UTC+05:30)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return new Date(`${trimmed}T00:00:00+05:30`);
+    }
+
+    // Datetime with space or T
+    const normalized = trimmed.replace(' ', 'T');
+
+    // YYYY-MM-DDTHH:mm -> append :00+05:30
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)) {
+      return new Date(`${normalized}:00+05:30`);
+    }
+
+    // YYYY-MM-DDTHH:mm:ss or with milliseconds -> append +05:30
+    return new Date(`${normalized}+05:30`);
+  }
+
+  /**
+   * Validates that the scheduled time is at least minimumLeadTimeMinutes in advance,
+   * not in the past or current time slot, and within maximumAdvanceDays.
+   */
+  public validateMinimumLeadTime(
+    scheduledAt: Date,
+    minimumLeadTimeMinutes: number = 120,
+    maximumAdvanceDays: number = 180,
+  ): void {
+    if (Number.isNaN(scheduledAt.getTime())) {
+      throw new BadRequestException('Invalid scheduled date and time');
+    }
+
+    const currentTime = Date.now();
+    const minimumAllowedTime = new Date(
+      currentTime + minimumLeadTimeMinutes * 60 * 1000,
+    );
+
+    if (scheduledAt < minimumAllowedTime) {
+      throw new BadRequestException(
+        `Booking must be scheduled at least ${minimumLeadTimeMinutes} minutes in advance`,
+      );
+    }
+
+    const maximumScheduledAt = new Date(
+      currentTime + maximumAdvanceDays * 24 * 60 * 60 * 1000,
+    );
+
+    if (scheduledAt > maximumScheduledAt) {
+      throw new BadRequestException(
+        `Booking cannot be scheduled more than ${maximumAdvanceDays} days in advance`,
+      );
+    }
+  }
+
+    @Cron('0 * * * * *', {
     name: 'mark-expired-bookings-manual',
   })
   async markExpiredBookingsManual(): Promise<void> {
@@ -277,31 +360,8 @@ export class BookingService {
     const minimumLeadTimeMinutes = 120;
     const maximumAdvanceDays = 180;
 
-    const scheduledAt = new Date(dto.scheduledAt);
-
-    if (Number.isNaN(scheduledAt.getTime())) {
-      throw new BadRequestException('Invalid scheduled date and time');
-    }
-
-    const minimumScheduledAt = new Date(
-      Date.now() + minimumLeadTimeMinutes * 60 * 1000,
-    );
-
-    if (scheduledAt < minimumScheduledAt) {
-      throw new BadRequestException(
-        `Booking must be scheduled at least ${minimumLeadTimeMinutes} minutes in advance`,
-      );
-    }
-
-    const maximumScheduledAt = new Date(
-      Date.now() + maximumAdvanceDays * 24 * 60 * 60 * 1000,
-    );
-
-    if (scheduledAt > maximumScheduledAt) {
-      throw new BadRequestException(
-        `Booking cannot be scheduled more than ${maximumAdvanceDays} days in advance`,
-      );
-    }
+    const scheduledAt = this.parseScheduledAt(dto.scheduledAt);
+    this.validateMinimumLeadTime(scheduledAt, minimumLeadTimeMinutes, maximumAdvanceDays);
 
     try {
       const transactionResult = await this.dataSource.transaction(async (manager) => {
@@ -1105,34 +1165,13 @@ export class BookingService {
       targetCustomerId = user.id;
     }
 
-    const scheduledAt = new Date(dto.scheduledAt);
-
-    if (Number.isNaN(scheduledAt.getTime())) {
-      throw new BadRequestException('Invalid scheduled date and time');
-    }
+    const scheduledAt = this.parseScheduledAt(dto.scheduledAt);
 
     if (user.role === USER_ROLE.CUSTOMER) {
-      const minimumLeadTimeMinutes = 120;
-      const maximumAdvanceDays = 180;
-
-      const minimumScheduledAt = new Date(
-        Date.now() + minimumLeadTimeMinutes * 60 * 1000,
-      );
-
-      if (scheduledAt < minimumScheduledAt) {
-        throw new BadRequestException(
-          `Booking must be scheduled at least ${minimumLeadTimeMinutes} minutes in advance`,
-        );
-      }
-
-      const maximumScheduledAt = new Date(
-        Date.now() + maximumAdvanceDays * 24 * 60 * 60 * 1000,
-      );
-
-      if (scheduledAt > maximumScheduledAt) {
-        throw new BadRequestException(
-          `Booking cannot be scheduled more than ${maximumAdvanceDays} days in advance`,
-        );
+      this.validateMinimumLeadTime(scheduledAt, 120, 180);
+    } else {
+      if (Number.isNaN(scheduledAt.getTime())) {
+        throw new BadRequestException('Invalid scheduled date and time');
       }
     }
 
@@ -1970,13 +2009,8 @@ export class BookingService {
       let assignmentNeedsRefresh = false;
 
       if (dto.scheduledAt !== undefined) {
-        const scheduledAt = new Date(dto.scheduledAt);
-
-        if (Number.isNaN(scheduledAt.getTime()) || scheduledAt <= new Date()) {
-          throw new BadRequestException(
-            'Scheduled date and time must be in the future',
-          );
-        }
+        const scheduledAt = this.parseScheduledAt(dto.scheduledAt);
+        this.validateMinimumLeadTime(scheduledAt, 120, 180);
 
         booking.scheduledAt = scheduledAt;
 
@@ -5096,31 +5130,8 @@ export class BookingService {
 
     const minimumLeadTimeMinutes = 120;
     const maximumAdvanceDays = 180;
-    const newScheduledAt = new Date(dto.scheduledAt);
-
-    if (Number.isNaN(newScheduledAt.getTime())) {
-      throw new BadRequestException('Invalid scheduled date and time');
-    }
-
-    const minimumScheduledAt = new Date(
-      Date.now() + minimumLeadTimeMinutes * 60 * 1000,
-    );
-
-    if (newScheduledAt < minimumScheduledAt) {
-      throw new BadRequestException(
-        `Booking must be rescheduled at least ${minimumLeadTimeMinutes} minutes in advance`,
-      );
-    }
-
-    const maximumScheduledAt = new Date(
-      Date.now() + maximumAdvanceDays * 24 * 60 * 60 * 1000,
-    );
-
-    if (newScheduledAt > maximumScheduledAt) {
-      throw new BadRequestException(
-        `Booking cannot be rescheduled more than ${maximumAdvanceDays} days in advance`,
-      );
-    }
+    const newScheduledAt = this.parseScheduledAt(dto.scheduledAt);
+    this.validateMinimumLeadTime(newScheduledAt, minimumLeadTimeMinutes, maximumAdvanceDays);
 
     return this.dataSource.transaction(async (manager) => {
       const bookingRepository = manager.getRepository(Booking);
@@ -5681,17 +5692,8 @@ export class BookingService {
       );
     }
 
-    const scheduledAt = new Date(dto.scheduledAt);
-
-    if (Number.isNaN(scheduledAt.getTime())) {
-      throw new BadRequestException('Invalid scheduled date and time');
-    }
-
-    if (scheduledAt <= new Date()) {
-      throw new BadRequestException(
-        'Repeated booking must be scheduled for a future date and time',
-      );
-    }
+    const scheduledAt = this.parseScheduledAt(dto.scheduledAt);
+    this.validateMinimumLeadTime(scheduledAt, 120, 180);
 
     const createBookingDto: CreateBookingDto = {
       serviceId: originalBooking.serviceId,
@@ -5794,7 +5796,7 @@ export class BookingService {
       throw new ForbiddenException('Only admins can create bookings manually');
     }
 
-    const scheduledAt = new Date(dto.scheduledAt);
+    const scheduledAt = this.parseScheduledAt(dto.scheduledAt);
     if (Number.isNaN(scheduledAt.getTime())) {
       throw new BadRequestException('Invalid scheduled date and time');
     }

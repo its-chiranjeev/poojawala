@@ -1346,6 +1346,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
     it('22. COMPLETED is permitted when paymentStatus is PAID', () => {
       const booking = {
         id: 999,
+        status: BOOKING_STATUS.ONGOING,
         paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
       } as Booking;
 
@@ -1441,6 +1442,9 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
         paymentId: 555,
         paymentUrl: 'https://rzp.io/i/testlink',
+        finalAmount: 4100,
+        message: 'Redirecting to the payment page',
+        priceBreakDown: expect.any(Object),
       });
 
       // Explicitly assert that internal entity fields are NOT leaked in data
@@ -1459,7 +1463,6 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         'couponCode',
         'discountAmount',
         'donationAmount',
-        'finalAmount',
         'assignmentType',
         'filteredPurohitIds',
         'completionPhotoUrls',
@@ -1482,10 +1485,13 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       expect(Object.keys(res).sort()).toEqual([
         'bookingId',
         'bookingNumber',
+        'finalAmount',
+        'message',
         'paymentId',
         'paymentStatus',
         'paymentType',
         'paymentUrl',
+        'priceBreakDown',
         'status',
       ]);
     });
@@ -1534,6 +1540,9 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
         paymentId: null,
         paymentUrl: null,
+        finalAmount: 4100,
+        message: 'Redirecting to the payment page',
+        priceBreakDown: expect.any(Object),
       });
 
       expect(res.paymentId).toBeNull();
@@ -1541,10 +1550,13 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       expect(Object.keys(res).sort()).toEqual([
         'bookingId',
         'bookingNumber',
+        'finalAmount',
+        'message',
         'paymentId',
         'paymentStatus',
         'paymentType',
         'paymentUrl',
+        'priceBreakDown',
         'status',
       ]);
     });
@@ -1928,7 +1940,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
     it('6. Admin — payment completed: Customer pays outstanding amount -> paymentStatus=PAID, remainingAmount=0 -> completion allowed', async () => {
       const deferredPaidBooking = {
         id: 302,
-        status: BOOKING_STATUS.IN_PROGRESS,
+        status: BOOKING_STATUS.ONGOING,
         paymentType: BOOKING_PAYMENT_TYPE.DEFERRED,
         paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
         paidAmount: 4100,
@@ -2285,5 +2297,305 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       expect(res.bookings[0].serviceId).toBe(184);
     });
   });
-});
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // Section: Booking Scheduled-Time Validation and IST/UTC Handling
+  // ══════════════════════════════════════════════════════════════════════════════
+  describe('Booking Scheduled-Time Validation and IST/UTC Handling', () => {
+    describe('1. POOJA Booking (createBooking)', () => {
+      it('rejects a past scheduled time', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        const pastDate = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1 hour in the past
+
+        await expect(
+          bookingService.createBooking(mockCustomerUser, {
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: pastDate,
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          }),
+        ).rejects.toThrow(new BadRequestException('Booking must be scheduled at least 120 minutes in advance'));
+      });
+
+      it('rejects the current time', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        const currentDate = new Date(Date.now()).toISOString();
+
+        await expect(
+          bookingService.createBooking(mockCustomerUser, {
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: currentDate,
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          }),
+        ).rejects.toThrow(new BadRequestException('Booking must be scheduled at least 120 minutes in advance'));
+      });
+
+      it('rejects a time 119 minutes ahead', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        const ahead119Min = new Date(Date.now() + 119 * 60 * 1000).toISOString();
+
+        await expect(
+          bookingService.createBooking(mockCustomerUser, {
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: ahead119Min,
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          }),
+        ).rejects.toThrow(new BadRequestException('Booking must be scheduled at least 120 minutes in advance'));
+      });
+
+      it('follows the boundary rule: a time exactly 120 minutes ahead is accepted', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        // Fixed mock clock for exact boundary verification
+        const fixedNow = 1761724800000;
+        const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(fixedNow);
+
+        try {
+          const exactly120Min = new Date(fixedNow + 120 * 60 * 1000).toISOString();
+
+          const res = await bookingService.createBooking(mockCustomerUser, {
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: exactly120Min,
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          });
+
+          expect(res.bookingId).toBe(999);
+          expect(res.status).toBe(BOOKING_STATUS.PENDING);
+        } finally {
+          nowSpy.mockRestore();
+        }
+      });
+
+      it('accepts a time 121 minutes ahead', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        const ahead121Min = new Date(Date.now() + 121 * 60 * 1000).toISOString();
+
+        const res = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: ahead121Min,
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res.bookingId).toBe(999);
+        expect(res.status).toBe(BOOKING_STATUS.PENDING);
+      });
+
+      it('verifies equivalent timestamps expressed in IST and UTC produce identical validation results', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        // Target: 4 hours ahead from current moment with zero milliseconds
+        const targetUtcDate = new Date(Date.now() + 4 * 60 * 60 * 1000);
+        targetUtcDate.setMilliseconds(0);
+        const targetUtcIso = targetUtcDate.toISOString(); // e.g. "2026-10-29T16:00:00.000Z"
+
+        // Format same point in time as IST (+05:30)
+        const targetIstDate = new Date(targetUtcDate.getTime() + 330 * 60 * 1000);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const targetIstIso = `${targetIstDate.getUTCFullYear()}-${pad(targetIstDate.getUTCMonth() + 1)}-${pad(targetIstDate.getUTCDate())}T${pad(targetIstDate.getUTCHours())}:${pad(targetIstDate.getUTCMinutes())}:${pad(targetIstDate.getUTCSeconds())}+05:30`;
+        const targetIstNoTz = `${targetIstDate.getUTCFullYear()}-${pad(targetIstDate.getUTCMonth() + 1)}-${pad(targetIstDate.getUTCDate())}T${pad(targetIstDate.getUTCHours())}:${pad(targetIstDate.getUTCMinutes())}:${pad(targetIstDate.getUTCSeconds())}`;
+
+        // Check parseScheduledAt outputs identical timestamps
+        const parsedUtc = bookingService.parseScheduledAt(targetUtcIso);
+        const parsedIstWithOffset = bookingService.parseScheduledAt(targetIstIso);
+        const parsedIstNoOffset = bookingService.parseScheduledAt(targetIstNoTz);
+
+        expect(parsedIstWithOffset.getTime()).toBe(parsedUtc.getTime());
+        expect(parsedIstNoOffset.getTime()).toBe(parsedUtc.getTime());
+
+        // Booking with UTC string succeeds
+        const resUtc = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: targetUtcIso,
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+        expect(resUtc.bookingId).toBe(999);
+
+        // Booking with IST offset string succeeds
+        const resIst = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: targetIstIso,
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+        expect(resIst.bookingId).toBe(999);
+
+        // Booking with timezone-less string (intended as IST) succeeds
+        const resNoTz = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: targetIstNoTz,
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+        expect(resNoTz.bookingId).toBe(999);
+      });
+    });
+
+    describe('2. ASTROLOGY Booking (createAstrologyBooking)', () => {
+      let mockAstrologerProfileRepo: any;
+
+      beforeEach(() => {
+        mockAstrologerProfileRepo = {
+          findOne: jest.fn().mockResolvedValue({
+            id: 99,
+            userId: 42,
+            commissionPrice: 200,
+            verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+            user: { id: 42, firstName: 'Pandit', lastName: 'Jyotish' },
+          }),
+        };
+
+        const originalGetRepo = mockEntityManager.getRepository;
+        mockEntityManager.getRepository = jest.fn().mockImplementation((entity) => {
+          if (entity === AstrologerProfile) return mockAstrologerProfileRepo;
+          return originalGetRepo(entity);
+        });
+      });
+
+      it('rejects a past scheduled time for astrology booking', async () => {
+        const pastDate = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+        await expect(
+          bookingService.createAstrologyBooking(mockCustomerUser, {
+            astrologerId: 42,
+            scheduledAt: pastDate,
+          }),
+        ).rejects.toThrow(new BadRequestException('Booking must be scheduled at least 120 minutes in advance'));
+      });
+
+      it('rejects a time 119 minutes ahead for astrology booking', async () => {
+        const ahead119Min = new Date(Date.now() + 119 * 60 * 1000).toISOString();
+
+        await expect(
+          bookingService.createAstrologyBooking(mockCustomerUser, {
+            astrologerId: 42,
+            scheduledAt: ahead119Min,
+          }),
+        ).rejects.toThrow(new BadRequestException('Booking must be scheduled at least 120 minutes in advance'));
+      });
+
+      it('accepts a time 121 minutes ahead for astrology booking', async () => {
+        const ahead121Min = new Date(Date.now() + 121 * 60 * 1000).toISOString();
+
+        const res = await bookingService.createAstrologyBooking(mockCustomerUser, {
+          astrologerId: 42,
+          scheduledAt: ahead121Min,
+        });
+
+        expect(res.paymentUrl).toBe('https://rzp.io/i/testlink');
+      });
+    });
+
+    describe('3. Reschedule Booking (rescheduleBooking)', () => {
+      it('rejects rescheduling to a time less than 120 minutes in advance', async () => {
+        const ahead60Min = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+        await expect(
+          bookingService.rescheduleBooking(mockCustomerUser, 10, {
+            scheduledAt: ahead60Min,
+          }),
+        ).rejects.toThrow(new BadRequestException('Booking must be scheduled at least 120 minutes in advance'));
+      });
+
+      it('accepts rescheduling when time is at least 120 minutes in advance', async () => {
+        const existingBooking = {
+          id: 10,
+          customerId: mockCustomerUser.id,
+          status: BOOKING_STATUS.PENDING,
+          paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+          bookingType: BOOKING_TYPE.POOJA,
+          bookingMode: BOOKING_MODE.OFFLINE,
+          scheduledAt: new Date(Date.now() + 86400000),
+          serviceId: 5,
+          purohitId: null,
+          customerAddressId: mockAddress.id,
+          filteredPurohitIds: [],
+        } as unknown as Booking;
+
+        mockBookingRepo.createQueryBuilder.mockReturnValue({
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue(existingBooking),
+          getExists: jest.fn().mockResolvedValue(false),
+        } as any);
+
+        const ahead150Min = new Date(Date.now() + 150 * 60 * 1000).toISOString();
+
+        const res = await bookingService.rescheduleBooking(mockCustomerUser, 10, {
+          scheduledAt: ahead150Min,
+        });
+
+        expect(res.message).toContain('Booking rescheduled successfully');
+      });
+    });
+
+    describe('4. Update Booking (updateBooking)', () => {
+      it('rejects updating scheduledAt to a time less than 120 minutes in advance', async () => {
+        mockBookingRepo.createQueryBuilder.mockReturnValue({
+          where: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue({
+            id: 10,
+            customerId: mockCustomerUser.id,
+            paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+            status: BOOKING_STATUS.PENDING,
+          }),
+        } as any);
+
+        const ahead30Min = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+
+        await expect(
+          bookingService.updateBooking(mockCustomerUser, 10, {
+            scheduledAt: ahead30Min,
+          }),
+        ).rejects.toThrow(new BadRequestException('Booking must be scheduled at least 120 minutes in advance'));
+      });
+    });
+
+    describe('5. Repeat Booking (repeatBooking)', () => {
+      it('rejects repeating a booking when scheduled time is less than 120 minutes in advance', async () => {
+        const originalBooking = {
+          id: 20,
+          customerId: mockCustomerUser.id,
+          status: BOOKING_STATUS.COMPLETED,
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          bookingMode: BOOKING_MODE.OFFLINE,
+        } as Booking;
+
+        mockBookingRepository.findBookingById = jest.fn().mockResolvedValue(originalBooking);
+
+        const ahead45Min = new Date(Date.now() + 45 * 60 * 1000).toISOString();
+
+        await expect(
+          bookingService.repeatBooking(mockCustomerUser, 20, {
+            scheduledAt: ahead45Min,
+          }),
+        ).rejects.toThrow(new BadRequestException('Booking must be scheduled at least 120 minutes in advance'));
+      });
+    });
+  });
+});

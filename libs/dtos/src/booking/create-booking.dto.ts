@@ -35,7 +35,8 @@ export class CreateBookingDto {
   @Type(() => CreateCustomerAddressDto)
   address?: CreateCustomerAddressDto;
 
-  @IsDateString()
+  @IsNotEmpty({ message: 'scheduledAt is required' })
+  @IsDateString({}, { message: 'scheduledAt must be a valid ISO date string' })
   scheduledAt!: string;
 
   @IsString()

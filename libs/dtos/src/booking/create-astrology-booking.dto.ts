@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsDateString, IsInt, IsOptional, Min } from 'class-validator';
+import { IsDateString, IsInt, IsNotEmpty, IsOptional, Min } from 'class-validator';
 
 export class CreateAstrologyBookingDto {
   @IsOptional()
@@ -13,6 +13,7 @@ export class CreateAstrologyBookingDto {
   @Min(1)
   astrologerId!: number;
 
-  @IsDateString()
+  @IsNotEmpty({ message: 'scheduledAt is required' })
+  @IsDateString({}, { message: 'scheduledAt must be a valid ISO date string' })
   scheduledAt!: string;
 }
