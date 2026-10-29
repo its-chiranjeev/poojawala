@@ -3183,6 +3183,115 @@ describe('TempleService', () => {
         expect(dto.services![0].id).toBe(15);
         expect(dto.services![0].remove).toBe(true);
       });
+
+      describe('Regression Suite: Service payload validation across CreateTempleDto, UpdateTempleDto, and CreateServiceDto', () => {
+        const exactServicePayload = {
+          name: 'Shri Hanuman Pooja',
+          categoryId: 1,
+          description: 'Complete Vedic Pooja and Aarti',
+          plans: {
+            basic: { price: 501, description: 'Basic path' },
+            standard: { price: 1001, description: 'Standard path with havan' },
+          },
+          commissionPercentage: 10,
+          tokenPercentage: 10,
+          durationMinutes: 60,
+          requiresVenue: false,
+          isOnline: true,
+          isOffline: false,
+          languages: ['Hindi', 'Sanskrit'],
+        };
+
+        const extractErrorMessages = (errs: any[]): string[] => {
+          const msgs: string[] = [];
+          for (const e of errs) {
+            if (e.constraints) msgs.push(...Object.values(e.constraints as Record<string, string>));
+            if (e.children && e.children.length > 0) msgs.push(...extractErrorMessages(e.children));
+          }
+          return msgs;
+        };
+
+        it('1. should reproduce exact 11 non-whitelisted property errors when service creation payload is sent to UpdateTempleDto (PATCH /temples/:id)', async () => {
+          const updateDto = plainToInstance(UpdateTempleDto, {
+            services: [exactServicePayload],
+          });
+
+          const errors = await validate(updateDto, { whitelist: true, forbidNonWhitelisted: true });
+          const errorMessages = extractErrorMessages(errors);
+
+          // All 11 reported properties must be flagged as "should not exist"
+          const expectedDisallowedProps = [
+            'property name should not exist',
+            'property categoryId should not exist',
+            'property description should not exist',
+            'property plans should not exist',
+            'property commissionPercentage should not exist',
+            'property tokenPercentage should not exist',
+            'property durationMinutes should not exist',
+            'property requiresVenue should not exist',
+            'property isOnline should not exist',
+            'property isOffline should not exist',
+            'property languages should not exist',
+          ];
+
+          for (const expectedError of expectedDisallowedProps) {
+            expect(errorMessages).toContain(expectedError);
+          }
+        });
+
+        it('2. should accept the exact service creation payload when sent to CreateTempleDto (POST /temples/add)', async () => {
+          const createTemplePayload = {
+            name: 'Shri Siddhivinayak Temple',
+            address: 'Prabhadevi',
+            city: 'Mumbai',
+            state: 'Maharashtra',
+            services: [exactServicePayload],
+          };
+
+          const createDto = plainToInstance(CreateTempleDto, createTemplePayload);
+          const errors = await validate(createDto, { whitelist: true, forbidNonWhitelisted: true });
+          const errorMessages = extractErrorMessages(errors);
+
+          // Must produce zero validation errors
+          expect(errorMessages).toHaveLength(0);
+          expect(createDto.services).toBeDefined();
+          expect(createDto.services!.length).toBe(1);
+          expect(createDto.services![0]).toBeInstanceOf(CreateServiceDto);
+          expect(createDto.services![0].name).toBe('Shri Hanuman Pooja');
+          expect(createDto.services![0].categoryId).toBe(1);
+        });
+
+        it('3. should accept the exact service creation payload for standalone service creation (POST /services with CreateServiceDto)', async () => {
+          const standaloneServiceDto = plainToInstance(CreateServiceDto, exactServicePayload);
+          const errors = await validate(standaloneServiceDto, { whitelist: true, forbidNonWhitelisted: true });
+          const errorMessages = extractErrorMessages(errors);
+
+          expect(errorMessages).toHaveLength(0);
+          expect(standaloneServiceDto.name).toBe('Shri Hanuman Pooja');
+          expect(standaloneServiceDto.categoryId).toBe(1);
+          expect(standaloneServiceDto.plans).toBeDefined();
+        });
+
+        it('4. should accept valid remove and delete operations on UpdateTempleDto (PATCH /temples/:id)', async () => {
+          const validPatchPayload = {
+            services: [
+              { id: 10, remove: true },
+              { id: 11, delete: true },
+            ],
+          };
+
+          const updateDto = plainToInstance(UpdateTempleDto, validPatchPayload);
+          const errors = await validate(updateDto, { whitelist: true, forbidNonWhitelisted: true });
+          const errorMessages = extractErrorMessages(errors);
+
+          expect(errorMessages).toHaveLength(0);
+          expect(updateDto.services).toHaveLength(2);
+          expect(updateDto.services![0].id).toBe(10);
+          expect(updateDto.services![0].remove).toBe(true);
+          expect(updateDto.services![1].id).toBe(11);
+          expect(updateDto.services![1].delete).toBe(true);
+        });
+      });
     });
   });
 });

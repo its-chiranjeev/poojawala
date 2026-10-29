@@ -232,6 +232,9 @@ export class CreateTempleDto {
         return value;
       }
     }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      parsed = [parsed];
+    }
     if (Array.isArray(parsed)) {
       return parsed.map((item) => {
         if (item && typeof item === 'object') {
