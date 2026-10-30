@@ -1,7 +1,8 @@
 import { Transform, Type } from 'class-transformer';
 import { IsBoolean, IsInt, IsOptional, Min } from 'class-validator';
+import { UpdateServiceDto } from '../service/update.service.dto';
 
-export class UpdateTempleServiceDto {
+export class UpdateTempleServiceDto extends UpdateServiceDto {
   @Type(() => Number)
   @IsInt({ message: 'Service ID must be an integer' })
   @Min(1, { message: 'Service ID must be greater than 0' })
@@ -14,7 +15,7 @@ export class UpdateTempleServiceDto {
     return raw === 'true' || raw === true;
   })
   @IsBoolean({ message: 'delete must be a boolean' })
-  delete?: boolean; //Softdelete Service
+  delete?: boolean; // Softdelete Service
 
   @IsOptional()
   @Transform(({ obj, value }) => {
@@ -23,5 +24,5 @@ export class UpdateTempleServiceDto {
     return raw === 'true' || raw === true;
   })
   @IsBoolean({ message: 'remove must be a boolean' })
-  remove?: boolean; //Remove Service (Set Service TempleId Null)
+  remove?: boolean; // Remove Service (Set Service TempleId Null)
 }

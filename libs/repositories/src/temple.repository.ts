@@ -233,6 +233,8 @@ export class TempleRepository extends BaseRepository<Temple> {
     return qb.getOne();
   }
 
+  // TODO: Previous findActiveServicesByTempleId with limited fields kept for reference:
+  /*
   async findActiveServicesByTempleId(templeId: number): Promise<Service[]> {
     return this.repo.manager
       .createQueryBuilder(Service, 'service')
@@ -253,6 +255,31 @@ export class TempleRepository extends BaseRepository<Temple> {
       .andWhere('service.deletedAt IS NULL')
       .andWhere('service.isActive = :isActive', { isActive: true })
       .orderBy('service.createdAt', 'DESC')
+      .getMany();
+  }
+  */
+  async findActiveServicesByTempleId(templeId: number): Promise<Service[]> {
+    return this.repo.manager
+      .createQueryBuilder(Service, 'service')
+      .leftJoinAndSelect('service.category', 'category')
+      .where('service.templeId = :templeId', { templeId })
+      .andWhere('service.deletedAt IS NULL')
+      .andWhere('service.isActive = :isActive', { isActive: true })
+      .orderBy('service.sortOrder', 'ASC')
+      .addOrderBy('service.createdAt', 'DESC')
+      .getMany();
+  }
+
+  async findActiveServicesByTempleIds(templeIds: number[]): Promise<Service[]> {
+    if (!templeIds || templeIds.length === 0) return [];
+    return this.repo.manager
+      .createQueryBuilder(Service, 'service')
+      .leftJoinAndSelect('service.category', 'category')
+      .where('service.templeId IN (:...templeIds)', { templeIds })
+      .andWhere('service.deletedAt IS NULL')
+      .andWhere('service.isActive = :isActive', { isActive: true })
+      .orderBy('service.sortOrder', 'ASC')
+      .addOrderBy('service.createdAt', 'DESC')
       .getMany();
   }
 

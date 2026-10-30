@@ -16,7 +16,6 @@ import {
 import { TEMPLE_VERIFICATION_STATUS } from '@poojawala/entities';
 import { UpdateTempleAartiDto } from './temple-aarti.dto';
 import { UpdateTempleServiceDto } from './temple-service.dto';
-export { UpdateTempleServiceDto } from './temple-service.dto';
 
 export class UpdateTempleDto {
   @IsOptional()
@@ -203,6 +202,9 @@ export class UpdateTempleDto {
         return value;
       }
     }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      parsed = [parsed];
+    }
     if (Array.isArray(parsed)) {
       return parsed.map((item) => {
         if (item && typeof item === 'object') {
@@ -233,6 +235,9 @@ export class UpdateTempleDto {
       } catch {
         return value;
       }
+    }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      parsed = [parsed];
     }
     if (Array.isArray(parsed)) {
       return parsed.map((item) => {

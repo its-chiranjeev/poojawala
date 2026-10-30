@@ -141,6 +141,8 @@ export class TempleService {
       deletedAt: temple.deletedAt,
     };
 
+    // TODO: Previous shallow service mapping kept for reference:
+    /*
     if (services !== undefined) {
       formatted.services = services.map((s) => ({
         id: s['id'],
@@ -154,6 +156,18 @@ export class TempleService {
         isActive: s['isActive'],
         plans: s['plans'] ?? null,
       }));
+    }
+    */
+    if (services !== undefined) {
+      formatted.services = services.map((s) => {
+        const item = { ...s };
+        delete item['temple'];
+        delete item['bookings'];
+        delete item['purohitServices'];
+        delete item['serviceFeatures'];
+        delete item['deletedAt'];
+        return item;
+      });
     }
 
     const effectiveAartis = aartis !== undefined ? aartis : temple.aartis;
@@ -285,6 +299,61 @@ export class TempleService {
     }
 
     return plans;
+  }
+
+  private async enrichFullServiceDetails(
+    service: Service | Record<string, unknown>,
+    features: ServiceFeature[] = [],
+  ): Promise<Record<string, unknown>> {
+    const s = service as any;
+    let iconDownloadurl: string | null = null;
+    if (s.iconUrl) {
+      try {
+        iconDownloadurl = await this.s3Service.getDownloadUrl(s.iconUrl);
+      } catch {
+        iconDownloadurl = s.iconUrl;
+      }
+    }
+
+    const plans = this.enrichServicePlansAndToken(
+      s,
+      features,
+    );
+
+    const result: Record<string, unknown> = {
+      ...s,
+      slug: s.slug ?? null,
+      description: s.description ?? null,
+      metaTitle: s.metaTitle ?? null,
+      metaDescription: s.metaDescription ?? null,
+      iconUrl: s.iconUrl ?? null,
+      iconDownloadurl: iconDownloadurl ?? s.iconUrl ?? null,
+      plans: plans ?? s.plans ?? null,
+    };
+
+    if (s.sortOrder !== undefined && s.sortOrder !== null) {
+      result.sortOrder = Number(s.sortOrder);
+    }
+    if (s.minPrice !== undefined && s.minPrice !== null) {
+      result.minPrice = Number(s.minPrice);
+    }
+    if (s.maxPrice !== undefined && s.maxPrice !== null) {
+      result.maxPrice = Number(s.maxPrice);
+    }
+    if (s.tokenPercentage !== undefined && s.tokenPercentage !== null) {
+      result.tokenPercentage = Number(s.tokenPercentage);
+    }
+    if (s.commissionPercentage !== undefined && s.commissionPercentage !== null) {
+      result.commissionPercentage = Number(s.commissionPercentage);
+    }
+
+    delete result.temple;
+    delete result.bookings;
+    delete result.purohitServices;
+    delete result.serviceFeatures;
+    delete result.deletedAt;
+
+    return result;
   }
 
   async createTemple(
@@ -1017,8 +1086,13 @@ export class TempleService {
 
             for (const item of dto.services) {
               if (!item.id) {
-                throw new BadRequestException('Cannot remove a service without providing an id');
+                throw new BadRequestException('Cannot update or remove a service without providing an id');
               }
+            }
+
+            const uniqueIds = new Set(incomingServiceIds);
+            if (uniqueIds.size !== incomingServiceIds.length) {
+              throw new BadRequestException('Duplicate service IDs are not allowed in the same request');
             }
 
             const serviceRepo = manager.getRepository(Service);
@@ -1049,6 +1123,8 @@ export class TempleService {
               }
             }
 
+            // TODO: Previous remove/delete-only loop kept for reference:
+            /*
             for (const item of dto.services) {
               if (item.delete === true) {
                 const existingService = existingServiceMap.get(item.id)!;
@@ -1059,6 +1135,54 @@ export class TempleService {
                 const existingService = existingServiceMap.get(item.id)!;
                 existingService.templeId = null;
                 await serviceRepo.save(existingService);
+              }
+            }
+            */
+
+            for (const item of dto.services) {
+              if (item.templeId !== undefined && item.templeId !== null && item.templeId !== id) {
+                throw new BadRequestException(
+                  `Cannot reassign service with id ${item.id} to another temple via temple update`,
+                );
+              }
+
+              if (item.delete === true) {
+                const existingService = existingServiceMap.get(item.id)!;
+                existingService.deletedAt = new Date();
+                existingService.isActive = false;
+                await serviceRepo.save(existingService);
+              } else if (item.remove === true) {
+                const existingService = existingServiceMap.get(item.id)!;
+                existingService.templeId = null;
+                await serviceRepo.save(existingService);
+              } else {
+                // Update service details using existing service update logic
+                if (this.serviceService) {
+                  await this.serviceService.updateService(
+                    item.id,
+                    item,
+                    undefined,
+                    actorId,
+                    manager,
+                    { skipNotifications: true, skipTempleValidation: true },
+                  );
+                } else {
+                  // Fallback if serviceService is not injected
+                  const existingService = existingServiceMap.get(item.id)!;
+                  if (item.name !== undefined) {
+                    existingService.name = item.name.trim();
+                  }
+                  if (item.description !== undefined) {
+                    existingService.description = item.description;
+                  }
+                  if (item.durationMinutes !== undefined) {
+                    existingService.durationMinutes = item.durationMinutes;
+                  }
+                  if (item.isActive !== undefined) {
+                    existingService.isActive = item.isActive;
+                  }
+                  await serviceRepo.save(existingService);
+                }
               }
             }
           }
@@ -1360,6 +1484,52 @@ export class TempleService {
       }
     }
 
+    let servicesByTempleId: Map<number, Record<string, unknown>[]> | undefined = undefined;
+    if (
+      result.data.length > 0 &&
+      typeof this.templeRepository.findActiveServicesByTempleIds === 'function'
+    ) {
+      const templeIds = result.data.map((t) => t.id).filter(Boolean);
+      if (templeIds.length > 0) {
+        try {
+          const allServices = await this.templeRepository.findActiveServicesByTempleIds(templeIds);
+          if (allServices && allServices.length > 0) {
+            const serviceIds = allServices.map((s) => s.id).filter(Boolean);
+            const featuresByServiceId = new Map<number, ServiceFeature[]>();
+            if (
+              serviceIds.length > 0 &&
+              typeof this.templeRepository.findFeaturesByServiceIds === 'function'
+            ) {
+              try {
+                const allFeatures = await this.templeRepository.findFeaturesByServiceIds(serviceIds);
+                for (const feat of allFeatures || []) {
+                  const list = featuresByServiceId.get(feat.serviceId) || [];
+                  list.push(feat);
+                  featuresByServiceId.set(feat.serviceId, list);
+                }
+              } catch (e) {
+                console.error('Failed to load service features for temple services in getTemples:', e);
+              }
+            }
+
+            servicesByTempleId = new Map();
+            for (const s of allServices) {
+              const enriched = await this.enrichFullServiceDetails(
+                s,
+                featuresByServiceId.get(s.id) || [],
+              );
+              const tId = s.templeId!;
+              const list = servicesByTempleId.get(tId) || [];
+              list.push(enriched);
+              servicesByTempleId.set(tId, list);
+            }
+          }
+        } catch (e) {
+          console.error('Failed to load services for temples in getTemples:', e);
+        }
+      }
+    }
+
     const dataWithDownloadUrls = await Promise.all(
       result.data.map(async (item: Temple) => {
         let downloadUrl: string | null = null;
@@ -1387,10 +1557,11 @@ export class TempleService {
           }
         }
         const aartis = shouldIncludeAartis && aartisByTempleId ? (aartisByTempleId.get(item.id) || []) : undefined;
+        const services = servicesByTempleId ? (servicesByTempleId.get(item.id) || []) : [];
         return this.formatTempleResponse(
           item,
           downloadUrl,
-          undefined,
+          services,
           aartis,
           trustDocDownloadUrl,
           deityPhotoDownloadUrl,
@@ -1477,6 +1648,8 @@ export class TempleService {
         }
       }
 
+      // TODO: Previous shallow 10-field mapping kept for reference:
+      /*
       enrichedServices = await Promise.all(
         services.map(async (s) => {
           let iconDownloadurl: string | null = null;
@@ -1506,6 +1679,13 @@ export class TempleService {
             isActive: s.isActive,
             plans: plans ?? null,
           };
+        }),
+      );
+      */
+      enrichedServices = await Promise.all(
+        services.map(async (s) => {
+          const features = featuresByServiceId.get(s.id) || [];
+          return this.enrichFullServiceDetails(s, features);
         }),
       );
     }
