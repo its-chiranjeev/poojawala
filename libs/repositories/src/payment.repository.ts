@@ -34,6 +34,7 @@ export interface FindAllPaymentsOptions {
 
   status?: PAYMENT_STATUS | PAYMENT_STATUS[];
   paymentType?: PAYMENT_TYPE;
+  excludedPaymentTypes?: PAYMENT_TYPE[];
   paymentMethod?: PAYMENT_METHOD;
   partnerPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
   purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
@@ -598,6 +599,7 @@ export class PaymentRepository extends BaseRepository<Payment> {
 
       status,
       paymentType,
+      excludedPaymentTypes,
       paymentMethod,
       partnerPayoutStatus = options.partnerPayoutStatus ?? options.purohitPayoutStatus,
       bookingPaymentStatus,
@@ -651,6 +653,19 @@ export class PaymentRepository extends BaseRepository<Payment> {
       '(payment."paymentType" != :bookingPaymentType OR (payment."razorpayPaymentLinkId" IS NOT NULL AND payment."razorpayPaymentLinkId" != \'\'))',
       { bookingPaymentType: PAYMENT_TYPE.BOOKING_PAYMENT },
     );
+
+    const typesToExclude = excludedPaymentTypes ?? [
+      PAYMENT_TYPE.PUROHIT_PAYOUT,
+      PAYMENT_TYPE.ASTROLOGER_PAYOUT,
+      PAYMENT_TYPE.CUSTOMER_REFUND,
+      PAYMENT_TYPE.DONATION,
+    ];
+
+    if (typesToExclude && typesToExclude.length > 0) {
+      query.andWhere('payment."paymentType" NOT IN (:...excludedPaymentTypes)', {
+        excludedPaymentTypes: typesToExclude,
+      });
+    }
 
     if (status) {
       if (Array.isArray(status)) {

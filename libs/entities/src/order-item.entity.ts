@@ -11,6 +11,15 @@ import {
 import { Order } from './order.entity';
 import { Product } from './product.entity';
 
+export interface OrderItemSnapshot {
+  productName: string;
+  productImage?: string | null;
+  unitPrice: number;
+  quantity: number;
+  totalAmount: number;
+  cartItemUpdatedAt?: string | null;
+}
+
 @Entity('order_items')
 export class OrderItem {
   @PrimaryGeneratedColumn()
@@ -26,26 +35,18 @@ export class OrderItem {
 
   @Index()
   @Column({ type: 'int', nullable: true })
+  cartItemId?: number | null;
+
+  @Index()
+  @Column({ type: 'int', nullable: true })
   productId?: number | null;
 
   @ManyToOne(() => Product, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'productId' })
   product?: Product | null;
 
-  @Column({ type: 'varchar', length: 255 })
-  productNameSnapshot!: string;
-
-  @Column({ type: 'text', nullable: true })
-  productImageSnapshot?: string | null;
-
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
-  unitPriceSnapshot!: number;
-
-  @Column({ type: 'int' })
-  quantity!: number;
-
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
-  totalAmount!: number;
+  @Column({ type: 'jsonb' })
+  snapshot!: OrderItemSnapshot;
 
   @CreateDateColumn()
   createdAt!: Date;

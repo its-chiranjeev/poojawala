@@ -20,6 +20,7 @@ import {
   CUSTOMER_PAYMENT_METHOD,
   Order,
   OrderItem,
+  OrderItemSnapshot,
   ORDER_PAYMENT_METHOD,
   ORDER_PAYMENT_STATUS,
   ORDER_STATUS,
@@ -149,8 +150,27 @@ export class CartService {
     if (order.paymentMethod !== ORDER_PAYMENT_METHOD.ONLINE) {
       return false;
     }
-    if (order.expiredAt) {
-      return new Date(order.expiredAt).getTime() <= Date.now();
+    const parseMs = (val: Date | string | null | undefined): number | null => {
+      if (!val) return null;
+      if (val instanceof Date) return val.getTime();
+      if (typeof val === 'string') {
+        const s = val.trim();
+        if (s.endsWith('Z') || /[+-]\d{2}(:\d{2})?$/.test(s)) {
+          return new Date(s).getTime();
+        }
+        return new Date(s.replace(' ', 'T') + 'Z').getTime();
+      }
+      return new Date(val).getTime();
+    };
+
+    const nowMs = Date.now();
+    const expiredAtMs = parseMs(order.expiredAt);
+    if (expiredAtMs !== null) {
+      return expiredAtMs <= nowMs;
+    }
+    const createdAtMs = parseMs(order.createdAt);
+    if (createdAtMs !== null) {
+      return createdAtMs + 30 * 60 * 1000 <= nowMs;
     }
     return false;
   }
@@ -430,6 +450,43 @@ export class CartService {
    *    - In DB transaction: Create Payment, Order, and OrderItems. If COD, clear cart.
    *    - Outside DB transaction: If ONLINE, generate Razorpay payment link. If COD, confirm immediately.
    */
+  /**
+   * Helper to determine whether an existing pending order's items match the current checkout cart.
+   * Matches by item count, total amount, and each item's productId and quantity.
+   */
+  private orderMatchesCart(
+    existingOrder: Order,
+    validItems: {
+      cartItemId: number;
+      cartItemUpdatedAt?: Date;
+      product: Product;
+      quantity: number;
+      unitPrice: number;
+      subtotal: number;
+    }[],
+    totalAmount: number,
+  ): boolean {
+    const orderItems = existingOrder.items || [];
+    if (orderItems.length !== validItems.length) {
+      return false;
+    }
+
+    if (Math.abs(Number(existingOrder.totalAmount) - totalAmount) > 0.01) {
+      return false;
+    }
+
+    for (const validItem of validItems) {
+      const match = orderItems.find(
+        (oi) => oi.productId === validItem.product.id && oi.snapshot?.quantity === validItem.quantity,
+      );
+      if (!match) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   async checkout(user: User, dto: CheckoutDto): Promise<CheckoutResponse> {
     if (user.role !== USER_ROLE.CUSTOMER) {
       throw new ForbiddenException('Only customers can checkout a cart');
@@ -611,8 +668,7 @@ export class CartService {
           shippingAddressSnapshot: existingOrder.shippingAddressSnapshot,
           items: await Promise.all(
             (existingOrder.items || []).map(async (item) => {
-              let img =
-                item.productImageSnapshot || item.product?.imageUrl || null;
+              let img = item.snapshot?.productImage || item.product?.imageUrl || null;
               if (img && this.s3Service) {
                 try {
                   img = await this.s3Service.getDownloadUrl(img);
@@ -623,12 +679,12 @@ export class CartService {
               return {
                 id: item.id,
                 productId: item.productId ?? null,
-                productName: item.productNameSnapshot,
+                productName: item.snapshot?.productName ?? '',
                 productImage: img,
                 pricingUnit: item.product?.pricingUnit || 'PIECE',
-                unitPrice: Number(item.unitPriceSnapshot),
-                quantity: item.quantity,
-                total: Number(item.totalAmount),
+                unitPrice: Number(item.snapshot?.unitPrice ?? 0),
+                quantity: Number(item.snapshot?.quantity ?? 1),
+                total: Number(item.snapshot?.totalAmount ?? 0),
               };
             }),
           ),
@@ -672,6 +728,8 @@ export class CartService {
 
     // Validate active products and calculate totals
     const validItems: {
+      cartItemId: number;
+      cartItemUpdatedAt?: Date;
       product: Product;
       quantity: number;
       unitPrice: number;
@@ -692,6 +750,8 @@ export class CartService {
       totalAmount = Number((totalAmount + subtotal).toFixed(2));
 
       validItems.push({
+        cartItemId: item.id,
+        cartItemUpdatedAt: item.updatedAt || item.createdAt || new Date(),
         product: item.product,
         quantity: item.quantity,
         unitPrice,
@@ -787,7 +847,6 @@ export class CartService {
 
         // For ONLINE payment: check if customer already has an active unpaid pending order that has not expired
         if (!isCod) {
-          const now = new Date();
           const existingPendingOrder = await manager
             .getRepository(Order)
             .createQueryBuilder('order')
@@ -805,13 +864,12 @@ export class CartService {
               orderStatus: ORDER_STATUS.PENDING_PAYMENT,
             })
             .andWhere(
-              'order.expiredAt IS NOT NULL AND order.expiredAt > :now',
-              { now },
+              'order.expiredAt IS NOT NULL AND "order"."expiredAt" > (now() AT TIME ZONE \'UTC\')',
             )
             .orderBy('order.createdAt', 'DESC')
             .getOne();
 
-          if (existingPendingOrder) {
+          if (existingPendingOrder && this.orderMatchesCart(existingPendingOrder, validItems, totalAmount)) {
             // Reusing existing active order: do not create another order!
             // Note: existingPendingOrder.expiredAt MUST REMAIN UNCHANGED
             const orderTotal = Number(existingPendingOrder.totalAmount);
@@ -832,10 +890,31 @@ export class CartService {
             if (resolvedAddress) {
               existingPendingOrder.shippingAddressSnapshot = resolvedAddress;
             }
+            if (existingPendingOrder.items && existingPendingOrder.items.length > 0) {
+              for (const validItem of validItems) {
+                const match = existingPendingOrder.items.find(
+                  (oi) => oi.productId === validItem.product.id,
+                );
+                if (match) {
+                  if (validItem.cartItemId) {
+                    match.cartItemId = validItem.cartItemId;
+                  }
+                  if (match.snapshot) {
+                    match.snapshot.cartItemUpdatedAt = validItem.cartItemUpdatedAt
+                      ? validItem.cartItemUpdatedAt.toISOString()
+                      : match.snapshot.cartItemUpdatedAt;
+                  }
+                }
+              }
+              if (typeof orderItemRepo.save === 'function') {
+                await orderItemRepo.save(existingPendingOrder.items);
+              }
+            }
             await orderRepo.save(existingPendingOrder);
 
-            // Clear cart immediately upon reusing active order
-            await cartItemRepo.delete({ cartId: cart.id });
+            // TODO: Deprecated premature cart clearing.
+            // Cart items must only be cleared upon verified payment success, not order creation/reuse.
+            // await cartItemRepo.delete({ cartId: cart.id });
 
             return {
               savedPayment: newPayment,
@@ -868,7 +947,7 @@ export class CartService {
         const expiryMinutes = this.getPaymentExpiryMinutes();
         const expiredAt = isCod
           ? null
-          : new Date(Date.now() + expiryMinutes * 60 * 1000);
+          : (new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString() as unknown as Date);
 
         const order = orderRepo.create({
           orderNumber,
@@ -892,14 +971,22 @@ export class CartService {
 
         const createdItems: OrderItem[] = [];
         for (const validItem of validItems) {
-          const orderItem = orderItemRepo.create({
-            orderId: newOrder.id,
-            productId: validItem.product.id,
-            productNameSnapshot: validItem.product.name,
-            productImageSnapshot: validItem.product.imageUrl || null,
-            unitPriceSnapshot: validItem.unitPrice,
+          const snapshot: OrderItemSnapshot = {
+            productName: validItem.product.name,
+            productImage: validItem.product.imageUrl || null,
+            unitPrice: validItem.unitPrice,
             quantity: validItem.quantity,
             totalAmount: validItem.subtotal,
+            cartItemUpdatedAt: validItem.cartItemUpdatedAt
+              ? validItem.cartItemUpdatedAt.toISOString()
+              : null,
+          };
+
+          const orderItem = orderItemRepo.create({
+            orderId: newOrder.id,
+            cartItemId: validItem.cartItemId,
+            productId: validItem.product.id,
+            snapshot,
           });
           createdItems.push(orderItem);
         }
@@ -907,8 +994,18 @@ export class CartService {
         await orderItemRepo.save(createdItems);
         newOrder.items = createdItems;
 
-        // Clear cart immediately upon order creation for both ONLINE and COD
-        await cartItemRepo.delete({ cartId: cart.id });
+        // TODO: Deprecated premature cart clearing for ONLINE checkout.
+        // For ONLINE checkout, cart items must only be cleared upon verified payment success from Razorpay.
+        // For COD checkout, since the order is immediately CONFIRMED, clear the purchased cart items.
+        // await cartItemRepo.delete({ cartId: cart.id });
+        if (isCod) {
+          for (const validItem of validItems) {
+            await cartItemRepo.delete({
+              cartId: cart.id,
+              productId: validItem.product.id,
+            });
+          }
+        }
 
         return {
           savedPayment: newPayment,
@@ -942,7 +1039,7 @@ export class CartService {
         shippingAddressSnapshot: savedOrder.shippingAddressSnapshot,
         items: await Promise.all(
           (savedOrder.items || []).map(async (item) => {
-            let img = item.productImageSnapshot || null;
+            let img = item.snapshot?.productImage || null;
             if (img && this.s3Service) {
               try {
                 img = await this.s3Service.getDownloadUrl(img);
@@ -953,11 +1050,11 @@ export class CartService {
             return {
               id: item.id,
               productId: item.productId ?? null,
-              productName: item.productNameSnapshot,
+              productName: item.snapshot?.productName ?? '',
               productImage: img,
-              unitPrice: Number(item.unitPriceSnapshot),
-              quantity: item.quantity,
-              total: Number(item.totalAmount),
+              unitPrice: Number(item.snapshot?.unitPrice ?? 0),
+              quantity: Number(item.snapshot?.quantity ?? 1),
+              total: Number(item.snapshot?.totalAmount ?? 0),
             };
           }),
         ),
@@ -992,58 +1089,58 @@ export class CartService {
         },
       );
 
-        // Only notify and email if this is a newly placed order (not reused retry)
-        if (!isReusedOrder) {
-          await this.notifyAndEmailOrderPlaced(
-            user,
-            savedOrder,
-            false,
-            paymentLink.short_url,
-          );
-        }
+      // Only notify and email if this is a newly placed order (not reused retry)
+      if (!isReusedOrder) {
+        await this.notifyAndEmailOrderPlaced(
+          user,
+          savedOrder,
+          false,
+          paymentLink.short_url,
+        );
+      }
 
-        return {
-          orderId: savedOrder.id,
-          orderNumber: savedOrder.orderNumber,
-          customerId: savedOrder.customerId,
-          paymentId: savedPayment.id,
-          paymentUrl: paymentLink.short_url,
-          amount: finalTotalAmount,
-          amountInPaise,
-          currency: 'INR',
-          subtotal: Number(savedOrder.subtotal),
-          discountAmount: Number(savedOrder.discountAmount),
-          totalAmount: finalTotalAmount,
-          paymentMethod: savedOrder.paymentMethod,
-          paymentStatus: savedOrder.paymentStatus,
-          orderStatus: savedOrder.orderStatus,
-          shippingAddressSnapshot: savedOrder.shippingAddressSnapshot,
-          items: await Promise.all(
-            (savedOrder.items || []).map(async (item) => {
-              let img = item.productImageSnapshot || null;
-              if (img && this.s3Service) {
-                try {
-                  img = await this.s3Service.getDownloadUrl(img);
-                } catch {
-                  // retain raw imageUrl if presigning fails
-                }
+      return {
+        orderId: savedOrder.id,
+        orderNumber: savedOrder.orderNumber,
+        customerId: savedOrder.customerId,
+        paymentId: savedPayment.id,
+        paymentUrl: paymentLink.short_url,
+        amount: finalTotalAmount,
+        amountInPaise,
+        currency: 'INR',
+        subtotal: Number(savedOrder.subtotal),
+        discountAmount: Number(savedOrder.discountAmount),
+        totalAmount: finalTotalAmount,
+        paymentMethod: savedOrder.paymentMethod,
+        paymentStatus: savedOrder.paymentStatus,
+        orderStatus: savedOrder.orderStatus,
+        shippingAddressSnapshot: savedOrder.shippingAddressSnapshot,
+        items: await Promise.all(
+          (savedOrder.items || []).map(async (item) => {
+            let img = item.snapshot?.productImage || null;
+            if (img && this.s3Service) {
+              try {
+                img = await this.s3Service.getDownloadUrl(img);
+              } catch {
+                // retain raw imageUrl if presigning fails
               }
-              return {
-                id: item.id,
-                productId: item.productId ?? null,
-                productName: item.productNameSnapshot,
-                productImage: img,
-                unitPrice: Number(item.unitPriceSnapshot),
-                quantity: item.quantity,
-                total: Number(item.totalAmount),
-              };
-            }),
-          ),
-          createdAt: savedOrder.createdAt,
-          updatedAt: savedOrder.updatedAt,
-          expiredAt: savedOrder.expiredAt ?? null,
-          status: savedPayment.status,
-        };
+            }
+            return {
+              id: item.id,
+              productId: item.productId ?? null,
+              productName: item.snapshot?.productName ?? '',
+              productImage: img,
+              unitPrice: Number(item.snapshot?.unitPrice ?? 0),
+              quantity: Number(item.snapshot?.quantity ?? 1),
+              total: Number(item.snapshot?.totalAmount ?? 0),
+            };
+          }),
+        ),
+        createdAt: savedOrder.createdAt,
+        updatedAt: savedOrder.updatedAt,
+        expiredAt: savedOrder.expiredAt ?? null,
+        status: savedPayment.status,
+      };
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
@@ -1243,13 +1340,13 @@ export class CartService {
               },
               ...(!isCod && paymentUrl
                 ? [
-                    {
-                      label: 'Payment Link',
-                      value: paymentUrl,
-                      link: paymentUrl,
-                      linkText: 'Click here to pay →',
-                    },
-                  ]
+                  {
+                    label: 'Payment Link',
+                    value: paymentUrl,
+                    link: paymentUrl,
+                    linkText: 'Click here to pay →',
+                  },
+                ]
                 : []),
             ],
             totalRow: {

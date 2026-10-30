@@ -243,8 +243,35 @@ describe('OrderService', () => {
         expect(service.isOrderPaymentExpired(order)).toBe(false);
       });
 
-      it('returns false when expiredAt is null', () => {
-        const order = makeOnlineOrder({ expiredAt: null });
+      it('returns false when expiredAt is in the future even if createdAt was over 30 minutes ago (createdAt cannot override future expiredAt)', () => {
+        const order = makeOnlineOrder({
+          createdAt: new Date(Date.now() - 40 * 60 * 1000),
+          expiredAt: new Date(Date.now() + 10 * 60 * 1000),
+        });
+        expect(service.isOrderPaymentExpired(order)).toBe(false);
+      });
+
+      it('returns false when expiredAt is null and createdAt is recent (< 30 minutes)', () => {
+        const order = makeOnlineOrder({
+          createdAt: new Date(Date.now() - 5 * 60 * 1000),
+          expiredAt: null,
+        });
+        expect(service.isOrderPaymentExpired(order)).toBe(false);
+      });
+
+      it('returns true when expiredAt is null and createdAt is older than 30 minutes (30-minute fallback)', () => {
+        const order = makeOnlineOrder({
+          createdAt: new Date(Date.now() - 31 * 60 * 1000),
+          expiredAt: null,
+        });
+        expect(service.isOrderPaymentExpired(order)).toBe(true);
+      });
+
+      it('parses raw database timestamp strings without timezone indicator as UTC', () => {
+        const futureDateStr = new Date(Date.now() + 10 * 60 * 1000).toISOString().replace('T', ' ').replace('Z', '');
+        const order = makeOnlineOrder({
+          expiredAt: futureDateStr as any,
+        });
         expect(service.isOrderPaymentExpired(order)).toBe(false);
       });
 
@@ -353,7 +380,7 @@ describe('OrderService', () => {
   // ══════════════════════════════════════════════════════════════════════════
 
   describe('getOrders — lazy expiry materialization for CUSTOMER', () => {
-    it('expired ONLINE order is filtered out from customer view', async () => {
+    it('customer order history includes EXPIRED orders and lazily materializes pending orders whose window expired', async () => {
       const expiredOnline = makeOnlineOrder({
         expiredAt: new Date(Date.now() - 5000),
       });
@@ -365,7 +392,8 @@ describe('OrderService', () => {
       dataSource.getRepository = jest.fn().mockReturnValue({ save: saveMock });
 
       const result = await service.getOrders(customerUser, { page: 1, limit: 10 });
-      expect(result.orders).toHaveLength(0);
+      expect(result.orders).toHaveLength(1);
+      expect(result.orders[0].orderStatus).toBe(ORDER_STATUS.EXPIRED);
       expect(saveMock).toHaveBeenCalled();
     });
 
@@ -424,14 +452,22 @@ describe('OrderService', () => {
       expect(order.orderStatus).toBe(ORDER_STATUS.PENDING_PAYMENT);
     });
 
-    it('CUSTOMER: expired ONLINE order is materialized as EXPIRED and hidden from customer', async () => {
+    it('CUSTOMER: can retrieve their own EXPIRED order without 404, lazily materializing EXPIRED status', async () => {
       orderRepository.findCustomerOrderById.mockResolvedValueOnce(
         makeOnlineOrder({ expiredAt: new Date(Date.now() - 1000) }),
       );
-      await expect(service.getOrderById(customerUser, 101)).rejects.toThrow(
-        NotFoundException,
-      );
+      const order = await service.getOrderById(customerUser, 101);
+      expect(order.orderStatus).toBe(ORDER_STATUS.EXPIRED);
       expect(orderRepository.save).toHaveBeenCalled();
+    });
+
+    it('CUSTOMER: can retrieve an order that was already materialized as EXPIRED in DB', async () => {
+      orderRepository.findCustomerOrderById.mockResolvedValueOnce(
+        makeOnlineOrder({ orderStatus: ORDER_STATUS.EXPIRED }),
+      );
+      const order = await service.getOrderById(customerUser, 101);
+      expect(order.orderStatus).toBe(ORDER_STATUS.EXPIRED);
+      expect(orderRepository.save).not.toHaveBeenCalled();
     });
 
     it('CUSTOMER: COD order is NOT marked EXPIRED regardless of age', async () => {

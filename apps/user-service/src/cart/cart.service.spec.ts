@@ -54,6 +54,7 @@ describe('CartService', () => {
   let paymentRepository: jest.Mocked<PaymentRepository>;
   let orderRepository: jest.Mocked<OrderRepository>;
   let customerAddressRepository: jest.Mocked<CustomerAddressRepository>;
+  let mockTxCartItemDelete: jest.Mock;
   let dataSource: jest.Mocked<DataSource>;
   let paymentService: { createRazorpayPaymentLink: jest.Mock };
   let auditLogService: { createAuditLog: jest.Mock };
@@ -129,7 +130,19 @@ describe('CartService', () => {
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
       removeByCartId: jest.fn().mockResolvedValue(undefined),
       findCartItemsWithPagination: jest.fn().mockResolvedValue({
-        items: [],
+        items: [
+          {
+            id: 2001,
+            orderId: 20,
+            productId: activeProduct.id,
+            snapshot: {
+              productName: 'Puja Thali',
+              unitPrice: 499,
+              quantity: 2,
+              totalAmount: 998,
+            },
+          } as any,
+        ],
         totalItems: 0,
       }),
       findAllValidItemsByCartId: jest.fn().mockResolvedValue([]),
@@ -176,6 +189,8 @@ describe('CartService', () => {
       }),
     } as unknown as jest.Mocked<CustomerAddressRepository>;
 
+    mockTxCartItemDelete = jest.fn().mockResolvedValue({ affected: 1 });
+
     dataSource = {
       transaction: jest.fn().mockImplementation(async (cb) => {
         const mockManager = {
@@ -204,7 +219,7 @@ describe('CartService', () => {
                   .mockImplementation((item) =>
                     Promise.resolve({ id: 200, ...item }),
                   ),
-                delete: jest.fn().mockResolvedValue({ affected: 1 }),
+                delete: mockTxCartItemDelete,
               };
             }
             if (entity === Payment) {
@@ -532,7 +547,19 @@ describe('CartService', () => {
     it('should throw BadRequestException when checking out an empty cart', async () => {
       cartRepository.findCartWithItems.mockResolvedValueOnce({
         ...mockCart,
-        items: [],
+        items: [
+          {
+            id: 2001,
+            orderId: 20,
+            productId: activeProduct.id,
+            snapshot: {
+              productName: 'Puja Thali',
+              unitPrice: 499,
+              quantity: 2,
+              totalAmount: 998,
+            },
+          } as any,
+        ],
       });
 
       await expect(service.checkout(customerUser, {})).rejects.toThrow(
@@ -588,6 +615,8 @@ describe('CartService', () => {
       );
       expect(notificationService.createNotification).toHaveBeenCalled();
       expect(emailService.sendMail).toHaveBeenCalled();
+      // Cart items must NOT be cleared during ONLINE checkout
+      expect(mockTxCartItemDelete).not.toHaveBeenCalled();
     });
 
     it('should create Order, OrderItem snapshot, and Payment record for COD, clear cart, and NOT call Razorpay', async () => {
@@ -628,6 +657,11 @@ describe('CartService', () => {
       );
       expect(notificationService.createNotification).toHaveBeenCalled();
       expect(emailService.sendMail).toHaveBeenCalled();
+      // COD checkout clears only the purchased items
+      expect(mockTxCartItemDelete).toHaveBeenCalledWith({
+        cartId: mockCart.id,
+        productId: activeProduct.id,
+      });
     });
 
     it('should retry payment for an existing unpaid order without creating duplicate orders', async () => {
@@ -649,7 +683,19 @@ describe('CartService', () => {
           city: 'Varanasi',
           pincode: '221001',
         },
-        items: [],
+        items: [
+          {
+            id: 2001,
+            orderId: 20,
+            productId: activeProduct.id,
+            snapshot: {
+              productName: 'Puja Thali',
+              unitPrice: 499,
+              quantity: 2,
+              totalAmount: 998,
+            },
+          } as any,
+        ],
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -690,7 +736,19 @@ describe('CartService', () => {
           city: 'Varanasi',
           pincode: '221001',
         },
-        items: [],
+        items: [
+          {
+            id: 2001,
+            orderId: 20,
+            productId: activeProduct.id,
+            snapshot: {
+              productName: 'Puja Thali',
+              unitPrice: 499,
+              quantity: 2,
+              totalAmount: 998,
+            },
+          } as any,
+        ],
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -722,7 +780,19 @@ describe('CartService', () => {
           city: 'Varanasi',
           pincode: '221001',
         },
-        items: [],
+        items: [
+          {
+            id: 2001,
+            orderId: 20,
+            productId: activeProduct.id,
+            snapshot: {
+              productName: 'Puja Thali',
+              unitPrice: 499,
+              quantity: 2,
+              totalAmount: 998,
+            },
+          } as any,
+        ],
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -755,7 +825,19 @@ describe('CartService', () => {
           city: 'Varanasi',
           pincode: '221001',
         },
-        items: [],
+        items: [
+          {
+            id: 2001,
+            orderId: 20,
+            productId: activeProduct.id,
+            snapshot: {
+              productName: 'Puja Thali',
+              unitPrice: 499,
+              quantity: 2,
+              totalAmount: 998,
+            },
+          } as any,
+        ],
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -841,6 +923,96 @@ describe('CartService', () => {
       expect(auditLogService.createAuditLog).not.toHaveBeenCalled();
       expect(notificationService.createNotification).not.toHaveBeenCalled();
       expect(emailService.sendMail).not.toHaveBeenCalled();
+      // Even on reuse, cart items must NOT be cleared prematurely
+      expect(mockTxCartItemDelete).not.toHaveBeenCalled();
+    });
+
+    it('should NOT reuse existing active pending order if current cart items do not match the pending order', async () => {
+      const existingFutureExpiry = new Date(Date.now() + 20 * 60 * 1000);
+      const activePendingOrder: Order = {
+        id: 20,
+        orderNumber: 'PW-ORD-20',
+        customerId: customerUser.id,
+        subtotal: 998,
+        discountAmount: 0,
+        totalAmount: 998,
+        paymentId: 500,
+        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
+        paymentStatus: ORDER_PAYMENT_STATUS.PENDING,
+        orderStatus: ORDER_STATUS.PENDING_PAYMENT,
+        expiredAt: existingFutureExpiry,
+        shippingAddressSnapshot: {
+          name: 'Devotee Sharma',
+          phone: '9876543210',
+          addressLine1: '123 Temple Road',
+          city: 'Varanasi',
+          pincode: '221001',
+        },
+        items: [
+          {
+            id: 2001,
+            orderId: 20,
+            productId: activeProduct.id,
+            snapshot: {
+              productName: 'Puja Thali',
+              unitPrice: 499,
+              quantity: 2,
+              totalAmount: 998,
+            },
+          } as any,
+        ],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      // Cart has changed! Customer added a new product
+      const differentProduct: Product = {
+        ...activeProduct,
+        id: 999,
+        name: 'Brass Bell',
+        price: 250,
+      };
+
+      const cartWithDifferentItem: Cart = {
+        ...mockCart,
+        items: [
+          {
+            id: 201,
+            cartId: mockCart.id,
+            cart: mockCart,
+            productId: activeProduct.id,
+            product: activeProduct,
+            quantity: 2,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+          {
+            id: 202,
+            cartId: mockCart.id,
+            cart: mockCart,
+            productId: differentProduct.id,
+            product: differentProduct,
+            quantity: 1,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      };
+      cartRepository.findCartWithItems.mockResolvedValueOnce(cartWithDifferentItem);
+
+      paymentService.createRazorpayPaymentLink.mockResolvedValueOnce({
+        id: 'plink_new_123',
+        short_url: 'https://rzp.io/i/new123',
+      });
+
+      const result = await service.checkout(customerUser, {
+        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
+      });
+
+      // Should create NEW order, NOT reuse order ORD-20
+      expect(result.orderId).toBe(1001);
+      expect(result.amount).toBe(1248); // 998 + 250
+      expect(mockTxCartItemDelete).not.toHaveBeenCalled();
     });
   });
 });

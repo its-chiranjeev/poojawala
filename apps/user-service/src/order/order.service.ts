@@ -46,10 +46,10 @@ export class OrderService {
     @Optional() private readonly emailService?: EmailService,
     @Optional() private readonly cartService?: CartService,
   ) { }
-
   /**
    * Helper to check if an order's payment window has expired.
-   * Checks order.expiredAt or 30 minutes from order.createdAt for ONLINE orders.
+   * When expiredAt is present, it is the sole expiry authority.
+   * When expiredAt is null, falls back to 30 minutes from order.createdAt for ONLINE orders.
    */
   isOrderPaymentExpired(order: Order): boolean {
     if (order.paymentStatus === ORDER_PAYMENT_STATUS.PAID) {
@@ -61,11 +61,27 @@ export class OrderService {
     if (order.paymentMethod !== ORDER_PAYMENT_METHOD.ONLINE) {
       return false;
     }
-    if (order.expiredAt) {
-      return new Date(order.expiredAt).getTime() <= Date.now();
+    const parseMs = (val: Date | string | null | undefined): number | null => {
+      if (!val) return null;
+      if (val instanceof Date) return val.getTime();
+      if (typeof val === 'string') {
+        const s = val.trim();
+        if (s.endsWith('Z') || /[+-]\d{2}(:\d{2})?$/.test(s)) {
+          return new Date(s).getTime();
+        }
+        return new Date(s.replace(' ', 'T') + 'Z').getTime();
+      }
+      return new Date(val).getTime();
+    };
+
+    const nowMs = Date.now();
+    const expiredAtMs = parseMs(order.expiredAt);
+    if (expiredAtMs !== null) {
+      return expiredAtMs <= nowMs;
     }
-    if (order.createdAt) {
-      return new Date(order.createdAt).getTime() + 30 * 60 * 1000 <= Date.now();
+    const createdAtMs = parseMs(order.createdAt);
+    if (createdAtMs !== null) {
+      return createdAtMs + 30 * 60 * 1000 <= nowMs;
     }
     return false;
   }
@@ -78,13 +94,7 @@ export class OrderService {
     name: 'materialize-expired-orders',
   })
   async materializeExpiredOrders(): Promise<number> {
-    // TODO: Standardized cron start log. Previous manual timestamp logging commented out.
-    // const startedAt = new Date().toISOString();
-    // this.logger.log(`[materialize-expired-orders] Cron started at ${startedAt}`);
     this.logger.log('[Order Cron] Started: Checking expired orders for materialization.');
-
-    const now = new Date();
-    const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
 
     try {
       const result = await this.dataSource
@@ -93,7 +103,7 @@ export class OrderService {
         .update(Order)
         .set({
           orderStatus: ORDER_STATUS.EXPIRED,
-          expiredAt: () => 'COALESCE("expiredAt", NOW())',
+          expiredAt: () => 'COALESCE("expiredAt", (now() AT TIME ZONE \'UTC\'))',
         })
         .where('orderStatus = :pendingStatus', {
           pendingStatus: ORDER_STATUS.PENDING_PAYMENT,
@@ -104,17 +114,12 @@ export class OrderService {
         .andWhere('paymentMethod = :onlineMethod', {
           onlineMethod: ORDER_PAYMENT_METHOD.ONLINE,
         })
-        .andWhere(
-          '(createdAt <= :thirtyMinutesAgo OR (expiredAt IS NOT NULL AND expiredAt <= :now))',
-          { thirtyMinutesAgo, now },
+                                .andWhere(
+          '(("expiredAt" IS NOT NULL AND "expiredAt" <= (now() AT TIME ZONE \'UTC\')) OR ("expiredAt" IS NULL AND "createdAt" <= ((now() AT TIME ZONE \'UTC\') - INTERVAL \'30 minutes\')))',
         )
         .execute();
 
       const affected = result.affected || 0;
-      // TODO: Standardized cron completion log. Previous log format:
-      // this.logger.log(
-      //   `[materialize-expired-orders] Completed. Expired orders: ${affected}`,
-      // );
       if (affected > 0) {
         this.logger.log(`[Order Cron] Completed: Materialized ${affected} orders.`);
       } else {
@@ -122,11 +127,6 @@ export class OrderService {
       }
       return affected;
     } catch (error: any) {
-      // TODO: Standardized cron failure log. Previous log format:
-      // this.logger.error(
-      //   `[materialize-expired-orders] Failed: ${error?.message}`,
-      //   error?.stack,
-      // );
       this.logger.error(
         `[Order Cron] Failed: ${error?.message || error}`,
         error?.stack,
@@ -142,7 +142,11 @@ export class OrderService {
   private async formatOrder(order: Order, isCustomer: boolean = false): Promise<Order> {
     if (order && order.items && Array.isArray(order.items)) {
       for (const item of order.items) {
-        let img = item.productImageSnapshot || item.product?.imageUrl || null;
+        const snap = item.snapshot;
+        let img =
+          snap?.productImage ||
+          item.product?.imageUrl ||
+          null;
         if (img && this.s3Service) {
           try {
             img = await this.s3Service.getDownloadUrl(img);
@@ -150,7 +154,9 @@ export class OrderService {
             // retain existing if presigning fails
           }
         }
-        item.productImageSnapshot = img;
+        if (snap) {
+          snap.productImage = img;
+        }
       }
     }
     if (isCustomer && order.payment && order.payment.status === PAYMENT_STATUS.CREATED) {
@@ -174,25 +180,18 @@ export class OrderService {
         query,
       );
 
-      // Lazily materialize ONLINE expiry in the list and filter out from customer view
+      // Lazily materialize ONLINE expiry in the list
       const expiredToSave: Order[] = [];
-      const visibleOrders: Order[] = [];
       for (const o of orders) {
         if (
-          o.orderStatus === ORDER_STATUS.EXPIRED ||
-          (o.orderStatus === ORDER_STATUS.PENDING_PAYMENT &&
-            this.isOrderPaymentExpired(o))
+          o.orderStatus === ORDER_STATUS.PENDING_PAYMENT &&
+          this.isOrderPaymentExpired(o)
         ) {
-          if (o.orderStatus !== ORDER_STATUS.EXPIRED) {
-            o.orderStatus = ORDER_STATUS.EXPIRED;
-            if (!o.expiredAt) {
-              o.expiredAt = new Date();
-            }
-            expiredToSave.push(o);
+          o.orderStatus = ORDER_STATUS.EXPIRED;
+          if (!o.expiredAt) {
+            o.expiredAt = new Date();
           }
-          // Do not include expired orders in customer view
-        } else {
-          visibleOrders.push(o);
+          expiredToSave.push(o);
         }
       }
       if (expiredToSave.length > 0) {
@@ -208,14 +207,14 @@ export class OrderService {
       }
 
       const formattedOrders = await Promise.all(
-        visibleOrders.map((o) => this.formatOrder(o, true)),
+        orders.map((o) => this.formatOrder(o, true)),
       );
       return {
         orders: formattedOrders,
-        total: Math.max(0, total - expiredToSave.length),
+        total,
         page,
         limit,
-        totalPages: Math.ceil(Math.max(0, total - expiredToSave.length) / limit),
+        totalPages: Math.ceil(total / limit),
       };
     }
 
@@ -263,23 +262,20 @@ export class OrderService {
       throw new NotFoundException(`Order #${orderId} not found`);
     }
 
+    // Lazily materialize ONLINE expiry on fetch so callers always see the true
+    // state even before the next cron run (up to 60s delay).
     if (
-      user.role === USER_ROLE.CUSTOMER &&
-      (order.orderStatus === ORDER_STATUS.EXPIRED ||
-        (order.orderStatus === ORDER_STATUS.PENDING_PAYMENT &&
-          this.isOrderPaymentExpired(order)))
+      order.orderStatus === ORDER_STATUS.PENDING_PAYMENT &&
+      this.isOrderPaymentExpired(order)
     ) {
-      if (order.orderStatus !== ORDER_STATUS.EXPIRED) {
-        order.orderStatus = ORDER_STATUS.EXPIRED;
-        if (!order.expiredAt) {
-          order.expiredAt = new Date();
-        }
-        await this.orderRepository.save(order);
+      order.orderStatus = ORDER_STATUS.EXPIRED;
+      if (!order.expiredAt) {
+        order.expiredAt = new Date();
       }
-      throw new NotFoundException(`Order #${orderId} not found`);
+      await this.orderRepository.save(order);
     }
 
-    return this.formatOrder(order, true);
+    return this.formatOrder(order, user.role === USER_ROLE.CUSTOMER);
   }
 
   /**

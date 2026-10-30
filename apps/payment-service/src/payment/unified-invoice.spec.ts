@@ -383,18 +383,22 @@ describe('Unified Invoice System', () => {
         {
           id: 1,
           orderId: 501,
-          productNameSnapshot: 'Gangajal 500ml',
-          unitPriceSnapshot: 150,
-          quantity: 2,
-          totalAmount: 300,
+          snapshot: {
+            productName: 'Gangajal 500ml',
+            unitPrice: 150,
+            quantity: 2,
+            totalAmount: 300,
+          },
         },
         {
           id: 2,
           orderId: 501,
-          productNameSnapshot: 'Havan Samagri 1kg',
-          unitPriceSnapshot: 1000,
-          quantity: 1,
-          totalAmount: 1000,
+          snapshot: {
+            productName: 'Havan Samagri 1kg',
+            unitPrice: 1000,
+            quantity: 1,
+            totalAmount: 1000,
+          },
         },
       ] as any,
       paymentId: 901,
@@ -604,10 +608,12 @@ describe('Unified Invoice System', () => {
         },
         items: [
           {
-            productNameSnapshot: 'Puja Samagri Kit',
+            snapshot: {
+            productName: 'Puja Samagri Kit',
             quantity: 1,
-            unitPriceSnapshot: 525,
+            unitPrice: 525,
             totalAmount: 525,
+          },
           },
         ],
         shippingAddressSnapshot: {
@@ -653,10 +659,12 @@ describe('Unified Invoice System', () => {
         },
         items: [
           {
-            productNameSnapshot: 'Puja Samagri Kit',
+            snapshot: {
+            productName: 'Puja Samagri Kit',
             quantity: 1,
-            unitPriceSnapshot: 525,
+            unitPrice: 525,
             totalAmount: 525,
+          },
           },
         ],
         shippingAddressSnapshot: {

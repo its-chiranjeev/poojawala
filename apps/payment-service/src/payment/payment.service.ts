@@ -33,6 +33,7 @@ import {
   PAYMENT_STATUS,
   PAYMENT_TYPE,
   Order,
+  OrderItem,
   ORDER_STATUS,
   ORDER_PAYMENT_STATUS,
   ORDER_PAYMENT_METHOD,
@@ -1713,6 +1714,11 @@ export class PaymentService {
         `Duplicate payment_link.paid webhook ignored for payment ${payment.id}`,
       );
 
+      // Cart cleanup retry: ensure cart cleanup runs idempotently if previous attempt failed
+      if (payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT) {
+        await this.finalizeSuccessfulPayment(payment);
+      }
+
       return;
     }
 
@@ -1896,6 +1902,12 @@ export class PaymentService {
     ) {
       await this.populateRazorpayMetadata(payment, razorpayPayment, undefined);
       await this.paymentRepository.savePayment(payment);
+      this.logger.log(
+        `Duplicate payment.captured webhook received for payment ${payment.id}. Retrying idempotent finalization if needed.`,
+      );
+      if (payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT) {
+        await this.finalizeSuccessfulPayment(payment);
+      }
       return;
     }
 
@@ -2851,12 +2863,18 @@ export class PaymentService {
           ? 'refunded'
           : 'pending';
 
-    const orderItems: InvoiceOrderItem[] = (order.items || []).map((item) => ({
-      productName: item.productNameSnapshot || 'Product',
-      quantity: Number(item.quantity) || 1,
-      unitPrice: Number(item.unitPriceSnapshot) || 0,
-      totalAmount: Number(item.totalAmount) || 0,
-    }));
+    const orderItems: InvoiceOrderItem[] = (order.items || []).map((item) => {
+      const snap = item.snapshot;
+      return {
+        productName:
+          snap?.productName ||
+          item.product?.name ||
+          'Product',
+        quantity: Number(snap?.quantity ?? 1),
+        unitPrice: Number(snap?.unitPrice ?? 0),
+        totalAmount: Number(snap?.totalAmount ?? 0),
+      };
+    });
 
     const customerName =
       order.shippingAddressSnapshot?.name?.trim() ||
@@ -4068,6 +4086,28 @@ export class PaymentService {
 
     const search = query.search?.trim() || undefined;
 
+    const excludedPaymentTypes: PAYMENT_TYPE[] = [
+      PAYMENT_TYPE.PUROHIT_PAYOUT,
+      PAYMENT_TYPE.ASTROLOGER_PAYOUT,
+      PAYMENT_TYPE.CUSTOMER_REFUND,
+      PAYMENT_TYPE.DONATION,
+    ];
+
+    if (
+      query.paymentType &&
+      excludedPaymentTypes.includes(query.paymentType)
+    ) {
+      return {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total: 0,
+          totalPages: 0,
+        },
+      };
+    }
+
     const { payments, total } = await this.paymentRepository.findAllPayments({
       page,
       limit,
@@ -4075,6 +4115,7 @@ export class PaymentService {
       status: query.status,
 
       paymentType: query.paymentType,
+      excludedPaymentTypes,
 
       paymentMethod: query.paymentMethod,
 
@@ -5339,7 +5380,27 @@ export class PaymentService {
     let newlyAssignedPurohitUserIds: number[] = [];
 
     await this.dataSource.transaction(async (manager) => {
-      await manager.save(Payment, payment);
+      // Pessimistic write lock on Payment to protect against concurrent webhook finalization
+      const paymentRepo = manager.getRepository(Payment);
+      let lockedPayment: Payment | null = null;
+      if (typeof paymentRepo.findOne === 'function') {
+        lockedPayment = await paymentRepo.findOne({
+          where: { id: payment.id },
+          lock: { mode: 'pessimistic_write' },
+        });
+      }
+
+      if (lockedPayment) {
+        lockedPayment.status = payment.status;
+        if (payment.paidAt) lockedPayment.paidAt = payment.paidAt;
+        if (payment.razorpayPaymentId) lockedPayment.razorpayPaymentId = payment.razorpayPaymentId;
+        if (payment.razorpayOrderId) lockedPayment.razorpayOrderId = payment.razorpayOrderId;
+        if (payment.paymentMethod) lockedPayment.paymentMethod = payment.paymentMethod;
+        lockedPayment.failureReason = undefined;
+        await paymentRepo.save(lockedPayment);
+      } else {
+        await paymentRepo.save(payment);
+      }
 
       const bookingId = payment.bookingId ?? payment.booking?.id;
       const isBookingOrAstrology =
@@ -5531,14 +5592,18 @@ export class PaymentService {
         const orderRepo = manager.getRepository(Order);
         let order = await orderRepo.findOne({
           where: { paymentId: payment.id },
+          lock: { mode: 'pessimistic_write' },
         });
 
         const paymentNotes = (payment as any).notes;
         if (!order && paymentNotes?.orderId) {
           const parsedOrderId = Number(paymentNotes.orderId);
           if (!isNaN(parsedOrderId)) {
-            order = await orderRepo.findOne({ where: { id: parsedOrderId } });
-            if (order) {
+            order = await orderRepo.findOne({
+              where: { id: parsedOrderId },
+              lock: { mode: 'pessimistic_write' },
+            });
+            if (order && !order.paymentId) {
               order.paymentId = payment.id;
             }
           }
@@ -5547,8 +5612,9 @@ export class PaymentService {
         if (!order && paymentNotes?.orderNumber) {
           order = await orderRepo.findOne({
             where: { orderNumber: String(paymentNotes.orderNumber) },
+            lock: { mode: 'pessimistic_write' },
           });
-          if (order) {
+          if (order && !order.paymentId) {
             order.paymentId = payment.id;
           }
         }
@@ -5568,14 +5634,125 @@ export class PaymentService {
           }
         }
 
-        // Safe, idempotent cart clearing upon payment confirmation
+        // Selective, safe, and idempotent cart item cleanup upon payment confirmation.
+        // Only removes the cart items that were part of this paid order.
+        // Preserves newly added products and customer modifications made after checkout.
         const payerId = payment.payerId || order?.customerId;
-        if (payerId) {
-          const customerCart = await cartRepo.findOne({
-            where: { customerId: payerId },
-          });
-          if (customerCart) {
-            await cartItemRepo.delete({ cartId: customerCart.id });
+        if (payerId && order) {
+          try {
+            const customerCart = await cartRepo.findOne({
+              where: { customerId: payerId },
+            });
+
+            if (customerCart) {
+              const orderItemRepo = manager.getRepository(OrderItem);
+              const orderItems = await orderItemRepo.find({
+                where: { orderId: order.id },
+              });
+
+              const getTimestamp = (val: any): number => {
+                if (!val) return 0;
+                if (val instanceof Date) return val.getTime();
+                const parsed = new Date(val).getTime();
+                return isNaN(parsed) ? 0 : parsed;
+              };
+
+              const checkoutTime =
+                getTimestamp(payment.createdAt) ||
+                getTimestamp(order.createdAt) ||
+                0;
+
+              for (const orderItem of orderItems) {
+                if (!orderItem.productId) {
+                  continue;
+                }
+
+                let cartItem: CartItem | null = null;
+
+                // 1. Try finding by cartItemId if captured at checkout
+                if (orderItem.cartItemId) {
+                  cartItem = await cartItemRepo.findOne({
+                    where: {
+                      id: orderItem.cartItemId,
+                      cartId: customerCart.id,
+                    },
+                  });
+                } else {
+                  // 2. Historical order fallback (cartItemId is null):
+                  // Match by productId ONLY IF the cart item existed at or before checkout
+                  const candidate = await cartItemRepo.findOne({
+                    where: {
+                      cartId: customerCart.id,
+                      productId: orderItem.productId,
+                    },
+                  });
+                  if (candidate) {
+                    const candidateCreatedAt = getTimestamp(candidate.createdAt);
+                    if (
+                      candidateCreatedAt === 0 ||
+                      checkoutTime === 0 ||
+                      candidateCreatedAt <= checkoutTime
+                    ) {
+                      cartItem = candidate;
+                    }
+                  }
+                }
+
+                if (!cartItem) {
+                  // Item was already removed by customer, deleted in previous cleanup run,
+                  // or re-added as a new cart item after checkout. Do not touch.
+                  continue;
+                }
+
+                const snap = orderItem.snapshot;
+                const itemUpdatedAt = getTimestamp(cartItem.updatedAt);
+                const itemSnapshotTime = getTimestamp(
+                  snap?.cartItemUpdatedAt ||
+                    (orderItem as any).cartItemUpdatedAtSnapshot,
+                );
+                const cutoffTime = itemSnapshotTime || checkoutTime;
+
+                const wasModifiedAfterCheckout =
+                  cutoffTime > 0 &&
+                  itemUpdatedAt > 0 &&
+                  itemUpdatedAt > cutoffTime;
+
+                const purchasedQuantity = Number(
+                  snap?.quantity ?? (orderItem as any).quantity ?? 1,
+                );
+
+                if (wasModifiedAfterCheckout) {
+                  // Customer modified this cart item after checkout!
+                  if (cartItem.quantity > purchasedQuantity) {
+                    // Scenario 1: Customer increased quantity after checkout (e.g. 2 -> 5).
+                    // Deduct only the purchased checkout quantity, keeping excess in cart.
+                    cartItem.quantity -= purchasedQuantity;
+                    await cartItemRepo.save(cartItem);
+                  } else {
+                    // Scenario 2: Customer decreased quantity after checkout (e.g. 2 -> 1).
+                    // Preserve the customer's post-checkout modification. Do NOT delete or decrement!
+                    this.logger.log(
+                      `Cart item #${cartItem.id} for product #${cartItem.productId} was modified after checkout (current qty: ${cartItem.quantity}, order qty: ${purchasedQuantity}). Preserving post-checkout modification.`,
+                    );
+                  }
+                } else {
+                  // Cart item was untouched since checkout.
+                  if (cartItem.quantity <= purchasedQuantity) {
+                    // Entire quantity was checked out in this order. Safely delete it.
+                    await cartItemRepo.delete(cartItem.id);
+                  } else {
+                    // Quantity was larger than checkout quantity. Decrement purchased amount.
+                    cartItem.quantity -= purchasedQuantity;
+                    await cartItemRepo.save(cartItem);
+                  }
+                }
+              }
+            }
+          } catch (cartCleanupError: any) {
+            this.logger.error(
+              `Cart cleanup failed for order #${order.id}, payment #${payment.id}: ${cartCleanupError?.message}`,
+              cartCleanupError?.stack,
+            );
           }
         }
       }

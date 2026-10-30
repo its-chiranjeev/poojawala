@@ -57,19 +57,7 @@ export class OrderRepository extends BaseRepository<Order> {
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.items', 'items')
       .leftJoinAndSelect('order.payment', 'payment')
-      .where('order.customerId = :customerId', { customerId })
-      .andWhere('order.orderStatus != :expiredStatus', {
-        expiredStatus: ORDER_STATUS.EXPIRED,
-      })
-      .andWhere(
-        'NOT (order.orderStatus = :pendingStatus AND order.paymentMethod = :onlineMethod AND order.expiredAt IS NOT NULL AND order.expiredAt <= :now AND order.paymentStatus != :paidStatus)',
-        {
-          pendingStatus: ORDER_STATUS.PENDING_PAYMENT,
-          onlineMethod: 'ONLINE',
-          now: new Date(),
-          paidStatus: ORDER_PAYMENT_STATUS.PAID,
-        },
-      );
+      .where('order.customerId = :customerId', { customerId });
 
     this.applyFilters(qb, query);
 
