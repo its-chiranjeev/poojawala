@@ -191,8 +191,8 @@ export class ServiceRepository extends BaseRepository<Service> {
       search !== undefined && search !== null && search.trim() !== ''
         ? search.trim()
         : (query as any).s !== undefined && (query as any).s !== null && String((query as any).s).trim() !== ''
-        ? String((query as any).s).trim()
-        : undefined;
+          ? String((query as any).s).trim()
+          : undefined;
 
     if (resolvedSearch) {
       qb.andWhere(
@@ -263,15 +263,15 @@ export class ServiceRepository extends BaseRepository<Service> {
       city !== undefined && city !== null && String(city).trim() !== ''
         ? String(city).trim()
         : (query as any).cityName !== undefined && (query as any).cityName !== null && String((query as any).cityName).trim() !== ''
-        ? String((query as any).cityName).trim()
-        : undefined;
+          ? String((query as any).cityName).trim()
+          : undefined;
 
     const rawState =
       state !== undefined && state !== null && String(state).trim() !== ''
         ? String(state).trim()
         : (query as any).stateName !== undefined && (query as any).stateName !== null && String((query as any).stateName).trim() !== ''
-        ? String((query as any).stateName).trim()
-        : undefined;
+          ? String((query as any).stateName).trim()
+          : undefined;
 
     const normalizedCity = rawCity ? rawCity.trim().replace(/\s+/g, ' ') : undefined;
     const normalizedState = rawState ? rawState.trim().replace(/\s+/g, ' ') : undefined;
@@ -509,11 +509,12 @@ export class ServiceRepository extends BaseRepository<Service> {
           templeId: service.templeId ?? null,
           temple: service.temple
             ? {
-                id: service.temple.id,
-                name: service.temple.name,
-                metaTitle: service.temple.metaTitle ?? null,
-                metaDescription: service.temple.metaDescription ?? null,
-              }
+              id: service.temple.id,
+              name: service.temple.name,
+              metaTitle: service.temple.metaTitle ?? null,
+              metaDescription: service.temple.metaDescription ?? null,
+
+            }
             : null,
           cities: service.cities ?? [],
           languages: service.languages ?? [],
@@ -534,11 +535,12 @@ export class ServiceRepository extends BaseRepository<Service> {
         templeId: service.templeId ?? null,
         temple: service.temple
           ? {
-              id: service.temple.id,
-              name: service.temple.name,
-              metaTitle: service.temple.metaTitle ?? null,
-              metaDescription: service.temple.metaDescription ?? null,
-            }
+            id: service.temple.id,
+            name: service.temple.name,
+            metaTitle: service.temple.metaTitle ?? null,
+            metaDescription: service.temple.metaDescription ?? null,
+
+          }
           : null,
         cities: service.cities ?? [],
         languages: service.languages ?? [],
@@ -684,11 +686,12 @@ export class ServiceRepository extends BaseRepository<Service> {
         templeId: service.templeId ?? null,
         temple: service.temple
           ? {
-              id: service.temple.id,
-              name: service.temple.name,
-              metaTitle: service.temple.metaTitle ?? null,
-              metaDescription: service.temple.metaDescription ?? null,
-            }
+            id: service.temple.id,
+            name: service.temple.name,
+            metaTitle: service.temple.metaTitle ?? null,
+            metaDescription: service.temple.metaDescription ?? null,
+
+          }
           : null,
         cities: service.cities ?? [],
         languages: service.languages ?? [],

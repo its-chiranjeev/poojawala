@@ -883,12 +883,12 @@ export class ServiceService {
       }
       const createdFeatures = manager
         ? await manager.getRepository(ServiceFeature).find({
-            where: { serviceId: savedService.id },
-            order: { id: 'ASC' },
-          })
+          where: { serviceId: savedService.id },
+          order: { id: 'ASC' },
+        })
         : (typeof this.serviceFeatureRepository?.findByServiceId === 'function'
-            ? await this.serviceFeatureRepository.findByServiceId(savedService.id)
-            : []);
+          ? await this.serviceFeatureRepository.findByServiceId(savedService.id)
+          : []);
 
       (savedService as any).templeId = savedService.templeId ?? null;
       (savedService as any).temple = validatedTemple
@@ -1553,16 +1553,14 @@ export class ServiceService {
 
   async findServiceById(id: number) {
     const service = await this.serviceRepository.findById(id);
-
     if (!service) {
       throw new NotFoundException('Service not found');
     }
-
     if (service.templeId) {
       if (
         !service.temple ||
         service.temple.deletedAt ||
-        !service.temple.isActive ||
+        (service?.temple?.isActive && !service.temple.isActive) ||
         (service.temple.verificationStatus &&
           service.temple.verificationStatus !== TEMPLE_VERIFICATION_STATUS.APPROVED)
       ) {
