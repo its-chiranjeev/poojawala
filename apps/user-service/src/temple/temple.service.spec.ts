@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TempleService } from './temple.service';
 import { TempleRepository } from '@poojawala/repositories';
@@ -86,6 +86,7 @@ describe('TempleService', () => {
   };
   let mockServiceService: {
     createService: jest.Mock;
+    updateService: jest.Mock;
   };
 
   const sampleActiveTemple: Temple = {
@@ -138,6 +139,7 @@ describe('TempleService', () => {
       findAllTemples: jest.fn(),
       findTempleById: jest.fn(),
       findActiveServicesByTempleId: jest.fn().mockResolvedValue([]),
+      findActiveServicesByTempleIds: jest.fn().mockResolvedValue([]),
       findAartisByTempleId: jest.fn().mockResolvedValue([]),
       findAartisByTempleIds: jest.fn().mockResolvedValue([]),
     };
@@ -228,6 +230,16 @@ describe('TempleService', () => {
             plans: dto.plans,
             isActive: true,
             iconUrl: dto.iconUrl || null,
+          },
+        };
+      }),
+      updateService: jest.fn().mockImplementation(async (id, dto, files, adminId, manager, options) => {
+        return {
+          success: true,
+          message: `Service was updated successfully.`,
+          data: {
+            id,
+            ...dto,
           },
         };
       }),
@@ -566,6 +578,160 @@ describe('TempleService', () => {
 
       expect(result.success).toBe(true);
       expect(result.data.services).toEqual([]);
+    });
+
+    it('17. should return complete service details on getTempleById when temple has associated services', async () => {
+      const fullServiceRecord = {
+        id: 101,
+        name: 'Grand Hanuman Chalisa Path',
+        slug: 'grand-hanuman-chalisa-path',
+        description: 'Detailed Vedic chanting and path',
+        metaTitle: 'Hanuman Path Online',
+        metaDescription: 'Book official path at temple',
+        cities: [{ name: 'Haridwar', state: 'Uttarakhand' }],
+        languages: [{ name: 'Hindi', code: 'hi' }],
+        benefits: [{ title: 'Removes Obstacles', description: 'Overcomes difficulties' }],
+        purohitCarryItems: ['Ganga Jal', 'Dhoop'],
+        iconUrl: 'https://images.poojawala.com/services/hanuman.png',
+        minPrice: 501,
+        maxPrice: 1001,
+        plans: {
+          basic: { price: 501 },
+          standard: { price: 1001 },
+        },
+        tokenPercentage: 20,
+        commissionPercentage: 15,
+        durationMinutes: 75,
+        requiresVenue: false,
+        isActive: true,
+        isGlobal: false,
+        isOnline: true,
+        isOffline: true,
+        isUpcomingFestival: false,
+        festivalStartDate: null,
+        festivalEndDate: null,
+        sortOrder: 2,
+        categoryId: 3,
+        category: {
+          id: 3,
+          name: 'Pooja',
+          slug: 'pooja',
+        },
+        templeId: 1,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-02T00:00:00Z'),
+      };
+
+      mockTempleRepo.findTempleById.mockResolvedValue(sampleActiveTemple);
+      mockTempleRepo.findActiveServicesByTempleId.mockResolvedValue([fullServiceRecord]);
+
+      const result = await service.getTempleById(1, false);
+
+      expect(result.success).toBe(true);
+      expect(result.data.services).toHaveLength(1);
+      const svc = result.data.services![0];
+      expect(svc.id).toBe(101);
+      expect(svc.name).toBe('Grand Hanuman Chalisa Path');
+      expect(svc.slug).toBe('grand-hanuman-chalisa-path');
+      expect(svc.description).toBe('Detailed Vedic chanting and path');
+      expect(svc.metaTitle).toBe('Hanuman Path Online');
+      expect(svc.metaDescription).toBe('Book official path at temple');
+      expect(svc.cities).toEqual([{ name: 'Haridwar', state: 'Uttarakhand' }]);
+      expect(svc.languages).toEqual([{ name: 'Hindi', code: 'hi' }]);
+      expect(svc.benefits).toEqual([{ title: 'Removes Obstacles', description: 'Overcomes difficulties' }]);
+      expect(svc.purohitCarryItems).toEqual(['Ganga Jal', 'Dhoop']);
+      expect(svc.iconUrl).toBe('https://images.poojawala.com/services/hanuman.png');
+      expect(svc.durationMinutes).toBe(75);
+      expect(svc.requiresVenue).toBe(false);
+      expect(svc.isActive).toBe(true);
+      expect(svc.isGlobal).toBe(false);
+      expect(svc.isOnline).toBe(true);
+      expect(svc.isOffline).toBe(true);
+      expect(svc.sortOrder).toBe(2);
+      expect(svc.categoryId).toBe(3);
+      expect(svc.tokenPercentage).toBe(20);
+      expect(svc.commissionPercentage).toBe(15);
+      expect(svc.plans).toBeDefined();
+      expect(svc.templeId).toBe(1);
+      expect(svc.temple).toBeUndefined(); // no circular reference
+    });
+
+    it('18. should return complete service details on getTemples when temples have associated services', async () => {
+      const templeOne: Temple = { ...sampleActiveTemple, id: 1, name: 'Temple 1' };
+      const templeTwo: Temple = { ...sampleActiveTemple, id: 2, name: 'Temple 2' };
+
+      mockTempleRepo.findAllTemples.mockResolvedValue({
+        data: [templeOne, templeTwo],
+        page: 1,
+        limit: 10,
+        total: 2,
+        totalPages: 1,
+      });
+
+      const serviceOne = {
+        id: 201,
+        name: 'Temple 1 Special Aarti Service',
+        templeId: 1,
+        durationMinutes: 45,
+        isOnline: true,
+        isOffline: false,
+        isActive: true,
+        cities: [{ name: 'Varanasi', state: 'UP' }],
+        plans: { basic: { price: 251 } },
+      };
+
+      const serviceTwo = {
+        id: 202,
+        name: 'Temple 2 Abhishekam Service',
+        templeId: 2,
+        durationMinutes: 60,
+        isOnline: false,
+        isOffline: true,
+        isActive: true,
+        cities: [{ name: 'Ujjain', state: 'MP' }],
+        plans: { basic: { price: 501 } },
+      };
+
+      mockTempleRepo.findActiveServicesByTempleIds.mockResolvedValue([serviceOne, serviceTwo]);
+
+      const result = await service.getTemples({ page: 1, limit: 10 }, false);
+
+      expect(result.success).toBe(true);
+      expect(result.data).toHaveLength(2);
+
+      // Temple 1 has service 201 with full details
+      expect(result.data[0].services).toHaveLength(1);
+      expect(result.data[0].services![0].id).toBe(201);
+      expect(result.data[0].services![0].name).toBe('Temple 1 Special Aarti Service');
+      expect(result.data[0].services![0].durationMinutes).toBe(45);
+      expect(result.data[0].services![0].cities).toEqual([{ name: 'Varanasi', state: 'UP' }]);
+      expect(result.data[0].services![0].temple).toBeUndefined();
+
+      // Temple 2 has service 202 with full details
+      expect(result.data[1].services).toHaveLength(1);
+      expect(result.data[1].services![0].id).toBe(202);
+      expect(result.data[1].services![0].name).toBe('Temple 2 Abhishekam Service');
+      expect(result.data[1].services![0].durationMinutes).toBe(60);
+      expect(result.data[1].services![0].cities).toEqual([{ name: 'Ujjain', state: 'MP' }]);
+      expect(result.data[1].services![0].temple).toBeUndefined();
+    });
+
+    it('19. should return empty services array on getTemples when temple has no associated services', async () => {
+      mockTempleRepo.findAllTemples.mockResolvedValue({
+        data: [{ ...sampleActiveTemple, id: 3, name: 'Temple Without Services' }],
+        page: 1,
+        limit: 10,
+        total: 1,
+        totalPages: 1,
+      });
+
+      mockTempleRepo.findActiveServicesByTempleIds.mockResolvedValue([]);
+
+      const result = await service.getTemples({ page: 1, limit: 10 }, false);
+
+      expect(result.success).toBe(true);
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].services).toEqual([]);
     });
   });
 
@@ -3211,32 +3377,40 @@ describe('TempleService', () => {
           return msgs;
         };
 
-        it('1. should reproduce exact 11 non-whitelisted property errors when service creation payload is sent to UpdateTempleDto (PATCH /temples/:id)', async () => {
-          const updateDto = plainToInstance(UpdateTempleDto, {
-            services: [exactServicePayload],
+        it('1. should require id and reject non-whitelisted properties on UpdateTempleDto (PATCH /temples/:id)', async () => {
+          const updateDtoWithoutId = plainToInstance(UpdateTempleDto, {
+            services: [
+              {
+                ...exactServicePayload,
+                unexpectedExtraField: 'invalid',
+              },
+            ],
           });
 
-          const errors = await validate(updateDto, { whitelist: true, forbidNonWhitelisted: true });
+          const errors = await validate(updateDtoWithoutId, { whitelist: true, forbidNonWhitelisted: true });
           const errorMessages = extractErrorMessages(errors);
 
-          // All 11 reported properties must be flagged as "should not exist"
-          const expectedDisallowedProps = [
-            'property name should not exist',
-            'property categoryId should not exist',
-            'property description should not exist',
-            'property plans should not exist',
-            'property commissionPercentage should not exist',
-            'property tokenPercentage should not exist',
-            'property durationMinutes should not exist',
-            'property requiresVenue should not exist',
-            'property isOnline should not exist',
-            'property isOffline should not exist',
-            'property languages should not exist',
-          ];
+          expect(errorMessages).toContain('Service ID must be an integer');
+          expect(errorMessages).toContain('property unexpectedExtraField should not exist');
+        });
 
-          for (const expectedError of expectedDisallowedProps) {
-            expect(errorMessages).toContain(expectedError);
-          }
+        it('1b. should accept full service editable payload when valid id is provided on UpdateTempleDto (PATCH /temples/:id)', async () => {
+          const updateDtoWithId = plainToInstance(UpdateTempleDto, {
+            services: [
+              {
+                id: 10,
+                ...exactServicePayload,
+              },
+            ],
+          });
+
+          const errors = await validate(updateDtoWithId, { whitelist: true, forbidNonWhitelisted: true });
+          const errorMessages = extractErrorMessages(errors);
+
+          expect(errorMessages).toHaveLength(0);
+          expect(updateDtoWithId.services).toHaveLength(1);
+          expect(updateDtoWithId.services![0].id).toBe(10);
+          expect(updateDtoWithId.services![0].name).toBe('Shri Hanuman Pooja');
         });
 
         it('2. should accept the exact service creation payload when sent to CreateTempleDto (POST /temples/add)', async () => {
@@ -3290,6 +3464,325 @@ describe('TempleService', () => {
           expect(updateDto.services![0].remove).toBe(true);
           expect(updateDto.services![1].id).toBe(11);
           expect(updateDto.services![1].delete).toBe(true);
+        });
+      });
+
+      describe('PATCH /temples/:id - Editing Existing Service Details', () => {
+        interface MockServiceItem {
+          id: number;
+          templeId: number | null;
+          name: string;
+          description?: string;
+          durationMinutes?: number;
+          isActive: boolean;
+          deletedAt: Date | null;
+          plans?: Record<string, unknown>;
+        }
+
+        let service10: MockServiceItem;
+        let service11: MockServiceItem;
+        let service12: MockServiceItem;
+
+        beforeEach(() => {
+          service10 = {
+            id: 10,
+            templeId: 1,
+            name: 'Shri Hanuman Pooja',
+            description: 'Original description',
+            durationMinutes: 60,
+            isActive: true,
+            deletedAt: null,
+            plans: { basic: { price: 501 } },
+          };
+          service11 = {
+            id: 11,
+            templeId: 1,
+            name: 'Maha Rudrabhishek',
+            description: 'Vedic Rudrabhishek',
+            durationMinutes: 90,
+            isActive: true,
+            deletedAt: null,
+            plans: { basic: { price: 1100 } },
+          };
+          service12 = {
+            id: 12,
+            templeId: 1,
+            name: 'Navgrah Shanti',
+            description: 'Navgrah pooja',
+            durationMinutes: 120,
+            isActive: true,
+            deletedAt: null,
+            plans: { basic: { price: 2100 } },
+          };
+
+          mockTempleRepo.findOne.mockResolvedValue({ ...sampleActiveTemple });
+          mockTempleRepo.save.mockImplementation(async (t) => ({ ...sampleActiveTemple, ...t }));
+
+          mockServiceRepo.find.mockImplementation(async (query: { where?: { id?: { _value?: number[] } | number[]; templeId?: number; deletedAt?: unknown } }) => {
+            const list = [service10, service11, service12];
+            if (query?.where?.id) {
+              const rawIdVal = query.where.id;
+              const ids: number[] = Array.isArray(rawIdVal)
+                ? rawIdVal
+                : rawIdVal && typeof rawIdVal === 'object' && '_value' in rawIdVal
+                ? ((rawIdVal as { _value: number[] })._value)
+                : [rawIdVal as number];
+              return list.filter((s) => ids.includes(s.id));
+            }
+            if (query?.where?.templeId === 1) {
+              return list.filter((s) => s.templeId === 1 && (!query?.where?.deletedAt || s.deletedAt === null));
+            }
+            return list;
+          });
+
+          mockServiceRepo.save.mockImplementation(async (s: MockServiceItem) => {
+            if (s.id === 10) Object.assign(service10, s);
+            if (s.id === 11) Object.assign(service11, s);
+            if (s.id === 12) Object.assign(service12, s);
+            return s;
+          });
+        });
+
+        it('1. should update one existing service details via PATCH /temples/:id', async () => {
+          const dto: UpdateTempleDto = {
+            services: [
+              {
+                id: 10,
+                name: 'Updated Hanuman Pooja',
+                durationMinutes: 45,
+              },
+            ],
+          };
+
+          const result = await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+          expect(result.success).toBe(true);
+          expect(result.statusCode).toBe(200);
+          expect(mockServiceService.updateService).toHaveBeenCalledWith(
+            10,
+            expect.objectContaining({
+              id: 10,
+              name: 'Updated Hanuman Pooja',
+              durationMinutes: 45,
+            }),
+            undefined,
+            mockAdmin.id,
+            expect.anything(),
+            { skipNotifications: true, skipTempleValidation: true },
+          );
+        });
+
+        it('2. should update multiple existing services in one request', async () => {
+          const dto: UpdateTempleDto = {
+            services: [
+              { id: 10, name: 'Service 10 New Name', durationMinutes: 75 },
+              { id: 11, description: 'Updated Rudrabhishek with special havan', durationMinutes: 100 },
+            ],
+          };
+
+          const result = await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+          expect(result.success).toBe(true);
+          expect(mockServiceService.updateService).toHaveBeenCalledTimes(2);
+          expect(mockServiceService.updateService).toHaveBeenNthCalledWith(
+            1,
+            10,
+            expect.objectContaining({ id: 10, name: 'Service 10 New Name' }),
+            undefined,
+            mockAdmin.id,
+            expect.anything(),
+            expect.anything(),
+          );
+          expect(mockServiceService.updateService).toHaveBeenNthCalledWith(
+            2,
+            11,
+            expect.objectContaining({ id: 11, description: 'Updated Rudrabhishek with special havan' }),
+            undefined,
+            mockAdmin.id,
+            expect.anything(),
+            expect.anything(),
+          );
+        });
+
+        it('3. should update both temple fields and service details in one request', async () => {
+          const dto: UpdateTempleDto = {
+            name: 'Shri Kashi Vishwanath Grand Temple',
+            city: 'Varanasi',
+            services: [
+              { id: 10, name: 'Grand Shivling Pooja', durationMinutes: 90 },
+            ],
+          };
+
+          const result = await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+          expect(result.success).toBe(true);
+          expect(mockTempleRepo.save).toHaveBeenCalledWith(
+            expect.objectContaining({
+              name: 'Shri Kashi Vishwanath Grand Temple',
+              city: 'Varanasi',
+            }),
+          );
+          expect(mockServiceService.updateService).toHaveBeenCalledWith(
+            10,
+            expect.objectContaining({ id: 10, name: 'Grand Shivling Pooja' }),
+            undefined,
+            mockAdmin.id,
+            expect.anything(),
+            expect.anything(),
+          );
+        });
+
+        it('4. should support partial updates preserving omitted service fields', async () => {
+          const dto: UpdateTempleDto = {
+            services: [
+              { id: 10, durationMinutes: 150 },
+            ],
+          };
+
+          const result = await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+          expect(result.success).toBe(true);
+          expect(mockServiceService.updateService).toHaveBeenCalledWith(
+            10,
+            expect.objectContaining({
+              id: 10,
+              durationMinutes: 150,
+            }),
+            undefined,
+            mockAdmin.id,
+            expect.anything(),
+            expect.anything(),
+          );
+          const passedDto = mockServiceService.updateService.mock.calls[0][1] as UpdateTempleServiceDto;
+          expect(passedDto.name).toBeUndefined();
+          expect(passedDto.description).toBeUndefined();
+          expect(passedDto.plans).toBeUndefined();
+        });
+
+        it('5. should support mixed operations (update details, detach with remove: true, soft-delete with delete: true) in one request', async () => {
+          const dto: UpdateTempleDto = {
+            services: [
+              { id: 10, name: 'Pooja 10 Updated' },
+              { id: 11, remove: true },
+              { id: 12, delete: true },
+            ],
+          };
+
+          const result = await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+          expect(result.success).toBe(true);
+          // Service 10 was updated
+          expect(mockServiceService.updateService).toHaveBeenCalledWith(
+            10,
+            expect.objectContaining({ id: 10, name: 'Pooja 10 Updated' }),
+            undefined,
+            mockAdmin.id,
+            expect.anything(),
+            expect.anything(),
+          );
+          // Service 11 was detached (templeId = null)
+          expect(service11.templeId).toBeNull();
+          // Service 12 was soft-deleted (deletedAt = Date, isActive = false)
+          expect(service12.deletedAt).toBeInstanceOf(Date);
+          expect(service12.isActive).toBe(false);
+        });
+
+        it('6. should reject service with nonexistent ID (HTTP 400)', async () => {
+          const dto: UpdateTempleDto = {
+            services: [
+              { id: 9999, name: 'Nonexistent service' },
+            ],
+          };
+
+          await expect(service.updateTempleWithUser(1, dto, undefined, mockAdmin)).rejects.toThrow(
+            BadRequestException,
+          );
+          await expect(service.updateTempleWithUser(1, dto, undefined, mockAdmin)).rejects.toThrow(
+            'Service with id 9999 not found',
+          );
+        });
+
+        it('7. should reject service belonging to another temple (HTTP 400)', async () => {
+          service10.templeId = 99; // belongs to temple 99, not temple 1
+          const dto: UpdateTempleDto = {
+            services: [
+              { id: 10, name: 'Cross-temple edit attempt' },
+            ],
+          };
+
+          await expect(service.updateTempleWithUser(1, dto, undefined, mockAdmin)).rejects.toThrow(
+            'Service with id 10 does not belong to temple 1',
+          );
+        });
+
+        it('8. should reject client attempting to reassign service to another temple in payload (HTTP 400)', async () => {
+          const dto: UpdateTempleDto = {
+            services: [
+              { id: 10, name: 'Reassignment attempt', templeId: 99 },
+            ],
+          };
+
+          await expect(service.updateTempleWithUser(1, dto, undefined, mockAdmin)).rejects.toThrow(
+            'Cannot reassign service with id 10 to another temple via temple update',
+          );
+        });
+
+        it('9. should reject duplicate service IDs within the same request (HTTP 400)', async () => {
+          const dto: UpdateTempleDto = {
+            services: [
+              { id: 10, name: 'First update' },
+              { id: 10, name: 'Second duplicate update' },
+            ],
+          };
+
+          await expect(service.updateTempleWithUser(1, dto, undefined, mockAdmin)).rejects.toThrow(
+            'Duplicate service IDs are not allowed in the same request',
+          );
+        });
+
+        it('10. should roll back entire transaction if a service operation fails', async () => {
+          mockServiceService.updateService.mockRejectedValueOnce(
+            new ConflictException('An online service with name "Duplicate Service Name" already exists'),
+          );
+
+          const dto: UpdateTempleDto = {
+            name: 'Temple Name To Rollback',
+            services: [
+              { id: 10, name: 'Duplicate Service Name' },
+            ],
+          };
+
+          await expect(service.updateTempleWithUser(1, dto, undefined, mockAdmin)).rejects.toThrow(
+            ConflictException,
+          );
+        });
+
+        it('11. should leave existing services untouched when services is omitted from request', async () => {
+          const dto: UpdateTempleDto = {
+            name: 'Temple Updated Name Only',
+          };
+
+          const result = await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+          expect(result.success).toBe(true);
+          expect(mockServiceService.updateService).not.toHaveBeenCalled();
+          expect(mockServiceRepo.save).not.toHaveBeenCalled();
+        });
+
+        it('12. should never perform physical deletion on service records', async () => {
+          const dto: UpdateTempleDto = {
+            services: [
+              { id: 11, delete: true },
+            ],
+          };
+
+          const result = await service.updateTempleWithUser(1, dto, undefined, mockAdmin);
+
+          expect(result.success).toBe(true);
+          expect(mockServiceRepo.save).toHaveBeenCalled();
+          expect(service11.deletedAt).toBeInstanceOf(Date);
+          expect(service11.isActive).toBe(false);
+          expect((mockServiceRepo as unknown as Record<string, unknown>).delete).toBeUndefined();
         });
       });
     });

@@ -976,6 +976,8 @@ export class ServiceService {
     }
   }
 
+  // TODO: Previous updateService signature without manager and options kept for reference:
+  /*
   async updateService(
     id: number,
     dto: UpdateServiceDto,
@@ -985,6 +987,26 @@ export class ServiceService {
     adminId: number,
   ) {
     const service = await this.serviceRepository.findOne({
+      where: { id },
+    });
+  */
+  async updateService(
+    id: number,
+    dto: UpdateServiceDto,
+    files?: {
+      icon?: Express.Multer.File[];
+    },
+    adminId?: number,
+    manager?: EntityManager,
+    options?: {
+      skipNotifications?: boolean;
+      skipTempleValidation?: boolean;
+    },
+  ) {
+    const serviceRepo = manager ? manager.getRepository(Service) : this.serviceRepository;
+    const templeRepo = manager ? manager.getRepository(Temple) : this.templeRepository;
+
+    const service = await serviceRepo.findOne({
       where: { id },
     });
 
@@ -1018,7 +1040,7 @@ export class ServiceService {
 
     const targetName = dto.name !== undefined ? dto.name.trim() : service.name.trim();
     if (targetName) {
-      const existingWithName = await this.serviceRepository.find({
+      const existingWithName = await serviceRepo.find({
         where: { name: targetName },
       });
 
@@ -1048,11 +1070,17 @@ export class ServiceService {
 
     let validatedTemple: Temple | null = null;
     if (dto.templeId !== undefined && dto.templeId !== null) {
-      validatedTemple = await this.validateTemple(dto.templeId);
+      if (!options?.skipTempleValidation) {
+        validatedTemple = await this.validateTemple(dto.templeId, manager);
+      } else if (manager) {
+        validatedTemple = await templeRepo.findOne({
+          where: { id: dto.templeId },
+        });
+      }
     }
 
     if (dto.categoryId !== undefined && dto.categoryId !== null) {
-      await this.validateServiceCategory(dto.categoryId);
+      await this.validateServiceCategory(dto.categoryId, manager);
     }
 
     // TODO: Deprecated - Samagri-based pricing replaced by Basic/Standard plans.
@@ -1248,16 +1276,55 @@ export class ServiceService {
           if (newSortOrder < oldSortOrder) {
             // Service moved up (e.g., from 10 to 2):
             // All services in [newSortOrder, oldSortOrder - 1] shift +1 (e.g., 2 -> 3, 3 -> 4, etc.)
-            await this.serviceRepository.shiftSortOrdersUp(newSortOrder, oldSortOrder, service.id);
+            if (manager) {
+              await manager
+                .createQueryBuilder()
+                .update(Service)
+                .set({ sortOrder: () => '"sortOrder" + 1' })
+                .where('"deletedAt" IS NULL')
+                .andWhere('"sortOrder" >= :fromOrder AND "sortOrder" < :toOrder', {
+                  fromOrder: newSortOrder,
+                  toOrder: oldSortOrder,
+                })
+                .andWhere('id != :serviceId', { serviceId: service.id })
+                .execute();
+            } else {
+              await this.serviceRepository.shiftSortOrdersUp(newSortOrder, oldSortOrder, service.id);
+            }
           } else if (newSortOrder > oldSortOrder) {
             // Service moved down (e.g., from 2 to 10):
             // All services in [oldSortOrder + 1, newSortOrder] shift -1 (e.g., 3 -> 2, 4 -> 3, etc.)
-            await this.serviceRepository.shiftSortOrdersDown(oldSortOrder, newSortOrder, service.id);
+            if (manager) {
+              await manager
+                .createQueryBuilder()
+                .update(Service)
+                .set({ sortOrder: () => '"sortOrder" - 1' })
+                .where('"deletedAt" IS NULL')
+                .andWhere('"sortOrder" > :fromOrder AND "sortOrder" <= :toOrder', {
+                  fromOrder: oldSortOrder,
+                  toOrder: newSortOrder,
+                })
+                .andWhere('id != :serviceId', { serviceId: service.id })
+                .execute();
+            } else {
+              await this.serviceRepository.shiftSortOrdersDown(oldSortOrder, newSortOrder, service.id);
+            }
           }
         } else if (newSortOrder > 0) {
           // Previously had sortOrder 0 or unassigned, now assigned positive newSortOrder:
           // Shift all services >= newSortOrder by +1
-          await this.serviceRepository.shiftSortOrdersUp(newSortOrder, undefined, service.id);
+          if (manager) {
+            await manager
+              .createQueryBuilder()
+              .update(Service)
+              .set({ sortOrder: () => '"sortOrder" + 1' })
+              .where('"deletedAt" IS NULL')
+              .andWhere('"sortOrder" >= :fromOrder', { fromOrder: newSortOrder })
+              .andWhere('id != :serviceId', { serviceId: service.id })
+              .execute();
+          } else {
+            await this.serviceRepository.shiftSortOrdersUp(newSortOrder, undefined, service.id);
+          }
         }
 
         service.sortOrder = newSortOrder;
@@ -1302,12 +1369,12 @@ export class ServiceService {
     if (dto.name !== undefined) {
       const trimmedName = dto.name.trim();
       if (trimmedName !== oldName) {
-        service.slug = await generateUniqueSlug(this.serviceRepository, trimmedName, service.id);
+        service.slug = await generateUniqueSlug(serviceRepo as unknown as ServiceRepository, trimmedName, service.id);
       } else {
-        service.slug = oldSlug || (await generateUniqueSlug(this.serviceRepository, trimmedName, service.id));
+        service.slug = oldSlug || (await generateUniqueSlug(serviceRepo as unknown as ServiceRepository, trimmedName, service.id));
       }
     } else if (!oldSlug) {
-      service.slug = await generateUniqueSlug(this.serviceRepository, service.name, service.id);
+      service.slug = await generateUniqueSlug(serviceRepo as unknown as ServiceRepository, service.name, service.id);
     } else {
       service.slug = oldSlug;
     }
@@ -1404,13 +1471,14 @@ export class ServiceService {
       }
     }
 
-    const updated = await this.serviceRepository.save(service);
+    const updated = await serviceRepo.save(service);
 
     if (basicFeaturesToSync !== undefined) {
       await this.syncServiceFeatures(
         updated.id,
         SERVICE_FEATURE_PLAN.BASIC,
         basicFeaturesToSync,
+        manager,
       );
     }
 
@@ -1419,23 +1487,31 @@ export class ServiceService {
         updated.id,
         SERVICE_FEATURE_PLAN.STANDARD,
         standardFeaturesToSync,
+        manager,
       );
     }
 
+    const typedUpdated = updated as unknown as {
+      temple?: unknown;
+      templeId?: unknown;
+      slug?: unknown;
+      serviceFeatures?: unknown;
+    };
+
     if (updated.templeId) {
       if (validatedTemple) {
-        (updated as any).temple = { id: validatedTemple.id, name: validatedTemple.name };
+        typedUpdated.temple = { id: validatedTemple.id, name: validatedTemple.name };
       } else {
-        const t = await this.templeRepository.findOne({
+        const t = await templeRepo.findOne({
           where: { id: updated.templeId },
         });
-        (updated as any).temple = t ? { id: t.id, name: t.name } : null;
+        typedUpdated.temple = t ? { id: t.id, name: t.name } : null;
       }
     } else {
-      (updated as any).temple = null;
-      (updated as any).templeId = null;
+      typedUpdated.temple = null;
+      typedUpdated.templeId = null;
     }
-    (updated as any).slug = updated.slug ?? null;
+    typedUpdated.slug = updated.slug ?? null;
 
     const hasBasicPlan = Boolean(dto.plans && dto.plans.basic !== undefined);
     const hasStandardPlan = Boolean(dto.plans && dto.plans.standard !== undefined);
@@ -1482,28 +1558,30 @@ export class ServiceService {
     // TODO: SERVICE_MESSAGE_IMPROVEMENT
     // Old message retained for reference; replaced with plan-aware message.
     // message: `Admin updated service ${updated.name}.`,
-    await this.auditLogService?.createAuditLog?.({
-      actorId: adminId,
-      actorType: ACTOR_TYPE.USER,
-      actorRole: USER_ROLE.ADMIN,
-      module: AUDIT_MODULE.SERVICE,
-      entity: 'Service',
-      entityId: String(updated.id),
-      action: 'SERVICE_UPDATED',
-      message: updateMessage,
-      oldValue: {
-        cities: oldCities,
-        languages: oldLanguages,
-        benefits: oldBenefits,
-        purohitCarryItems: oldPurohitCarryItems,
-        plans: oldPlans,
-        templeId: oldTempleId,
-        slug: oldSlug,
-      },
-      newValue: updatedFields,
-    });
+    if (adminId) {
+      await this.auditLogService?.createAuditLog?.({
+        actorId: adminId,
+        actorType: ACTOR_TYPE.USER,
+        actorRole: USER_ROLE.ADMIN,
+        module: AUDIT_MODULE.SERVICE,
+        entity: 'Service',
+        entityId: String(updated.id),
+        action: 'SERVICE_UPDATED',
+        message: updateMessage,
+        oldValue: {
+          cities: oldCities,
+          languages: oldLanguages,
+          benefits: oldBenefits,
+          purohitCarryItems: oldPurohitCarryItems,
+          plans: oldPlans,
+          templeId: oldTempleId,
+          slug: oldSlug,
+        },
+        newValue: updatedFields,
+      });
+    }
 
-    if (this.notificationService) {
+    if (this.notificationService && !options?.skipNotifications) {
       try {
         let notificationMessage: string;
         if (isBasicModified && isStandardModified) {
@@ -1529,17 +1607,21 @@ export class ServiceService {
             plan: isBasicModified && isStandardModified ? 'BASIC, STANDARD' : isBasicModified ? 'BASIC' : isStandardModified ? 'STANDARD' : undefined,
           },
         );
-      } catch (err: any) {
+      } catch {
         // Continue if admin notification fails
       }
     }
 
-    const updatedFeatures =
-      typeof this.serviceFeatureRepository?.findByServiceId === 'function'
-        ? await this.serviceFeatureRepository.findByServiceId(updated.id)
-        : [];
+    const updatedFeatures = manager
+      ? await manager.getRepository(ServiceFeature).find({
+          where: { serviceId: updated.id },
+          order: { id: 'ASC' },
+        })
+      : typeof this.serviceFeatureRepository?.findByServiceId === 'function'
+      ? await this.serviceFeatureRepository.findByServiceId(updated.id)
+      : [];
     this.enrichServicePlansAndToken(updated, updatedFeatures);
-    delete (updated as any).serviceFeatures;
+    delete typedUpdated.serviceFeatures;
 
     // TODO: SERVICE_MESSAGE_IMPROVEMENT
     // Old message retained for reference; replaced with plan-aware message.
