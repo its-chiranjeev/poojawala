@@ -90,50 +90,50 @@ export class OrderService {
    * Cron job running every minute to materialize expired unpaid pending orders as EXPIRED in DB.
    * Expires orders created more than 30 minutes ago whose payment status is PENDING and payment mode is not COD.
    */
-  @Cron('0 * * * * *', {
-    name: 'materialize-expired-orders',
-  })
-  async materializeExpiredOrders(): Promise<number> {
-    this.logger.log('[Order Cron] Started: Checking expired orders for materialization.');
+  // @Cron('0 * * * * *', {
+  //   name: 'materialize-expired-orders',
+  // })
+  // async materializeExpiredOrders(): Promise<number> {
+  //   this.logger.log('[Order Cron] Started: Checking expired orders for materialization.');
 
-    try {
-      const result = await this.dataSource
-        .getRepository(Order)
-        .createQueryBuilder()
-        .update(Order)
-        .set({
-          orderStatus: ORDER_STATUS.EXPIRED,
-          expiredAt: () => 'COALESCE("expiredAt", (now() AT TIME ZONE \'UTC\'))',
-        })
-        .where('orderStatus = :pendingStatus', {
-          pendingStatus: ORDER_STATUS.PENDING_PAYMENT,
-        })
-        .andWhere('paymentStatus = :paymentPendingStatus', {
-          paymentPendingStatus: ORDER_PAYMENT_STATUS.PENDING,
-        })
-        .andWhere('paymentMethod = :onlineMethod', {
-          onlineMethod: ORDER_PAYMENT_METHOD.ONLINE,
-        })
-                                .andWhere(
-          '(("expiredAt" IS NOT NULL AND "expiredAt" <= (now() AT TIME ZONE \'UTC\')) OR ("expiredAt" IS NULL AND "createdAt" <= ((now() AT TIME ZONE \'UTC\') - INTERVAL \'30 minutes\')))',
-        )
-        .execute();
+  //   try {
+  //     const result = await this.dataSource
+  //       .getRepository(Order)
+  //       .createQueryBuilder()
+  //       .update(Order)
+  //       .set({
+  //         orderStatus: ORDER_STATUS.EXPIRED,
+  //         expiredAt: () => 'COALESCE("expiredAt", (now() AT TIME ZONE \'UTC\'))',
+  //       })
+  //       .where('orderStatus = :pendingStatus', {
+  //         pendingStatus: ORDER_STATUS.PENDING_PAYMENT,
+  //       })
+  //       .andWhere('paymentStatus = :paymentPendingStatus', {
+  //         paymentPendingStatus: ORDER_PAYMENT_STATUS.PENDING,
+  //       })
+  //       .andWhere('paymentMethod = :onlineMethod', {
+  //         onlineMethod: ORDER_PAYMENT_METHOD.ONLINE,
+  //       })
+  //                               .andWhere(
+  //         '(("expiredAt" IS NOT NULL AND "expiredAt" <= (now() AT TIME ZONE \'UTC\')) OR ("expiredAt" IS NULL AND "createdAt" <= ((now() AT TIME ZONE \'UTC\') - INTERVAL \'30 minutes\')))',
+  //       )
+  //       .execute();
 
-      const affected = result.affected || 0;
-      if (affected > 0) {
-        this.logger.log(`[Order Cron] Completed: Materialized ${affected} orders.`);
-      } else {
-        this.logger.log('[Order Cron] Completed: No expired orders require materialization.');
-      }
-      return affected;
-    } catch (error: any) {
-      this.logger.error(
-        `[Order Cron] Failed: ${error?.message || error}`,
-        error?.stack,
-      );
-      return 0;
-    }
-  }
+  //     const affected = result.affected || 0;
+  //     if (affected > 0) {
+  //       this.logger.log(`[Order Cron] Completed: Materialized ${affected} orders.`);
+  //     } else {
+  //       this.logger.log('[Order Cron] Completed: No expired orders require materialization.');
+  //     }
+  //     return affected;
+  //   } catch (error: any) {
+  //     this.logger.error(
+  //       `[Order Cron] Failed: ${error?.message || error}`,
+  //       error?.stack,
+  //     );
+  //     return 0;
+  //   }
+  // }
 
   /**
    * Helper to ensure productImageSnapshot has a fresh S3 presigned downloadUrl

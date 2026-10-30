@@ -252,7 +252,7 @@ export class BookingService {
     }
   }
 
-    @Cron('0 * * * * *', {
+  @Cron('0 * * * * *', {
     name: 'mark-expired-bookings-manual',
   })
   async markExpiredBookingsManual(): Promise<void> {
@@ -310,44 +310,44 @@ export class BookingService {
     }
   }
 
-  @Cron('0 * * * * *', {
-    name: 'cancel-expired-pending-astrology-bookings',
-  })
-  async cancelExpiredPendingAstrologyBookingsCron(): Promise<void> {
-    this.logger.log('[Astrology Cron] Started: Checking expired unpaid astrology bookings.');
+  // @Cron('0 * * * * *', {
+  //   name: 'cancel-expired-pending-astrology-bookings',
+  // })
+  // async cancelExpiredPendingAstrologyBookingsCron(): Promise<void> {
+  //   this.logger.log('[Astrology Cron] Started: Checking expired unpaid astrology bookings.');
 
-    try {
-      const expired = await this.bookingRepository.cancelExpiredPendingAstrologyBookings(15);
-      if (expired.length > 0) {
-        this.logger.log(
-          `[Astrology Cron] Completed: Soft-deleted ${expired.length} expired pending astrology reservation(s).`,
-        );
-        for (const b of expired) {
-          await this.auditLogService.createAuditLog({
-            actorId: null,
-            actorType: ACTOR_TYPE.SYSTEM,
-            actorRole: undefined,
-            module: AUDIT_MODULE.BOOKING,
-            entity: 'Booking',
-            entityId: String(b.id),
-            action: 'BOOKING_SOFT_DELETED',
-            message: `Astrology booking #${b.id} pending reservation expired after 15 minutes and was soft-deleted by SYSTEM.`,
-            oldValue: { deletedAt: null },
-            newValue: { deletedAt: new Date() },
-          });
-        }
-      } else {
-        this.logger.log(
-          '[Astrology Cron] Completed: No expired unpaid astrology bookings found.',
-        );
-      }
-    } catch (error) {
-      this.logger.error(
-        `[Astrology Cron] Failed: ${error instanceof Error ? error.message : String(error)}`,
-        error instanceof Error ? error.stack : undefined,
-      );
-    }
-  }
+  //   try {
+  //     const expired = await this.bookingRepository.cancelExpiredPendingAstrologyBookings(15);
+  //     if (expired.length > 0) {
+  //       this.logger.log(
+  //         `[Astrology Cron] Completed: Soft-deleted ${expired.length} expired pending astrology reservation(s).`,
+  //       );
+  //       for (const b of expired) {
+  //         await this.auditLogService.createAuditLog({
+  //           actorId: null,
+  //           actorType: ACTOR_TYPE.SYSTEM,
+  //           actorRole: undefined,
+  //           module: AUDIT_MODULE.BOOKING,
+  //           entity: 'Booking',
+  //           entityId: String(b.id),
+  //           action: 'BOOKING_SOFT_DELETED',
+  //           message: `Astrology booking #${b.id} pending reservation expired after 15 minutes and was soft-deleted by SYSTEM.`,
+  //           oldValue: { deletedAt: null },
+  //           newValue: { deletedAt: new Date() },
+  //         });
+  //       }
+  //     } else {
+  //       this.logger.log(
+  //         '[Astrology Cron] Completed: No expired unpaid astrology bookings found.',
+  //       );
+  //     }
+  //   } catch (error) {
+  //     this.logger.error(
+  //       `[Astrology Cron] Failed: ${error instanceof Error ? error.message : String(error)}`,
+  //       error instanceof Error ? error.stack : undefined,
+  //     );
+  //   }
+  // }
 
   async createBooking(
     user: User,
