@@ -1,7 +1,7 @@
 // Must be the VERY FIRST statement — prevents Jest from crashing on puppeteer ESM
 jest.mock('puppeteer', () => ({}));
 
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { BookingService } from './booking.service';
 import { BookingController } from './booking.controller';
 import { ServiceService } from '../service/service.service';
@@ -2295,6 +2295,99 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       const res = await bookingService.getBookings(mockCustomerUser, {} as any);
       expect(res.bookings[0].serviceNameSnapshot).toBe('Tulsi Vivah Puja Snapshot');
       expect(res.bookings[0].serviceId).toBe(184);
+    });
+  });
+
+  describe('Admin vs Customer Visibility of Pending Payment Bookings', () => {
+    const adminUser = { id: 1, role: USER_ROLE.ADMIN } as User;
+    const customerUser = { id: 10, role: USER_ROLE.CUSTOMER } as User;
+
+    it('Admin getBookingById throws NotFoundException when booking paymentStatus is PENDING', async () => {
+      const pendingBooking = {
+        id: 901,
+        customerId: customerUser.id,
+        serviceId: 104,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+        status: BOOKING_STATUS.PENDING,
+        payments: [],
+      } as any;
+
+      mockBookingRepository.findBookingById = jest.fn().mockResolvedValue(pendingBooking);
+
+      let caughtError: any;
+      try {
+        await bookingService.getBookingById(adminUser, 901);
+      } catch (err) {
+        caughtError = err;
+      }
+      expect(caughtError).toBeInstanceOf(NotFoundException);
+      expect(caughtError?.message).toBe('Booking not found');
+    });
+
+    it('Admin getBookingById succeeds when booking paymentStatus is PAID', async () => {
+      const paidBooking = {
+        id: 902,
+        customerId: customerUser.id,
+        serviceId: 104,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+        status: BOOKING_STATUS.ACCEPTED,
+        payments: [],
+      } as any;
+
+      mockBookingRepository.findBookingById = jest.fn().mockResolvedValue(paidBooking);
+
+      const res = await bookingService.getBookingById(adminUser, 902);
+      expect(res.id).toBe(902);
+      expect(res.paymentStatus).toBe(BOOKING_PAYMENT_STATUS.PAID);
+    });
+
+    it('Customer getBookingById succeeds when booking paymentStatus is PENDING for own booking', async () => {
+      const pendingBooking = {
+        id: 903,
+        customerId: customerUser.id,
+        serviceId: 104,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+        status: BOOKING_STATUS.PENDING,
+        payments: [],
+      } as any;
+
+      mockBookingRepository.findBookingById = jest.fn().mockResolvedValue(pendingBooking);
+
+      const res = await bookingService.getBookingById(customerUser, 903);
+      expect(res.id).toBe(903);
+      expect(res.paymentStatus).toBe(BOOKING_PAYMENT_STATUS.PENDING);
+    });
+
+    it('Admin getBookings passes USER_ROLE.ADMIN to bookingRepository.findBookingsByRole', async () => {
+      mockBookingRepository.findBookingsByRole = jest.fn().mockResolvedValue({
+        bookings: [],
+        total: 0,
+      });
+
+      await bookingService.getBookings(adminUser, {} as any);
+
+      expect(mockBookingRepository.findBookingsByRole).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: adminUser.id,
+          userRole: USER_ROLE.ADMIN,
+        }),
+      );
+    });
+
+    it('Customer getBookings passes USER_ROLE.CUSTOMER to bookingRepository.findBookingsByRole', async () => {
+      mockBookingRepository.findBookingsByRole = jest.fn().mockResolvedValue({
+        bookings: [],
+        total: 0,
+      });
+
+      await bookingService.getBookings(customerUser, {} as any);
+
+      expect(mockBookingRepository.findBookingsByRole).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: customerUser.id,
+          userRole: USER_ROLE.CUSTOMER,
+        }),
+      );
     });
   });
 

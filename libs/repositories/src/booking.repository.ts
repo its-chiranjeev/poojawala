@@ -250,6 +250,10 @@ export class BookingRepository extends BaseRepository<Booking> {
 
     switch (userRole) {
       case USER_ROLE.ADMIN:
+        // Do not show bookings with PENDING payment status to ADMIN
+        query.andWhere('booking.paymentStatus != :adminExcludedPaymentStatus', {
+          adminExcludedPaymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+        });
         break;
 
       case USER_ROLE.CUSTOMER:
@@ -674,6 +678,13 @@ export class BookingRepository extends BaseRepository<Booking> {
 
     switch (userRole) {
       case USER_ROLE.ADMIN:
+        // Do not show bookings with PENDING payment status to ADMIN
+        queryBuilder.andWhere(
+          'booking.paymentStatus != :adminExcludedPaymentStatus',
+          {
+            adminExcludedPaymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+          },
+        );
         break;
 
       case USER_ROLE.CUSTOMER:

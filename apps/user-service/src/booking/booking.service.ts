@@ -1803,6 +1803,10 @@ export class BookingService {
 
     switch (user.role) {
       case USER_ROLE.ADMIN: {
+        // Do not show bookings with PENDING payment status to ADMIN
+        if (booking.paymentStatus === BOOKING_PAYMENT_STATUS.PENDING) {
+          throw new NotFoundException('Booking not found');
+        }
         // Admin can access any booking.
         this.enrichBookingServicePlans(booking);
         const isAdminAstrology = booking.bookingType === BOOKING_TYPE.ASTROLOGY;
