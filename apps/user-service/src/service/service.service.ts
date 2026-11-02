@@ -39,6 +39,7 @@ import {
   PUROHIT_VERIFICATION_STATUS,
   Category,
   Service,
+  PurohitService,
   ServiceFeature,
   ServicePlans,
   ServicePlanDetails,
@@ -1473,6 +1474,17 @@ export class ServiceService {
 
     const updated = await serviceRepo.save(service);
 
+    const purohitServiceRepo = manager
+      ? manager.getRepository(PurohitService)
+      : this.PurohitServiceRepository;
+    await purohitServiceRepo.update(
+      { serviceId: updated.id } as any,
+      {
+        isOnline: updated.isOnline ?? false,
+        isOffline: updated.isOffline ?? true,
+      } as any,
+    );
+
     if (basicFeaturesToSync !== undefined) {
       await this.syncServiceFeatures(
         updated.id,
@@ -1907,6 +1919,8 @@ export class ServiceService {
           // isOffline: serviceDto.isOffline ?? existing.isOffline,
           // onlinePrice: serviceDto.onlinePrice ?? existing.onlinePrice,
           // offlinePrice: serviceDto.offlinePrice ?? existing.offlinePrice,
+          isOnline: service.isOnline ?? false,
+          isOffline: service.isOffline ?? true,
           durationMinutes: serviceDto.durationMinutes ?? existing.durationMinutes,
           isActive: serviceDto.isActive ?? true,
         });
@@ -1919,6 +1933,8 @@ export class ServiceService {
       // Save new
       const entity = this.PurohitServiceRepository.create({
         ...serviceDto,
+        isOnline: service.isOnline ?? false,
+        isOffline: service.isOffline ?? true,
         purohitId: purohitProfile.id,
       });
 
@@ -1949,6 +1965,8 @@ export class ServiceService {
               // isOffline: serviceDto.isOffline ?? softDeleted.isOffline,
               // onlinePrice: serviceDto.onlinePrice ?? softDeleted.onlinePrice,
               // offlinePrice: serviceDto.offlinePrice ?? softDeleted.offlinePrice,
+              isOnline: service.isOnline ?? false,
+              isOffline: service.isOffline ?? true,
               durationMinutes: serviceDto.durationMinutes ?? softDeleted.durationMinutes,
               isActive: serviceDto.isActive ?? true,
             });
