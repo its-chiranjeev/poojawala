@@ -38,6 +38,7 @@ import {
   ORDER_PAYMENT_STATUS,
   ORDER_PAYMENT_METHOD,
   ShippingAddressSnapshot,
+  CustomerAddress,
   User,
   USER_ROLE,
   BANK_VERIFICATION_STATUS,
@@ -316,6 +317,8 @@ export interface RazorpayWebhookPaymentEntity {
   method?: string;
   fee?: number;
   tax?: number;
+  error_code?: string | null;
+  error_reason?: string | null;
   error_description?: string | null;
   created_at?: number;
 
@@ -1128,6 +1131,17 @@ export class PaymentService {
           );
 
           if (paymentLink && paymentLink.status === 'created') {
+            if (!booking.customer && booking.customerId) {
+              try {
+                const userRepo = this.dataSource.getRepository(User);
+                booking.customer = (await userRepo.findOne({
+                  where: { id: booking.customerId },
+                })) as any;
+              } catch {
+                // ignore fallback error
+              }
+            }
+
             const isAstrology = booking.bookingType === BOOKING_TYPE.ASTROLOGY;
             const ratePerMinute =
               booking.astrologer?.astrologerProfile?.ratePerMinute ??
@@ -1714,10 +1728,8 @@ export class PaymentService {
         `Duplicate payment_link.paid webhook ignored for payment ${payment.id}`,
       );
 
-      // Cart cleanup retry: ensure cart cleanup runs idempotently if previous attempt failed
-      if (payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT) {
-        await this.finalizeSuccessfulPayment(payment);
-      }
+      // Cart cleanup and booking status finalization retry: ensure finalization runs idempotently if previous attempt failed
+      await this.finalizeSuccessfulPayment(payment);
 
       return;
     }
@@ -1829,7 +1841,7 @@ export class PaymentService {
       if (
         booking &&
         booking.bookingType === BOOKING_TYPE.ASTROLOGY &&
-        booking.status === BOOKING_STATUS.PENDING &&
+        (booking.status === BOOKING_STATUS.PENDING || booking.status === BOOKING_STATUS.CREATED) &&
         booking.paymentStatus === BOOKING_PAYMENT_STATUS.PENDING
       ) {
         await bookingRepo.softDelete(booking.id);
@@ -1840,8 +1852,8 @@ export class PaymentService {
     }
 
     await this.auditLogService.createAuditLog({
-      actorId: null,
-      actorType: ACTOR_TYPE.SYSTEM,
+      actorId: payment.payerId || null,
+      actorType: payment.payerId ? ACTOR_TYPE.USER : ACTOR_TYPE.SYSTEM,
       actorRole: undefined,
       module: AUDIT_MODULE.PAYMENT,
       entity: 'Payment',
@@ -1852,10 +1864,11 @@ export class PaymentService {
       newValue: {
         status: payment.status,
         failureReason: payment.failureReason,
+        bookingId: payment.bookingId,
       },
     });
 
-    await this.notifyAndEmailProductPaymentFailure(payment, payment.failureReason);
+    await this.notifyAndEmailBookingPaymentFailure(payment, payment.failureReason);
   }
 
   /**
@@ -1905,9 +1918,7 @@ export class PaymentService {
       this.logger.log(
         `Duplicate payment.captured webhook received for payment ${payment.id}. Retrying idempotent finalization if needed.`,
       );
-      if (payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT) {
-        await this.finalizeSuccessfulPayment(payment);
-      }
+      await this.finalizeSuccessfulPayment(payment);
       return;
     }
 
@@ -2047,6 +2058,13 @@ export class PaymentService {
 
     payment.status = PAYMENT_STATUS.FAILED;
 
+    payment.failureReason =
+      razorpayPayment.error_description ||
+      razorpayPayment.error_reason ||
+      razorpayPayment.error_code ||
+      payment.failureReason ||
+      'Payment transaction failed';
+
     payment.paymentMethod = this.mapRazorpayMethod(
       razorpayPayment.method,
       payment.paymentMethod,
@@ -2076,7 +2094,7 @@ export class PaymentService {
       if (
         booking &&
         booking.bookingType === BOOKING_TYPE.ASTROLOGY &&
-        booking.status === BOOKING_STATUS.PENDING &&
+        (booking.status === BOOKING_STATUS.PENDING || booking.status === BOOKING_STATUS.CREATED) &&
         booking.paymentStatus === BOOKING_PAYMENT_STATUS.PENDING
       ) {
         await bookingRepo.softDelete(booking.id);
@@ -2087,8 +2105,8 @@ export class PaymentService {
     }
 
     await this.auditLogService.createAuditLog({
-      actorId: null,
-      actorType: ACTOR_TYPE.SYSTEM,
+      actorId: payment.payerId || null,
+      actorType: payment.payerId ? ACTOR_TYPE.USER : ACTOR_TYPE.SYSTEM,
       actorRole: undefined,
       module: AUDIT_MODULE.PAYMENT,
       entity: 'Payment',
@@ -2099,9 +2117,11 @@ export class PaymentService {
       newValue: {
         status: payment.status,
         failureReason: payment.failureReason,
+        bookingId: payment.bookingId,
       },
     });
 
+    await this.notifyAndEmailBookingPaymentFailure(payment, payment.failureReason);
     await this.notifyAndEmailProductPaymentFailure(payment, payment.failureReason);
   }
 
@@ -2769,9 +2789,10 @@ export class PaymentService {
       date: new Date(paymentDate).toLocaleString('en-IN', {
         timeZone: 'Asia/Kolkata',
       }),
-      errorMessage: String(
-        razorpayPayment?.error_description ?? payment?.failureReason ?? '-',
-      ),
+      errorMessage:
+        (payment?.status === PAYMENT_STATUS.FAILED || booking.paymentStatus === BOOKING_PAYMENT_STATUS.FAILED)
+          ? String(payment?.failureReason || razorpayPayment?.error_description || 'Payment transaction was declined or failed.')
+          : String(razorpayPayment?.error_description ?? payment?.failureReason ?? '-'),
     });
 
     return this.renderHtmlToPdf(
@@ -2889,7 +2910,29 @@ export class PaymentService {
 
     const customerEmail = order.customer?.email || '-';
 
-    const billingAddress = this.formatOrderAddress(order.shippingAddressSnapshot);
+    let billingAddress = this.formatOrderAddress(order.shippingAddressSnapshot);
+    if (billingAddress === '-' && order.customerId) {
+      try {
+        const addressRepo = this.dataSource.getRepository(CustomerAddress);
+        const defaultAddr = await addressRepo.findOne({
+          where: { customerId: order.customerId },
+          order: { isDefault: 'DESC', createdAt: 'DESC' },
+        });
+        if (defaultAddr) {
+          const parts = [
+            defaultAddr.fullAddress,
+            defaultAddr.city,
+            defaultAddr.state,
+            defaultAddr.pincode,
+          ].filter((p): p is string => Boolean(p && String(p).trim() && String(p).trim() !== '-'));
+          if (parts.length > 0) {
+            billingAddress = parts.join(', ');
+          }
+        }
+      } catch {
+        // ignore fallback error
+      }
+    }
 
     const customerPaidAmount =
       payment?.customerPaidAmount != null
@@ -3469,20 +3512,38 @@ export class PaymentService {
       | Record<string, unknown>
       | undefined;
 
-    if (!snapshot) {
-      return '-';
+    if (snapshot && Object.keys(snapshot).length > 0) {
+      const parts = [
+        snapshot['fullAddress'],
+        snapshot['addressLine1'],
+        snapshot['addressLine2'],
+        snapshot['city'],
+        snapshot['state'],
+        snapshot['pincode'],
+      ].filter((p): p is string => Boolean(p && String(p).trim() && String(p).trim() !== '-'));
+      if (parts.length > 0) {
+        return parts.join(', ');
+      }
     }
 
-    return [
-      snapshot['fullAddress'],
-      snapshot['addressLine1'],
-      snapshot['addressLine2'],
-      snapshot['city'],
-      snapshot['state'],
-      snapshot['pincode'],
-    ]
-      .filter(Boolean)
-      .join(', ');
+    if (booking.customerAddress) {
+      const addr = booking.customerAddress;
+      const parts = [
+        addr.fullAddress,
+        addr.city,
+        addr.state,
+        addr.pincode,
+      ].filter((p): p is string => Boolean(p && String(p).trim() && String(p).trim() !== '-'));
+      if (parts.length > 0) {
+        return parts.join(', ');
+      }
+    }
+
+    if (booking.bookingType === BOOKING_TYPE.ASTROLOGY) {
+      return 'Online Video / Audio Consultation';
+    }
+
+    return '-';
   }
 
   private getCustomerName(booking: Booking): string {
@@ -5378,6 +5439,8 @@ export class PaymentService {
       payment.booking?.paymentStatus === BOOKING_PAYMENT_STATUS.PAID;
     let wasOrderAlreadyPaid = false;
     let newlyAssignedPurohitUserIds: number[] = [];
+    let previousBookingStatus: BOOKING_STATUS | undefined;
+    let previousBookingPaymentStatus: BOOKING_PAYMENT_STATUS | undefined;
 
     await this.dataSource.transaction(async (manager) => {
       // Pessimistic write lock on Payment to protect against concurrent webhook finalization
@@ -5414,6 +5477,8 @@ export class PaymentService {
         });
 
         if (booking) {
+          previousBookingStatus = booking.status;
+          previousBookingPaymentStatus = booking.paymentStatus;
           if (booking.deletedAt) {
             this.logger.warn(
               `Payment #${payment.id} completed for booking #${booking.id}, but the booking was already soft-deleted (unpaid reservation expired/failed). Booking remains soft-deleted. Flagged for refund/reconciliation.`,
@@ -5462,9 +5527,29 @@ export class PaymentService {
           );
           booking.bookingPaymentId = payment.id;
 
+          // Webhook payment success:
+          // 1. Astrology booking: Astrologer is already selected, payment confirms/accepts the appointment directly (ACCEPTED)
+          // 2. Pooja booking: Transitions to PENDING awaiting Purohit acceptance
+          if (booking.bookingType === BOOKING_TYPE.ASTROLOGY) {
+            if (
+              booking.status === BOOKING_STATUS.CREATED ||
+              booking.status === BOOKING_STATUS.PENDING ||
+              (booking.status as string) === 'CREATED' ||
+              (booking.status as string) === 'PENDING'
+            ) {
+              booking.status = BOOKING_STATUS.ACCEPTED;
+            }
+          } else {
+            if (
+              booking.status === BOOKING_STATUS.CREATED ||
+              (booking.status as string) === 'CREATED'
+            ) {
+              booking.status = BOOKING_STATUS.PENDING;
+            }
+          }
+
           if (totalPaid >= finalAmount) {
             booking.paymentStatus = BOOKING_PAYMENT_STATUS.PAID;
-            // TODO: In legacy flow, bookings were marked COMPLETED upon payment.
             // In token payment flow, if booking was ONGOING, full settlement completes it.
             if (booking.status === BOOKING_STATUS.ONGOING) {
               booking.status = BOOKING_STATUS.COMPLETED;
@@ -5473,11 +5558,6 @@ export class PaymentService {
               this.logger.warn(
                 `Payment #${payment.id} completed for booking #${booking.id}, but booking was already CANCELLED (reservation expired or cancelled). Status remains CANCELLED.`,
               );
-            } else if (
-              booking.bookingType === BOOKING_TYPE.ASTROLOGY &&
-              booking.status === BOOKING_STATUS.PENDING
-            ) {
-              booking.status = BOOKING_STATUS.ACCEPTED;
             }
 
             if (booking.bookingType !== BOOKING_TYPE.ASTROLOGY) {
@@ -5500,11 +5580,11 @@ export class PaymentService {
             booking.status === BOOKING_STATUS.PENDING &&
             !booking.purohitId;
 
-          if (
-            isEligibleForAssignment &&
-            (!booking.filteredPurohitIds || booking.filteredPurohitIds.length === 0)
-          ) {
-            if (this.assignmentService) {
+          if (isEligibleForAssignment) {
+            if (
+              (!booking.filteredPurohitIds || booking.filteredPurohitIds.length === 0) &&
+              this.assignmentService
+            ) {
               const eligiblePurohitIds =
                 await this.assignmentService.findEligiblePurohitIds(
                   manager,
@@ -5512,21 +5592,21 @@ export class PaymentService {
                 );
               booking.filteredPurohitIds = eligiblePurohitIds;
               booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
+            }
 
-              if (eligiblePurohitIds.length > 0) {
-                const purohitProfiles = await manager
-                  .getRepository(PurohitProfile)
-                  .createQueryBuilder('profile')
-                  .select(['profile.id', 'profile.userId'])
-                  .where('profile.id IN (:...purohitProfileIds)', {
-                    purohitProfileIds: eligiblePurohitIds,
-                  })
-                  .getMany();
+            if (booking.filteredPurohitIds && booking.filteredPurohitIds.length > 0) {
+              const purohitProfiles = await manager
+                .getRepository(PurohitProfile)
+                .createQueryBuilder('profile')
+                .select(['profile.id', 'profile.userId'])
+                .where('profile.id IN (:...purohitProfileIds)', {
+                  purohitProfileIds: booking.filteredPurohitIds,
+                })
+                .getMany();
 
-                newlyAssignedPurohitUserIds = purohitProfiles.map(
-                  (p) => p.userId,
-                );
-              }
+              newlyAssignedPurohitUserIds = purohitProfiles.map(
+                (p) => p.userId,
+              );
             }
           }
 
@@ -5708,7 +5788,7 @@ export class PaymentService {
                 const itemUpdatedAt = getTimestamp(cartItem.updatedAt);
                 const itemSnapshotTime = getTimestamp(
                   snap?.cartItemUpdatedAt ||
-                    (orderItem as any).cartItemUpdatedAtSnapshot,
+                  (orderItem as any).cartItemUpdatedAtSnapshot,
                 );
                 const cutoffTime = itemSnapshotTime || checkoutTime;
 
@@ -5924,6 +6004,55 @@ export class PaymentService {
         },
       );
 
+      // Manage Audit Logs for Booking payment
+      try {
+        await this.auditLogService.createAuditLog({
+          actorId: payment.payerId || null,
+          actorType: payment.payerId ? ACTOR_TYPE.USER : ACTOR_TYPE.SYSTEM,
+          actorRole: undefined,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(payment.booking.id),
+          action:
+            payment.booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID
+              ? 'BOOKING_PAYMENT_COMPLETED'
+              : 'BOOKING_TOKEN_PAID',
+          message: `Booking #${payment.booking.bookingNumber || payment.booking.id} payment of ₹${payment.amount} finalized. Status: ${payment.booking.status}, Payment Status: ${payment.booking.paymentStatus}.`,
+          oldValue: {
+            status: previousBookingStatus,
+            paymentStatus: previousBookingPaymentStatus,
+          },
+          newValue: {
+            status: payment.booking.status,
+            paymentStatus: payment.booking.paymentStatus,
+            paidAmount: payment.booking.paidAmount,
+            remainingAmount: payment.booking.remainingAmount,
+            paymentId: payment.id,
+            razorpayPaymentId: payment.razorpayPaymentId,
+          },
+        });
+
+        await this.auditLogService.createAuditLog({
+          actorId: payment.payerId || null,
+          actorType: payment.payerId ? ACTOR_TYPE.USER : ACTOR_TYPE.SYSTEM,
+          actorRole: undefined,
+          module: AUDIT_MODULE.PAYMENT,
+          entity: 'Payment',
+          entityId: String(payment.id),
+          action: 'PAYMENT_SUCCESS',
+          message: `Payment #${payment.id} for Booking #${payment.booking.bookingNumber || payment.booking.id} completed successfully (Amount: ₹${payment.amount}).`,
+          oldValue: { status: PAYMENT_STATUS.PENDING },
+          newValue: {
+            status: PAYMENT_STATUS.SUCCESS,
+            amount: payment.amount,
+            bookingId: payment.booking.id,
+            razorpayPaymentId: payment.razorpayPaymentId,
+          },
+        });
+      } catch (auditErr: any) {
+        this.logger.warn(`Failed to create payment audit log: ${auditErr?.message}`);
+      }
+
       if (newlyAssignedPurohitUserIds.length > 0) {
         for (const purohitUserId of newlyAssignedPurohitUserIds) {
           try {
@@ -5934,6 +6063,32 @@ export class PaymentService {
               NOTIFICATION_TYPE.BOOKING,
               payment.booking.id,
               'BOOKING',
+              true,
+              {
+                bookingId: payment.booking.id,
+                bookingNumber: payment.booking.bookingNumber,
+                status: payment.booking.status,
+                booking: payment.booking,
+              },
+            );
+
+            this.bookingGateway.notifyUser(
+              purohitUserId,
+              'new_booking',
+              {
+                message: `You have received a new booking request (Booking B-${payment.booking.id}).`,
+                booking: payment.booking,
+                bookingId: payment.booking.id,
+              },
+            );
+
+            this.bookingGateway.notifyUser(
+              purohitUserId,
+              'booking_status_updated',
+              {
+                message: `Booking status updated to ${payment.booking.status}`,
+                booking: payment.booking,
+              },
             );
           } catch (notifyErr: any) {
             this.logger.warn(
@@ -5998,28 +6153,96 @@ export class PaymentService {
                 )
                 : 'Scheduled Time';
 
-              this.logger.log(
-                `[BookingEmail] Sending booking completed email to customer for booking #${fullBooking.bookingNumber}...`,
-              );
-              await this.emailService.sendCustomerBookingCompletedEmail({
-                email: fullBooking.customer.email,
-                customerName,
-                bookingId: fullBooking.bookingNumber || `B-${fullBooking.id}`,
-                serviceName: fullBooking.service?.name || 'Vedic Pooja',
-                servicePlan: fullBooking.plan ? String(fullBooking.plan) : undefined,
-                planName: fullBooking.plan ? String(fullBooking.plan) : undefined,
-                bookingDate,
-                bookingTime,
-                purohitName,
-                totalAmount:
-                  Number(fullBooking.finalAmount) ||
-                  Number(payment.amount) ||
-                  0,
-                paymentStatus: fullBooking.paymentStatus || 'PAID',
-              });
-              this.logger.log(
-                `[BookingEmail] Customer booking completed email sent successfully for booking #${fullBooking.bookingNumber}.`,
-              );
+              const totalAmountVal = Number(fullBooking.finalAmount) || Number(payment.amount) || 0;
+              const paidAmountVal = Number(fullBooking.paidAmount) || Number(payment.amount) || 0;
+              const remainingAmountVal = Number(fullBooking.remainingAmount ?? 0);
+              const isAstrology = fullBooking.bookingType === BOOKING_TYPE.ASTROLOGY;
+              const effectiveServiceName = fullBooking.service?.name || (isAstrology ? 'Astrology Consultation' : 'Vedic Pooja');
+
+              const addressSnapshot = fullBooking.addressSnapshot as Record<string, any> | undefined;
+              const bookingAddress =
+                addressSnapshot?.['fullAddress'] ||
+                [
+                  addressSnapshot?.['addressLine1'],
+                  addressSnapshot?.['addressLine2'],
+                  addressSnapshot?.['city'],
+                  addressSnapshot?.['state'],
+                  addressSnapshot?.['pincode'],
+                ].filter(Boolean).join(', ') ||
+                (isAstrology ? 'Online Video / Audio Consultation' : 'Scheduled Location');
+
+              if (fullBooking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL) {
+                // Token / Partial Payment: send meaningful reminder to complete remaining balance before puja completion
+                this.logger.log(
+                  `[BookingEmail] Sending advance token payment email to customer for booking #${fullBooking.bookingNumber}...`,
+                );
+                await this.emailService.sendCustomerBookingTokenPaymentEmail({
+                  email: fullBooking.customer.email,
+                  customerName,
+                  bookingId: fullBooking.bookingNumber || `B-${fullBooking.id}`,
+                  bookingNumber: fullBooking.bookingNumber,
+                  serviceName: effectiveServiceName,
+                  servicePlan: fullBooking.plan ? String(fullBooking.plan) : undefined,
+                  planName: fullBooking.plan ? String(fullBooking.plan) : undefined,
+                  bookingDate,
+                  bookingTime,
+                  bookingAddress,
+                  purohitName,
+                  totalAmount: totalAmountVal,
+                  amountPaid: Number(payment.amount),
+                  remainingAmount: remainingAmountVal,
+                });
+                this.logger.log(
+                  `[BookingEmail] Advance token payment email sent successfully for booking #${fullBooking.bookingNumber}.`,
+                );
+              } else if (wasBookingCompleted) {
+                // Booking was ONGOING and fully completed
+                this.logger.log(
+                  `[BookingEmail] Sending booking completed email to customer for booking #${fullBooking.bookingNumber}...`,
+                );
+                await this.emailService.sendCustomerBookingCompletedEmail({
+                  email: fullBooking.customer.email,
+                  customerName,
+                  bookingId: fullBooking.bookingNumber || `B-${fullBooking.id}`,
+                  serviceName: effectiveServiceName,
+                  servicePlan: fullBooking.plan ? String(fullBooking.plan) : undefined,
+                  planName: fullBooking.plan ? String(fullBooking.plan) : undefined,
+                  bookingDate,
+                  bookingTime,
+                  bookingAddress,
+                  purohitName,
+                  totalAmount: totalAmountVal,
+                  paymentStatus: 'PAID',
+                });
+                this.logger.log(
+                  `[BookingEmail] Customer booking completed email sent successfully for booking #${fullBooking.bookingNumber}.`,
+                );
+              } else {
+                // Full payment completed upfront / settled
+                this.logger.log(
+                  `[BookingEmail] Sending full booking payment confirmation email to customer for booking #${fullBooking.bookingNumber}...`,
+                );
+                await this.emailService.sendCustomerBookingConfirmationEmail({
+                  email: fullBooking.customer.email,
+                  customerName,
+                  bookingId: fullBooking.bookingNumber || `B-${fullBooking.id}`,
+                  serviceName: effectiveServiceName,
+                  servicePlan: fullBooking.plan ? String(fullBooking.plan) : undefined,
+                  planName: fullBooking.plan ? String(fullBooking.plan) : undefined,
+                  bookingDate,
+                  bookingTime,
+                  bookingAddress,
+                  purohitName,
+                  totalAmount: totalAmountVal,
+                  amountPaid: paidAmountVal,
+                  pendingAmount: 0,
+                  paymentStatus: 'PAID',
+                  bookingStatus: fullBooking.status,
+                });
+                this.logger.log(
+                  `[BookingEmail] Full booking payment confirmation email sent successfully for booking #${fullBooking.bookingNumber}.`,
+                );
+              }
             }
           } catch (emailErr) {
             this.logger.error(
@@ -6027,6 +6250,39 @@ export class PaymentService {
               emailErr instanceof Error ? emailErr.stack : String(emailErr),
             );
           }
+        }
+      }
+
+      if (payment.booking.astrologerId) {
+        if (!wasPaymentPaid) {
+          await this.notificationService.createNotification(
+            payment.booking.astrologerId,
+            'Payment Successful',
+            `The customer has paid for Astrology Booking #${payment.booking.bookingNumber || payment.booking.id}.`,
+            NOTIFICATION_TYPE.PAYMENT,
+            payment.id,
+            'PAYMENT',
+          );
+        }
+
+        if (!wasBookingCompleted) {
+          this.bookingGateway.notifyUser(
+            payment.booking.astrologerId,
+            'booking_status_updated',
+            {
+              message: `Booking status updated to ${payment.booking.status}`,
+              booking: payment.booking,
+            },
+          );
+
+          await this.notificationService.createNotification(
+            payment.booking.astrologerId,
+            'Booking Status Updated',
+            `Astrology booking ${payment.booking.bookingNumber || `B-${payment.booking.id}`} status has been updated to ${payment.booking.status}.`,
+            NOTIFICATION_TYPE.BOOKING_STATUS,
+            payment.booking.id,
+            'BOOKING',
+          );
         }
       }
 
@@ -6623,6 +6879,99 @@ export class PaymentService {
     } catch (err: any) {
       this.logger.warn(
         `Failed to send payment failure notification/email: ${err?.message}`,
+      );
+    }
+  }
+
+  private async notifyAndEmailBookingPaymentFailure(
+    payment: Payment,
+    reason?: string,
+  ): Promise<void> {
+    const bookingId = payment.bookingId ?? payment.booking?.id;
+    if (
+      !bookingId ||
+      (payment.paymentType !== PAYMENT_TYPE.BOOKING_PAYMENT &&
+        payment.paymentType !== PAYMENT_TYPE.ASTROLOGY_PAYMENT)
+    ) {
+      return;
+    }
+
+    try {
+      const bookingRepo = this.dataSource.getRepository(Booking);
+      const booking = await bookingRepo.findOne({
+        where: { id: bookingId },
+        relations: ['service', 'customer'],
+      });
+
+      const customerId = payment.payerId || booking?.customerId;
+      const bookingNumber = booking?.bookingNumber || `B-${bookingId}`;
+      const effectiveReason = reason || payment.failureReason || 'Payment declined by bank or gateway';
+      const isAstrology = booking?.bookingType === BOOKING_TYPE.ASTROLOGY;
+      const serviceName = isAstrology
+        ? 'Astrology Consultation'
+        : (booking as any)?.service?.name || 'Vedic Pooja';
+
+      if (customerId) {
+        await this.notificationService.createNotification(
+          customerId,
+          'Payment Failed',
+          `Payment of ₹${payment.amount} for Booking #${bookingNumber} failed. Reason: ${effectiveReason}. Please retry to secure your reservation.`,
+          NOTIFICATION_TYPE.PAYMENT,
+          bookingId,
+          'BOOKING',
+        );
+      }
+
+      if (this.emailService) {
+        let payerEmail = booking?.customer?.email;
+        let customerName =
+          [booking?.customer?.firstName, booking?.customer?.lastName]
+            .filter(Boolean)
+            .join(' ') || 'Devotee';
+
+        if (!payerEmail && customerId) {
+          const userRepo = this.dataSource.getRepository(User);
+          const payer = await userRepo.findOne({ where: { id: customerId } });
+          payerEmail = payer?.email;
+          if (payer) {
+            customerName = [payer.firstName, payer.lastName].filter(Boolean).join(' ') || 'Devotee';
+          }
+        }
+
+        if (payerEmail) {
+          await this.emailService.sendCustomerBookingPaymentFailedEmail({
+            email: payerEmail,
+            customerName,
+            bookingId,
+            bookingNumber,
+            serviceName,
+            amount: Number(payment.amount),
+            failureReason: effectiveReason,
+          });
+        }
+      }
+
+      if (booking) {
+        await this.auditLogService.createAuditLog({
+          actorId: payment.payerId || null,
+          actorType: payment.payerId ? ACTOR_TYPE.USER : ACTOR_TYPE.SYSTEM,
+          actorRole: undefined,
+          module: AUDIT_MODULE.BOOKING,
+          entity: 'Booking',
+          entityId: String(booking.id),
+          action: 'BOOKING_PAYMENT_FAILED',
+          message: `Payment #${payment.id} for Booking #${bookingNumber} failed: ${effectiveReason}.`,
+          oldValue: { paymentStatus: booking.paymentStatus },
+          newValue: {
+            paymentStatus: booking.paymentStatus,
+            paymentId: payment.id,
+            failureReason: effectiveReason,
+          },
+        });
+      }
+    } catch (failedNotifyErr: any) {
+      this.logger.warn(
+        `Failed to send booking payment failure notification/email: ${failedNotifyErr?.message}`,
       );
     }
   }

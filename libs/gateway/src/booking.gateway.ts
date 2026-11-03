@@ -4,13 +4,17 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
+import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
+import axios from 'axios';
 
 @WebSocketGateway({ cors: { origin: '*' } })
 export class BookingGateway
   implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
+
+  private readonly logger = new Logger(BookingGateway.name);
 
   handleConnection(client: Socket) {
     const auth = client.handshake.auth || {};
@@ -52,27 +56,79 @@ export class BookingGateway
     }
   }
 
+  private async bridgeSocketToUserService(
+    rooms: string[],
+    event: string,
+    payload: any,
+  ): Promise<void> {
+    if (process.env.CURRENT_SERVICE === 'user-service') {
+      return;
+    }
+
+    const primaryPort = process.env.USER_MANAGEMENT_PORT || 8011;
+    try {
+      await axios.post(
+        `http://127.0.0.1:${primaryPort}/api/users/internal/emit-notification`,
+        { rooms, event, payload },
+        { timeout: 3000 },
+      );
+    } catch (err: unknown) {
+      const errCode = (err as { code?: string })?.code;
+      if (errCode === 'ECONNREFUSED' && Number(primaryPort) !== 5001) {
+        try {
+          await axios.post(
+            `http://127.0.0.1:5001/api/users/internal/emit-notification`,
+            { rooms, event, payload },
+            { timeout: 3000 },
+          );
+          return;
+        } catch {
+          // ignore fallback error
+        }
+      }
+      this.logger.debug(
+        `Cross-service socket bridge from BookingGateway failed: ${(err as Error)?.message || err}`,
+      );
+    }
+  }
+
   notifyUser(
     userId: string | number,
     eventName: string,
     data: unknown,
   ): void {
     this.server?.to(`user:${userId}`).emit(eventName, data);
+    this.bridgeSocketToUserService([`user:${userId}`], eventName, data).catch(() => {});
+  }
+
+  notifyUsers(
+    userIds: (string | number)[],
+    eventName: string,
+    data: unknown,
+  ): void {
+    if (!userIds || userIds.length === 0) return;
+    const rooms = userIds.map((id) => `user:${id}`);
+    this.server?.to(rooms).emit(eventName, data);
+    this.bridgeSocketToUserService(rooms, eventName, data).catch(() => {});
   }
 
   emitNotification(userId: string | number, data: unknown): void {
     this.server?.to(`user:${userId}`).emit('notification:new', data);
+    this.bridgeSocketToUserService([`user:${userId}`], 'notification:new', data).catch(() => {});
   }
 
   notifyAdmin(eventName: string, data: unknown): void {
     this.server?.to('admin').emit(eventName, data);
+    this.bridgeSocketToUserService(['admin'], eventName, data).catch(() => {});
   }
 
   emitAdminNotification(data: unknown): void {
     this.server?.to('admin').emit('notification:new', data);
+    this.bridgeSocketToUserService(['admin'], 'notification:new', data).catch(() => {});
   }
 
   dismissNotification(userId: string | number) {
     this.server?.to(`user:${userId}`).emit('booking_taken');
+    this.bridgeSocketToUserService([`user:${userId}`], 'booking_taken', {}).catch(() => {});
   }
 }

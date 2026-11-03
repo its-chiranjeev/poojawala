@@ -244,7 +244,9 @@ export const paymentInvoiceTemplate = (
     .includes('proforma');
 
   const hasError =
-    Boolean(data.errorMessage) && data.errorMessage.trim() !== '-';
+    (Boolean(data.errorMessage) && data.errorMessage.trim() !== '-') ||
+    data.paymentStatus?.toLowerCase() === 'failed' ||
+    data.statusClass?.toLowerCase() === 'failed';
 
   const finalAmount = Number(data.finalAmount) || 0;
 
@@ -1615,6 +1617,21 @@ export const paymentInvoiceTemplate = (
               ${isProformaInvoice ? 'Proforma Invoice' : 'Tax Invoice'}
             </div>
           </div>
+
+          ${hasError
+            ? `
+                <div class="payment-cell" style="grid-column: span 2; border-color: rgba(239, 68, 68, 0.4); background: #fef2f2;">
+                  <div class="payment-label" style="color: var(--danger); font-weight: 700;">
+                    Payment Failure Reason
+                  </div>
+
+                  <div class="payment-value" style="color: var(--danger); font-weight: 600;">
+                    ${displayValue(data.errorMessage && data.errorMessage.trim() !== '-' ? data.errorMessage : 'Payment transaction failed or declined')}
+                  </div>
+                </div>
+              `
+            : ''
+          }
 
           ${showRazorpayCharges
             ? `

@@ -130,6 +130,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         isOnline: true,
         isOffline: true,
       }),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
 
     mockBookingRepo = {
@@ -176,6 +177,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
     };
     mockSmsService = {};
     mockEmailService = {
+      sendCustomerBookingCreatedEmail: jest.fn().mockResolvedValue({}),
       sendCustomerBookingConfirmationEmail: jest.fn().mockResolvedValue({}),
       sendPurohitBookingAssignmentEmail: jest.fn().mockResolvedValue({}),
     };
@@ -233,6 +235,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
 
     serviceService = new ServiceService(
       mockServiceRepo as any,
+      {} as any,
       mockS3Service as any,
       mockPurohitServiceRepo as any,
       mockPurohitProfileRepo as any,
@@ -708,7 +711,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       const savedBooking = getLastSavedBooking();
       expect(savedBooking.plan).toBe(SERVICE_PLAN.BASIC);
       expect(res.bookingId).toBe(999);
-      expect(res.status).toBe(BOOKING_STATUS.PENDING);
+      expect(res.status).toBe(BOOKING_STATUS.CREATED);
     });
 
     it('20. Backend resolves plans.basic.price', async () => {
@@ -1437,7 +1440,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       expect(res).toEqual({
         bookingId: 999,
         bookingNumber: expect.stringMatching(/^PW/),
-        status: BOOKING_STATUS.PENDING,
+        status: BOOKING_STATUS.CREATED,
         paymentType: BOOKING_PAYMENT_TYPE.TOKEN,
         paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
         paymentId: 555,
@@ -1535,7 +1538,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       expect(res).toEqual({
         bookingId: 999,
         bookingNumber: expect.stringMatching(/^PW/),
-        status: BOOKING_STATUS.PENDING,
+        status: BOOKING_STATUS.CREATED,
         paymentType: BOOKING_PAYMENT_TYPE.TOKEN,
         paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
         paymentId: null,
@@ -1581,7 +1584,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       });
 
       expect(res.paymentStatus).toBe(BOOKING_PAYMENT_STATUS.PENDING);
-      expect(res.status).toBe(BOOKING_STATUS.PENDING);
+      expect(res.status).toBe(BOOKING_STATUS.CREATED);
       expect(res.paymentUrl).toBeDefined();
 
       // No Purohit was notified at creation time
@@ -2008,10 +2011,12 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
           astrologerId: 42,
           servicePrice: 200,
           finalAmount: 200,
+          status: BOOKING_STATUS.CREATED,
           paymentType: BOOKING_PAYMENT_TYPE.TOKEN,
         }),
       );
 
+      expect(res.status).toBe(BOOKING_STATUS.CREATED);
       expect(res.paymentUrl).toBe('https://rzp.io/i/testlink');
     });
 
@@ -2467,7 +2472,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
           });
 
           expect(res.bookingId).toBe(999);
-          expect(res.status).toBe(BOOKING_STATUS.PENDING);
+          expect(res.status).toBe(BOOKING_STATUS.CREATED);
         } finally {
           nowSpy.mockRestore();
         }
@@ -2488,7 +2493,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         });
 
         expect(res.bookingId).toBe(999);
-        expect(res.status).toBe(BOOKING_STATUS.PENDING);
+        expect(res.status).toBe(BOOKING_STATUS.CREATED);
       });
 
       it('verifies equivalent timestamps expressed in IST and UTC produce identical validation results', async () => {
@@ -2689,6 +2694,313 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
           }),
         ).rejects.toThrow(new BadRequestException('Booking must be scheduled at least 120 minutes in advance'));
       });
+    });
+  });
+
+
+  describe('Booking Creation — Customer Email & Audit Log Management', () => {
+    let mockAstrologerProfileRepo: any;
+
+    beforeEach(() => {
+      mockAstrologerProfileRepo = {
+        findOne: jest.fn().mockResolvedValue({
+          id: 10,
+          userId: 42,
+          verificationStatus: 'APPROVED',
+          commissionPrice: 200,
+          user: {
+            id: 42,
+            firstName: 'Acharya',
+            lastName: 'Ji',
+            email: 'astrologer@example.com',
+          },
+        }),
+      };
+
+      const originalGetRepo = mockEntityManager.getRepository;
+      mockEntityManager.getRepository = jest.fn().mockImplementation((entity) => {
+        if (entity === AstrologerProfile) return mockAstrologerProfileRepo;
+        return originalGetRepo(entity);
+      });
+    });
+
+    it('sends sendCustomerBookingCreatedEmail and creates audit log upon createBooking', async () => {
+      const service = createPlanService();
+      mockServiceRepo.findOne.mockResolvedValue(service);
+
+      const scheduledAhead = new Date(Date.now() + 180 * 60 * 1000).toISOString();
+      const res = await bookingService.createBooking(mockCustomerUser, {
+        serviceId: 1,
+        customerAddressId: mockAddress.id,
+        scheduledAt: scheduledAhead,
+        bookingMode: BOOKING_MODE.OFFLINE,
+        plan: SERVICE_PLAN.STANDARD,
+        paymentOption: BOOKING_PAYMENT_TYPE.TOKEN,
+      });
+
+      expect(res.status).toBe(BOOKING_STATUS.CREATED);
+      expect(res.paymentStatus).toBe(BOOKING_PAYMENT_STATUS.PENDING);
+      expect(res.paymentUrl).toBe('https://rzp.io/i/testlink');
+
+      // Email sent to customer with payment instructions
+      expect(mockEmailService.sendCustomerBookingCreatedEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: mockCustomerUser.email,
+          payableAmount: expect.any(Number),
+          paymentUrl: 'https://rzp.io/i/testlink',
+          paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+          bookingStatus: BOOKING_STATUS.CREATED,
+        }),
+      );
+
+      // Audit log created with BOOKING_CREATED action and comprehensive details
+      expect(mockAuditLogService.createAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'BOOKING_CREATED',
+          module: 'BOOKING',
+          entity: 'Booking',
+          newValue: expect.objectContaining({
+            status: BOOKING_STATUS.CREATED,
+            paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+            customerId: mockCustomerUser.id,
+          }),
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('sends sendCustomerBookingCreatedEmail and creates audit log upon createAstrologyBooking', async () => {
+      const scheduledAhead = new Date(Date.now() + 180 * 60 * 1000).toISOString();
+      const res = await bookingService.createAstrologyBooking(mockCustomerUser, {
+        astrologerId: 42,
+        scheduledAt: scheduledAhead,
+      });
+
+      expect(res.status).toBe(BOOKING_STATUS.CREATED);
+      expect(res.paymentStatus).toBe(BOOKING_PAYMENT_STATUS.PENDING);
+
+      // Email sent to customer with astrology consultation details
+      expect(mockEmailService.sendCustomerBookingCreatedEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: mockCustomerUser.email,
+          serviceName: 'Astrology Consultation',
+          bookingAddress: 'Online Video / Audio Consultation',
+          isAstrology: true,
+          bookingStatus: BOOKING_STATUS.CREATED,
+        }),
+      );
+
+      // Audit log created with ASTROLOGY_BOOKING_CREATED
+      expect(mockAuditLogService.createAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'ASTROLOGY_BOOKING_CREATED',
+          module: 'BOOKING',
+          entity: 'Booking',
+          newValue: expect.objectContaining({
+            status: BOOKING_STATUS.CREATED,
+            paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+          }),
+        }),
+        expect.anything(),
+      );
+    });
+  });
+  // ══════════════════════════════════════════════════════════════════════════════
+  // Section: assignBookingToPurohit Flow & Zero/Null Purohit Pricing
+  // ══════════════════════════════════════════════════════════════════════════════
+  describe('assignBookingToPurohit Flow & Platform-Defined Pricing', () => {
+    const adminUser = { id: 1, role: USER_ROLE.ADMIN } as User;
+
+    it('successfully assigns Purohit when onlinePrice and offlinePrice are null or 0', async () => {
+      const booking = {
+        id: 501,
+        bookingNumber: 'B-501',
+        serviceId: 5,
+        bookingMode: 'ONLINE',
+        status: BOOKING_STATUS.PENDING,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PARTIAL,
+        paymentType: BOOKING_PAYMENT_TYPE.TOKEN,
+        servicePrice: 1500,
+        finalAmount: 1500,
+        purohitId: null,
+        scheduledAt: new Date(Date.now() + 86400000),
+      } as any;
+
+      const purohitProfile = {
+        id: 77,
+        userId: 200,
+        verificationStatus: 'APPROVED',
+        isOnlineAvailable: true,
+        user: { id: 200, role: USER_ROLE.PUROHIT, status: 'ACTIVE' },
+      };
+
+      const matchingPurohitService = {
+        id: 1,
+        purohitId: 77,
+        serviceId: 5,
+        isActive: true,
+        isOnline: true,
+        isOffline: true,
+        onlinePrice: null, // No pricing configured on purohit
+        offlinePrice: 0,
+      };
+
+      mockAssignmentService.findEligiblePurohitIds.mockResolvedValue([77]);
+
+      const createChainableQb = (result: any) => {
+        const qb: any = {};
+        qb.where = jest.fn().mockReturnValue(qb);
+        qb.andWhere = jest.fn().mockReturnValue(qb);
+        qb.setLock = jest.fn().mockReturnValue(qb);
+        qb.innerJoinAndSelect = jest.fn().mockReturnValue(qb);
+        qb.leftJoinAndSelect = jest.fn().mockReturnValue(qb);
+        qb.select = jest.fn().mockReturnValue(qb);
+        qb.getOne = jest.fn().mockResolvedValue(result);
+        qb.getMany = jest.fn().mockResolvedValue(result ? [result] : []);
+        return qb;
+      };
+
+      mockDataSource.transaction.mockImplementationOnce(async (cb: any) => {
+        const fakeManager = {
+          getRepository: (entity: any) => {
+            if (entity === Booking) {
+              return {
+                createQueryBuilder: () => createChainableQb(booking),
+                save: jest.fn().mockImplementation(async (b) => b),
+                findOne: jest.fn().mockResolvedValue({
+                  ...booking,
+                  purohitId: 77,
+                  status: BOOKING_STATUS.ACCEPTED,
+                  service: { id: 5, name: 'Puja' },
+                }),
+              };
+            }
+            if (entity === PurohitProfile) {
+              return {
+                createQueryBuilder: () => createChainableQb(purohitProfile),
+                findOne: jest.fn().mockResolvedValue(purohitProfile),
+                update: jest.fn().mockResolvedValue({ affected: 1 }),
+              };
+            }
+            if (entity === PurohitService) {
+              return {
+                findOne: jest.fn().mockResolvedValue(matchingPurohitService),
+              };
+            }
+            if (entity === Service) {
+              return {
+                findOne: jest.fn().mockResolvedValue({ id: 5, name: 'Puja' }),
+              };
+            }
+            return {
+              findOne: jest.fn().mockResolvedValue(null),
+              find: jest.fn().mockResolvedValue([]),
+              save: jest.fn().mockImplementation(async (x) => x),
+            };
+          },
+        };
+        return cb(fakeManager);
+      });
+
+      const res = await bookingService.assignBookingToPurohit(adminUser, 501, {
+        purohitId: 200,
+      });
+
+      expect(res.message).toBe('Booking assigned to Purohit successfully');
+      expect(booking.purohitId).toBe(77);
+      expect(booking.status).toBe(BOOKING_STATUS.ACCEPTED);
+      expect(booking.assignmentType).toBe('MANUAL');
+    });
+
+    it('allows assigning a booking in CREATED status if payment is PARTIAL', async () => {
+      const booking = {
+        id: 502,
+        bookingNumber: 'B-502',
+        serviceId: 5,
+        bookingMode: 'ONLINE',
+        status: BOOKING_STATUS.CREATED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PARTIAL,
+        paymentType: BOOKING_PAYMENT_TYPE.TOKEN,
+        servicePrice: 2000,
+        finalAmount: 2000,
+        purohitId: null,
+        scheduledAt: new Date(Date.now() + 86400000),
+      } as any;
+
+      const purohitProfile = {
+        id: 88,
+        userId: 201,
+        verificationStatus: 'APPROVED',
+        isOnlineAvailable: true,
+        user: { id: 201, role: USER_ROLE.PUROHIT, status: 'ACTIVE' },
+      };
+
+      const matchingPurohitService = {
+        id: 2,
+        purohitId: 88,
+        serviceId: 5,
+        isActive: true,
+        isOnline: true,
+        onlinePrice: null,
+      };
+
+      mockAssignmentService.findEligiblePurohitIds.mockResolvedValue([88]);
+
+      const createChainableQb = (result: any) => {
+        const qb: any = {};
+        qb.where = jest.fn().mockReturnValue(qb);
+        qb.setLock = jest.fn().mockReturnValue(qb);
+        qb.innerJoinAndSelect = jest.fn().mockReturnValue(qb);
+        qb.getOne = jest.fn().mockResolvedValue(result);
+        return qb;
+      };
+
+      mockDataSource.transaction.mockImplementationOnce(async (cb: any) => {
+        const fakeManager = {
+          getRepository: (entity: any) => {
+            if (entity === Booking) {
+              return {
+                createQueryBuilder: () => createChainableQb(booking),
+                save: jest.fn().mockImplementation(async (b) => b),
+                findOne: jest.fn().mockResolvedValue({
+                  ...booking,
+                  purohitId: 88,
+                  status: BOOKING_STATUS.ACCEPTED,
+                }),
+              };
+            }
+            if (entity === PurohitProfile) {
+              return {
+                createQueryBuilder: () => createChainableQb(purohitProfile),
+              };
+            }
+            if (entity === PurohitService) {
+              return {
+                findOne: jest.fn().mockResolvedValue(matchingPurohitService),
+              };
+            }
+            if (entity === Service) {
+              return {
+                findOne: jest.fn().mockResolvedValue({ id: 5, name: 'Puja' }),
+              };
+            }
+            return {
+              findOne: jest.fn().mockResolvedValue(null),
+              find: jest.fn().mockResolvedValue([]),
+              save: jest.fn().mockImplementation(async (x) => x),
+            };
+          },
+        };
+        return cb(fakeManager);
+      });
+
+      const res = await bookingService.assignBookingToPurohit(adminUser, 502, {
+        purohitId: 201,
+      });
+
+      expect(res.message).toBe('Booking assigned to Purohit successfully');
+      expect(booking.status).toBe(BOOKING_STATUS.ACCEPTED);
+      expect(booking.purohitId).toBe(88);
     });
   });
 });

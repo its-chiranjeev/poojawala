@@ -667,6 +667,7 @@ export class BookingService {
         );
 
         const activeBookingStatuses = [
+          BOOKING_STATUS.CREATED,
           BOOKING_STATUS.PENDING,
           BOOKING_STATUS.ACCEPTED,
           BOOKING_STATUS.ENROUTE,
@@ -839,7 +840,7 @@ export class BookingService {
           paidAmount,
           remainingAmount,
           priceBreakDown,
-          status: BOOKING_STATUS.PENDING,
+          status: BOOKING_STATUS.CREATED,
           paymentType:
             dto.paymentOption === BOOKING_PAYMENT_TYPE.FULL || (dto.paymentOption as any) === 'FULL'
               ? BOOKING_PAYMENT_TYPE.FULL
@@ -929,10 +930,16 @@ export class BookingService {
             message: `Customer created Booking B-${savedBooking.id}.`,
             oldValue: undefined,
             newValue: {
+              bookingNumber: savedBooking.bookingNumber,
               status: savedBooking.status,
               paymentStatus: savedBooking.paymentStatus,
+              paymentType: savedBooking.paymentType,
+              finalAmount: savedBooking.finalAmount,
+              tokenAmount: savedBooking.tokenAmount,
+              remainingAmount: savedBooking.remainingAmount,
               serviceId: savedBooking.serviceId,
               scheduledAt: savedBooking.scheduledAt,
+              customerId: savedBooking.customerId,
             },
           },
           manager, // Pass transaction manager
@@ -1118,6 +1125,79 @@ export class BookingService {
         );
       }
 
+      // Send Booking Created email to customer (with payment link if pending)
+      if (this.emailService && user.email) {
+        try {
+          const customerName =
+            [user.firstName, user.lastName].filter(Boolean).join(' ') ||
+            'Devotee';
+          const scheduledAtDate = transactionResult.savedBooking.scheduledAt
+            ? new Date(transactionResult.savedBooking.scheduledAt)
+            : null;
+          const bookingDate = scheduledAtDate
+            ? scheduledAtDate.toLocaleDateString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+              })
+            : 'Scheduled Date';
+          const bookingTime = scheduledAtDate
+            ? scheduledAtDate.toLocaleTimeString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true,
+              })
+            : 'Scheduled Time';
+
+          const addressSnapshot = transactionResult.savedBooking.addressSnapshot as Record<string, any> | undefined;
+          const bookingAddress =
+            addressSnapshot?.['fullAddress'] ||
+            [
+              addressSnapshot?.['addressLine1'],
+              addressSnapshot?.['addressLine2'],
+              addressSnapshot?.['city'],
+              addressSnapshot?.['state'],
+              addressSnapshot?.['pincode'],
+            ]
+              .filter(Boolean)
+              .join(', ') ||
+            'Address Provided';
+
+          const payableAmount =
+            paymentLinkRes?.amount != null
+              ? Number(paymentLinkRes.amount)
+              : transactionResult.savedBooking.paymentType === BOOKING_PAYMENT_TYPE.TOKEN &&
+                transactionResult.savedBooking.tokenAmount != null
+                ? Number(transactionResult.savedBooking.tokenAmount)
+                : Number(transactionResult.savedBooking.finalAmount);
+
+          await this.emailService.sendCustomerBookingCreatedEmail({
+            email: user.email,
+            customerName,
+            bookingId: transactionResult.savedBooking.id,
+            bookingNumber: transactionResult.savedBooking.bookingNumber,
+            serviceName: transactionResult.service?.name || 'Vedic Pooja',
+            servicePlan: transactionResult.savedBooking.plan ? String(transactionResult.savedBooking.plan) : undefined,
+            planName: transactionResult.savedBooking.plan ? String(transactionResult.savedBooking.plan) : undefined,
+            bookingDate,
+            bookingTime,
+            bookingAddress,
+            totalAmount: Number(transactionResult.savedBooking.finalAmount),
+            payableAmount,
+            paymentType: transactionResult.savedBooking.paymentType,
+            paymentStatus: transactionResult.savedBooking.paymentStatus,
+            bookingStatus: transactionResult.savedBooking.status,
+            paymentUrl: existingPaymentUrl,
+          });
+        } catch (emailErr: any) {
+          this.logger.warn(
+            `Failed to send booking created email to customer: ${emailErr?.message}`,
+          );
+        }
+      }
+
       const bookingData: CreateBookingResponse = {
         bookingId: transactionResult.savedBooking.id,
         bookingNumber: transactionResult.savedBooking.bookingNumber,
@@ -1258,6 +1338,7 @@ export class BookingService {
         // Active booking statuses that block appointment slots:
         // Confirmed, accepted, in-progress, or active unexpired pending bookings.
         const blockingBookingStatuses = [
+          BOOKING_STATUS.CREATED,
           BOOKING_STATUS.PENDING,
           BOOKING_STATUS.ACCEPTED,
           BOOKING_STATUS.ENROUTE,
@@ -1359,7 +1440,7 @@ export class BookingService {
           paidAmount,
           remainingAmount,
           priceBreakDown,
-          status: user.role === USER_ROLE.ADMIN ? BOOKING_STATUS.ACCEPTED : BOOKING_STATUS.PENDING,
+          status: user.role === USER_ROLE.ADMIN ? BOOKING_STATUS.ACCEPTED : BOOKING_STATUS.CREATED,
           paymentType: user.role === USER_ROLE.ADMIN ? BOOKING_PAYMENT_TYPE.DEFERRED : BOOKING_PAYMENT_TYPE.TOKEN,
           paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
           assignmentType: ASSIGNMENT_TYPE.MANUAL,
@@ -1395,11 +1476,17 @@ export class BookingService {
             message: `${user.role === USER_ROLE.ADMIN ? 'Admin' : 'Customer'} created Astrology Booking ${savedBooking.bookingNumber || savedBooking.id}.`,
             oldValue: undefined,
             newValue: {
+              bookingNumber: savedBooking.bookingNumber,
               status: savedBooking.status,
               paymentStatus: savedBooking.paymentStatus,
+              paymentType: savedBooking.paymentType,
+              finalAmount: savedBooking.finalAmount,
+              tokenAmount: savedBooking.tokenAmount,
+              remainingAmount: savedBooking.remainingAmount,
               astrologerId: savedBooking.astrologerId,
               scheduledAt: savedBooking.scheduledAt,
               bookingType: savedBooking.bookingType,
+              customerId: savedBooking.customerId,
             },
           },
           manager,
@@ -1524,6 +1611,56 @@ export class BookingService {
 
       const existingPaymentId = paymentLinkRes?.paymentId ?? null;
       const existingPaymentUrl = paymentLinkRes?.paymentUrl ?? null;
+
+      // Send Astrology Booking Created email to customer (with payment link if pending)
+      if (this.emailService && transactionResult.customer?.email) {
+        try {
+          const customerName =
+            [transactionResult.customer.firstName, transactionResult.customer.lastName].filter(Boolean).join(' ') ||
+            'Devotee';
+          const scheduledAtDate = transactionResult.savedBooking.scheduledAt
+            ? new Date(transactionResult.savedBooking.scheduledAt)
+            : null;
+          const bookingDate = scheduledAtDate
+            ? scheduledAtDate.toLocaleDateString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+              })
+            : 'Scheduled Date';
+          const bookingTime = scheduledAtDate
+            ? scheduledAtDate.toLocaleTimeString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true,
+              })
+            : 'Scheduled Time';
+
+          await this.emailService.sendCustomerBookingCreatedEmail({
+            email: transactionResult.customer.email,
+            customerName,
+            bookingId: transactionResult.savedBooking.id,
+            bookingNumber: transactionResult.savedBooking.bookingNumber,
+            serviceName: 'Astrology Consultation',
+            bookingDate,
+            bookingTime,
+            bookingAddress: 'Online Video / Audio Consultation',
+            totalAmount: Number(transactionResult.savedBooking.finalAmount),
+            payableAmount: Number(paymentLinkRes?.amount || transactionResult.savedBooking.finalAmount),
+            paymentType: transactionResult.savedBooking.paymentType,
+            paymentStatus: transactionResult.savedBooking.paymentStatus,
+            bookingStatus: transactionResult.savedBooking.status,
+            paymentUrl: existingPaymentUrl,
+            isAstrology: true,
+          });
+        } catch (emailErr: any) {
+          this.logger.warn(
+            `Failed to send astrology booking created email to customer: ${emailErr?.message}`,
+          );
+        }
+      }
 
       const bookingData: CreateBookingResponse = {
         bookingId: transactionResult.savedBooking.id,
@@ -2002,6 +2139,7 @@ export class BookingService {
       }
 
       const editableStatuses: BOOKING_STATUS[] = [
+        BOOKING_STATUS.CREATED,
         BOOKING_STATUS.PENDING,
         BOOKING_STATUS.ACCEPTED,
       ];
@@ -2214,6 +2352,7 @@ export class BookingService {
     }
 
     const customerCancellableStatuses: BOOKING_STATUS[] = [
+      BOOKING_STATUS.CREATED,
       BOOKING_STATUS.PENDING,
       BOOKING_STATUS.ACCEPTED,
       BOOKING_STATUS.ENROUTE,
@@ -3396,7 +3535,7 @@ export class BookingService {
               entityId: String(savedBooking.id),
               action: 'BOOKING_RESPONDED',
               message: `Purohit #${purohitProfile.id} accepted Booking B-${savedBooking.id}.`,
-              oldValue: { status: BOOKING_STATUS.PENDING },
+              oldValue: { status: booking.status },
               newValue: { status: savedBooking.status, purohitId: savedBooking.purohitId },
             },
             manager,
@@ -3576,7 +3715,10 @@ export class BookingService {
         throw new NotFoundException('Booking not found');
       }
 
-      const assignableStatuses: BOOKING_STATUS[] = [BOOKING_STATUS.PENDING];
+      const assignableStatuses: BOOKING_STATUS[] = [
+        BOOKING_STATUS.PENDING,
+        BOOKING_STATUS.CREATED,
+      ];
 
       if (!assignableStatuses.includes(booking.status)) {
         throw new BadRequestException(
@@ -3699,16 +3841,7 @@ export class BookingService {
         );
       }
 
-      const exactPrice =
-        booking.bookingMode === BOOKING_MODE.ONLINE
-          ? Number(matchingPurohitService.onlinePrice)
-          : Number(matchingPurohitService.offlinePrice);
-
-      if (!exactPrice || exactPrice <= 0) {
-        throw new BadRequestException(
-          'Exact price is not configured for this mode by the selected Purohit',
-        );
-      }
+      // Note: Purohit does not set service prices anymore. Pricing is platform-defined & snapshotted at booking creation.
 
       const eligiblePurohitIds =
         await this.assignmentService.findEligiblePurohitIds(manager, booking);
@@ -3745,11 +3878,19 @@ export class BookingService {
             );
           }
 
-          const bookingCity = (
+          let bookingCity = (
             booking.customerAddress?.city ||
             (booking.addressSnapshot as any)?.city ||
             ''
           ).trim();
+
+          if (!bookingCity && booking.customerAddressId) {
+            const addr = await manager.getRepository(CustomerAddress).findOne({
+              where: { id: booking.customerAddressId },
+              select: ['city'],
+            });
+            bookingCity = (addr?.city || '').trim();
+          }
 
           const normalizedBookingCity = normalizeCityName(bookingCity);
           const servesCity = serviceAreas.some(
@@ -3784,15 +3925,20 @@ export class BookingService {
         booking.assignmentType = ASSIGNMENT_TYPE.MANUAL;
         booking.filteredPurohitIds = [];
       } else {
-        // TODO: Legacy minPrice/maxPrice / Purohit custom pricing logic.
         // Retained for backward compatibility with historical bookings that lack servicePrice.
-        booking.partnerPayoutAmount = exactPrice;
+        const legacyPrice =
+          (booking.bookingMode === BOOKING_MODE.ONLINE
+            ? Number(matchingPurohitService.onlinePrice)
+            : Number(matchingPurohitService.offlinePrice)) ||
+          Number(booking.partnerPayoutAmount ?? booking.finalAmount ?? 0);
+
+        booking.partnerPayoutAmount = legacyPrice;
         booking.platformCommission = Number(
-          (exactPrice * (Number(booking.commissionPercentage) / 100)).toFixed(2),
+          (legacyPrice * (Number(booking.commissionPercentage) / 100)).toFixed(2),
         );
         booking.finalAmount = Number(
           (
-            exactPrice +
+            legacyPrice +
             booking.platformCommission -
             Number(booking.discountAmount ?? 0) +
             Number(booking.donationAmount ?? 0)
@@ -4173,6 +4319,7 @@ export class BookingService {
       const allowedAstrologyTransitions: Partial<
         Record<BOOKING_STATUS, BOOKING_STATUS[]>
       > = {
+        [BOOKING_STATUS.CREATED]: [BOOKING_STATUS.ACCEPTED, BOOKING_STATUS.PENDING, BOOKING_STATUS.CANCELLED],
         [BOOKING_STATUS.PENDING]: [BOOKING_STATUS.ACCEPTED, BOOKING_STATUS.CANCELLED],
         [BOOKING_STATUS.ACCEPTED]: [BOOKING_STATUS.COMPLETED, BOOKING_STATUS.CANCELLED],
       };
@@ -5173,6 +5320,7 @@ export class BookingService {
       }
 
       const reschedulableStatuses: BOOKING_STATUS[] = [
+        BOOKING_STATUS.CREATED,
         BOOKING_STATUS.PENDING,
         BOOKING_STATUS.ACCEPTED,
       ];
@@ -5213,6 +5361,7 @@ export class BookingService {
       );
 
       const duplicateStatuses: BOOKING_STATUS[] = [
+        BOOKING_STATUS.CREATED,
         BOOKING_STATUS.PENDING,
         BOOKING_STATUS.ACCEPTED,
         BOOKING_STATUS.ENROUTE,
@@ -5990,6 +6139,7 @@ export class BookingService {
         ]);
 
         const activeBookingStatuses = [
+          BOOKING_STATUS.CREATED,
           BOOKING_STATUS.PENDING,
           BOOKING_STATUS.ACCEPTED,
           BOOKING_STATUS.ENROUTE,

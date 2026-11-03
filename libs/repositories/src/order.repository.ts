@@ -18,6 +18,11 @@ export class OrderRepository extends BaseRepository<Order> {
     qb: SelectQueryBuilder<Order>,
     query: GetOrdersQueryDto,
   ): void {
+    // Do not show PENDING_PAYMENT orders in get all orders API to admin or customer
+    qb.andWhere('order.orderStatus != :excludedPendingPaymentStatus', {
+      excludedPendingPaymentStatus: ORDER_STATUS.PENDING_PAYMENT,
+    });
+
     if (query.orderStatus) {
       qb.andWhere('order.orderStatus = :orderStatus', {
         orderStatus: query.orderStatus,

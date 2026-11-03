@@ -25,6 +25,7 @@ export enum SERVICE_PLAN {
 }
 
 export enum BOOKING_STATUS {
+  CREATED = 'CREATED',
   PENDING = 'PENDING',
   ACCEPTED = 'ACCEPTED',
   ENROUTE = 'ENROUTE',
@@ -41,11 +42,6 @@ export enum BOOKING_PAYMENT_STATUS {
   FAILED = 'FAILED',
   PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
   REFUNDED = 'REFUNDED',
-  // TODO: Deprecated.
-  // Payment is required for every booking, including Admin-created bookings.
-  // Admin-created bookings only defer when the payment is collected.
-  // NOT_REQUIRED should no longer be used as a payment status.
-  // NOT_REQUIRED = 'NOT_REQUIRED',
 }
 
 export enum BOOKING_PAYMENT_TYPE {

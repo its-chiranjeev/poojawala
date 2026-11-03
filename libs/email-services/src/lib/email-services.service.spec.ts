@@ -100,6 +100,92 @@ describe('EmailService - Centralized Platform Branding', () => {
     expect(sentHtml).not.toContain('poojawala.com');
   });
 
+  it('should send Booking Created email with pending payment instructions and 1Pooja branding', async () => {
+    mockResendProvider.sendMail.mockClear();
+    await service.sendCustomerBookingCreatedEmail({
+      email: 'customer@example.com',
+      customerName: 'Aarav Patel',
+      bookingId: '1001',
+      bookingNumber: 'PW-1001',
+      serviceName: 'Ganesh Pooja',
+      servicePlan: 'Standard',
+      bookingDate: '2026-11-10',
+      bookingTime: '09:00 AM',
+      bookingAddress: 'Flat 402, Mumbai',
+      totalAmount: 3100,
+      payableAmount: 930,
+      paymentType: 'TOKEN',
+      paymentStatus: 'PENDING',
+      bookingStatus: 'CREATED',
+      paymentUrl: 'https://rzp.io/i/testpay',
+    });
+
+    expect(mockResendProvider.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'customer@example.com',
+        subject: expect.stringContaining('Booking Registered - 1Pooja | Complete Payment for Booking PW-1001'),
+      }),
+    );
+    const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+    expect(sentHtml).toContain('Complete Payment Now');
+    expect(sentHtml).toContain('https://rzp.io/i/testpay');
+    expect(sentHtml).toContain('930');
+    expect(sentHtml).toContain('Advance Token Payment');
+  });
+
+  it('should send Token Payment Confirmed email with remaining balance notice', async () => {
+    mockResendProvider.sendMail.mockClear();
+    await service.sendCustomerBookingTokenPaymentEmail({
+      email: 'customer@example.com',
+      customerName: 'Aarav Patel',
+      bookingId: '1001',
+      bookingNumber: 'PW-1001',
+      serviceName: 'Ganesh Pooja',
+      servicePlan: 'Standard',
+      bookingDate: '2026-11-10',
+      bookingTime: '09:00 AM',
+      bookingAddress: 'Flat 402, Mumbai',
+      totalAmount: 3100,
+      amountPaid: 930,
+      remainingAmount: 2170,
+    });
+
+    expect(mockResendProvider.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'customer@example.com',
+        subject: expect.stringContaining('Advance Payment Confirmed - 1Pooja | Booking PW-1001'),
+      }),
+    );
+    const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+    expect(sentHtml).toContain('2170');
+    expect(sentHtml).toContain('before the conclusion of your Puja ceremony');
+    expect(sentHtml).toContain('Complete Payment Before Ceremony Completion');
+  });
+
+  it('should send Booking Payment Failed email with failure reason', async () => {
+    mockResendProvider.sendMail.mockClear();
+    await service.sendCustomerBookingPaymentFailedEmail({
+      email: 'customer@example.com',
+      customerName: 'Aarav Patel',
+      bookingId: '1001',
+      bookingNumber: 'PW-1001',
+      serviceName: 'Ganesh Pooja',
+      amount: 930,
+      failureReason: 'Payment declined by bank due to insufficient funds',
+      retryPaymentUrl: 'https://rzp.io/i/retrypay',
+    });
+
+    expect(mockResendProvider.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'customer@example.com',
+        subject: expect.stringContaining('Payment Failed - 1Pooja | Booking PW-1001'),
+      }),
+    );
+    const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+    expect(sentHtml).toContain('Payment declined by bank due to insufficient funds');
+    expect(sentHtml).toContain('Retry Payment Now');
+  });
+
   it('should send Booking cancellation email with 1Pooja branding', async () => {
     await service.sendBookingCancellationEmailToCustomer({
       email: 'customer@example.com',

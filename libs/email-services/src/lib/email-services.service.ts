@@ -326,6 +326,234 @@ export class EmailService {
     });
   }
 
+  /**
+   * Sent when a customer creates a new booking and payment is pending.
+   * Informs the devotee that their booking has been received and prompts them to complete payment.
+   */
+  async sendCustomerBookingCreatedEmail(data: {
+    email: string;
+    customerName: string;
+    bookingId: string | number;
+    bookingNumber?: string;
+    serviceName: string;
+    servicePlan?: string;
+    planName?: string;
+    bookingDate: string;
+    bookingTime: string;
+    bookingAddress: string;
+    totalAmount: number;
+    payableAmount: number;
+    paymentType?: string;
+    paymentStatus?: string;
+    bookingStatus?: string;
+    paymentUrl?: string | null;
+    isAstrology?: boolean;
+  }): Promise<void> {
+    const effectivePlan = data.planName || data.servicePlan;
+    const planText = effectivePlan ? ` - ${effectivePlan} Plan` : '';
+    const displayId = data.bookingNumber || `#${data.bookingId}`;
+    const paymentTypeLabel =
+      (data.paymentType || '').toUpperCase() === 'TOKEN'
+        ? 'Advance Token Payment'
+        : 'Full Payment';
+
+    const preheaderText = `Booking ${displayId} received for ${data.serviceName}! Complete payment to confirm.`;
+    const emailMessage = `Thank you for choosing ${platformBrandName}! Your sacred ${data.isAstrology ? 'astrology consultation' : 'pooja service'} booking for <strong>${this.escapeHtml(data.serviceName)}</strong>${effectivePlan ? ` (<strong>${this.escapeHtml(effectivePlan)} Plan</strong>)` : ''} (Booking <strong>${displayId}</strong>) has been registered successfully.
+<br><br>
+To secure your preferred date and time slot and assign our verified Vedic ${data.isAstrology ? 'Astrologer' : 'Purohit'}, please complete your ${paymentTypeLabel.toLowerCase()} of <strong>₹${data.payableAmount}</strong>.`;
+
+    const ctaButtonHtml = data.paymentUrl
+      ? `
+        <div style="text-align: center; margin: 28px 0 16px;">
+          <a href="${data.paymentUrl}" target="_blank" rel="noopener noreferrer" style="background-color: #FF6200; color: #ffffff; padding: 14px 32px; text-decoration: none; font-size: 15px; font-weight: 700; border-radius: 8px; display: inline-block; box-shadow: 0 4px 12px rgba(255, 98, 0, 0.35);">
+            Complete Payment Now (₹${data.payableAmount})
+          </a>
+        </div>
+      `
+      : '';
+
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Booking Created - Action Required',
+      userName: data.customerName || 'Devotee',
+      preheaderText,
+      emailMessage,
+      additionalContentHtml: ctaButtonHtml,
+      detailsTable: {
+        title: 'Booking & Payment Overview',
+        rows: [
+          { label: 'Booking Number', value: displayId },
+          { label: data.isAstrology ? 'Consultation' : 'Pooja Service', value: data.serviceName },
+          ...(effectivePlan ? [{ label: 'Service Plan', value: `${effectivePlan} Plan` }] : []),
+          { label: 'Date', value: data.bookingDate },
+          { label: 'Time', value: data.bookingTime },
+          { label: data.isAstrology ? 'Mode' : 'Location', value: data.bookingAddress },
+          { label: 'Total Amount', value: `₹${data.totalAmount}` },
+          { label: 'Payable Now', value: `₹${data.payableAmount} (${paymentTypeLabel})`, isHighlight: true },
+          { label: 'Payment Status', value: data.paymentStatus || 'PENDING' },
+          { label: 'Booking Status', value: data.bookingStatus || 'CREATED' },
+          ...(data.paymentUrl
+            ? [{ label: 'Payment Link', value: data.paymentUrl, link: data.paymentUrl, linkText: 'Click here to pay' }]
+            : []),
+        ],
+      },
+      highlight: {
+        title: 'Slot Reservation Notice',
+        text: `Your selected appointment slot is temporarily reserved. Complete your ${paymentTypeLabel.toLowerCase()} of ₹${data.payableAmount} to initiate Purohit matching and finalize ceremony preparation.`,
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject: `Booking Registered - ${platformBrandName} | Complete Payment for Booking ${displayId}`,
+      html,
+    });
+  }
+
+  /**
+   * Sent when token / partial payment is received.
+   * Confirms advance payment and reminds customer to complete remaining payment before booking completion.
+   */
+  async sendCustomerBookingTokenPaymentEmail(data: {
+    email: string;
+    customerName: string;
+    bookingId: string | number;
+    bookingNumber?: string;
+    serviceName: string;
+    servicePlan?: string;
+    planName?: string;
+    bookingDate: string;
+    bookingTime: string;
+    bookingAddress: string;
+    purohitName?: string;
+    totalAmount: number;
+    amountPaid: number;
+    remainingAmount: number;
+    paymentUrl?: string | null;
+  }): Promise<void> {
+    const effectivePlan = data.planName || data.servicePlan;
+    const planText = effectivePlan ? ` - ${effectivePlan} Plan` : '';
+    const displayId = data.bookingNumber || `#${data.bookingId}`;
+
+    const preheaderText = `Advance payment confirmed for Booking ${displayId}! Remaining balance: ₹${data.remainingAmount}.`;
+    const emailMessage = `We have received your advance token payment of <strong>₹${data.amountPaid}</strong> for <strong>${this.escapeHtml(data.serviceName)}</strong>${effectivePlan ? ` (<strong>${this.escapeHtml(effectivePlan)} Plan</strong>)` : ''} (Booking <strong>${displayId}</strong>). Your booking is confirmed and our Vedic team is preparing for your auspicious ceremony!
+<br><br>
+<div style="background: #FFF7ED; border-left: 4px solid #F97316; padding: 14px 18px; border-radius: 6px; margin: 16px 0;">
+  <strong style="color: #9A3412; font-size: 14px;">⚠️ Important Payment Notice:</strong><br>
+  <span style="color: #7C2D12; font-size: 13px; line-height: 1.5;">
+    Please note that the remaining balance of <strong>₹${data.remainingAmount}</strong> must be completed before the conclusion of your Puja ceremony. Completing the payment in a timely manner ensures an uninterrupted sacred experience and immediate generation of your final Tax Invoice.
+  </span>
+</div>`;
+
+    const ctaButtonHtml = data.paymentUrl
+      ? `
+        <div style="text-align: center; margin: 24px 0 16px;">
+          <a href="${data.paymentUrl}" target="_blank" rel="noopener noreferrer" style="background-color: #FF6200; color: #ffffff; padding: 13px 28px; text-decoration: none; font-size: 14px; font-weight: 700; border-radius: 8px; display: inline-block;">
+            Pay Remaining Balance (₹${data.remainingAmount})
+          </a>
+        </div>
+      `
+      : '';
+
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Advance Payment Received',
+      userName: data.customerName || 'Devotee',
+      preheaderText,
+      emailMessage,
+      additionalContentHtml: ctaButtonHtml,
+      detailsTable: {
+        title: 'Booking & Payment Breakdown',
+        rows: [
+          { label: 'Booking Number', value: displayId },
+          { label: 'Pooja Service', value: data.serviceName },
+          ...(effectivePlan ? [{ label: 'Service Plan', value: `${effectivePlan} Plan` }] : []),
+          { label: 'Date', value: data.bookingDate },
+          { label: 'Time', value: data.bookingTime },
+          { label: 'Pooja Location', value: data.bookingAddress },
+          ...(data.purohitName ? [{ label: 'Assigned Purohit', value: data.purohitName }] : []),
+          { label: 'Total Booking Amount', value: `₹${data.totalAmount}` },
+          { label: 'Advance Paid', value: `₹${data.amountPaid}`, isHighlight: true },
+          { label: 'Remaining Balance Due', value: `₹${data.remainingAmount}`, isHighlight: true },
+          { label: 'Payment Status', value: 'PARTIAL (Advance Paid)' },
+          { label: 'Booking Status', value: 'PENDING (Confirmed)' },
+        ],
+      },
+      highlight: {
+        title: 'Complete Payment Before Ceremony Completion',
+        text: `Kindly ensure the outstanding balance of ₹${data.remainingAmount} is settled before the ceremony concludes. You can pay online anytime from your 1Pooja account dashboard or directly via the payment link.`,
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject: `Advance Payment Confirmed - ${platformBrandName} | Booking ${displayId}`,
+      html,
+    });
+  }
+
+  /**
+   * Sent when a customer's booking payment transaction fails.
+   * Includes the exact failure reason and provides a retry link.
+   */
+  async sendCustomerBookingPaymentFailedEmail(data: {
+    email: string;
+    customerName: string;
+    bookingId: string | number;
+    bookingNumber?: string;
+    serviceName: string;
+    amount: number;
+    failureReason: string;
+    retryPaymentUrl?: string | null;
+  }): Promise<void> {
+    const displayId = data.bookingNumber || `#${data.bookingId}`;
+    const preheaderText = `Payment failed for Booking ${displayId}. Reason: ${data.failureReason}`;
+
+    const emailMessage = `Your payment of <strong>₹${data.amount}</strong> for Booking <strong>${displayId}</strong> (${this.escapeHtml(data.serviceName)}) could not be processed by your bank or the payment gateway.
+<br><br>
+<div style="background: #FEF2F2; border-left: 4px solid #EF4444; padding: 14px 18px; border-radius: 6px; margin: 16px 0;">
+  <strong style="color: #991B1B; font-size: 14px;">Reason for Failure:</strong><br>
+  <span style="color: #7F1D1D; font-size: 13px; line-height: 1.5;">${this.escapeHtml(data.failureReason)}</span>
+</div>
+Please retry your payment using an alternate method (UPI, Netbanking, or Card) to confirm your booking and keep your selected date and time reserved.`;
+
+    const ctaButtonHtml = data.retryPaymentUrl
+      ? `
+        <div style="text-align: center; margin: 24px 0 16px;">
+          <a href="${data.retryPaymentUrl}" target="_blank" rel="noopener noreferrer" style="background-color: #DC2626; color: #ffffff; padding: 13px 28px; text-decoration: none; font-size: 14px; font-weight: 700; border-radius: 8px; display: inline-block;">
+            Retry Payment Now (₹${data.amount})
+          </a>
+        </div>
+      `
+      : '';
+
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Payment Failed',
+      userName: data.customerName || 'Devotee',
+      preheaderText,
+      emailMessage,
+      additionalContentHtml: ctaButtonHtml,
+      detailsTable: {
+        title: 'Transaction Details',
+        rows: [
+          { label: 'Booking Number', value: displayId },
+          { label: 'Service', value: data.serviceName },
+          { label: 'Attempted Amount', value: `₹${data.amount}` },
+          { label: 'Payment Status', value: 'FAILED', isHighlight: true },
+          { label: 'Failure Reason', value: data.failureReason },
+        ],
+      },
+      highlight: {
+        title: 'Retry Your Payment',
+        text: 'No amount has been deducted. You can retry payment anytime by visiting your booking history or using the payment link above to secure your slot.',
+      },
+    });
+
+    await this.sendMail({
+      to: data.email,
+      subject: `Payment Failed - ${platformBrandName} | Booking ${displayId}`,
+      html,
+    });
+  }
+
   async sendCustomerBookingConfirmationEmail(data: {
     email: string;
     customerName: string;
@@ -561,6 +789,7 @@ export class EmailService {
     planName?: string;
     bookingDate: string;
     bookingTime: string;
+    bookingAddress?: string;
     purohitName: string;
     totalAmount: number;
     paymentStatus?: string;
@@ -589,6 +818,7 @@ export class EmailService {
           { label: 'Conducted By', value: data.purohitName },
           { label: 'Date', value: data.bookingDate },
           { label: 'Time', value: data.bookingTime },
+          ...(data.bookingAddress ? [{ label: 'Location / Venue', value: data.bookingAddress }] : []),
           { label: 'Payment Status', value: data.paymentStatus || 'Paid & Settled', isHighlight: true },
           { label: 'Booking Status', value: 'Completed' },
         ],

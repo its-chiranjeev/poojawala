@@ -284,14 +284,10 @@ export class BookingRepository extends BaseRepository<Booking> {
         break;
     }
 
-    // Exclude astrology bookings that are in PENDING status
-    query.andWhere(
-      'NOT (booking.bookingType = :pendingAstrologyType AND booking.status = :pendingAstrologyStatus)',
-      {
-        pendingAstrologyType: BOOKING_TYPE.ASTROLOGY,
-        pendingAstrologyStatus: BOOKING_STATUS.PENDING,
-      },
-    );
+    // Do not show bookings with CREATED status in get all bookings API
+    query.andWhere('booking.status != :excludedCreatedStatus', {
+      excludedCreatedStatus: BOOKING_STATUS.CREATED,
+    });
 
     if (bookingType) {
       if (Array.isArray(bookingType)) {
@@ -793,7 +789,7 @@ export class BookingRepository extends BaseRepository<Booking> {
     const expiredBookings = await this.bookingRepo
       .createQueryBuilder('booking')
       .where('booking.bookingType = :bType', { bType: BOOKING_TYPE.ASTROLOGY })
-      .andWhere('booking.status = :status', { status: BOOKING_STATUS.PENDING })
+      .andWhere('booking.status IN (:...statuses)', { statuses: [BOOKING_STATUS.CREATED, BOOKING_STATUS.PENDING] })
       .andWhere('booking.paymentStatus = :paymentStatus', { paymentStatus: BOOKING_PAYMENT_STATUS.PENDING })
       .andWhere('booking.deletedAt IS NULL')
       .andWhere(
