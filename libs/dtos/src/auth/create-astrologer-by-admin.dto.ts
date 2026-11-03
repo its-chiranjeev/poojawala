@@ -51,6 +51,11 @@ export class CreateAstrologerByAdminDto {
   password!: string;
 
   @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  confirmPassword?: string;
+
+  @IsOptional()
   @IsDateString()
   dob?: string;
 
@@ -64,6 +69,12 @@ export class CreateAstrologerByAdminDto {
   @IsArray()
   @IsString({ each: true })
   qualification?: string[];
+
+  @IsOptional()
+  @Transform(({ value }) => parseStringArray(value))
+  @IsArray()
+  @IsString({ each: true })
+  education?: string[];
 
   @IsOptional()
   @Type(() => Number)
@@ -97,6 +108,42 @@ export class CreateAstrologerByAdminDto {
   @IsString()
   @Transform(({ value }) => value?.trim())
   state?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === true || value === 'true') return true;
+    if (value === false || value === 'false') return false;
+    return value;
+  })
+  isOnlineAvailable?: boolean | string;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === true || value === 'true') return true;
+    if (value === false || value === 'false') return false;
+    return value;
+  })
+  isOfflineAvailable?: boolean | string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  birthPlace?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  rashi?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  gotra?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  profileImage?: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -140,26 +187,71 @@ export class CreateAstrologerByAdminDto {
 
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => value?.trim())
+  aadhaarDoc?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  aadhaarDocUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  panDoc?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  panDocUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  panNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  certificate?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  certificateUrl?: string;
+
+  @IsOptional()
+  @IsString()
   paymentMethod?: string;
 
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => value?.trim())
   accountHolderName?: string;
 
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => value?.trim())
   accountNumber?: string;
 
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => value?.trim())
   ifscCode?: string;
 
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => value?.trim())
   bankName?: string;
 
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => value?.trim())
+  accountType?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
   upiId?: string;
 
   @IsOptional()

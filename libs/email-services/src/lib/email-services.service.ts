@@ -579,11 +579,20 @@ Please retry your payment using an alternate method (UPI, Netbanking, or Card) t
     // Old message retained for reference; replaced with plan-aware message.
     // preheaderText: `Booking #${data.bookingId} for ${data.serviceName} confirmed!`,
     // emailMessage: `Your sacred pooja service for <strong>${this.escapeHtml(data.serviceName)}</strong> has been scheduled successfully.`,
-    const preheaderText = `Booking #${data.bookingId} for ${data.serviceName}${planText} confirmed!`;
-    const emailMessage = `Your sacred pooja service for <strong>${this.escapeHtml(data.serviceName)}</strong>${effectivePlan ? ` (<strong>${this.escapeHtml(effectivePlan)} Plan</strong>)` : ''} has been scheduled successfully.`;
+    const isAstrology =
+      data.serviceName?.toLowerCase().includes('astrolog') ||
+      data.purohitName?.toLowerCase().includes('astrolog');
+
+    const preheaderText = isAstrology
+      ? `Astrology Consultation #${data.bookingId} scheduled & confirmed!`
+      : `Booking #${data.bookingId} for ${data.serviceName}${planText} scheduled & confirmed!`;
+
+    const emailMessage = isAstrology
+      ? `Your astrology consultation with <strong>${this.escapeHtml(data.purohitName || 'our Astrologer')}</strong> for <strong>${this.escapeHtml(data.serviceName)}</strong> has been scheduled and confirmed successfully.`
+      : `Your sacred pooja service for <strong>${this.escapeHtml(data.serviceName)}</strong>${effectivePlan ? ` (<strong>${this.escapeHtml(effectivePlan)} Plan</strong>)` : ''} has been scheduled and confirmed successfully.`;
 
     const html = renderPoojawalaEmail({
-      statusBadge: 'Booking Confirmed',
+      statusBadge: isAstrology ? 'Consultation Scheduled' : 'Booking Scheduled',
       userName: data.customerName || 'Devotee',
       preheaderText,
       emailMessage,
@@ -591,12 +600,12 @@ Please retry your payment using an alternate method (UPI, Netbanking, or Card) t
         title: 'Booking & Payment Details',
         rows: [
           { label: 'Booking ID', value: `#${data.bookingId}` },
-          { label: 'Pooja Service', value: data.serviceName },
+          { label: isAstrology ? 'Consultation Service' : 'Pooja Service', value: data.serviceName },
           ...(effectivePlan ? [{ label: 'Service Plan', value: `${effectivePlan} Plan` }] : []),
           { label: 'Date', value: data.bookingDate },
           { label: 'Time', value: data.bookingTime },
-          { label: 'Pooja Location', value: data.bookingAddress },
-          { label: 'Assigned Purohit', value: data.purohitName },
+          { label: isAstrology ? 'Consultation Mode' : 'Pooja Location', value: data.bookingAddress },
+          { label: isAstrology ? 'Assigned Astrologer' : 'Assigned Purohit', value: data.purohitName },
           { label: 'Amount Paid', value: `₹${data.amountPaid}` },
           { label: 'Pending Amount', value: `₹${data.pendingAmount}` },
           { label: 'Payment Status', value: data.paymentStatus, isHighlight: true },
@@ -612,15 +621,22 @@ Please retry your payment using an alternate method (UPI, Netbanking, or Card) t
           title: 'Special Instructions',
           text: data.specialInstructions,
         }
-        : {
-          title: 'Pooja Day Preparation',
-          text: 'Please ensure basic household pooja essentials and a clean, quiet space are ready at least 15 minutes before the scheduled time.',
-        },
+        : isAstrology
+          ? {
+            title: 'Consultation Preparation',
+            text: 'Please be available at the scheduled time. Ensure a quiet space and stable network connection for your consultation session.',
+          }
+          : {
+            title: 'Pooja Day Preparation',
+            text: 'Please ensure basic household pooja essentials and a clean, quiet space are ready at least 15 minutes before the scheduled time.',
+          },
     });
 
     await this.sendMail({
       to: data.email,
-      subject: `Booking Confirmed - ${platformBrandName} | Booking #${data.bookingId}`,
+      subject: isAstrology
+        ? `Consultation Scheduled - ${platformBrandName} | Booking #${data.bookingId}`
+        : `Booking Confirmed - ${platformBrandName} | Booking #${data.bookingId}`,
       html,
     });
   }

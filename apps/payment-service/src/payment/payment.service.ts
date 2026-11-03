@@ -2122,7 +2122,7 @@ export class PaymentService {
     });
 
     await this.notifyAndEmailBookingPaymentFailure(payment, payment.failureReason);
-    await this.notifyAndEmailProductPaymentFailure(payment, payment.failureReason);
+    // await this.notifyAndEmailProductPaymentFailure(payment, payment.failureReason);
   }
 
   private resolveDatabasePaymentId(
@@ -6195,32 +6195,11 @@ export class PaymentService {
                 this.logger.log(
                   `[BookingEmail] Advance token payment email sent successfully for booking #${fullBooking.bookingNumber}.`,
                 );
-              } else if (wasBookingCompleted) {
-                // Booking was ONGOING and fully completed
-                this.logger.log(
-                  `[BookingEmail] Sending booking completed email to customer for booking #${fullBooking.bookingNumber}...`,
-                );
-                await this.emailService.sendCustomerBookingCompletedEmail({
-                  email: fullBooking.customer.email,
-                  customerName,
-                  bookingId: fullBooking.bookingNumber || `B-${fullBooking.id}`,
-                  serviceName: effectiveServiceName,
-                  servicePlan: fullBooking.plan ? String(fullBooking.plan) : undefined,
-                  planName: fullBooking.plan ? String(fullBooking.plan) : undefined,
-                  bookingDate,
-                  bookingTime,
-                  bookingAddress,
-                  purohitName,
-                  totalAmount: totalAmountVal,
-                  paymentStatus: 'PAID',
-                });
-                this.logger.log(
-                  `[BookingEmail] Customer booking completed email sent successfully for booking #${fullBooking.bookingNumber}.`,
-                );
               } else {
-                // Full payment completed upfront / settled
+                // Full payment completed (upfront or settled balance): send Booking Scheduled / Confirmed Email.
+                // Note: Booking Completed email is ONLY sent when Purohit or Astrologer marks the booking as COMPLETED.
                 this.logger.log(
-                  `[BookingEmail] Sending full booking payment confirmation email to customer for booking #${fullBooking.bookingNumber}...`,
+                  `[BookingEmail] Sending booking scheduled confirmation email to customer for booking #${fullBooking.bookingNumber}...`,
                 );
                 await this.emailService.sendCustomerBookingConfirmationEmail({
                   email: fullBooking.customer.email,
@@ -6235,12 +6214,12 @@ export class PaymentService {
                   purohitName,
                   totalAmount: totalAmountVal,
                   amountPaid: paidAmountVal,
-                  pendingAmount: 0,
+                  pendingAmount: remainingAmountVal,
                   paymentStatus: 'PAID',
                   bookingStatus: fullBooking.status,
                 });
                 this.logger.log(
-                  `[BookingEmail] Full booking payment confirmation email sent successfully for booking #${fullBooking.bookingNumber}.`,
+                  `[BookingEmail] Booking scheduled confirmation email sent successfully for booking #${fullBooking.bookingNumber}.`,
                 );
               }
             }

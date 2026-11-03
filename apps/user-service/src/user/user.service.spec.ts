@@ -380,7 +380,9 @@ describe('UserService - Purohit Verification Rework', () => {
       { id: 31, name: 'Navgrah Shanti', isActive: true } as Service,
     ];
     testPurohitServices = [];
-    testServiceAreas = [];
+    testServiceAreas = [
+      { id: 1, purohitId: 10, city: 'Varanasi', state: 'Uttar Pradesh', addressLabel: 'Varanasi Central', isDefault: true },
+    ];
     testAddresses = [];
 
     mockCustomerFavoriteRepo = {};
@@ -481,6 +483,11 @@ describe('UserService - Purohit Verification Rework', () => {
         if (a) Object.assign(a, payload);
         return Promise.resolve(a);
       }),
+      update: jest.fn().mockImplementation((id: number, payload: any) => {
+        const a = testServiceAreas.find((item) => item.id === id);
+        if (a) Object.assign(a, payload);
+        return Promise.resolve({ affected: 1 });
+      }),
       create: jest.fn().mockImplementation((d: any) => ({
         id: Math.floor(Math.random() * 1000) + 1,
         ...d,
@@ -578,13 +585,20 @@ describe('UserService - Purohit Verification Rework', () => {
           ),
           createQueryBuilder: () => ({
             setLock: () => ({
-              where: () => ({
-                getOne: () => Promise.resolve(testUser),
+              where: (clause: string, params: any) => ({
+                getOne: () => {
+                  const targetId = params?.targetUserId ?? params?.userId;
+                  if (targetId !== undefined) {
+                    return mockUserRepo.findById(targetId);
+                  }
+                  return Promise.resolve(testUser);
+                },
               }),
             }),
             update: () => ({
               set: (payload: any) => {
                 if (payload.status) testUser.status = payload.status;
+                if (payload.isAdminCreated !== undefined) testUser.isAdminCreated = payload.isAdminCreated;
                 return {
                   where: () => ({ execute: () => Promise.resolve({ affected: 1 }) }),
                 };
@@ -632,6 +646,7 @@ describe('UserService - Purohit Verification Rework', () => {
       }
       if (entity === PurohitMedia) {
         return {
+          ...mockPurohitMediaRepo,
           find: mockPurohitMediaRepo.find,
           createQueryBuilder: () => ({
             update: () => ({
@@ -654,6 +669,17 @@ describe('UserService - Purohit Verification Rework', () => {
       }
       if (entity === BankAccount) {
         return {
+          findOne: jest.fn().mockImplementation(({ where }: any) => {
+            const found = testBankAccounts.find(
+              (b) =>
+                (!where?.userId ||
+                  b.userId === where.userId ||
+                  (where.userId === 10 && b.purohitId === 101)) &&
+                (!where?.isPrimary || b.isPrimary === where.isPrimary) &&
+                !b.deletedAt,
+            );
+            return Promise.resolve(found || null);
+          }),
           find: jest.fn().mockImplementation(({ where, order }: any) => {
             let filtered = testBankAccounts.filter(
               (b) =>
@@ -844,6 +870,13 @@ describe('UserService - Purohit Verification Rework', () => {
       }
       if (entity === AstrologerProfile) {
         return {
+          createQueryBuilder: () => ({
+            setLock: () => ({
+              where: () => ({
+                getOne: () => Promise.resolve(testAstrologerProfile),
+              }),
+            }),
+          }),
           findOne: jest.fn().mockImplementation(({ where }: any) => {
             if (testAstrologerProfile && (!where?.userId || testAstrologerProfile.userId === where.userId)) {
               return Promise.resolve(testAstrologerProfile);
@@ -1260,30 +1293,53 @@ describe('UserService - Purohit Verification Rework', () => {
   // PART 1 & 4 — Admin Purohit Services and Service Areas (Tests 1 to 10)
   // =========================================================================
   describe('Admin Purohit Services & Service Areas (Tests 1-10)', () => {
-    it('Test 1 — Create Purohit without services: no service mapping created', async () => {
+    it('Test 1 — Create Purohit without services: no service mapping created and profile auto-approved', async () => {
       const dto = {
         firstName: 'Rahul',
         lastName: 'Sharma',
         email: 'rahul.test1@example.com',
         phone: '9876543211',
         password: 'Password123!',
+        city: 'Varanasi',
+        state: 'Uttar Pradesh',
+        bio: 'Vedic priest with 10 years experience',
+        qualification: ['Acharya in Shukla Yajurveda'],
+        aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+        accountNumber: '123456789012',
+        ifscCode: 'SBIN0001234',
+        accountHolderName: 'Rahul Sharma',
+        serviceAreas: ['Varanasi'],
       };
       const result = await service.createPurohitByAdmin(dto);
       expect(result.success).toBe(true);
       expect(result.data.services).toEqual([]);
+      expect(result.data.user.isAdminCreated).toBe(false);
+      expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+      expect(result.data.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.VERIFIED);
     });
 
-    it('Test 2 — Create Purohit without service areas: no service area mapping created', async () => {
+    it('Test 2 — Create Purohit without service areas: no service area mapping created and profile remains pending', async () => {
       const dto = {
         firstName: 'Rahul',
         lastName: 'Sharma',
         email: 'rahul.test2@example.com',
         phone: '9876543212',
         password: 'Password123!',
+        city: 'Varanasi',
+        state: 'Uttar Pradesh',
+        bio: 'Vedic priest with 10 years experience',
+        qualification: ['Acharya in Shukla Yajurveda'],
+        aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+        accountNumber: '123456789012',
+        ifscCode: 'SBIN0001234',
+        accountHolderName: 'Rahul Sharma',
       };
       const result = await service.createPurohitByAdmin(dto);
       expect(result.success).toBe(true);
       expect(result.data.serviceAreas).toEqual([]);
+      expect(result.data.user.isAdminCreated).toBe(true);
+      expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+      expect(result.data.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.PENDING);
     });
 
     it('Test 3 — Create Purohit with services: correct service mappings created', async () => {
@@ -1293,12 +1349,23 @@ describe('UserService - Purohit Verification Rework', () => {
         email: 'rahul.test3@example.com',
         phone: '9876543213',
         password: 'Password123!',
+        city: 'Varanasi',
+        state: 'Uttar Pradesh',
+        bio: 'Vedic priest with 10 years experience',
+        qualification: ['Acharya in Shukla Yajurveda'],
+        aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+        accountNumber: '123456789012',
+        ifscCode: 'SBIN0001234',
+        accountHolderName: 'Rahul Sharma',
+        serviceAreas: ['Varanasi'],
         services: [12, 15],
       };
       const result = await service.createPurohitByAdmin(dto);
       expect(result.success).toBe(true);
       expect(result.data.services).toHaveLength(2);
       expect(result.data.services.map((s: any) => s.serviceId)).toEqual(expect.arrayContaining([12, 15]));
+      expect(result.data.user.isAdminCreated).toBe(false);
+      expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
     });
 
     it('Test 4 — Create Purohit with service areas: correct service areas created', async () => {
@@ -1308,6 +1375,14 @@ describe('UserService - Purohit Verification Rework', () => {
         email: 'rahul.test4@example.com',
         phone: '9876543214',
         password: 'Password123!',
+        city: 'Varanasi',
+        state: 'Uttar Pradesh',
+        bio: 'Vedic priest with 10 years experience',
+        qualification: ['Acharya in Shukla Yajurveda'],
+        aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+        accountNumber: '123456789012',
+        ifscCode: 'SBIN0001234',
+        accountHolderName: 'Rahul Sharma',
         serviceAreas: ['Ghaziabad', 'Noida'],
       };
       const result = await service.createPurohitByAdmin(dto);
@@ -1315,10 +1390,12 @@ describe('UserService - Purohit Verification Rework', () => {
       expect(result.data.serviceAreas).toHaveLength(2);
       expect(result.data.serviceAreas.map((a: any) => a.city)).toEqual(expect.arrayContaining(['Ghaziabad', 'Noida']));
       expect(result.data.serviceAreas.some((a: any) => a.isDefault)).toBe(true);
+      expect(result.data.user.isAdminCreated).toBe(false);
+      expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
     });
 
     describe('createAstrologerByAdmin', () => {
-      it('successfully creates an astrologer user and profile', async () => {
+      it('successfully creates an astrologer user and profile with auto-approval and no service area', async () => {
         const dto = {
           firstName: 'Anand',
           lastName: 'Mishra',
@@ -1330,13 +1407,22 @@ describe('UserService - Purohit Verification Rework', () => {
           commissionPrice: 5,
           specializations: ['Kundali', 'Vastu'],
           city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          bio: 'Expert Vedic Astrologer with 7 years of practice',
+          qualification: ['Acharya in Jyotish'],
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '123456789012',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Anand Mishra',
         };
 
         const result = await service.createAstrologerByAdmin(dto);
         expect(result.user).toBeDefined();
         expect(result.profile).toBeDefined();
         expect(result.user.role).toBe(USER_ROLE.ASTROLOGER);
-        expect(result.user.isAdminCreated).toBe(true);
+        expect(result.user.isAdminCreated).toBe(false);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(result.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.VERIFIED);
         expect(mockEmailService.sendAstrologerCreatedByAdminEmail).toHaveBeenCalledWith(
           dto.email,
           'Anand Mishra',
@@ -1373,11 +1459,19 @@ describe('UserService - Purohit Verification Rework', () => {
           email: 'anand.nullprices@example.com',
           phone: '9876543888',
           password: 'Password123!',
+          city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          bio: 'Expert Vedic Astrologer',
+          qualification: ['Acharya in Jyotish'],
+          panDocUrl: 'https://storage.poojawala.com/pan.jpg',
+          upiId: 'anand@okhdfcbank',
         };
 
         const result = await service.createAstrologerByAdmin(dto as any);
         expect(result.profile.ratePerMinute).toBeNull();
         expect(result.profile.commissionPrice).toBeNull();
+        expect(result.user.isAdminCreated).toBe(false);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
       });
 
       it('calculates commissionPrice and astrologerPayout from astrologyPrice and platform setting commission percentage', async () => {
@@ -1388,6 +1482,14 @@ describe('UserService - Purohit Verification Rework', () => {
           phone: '9876543777',
           password: 'Password123!',
           astrologyPrice: 1000,
+          city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          bio: 'Expert Vedic Astrologer',
+          qualification: ['Acharya in Jyotish'],
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '123456789012',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Anand Mishra',
         };
 
         const result = await service.createAstrologerByAdmin(dto as any);
@@ -4361,6 +4463,481 @@ describe('UserService - Purohit Verification Rework', () => {
       });
     });
   });
+  // =========================================================================
+  // Auto-Approval & Profile Completeness Validation (Purohit & Astrologer)
+  // =========================================================================
+  describe('Admin-Created Auto-Approval & Profile Completeness Validation', () => {
+    describe('Purohit Onboarding & Completeness', () => {
+      it('1. Complete profile with Aadhaar + Bank + Service Area -> auto-approved', async () => {
+        const dto = {
+          firstName: 'Shyam',
+          lastName: 'Sundar',
+          email: 'shyam.purohit@example.com',
+          phone: '9811122233',
+          password: 'Password123!',
+          city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          bio: 'Devoted priest for Pujas and Hawans',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '987654321012',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Shyam Sundar',
+          serviceAreas: ['Varanasi', 'Sarnath'],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.success).toBe(true);
+        expect(result.data.user.isAdminCreated).toBe(false);
+        expect(result.data.user.status).toBe(USER_STATUS.ACTIVE);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(result.data.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.VERIFIED);
+        expect(result.data.serviceAreas).toHaveLength(2);
+      });
+
+      it('2. Complete profile with PAN + UPI + Service Area -> auto-approved', async () => {
+        const dto = {
+          firstName: 'Madhav',
+          lastName: 'Prasad',
+          email: 'madhav.purohit@example.com',
+          phone: '9811122234',
+          password: 'Password123!',
+          city: 'Prayagraj',
+          state: 'Uttar Pradesh',
+          bio: 'Experienced in Vedic ceremonies',
+          panDocUrl: 'https://storage.poojawala.com/pan.jpg',
+          upiId: 'madhav@okhdfcbank',
+          serviceAreas: [{ city: 'Prayagraj', addressLabel: 'Civil Lines' }],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.success).toBe(true);
+        expect(result.data.user.isAdminCreated).toBe(false);
+        expect(result.data.user.status).toBe(USER_STATUS.ACTIVE);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(result.data.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.VERIFIED);
+      });
+
+      it('3. Missing city -> created but pending', async () => {
+        const dto = {
+          firstName: 'Rohan',
+          lastName: 'Sharma',
+          email: 'rohan.nocity@example.com',
+          phone: '9811122235',
+          password: 'Password123!',
+          state: 'Uttar Pradesh',
+          bio: 'Bio here',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '987654321012',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Rohan Sharma',
+          serviceAreas: ['Varanasi'],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.success).toBe(true);
+        expect(result.data.user.isAdminCreated).toBe(true);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(result.data.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.PENDING);
+      });
+
+      it('4. Missing state -> created but pending', async () => {
+        const dto = {
+          firstName: 'Rohan',
+          lastName: 'Sharma',
+          email: 'rohan.nostate@example.com',
+          phone: '9811122236',
+          password: 'Password123!',
+          city: 'Varanasi',
+          bio: 'Bio here',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '987654321012',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Rohan Sharma',
+          serviceAreas: ['Varanasi'],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.success).toBe(true);
+        expect(result.data.user.isAdminCreated).toBe(true);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(result.data.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.PENDING);
+      });
+
+      it('5. Missing bio -> created but pending', async () => {
+        const dto = {
+          firstName: 'Rohan',
+          lastName: 'Sharma',
+          email: 'rohan.nobio@example.com',
+          phone: '9811122237',
+          password: 'Password123!',
+          city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '987654321012',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Rohan Sharma',
+          serviceAreas: ['Varanasi'],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.success).toBe(true);
+        expect(result.data.user.isAdminCreated).toBe(true);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(result.data.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.PENDING);
+      });
+
+      it('6. Missing bank and UPI -> created but pending', async () => {
+        const dto = {
+          firstName: 'Rohan',
+          lastName: 'Sharma',
+          email: 'rohan.nobank@example.com',
+          phone: '9811122238',
+          password: 'Password123!',
+          city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          bio: 'Bio here',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          serviceAreas: ['Varanasi'],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.success).toBe(true);
+        expect(result.data.user.isAdminCreated).toBe(true);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(result.data.bankAccount).toBeNull();
+      });
+
+      it('7. Missing Aadhaar and PAN -> created but pending', async () => {
+        const dto = {
+          firstName: 'Rohan',
+          lastName: 'Sharma',
+          email: 'rohan.nodocs@example.com',
+          phone: '9811122239',
+          password: 'Password123!',
+          city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          bio: 'Bio here',
+          accountNumber: '987654321012',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Rohan Sharma',
+          serviceAreas: ['Varanasi'],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.success).toBe(true);
+        expect(result.data.user.isAdminCreated).toBe(true);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(result.data.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.PENDING);
+      });
+
+      it('8. Missing service area -> created but pending', async () => {
+        const dto = {
+          firstName: 'Rohan',
+          lastName: 'Sharma',
+          email: 'rohan.noareas@example.com',
+          phone: '9811122240',
+          password: 'Password123!',
+          city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          bio: 'Bio here',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '987654321012',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Rohan Sharma',
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.success).toBe(true);
+        expect(result.data.user.isAdminCreated).toBe(true);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(result.data.serviceAreas).toHaveLength(0);
+      });
+
+      it('9. Incomplete profile with some valid information -> supplied information is still persisted', async () => {
+        const dto = {
+          firstName: 'Rohan',
+          lastName: 'Sharma',
+          email: 'rohan.partial@example.com',
+          phone: '9811122241',
+          password: 'Password123!',
+          city: 'Haridwar',
+          bio: 'Vedic priest specializing in Rudrabhishek',
+          experienceYears: 5,
+          languages: ['Hindi', 'Sanskrit'],
+          specializations: ['Rudrabhishek'],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.success).toBe(true);
+        expect(result.data.user.isAdminCreated).toBe(true);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(result.data.profile.city).toBe('Haridwar');
+        expect(result.data.profile.bio).toBe('Vedic priest specializing in Rudrabhishek');
+        expect(result.data.profile.experienceYears).toBe(5);
+        expect(result.data.profile.languages).toEqual(['Hindi', 'Sanskrit']);
+      });
+    });
+
+    describe('Astrologer Onboarding & Completeness', () => {
+      it('1. Complete profile with Aadhaar + Bank -> auto-approved', async () => {
+        const dto = {
+          firstName: 'Gaurav',
+          lastName: 'Joshi',
+          email: 'gaurav.astro1@example.com',
+          phone: '9811122242',
+          password: 'Password123!',
+          city: 'Haridwar',
+          state: 'Uttarakhand',
+          bio: 'Specialist in Prashna Kundali',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '987654321013',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Gaurav Joshi',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.user).toBeDefined();
+        expect(result.user.isAdminCreated).toBe(false);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(result.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.VERIFIED);
+      });
+
+      it('2. Complete profile with PAN + UPI -> auto-approved', async () => {
+        const dto = {
+          firstName: 'Harish',
+          lastName: 'Pandey',
+          email: 'harish.astro2@example.com',
+          phone: '9811122243',
+          password: 'Password123!',
+          city: 'Haridwar',
+          state: 'Uttarakhand',
+          bio: 'Expert Vedic Astrologer',
+          panDocUrl: 'https://storage.poojawala.com/pan.jpg',
+          upiId: 'harish@okicici',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.user.isAdminCreated).toBe(false);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(result.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.VERIFIED);
+      });
+
+      it('3. Missing city/state/bio -> created but pending', async () => {
+        const dto = {
+          firstName: 'Harish',
+          lastName: 'Pandey',
+          email: 'harish.nocity@example.com',
+          phone: '9811122244',
+          password: 'Password123!',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          upiId: 'harish@okicici',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.user.isAdminCreated).toBe(true);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(result.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.PENDING);
+      });
+
+      it('4. Missing bank and UPI -> created but pending', async () => {
+        const dto = {
+          firstName: 'Harish',
+          lastName: 'Pandey',
+          email: 'harish.nobank@example.com',
+          phone: '9811122245',
+          password: 'Password123!',
+          city: 'Haridwar',
+          state: 'Uttarakhand',
+          bio: 'Expert Vedic Astrologer',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.user.isAdminCreated).toBe(true);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(result.bankAccount).toBeNull();
+      });
+
+      it('5. Missing Aadhaar and PAN -> created but pending', async () => {
+        const dto = {
+          firstName: 'Harish',
+          lastName: 'Pandey',
+          email: 'harish.nodocs@example.com',
+          phone: '9811122246',
+          password: 'Password123!',
+          city: 'Haridwar',
+          state: 'Uttarakhand',
+          bio: 'Expert Vedic Astrologer',
+          upiId: 'harish@okicici',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.user.isAdminCreated).toBe(true);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(result.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.PENDING);
+      });
+
+      it('6. No service area -> still eligible for auto-approval if all other requirements are satisfied', async () => {
+        const dto = {
+          firstName: 'Gaurav',
+          lastName: 'Joshi',
+          email: 'gaurav.noarea@example.com',
+          phone: '9811122247',
+          password: 'Password123!',
+          city: 'Haridwar',
+          state: 'Uttarakhand',
+          bio: 'Specialist in Prashna Kundali',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '987654321013',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Gaurav Joshi',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.user.isAdminCreated).toBe(false);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(result.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.VERIFIED);
+      });
+
+      it('7. Incomplete profile with some valid information -> supplied information is still persisted', async () => {
+        const dto = {
+          firstName: 'Harish',
+          lastName: 'Pandey',
+          email: 'harish.partial@example.com',
+          phone: '9811122248',
+          password: 'Password123!',
+          city: 'Rishikesh',
+          bio: 'Jyotishacharya in Palmistry',
+          ratePerMinute: 30,
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.user.isAdminCreated).toBe(true);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(result.profile.city).toBe('Rishikesh');
+        expect(result.profile.bio).toBe('Jyotishacharya in Palmistry');
+        expect(result.profile.ratePerMinute).toBe(30);
+      });
+    });
+
+    describe('Verification Workflows', () => {
+      it('1. Admin cannot approve an incomplete Purohit', async () => {
+        testServiceAreas = []; // remove service areas so profile is incomplete
+
+        const approveDto: VerifyPurohitDto = {
+          status: PUROHIT_VERIFICATION_STATUS.APPROVED,
+        };
+
+        await expect(
+          service.verifyPurohitByAdmin(testAdmin.id, testUser.id, approveDto),
+        ).rejects.toThrow(
+          expect.objectContaining({
+            message: expect.stringContaining('At least one valid service area'),
+          }),
+        );
+      });
+
+      it('2. Admin cannot approve an incomplete Astrologer', async () => {
+        testAstrologerProfile = {
+          id: 301,
+          userId: 30,
+          city: 'Haridwar',
+          state: 'Uttarakhand',
+          bio: 'Bio',
+          aadhaarDocUrl: null,
+          panDocUrl: null, // missing docs
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+        };
+        const astroUser = {
+          id: 30,
+          role: USER_ROLE.ASTROLOGER,
+          firstName: 'Astro',
+          lastName: 'User',
+          email: 'astro@example.com',
+        } as User;
+
+        mockUserRepo.findById.mockImplementation((id: any) => {
+          if (Number(id) === 30) return Promise.resolve(astroUser);
+          if (Number(id) === testAdmin.id) return Promise.resolve(testAdmin);
+          return Promise.resolve(null);
+        });
+
+        const approveDto: VerifyPurohitDto = {
+          status: PUROHIT_VERIFICATION_STATUS.APPROVED,
+        };
+
+        await expect(
+          service.verifyUserByAdmin(testAdmin.id, 30, approveDto),
+        ).rejects.toThrow(
+          expect.objectContaining({
+            message: expect.stringContaining('Aadhaar or PAN document'),
+          }),
+        );
+      });
+
+      it('3. Admin can approve a complete Purohit', async () => {
+        testUser.isAdminCreated = true;
+        testProfile.verificationStatus = PUROHIT_VERIFICATION_STATUS.PENDING;
+
+        const approveDto: VerifyPurohitDto = {
+          status: PUROHIT_VERIFICATION_STATUS.APPROVED,
+        };
+
+        const result = await service.verifyPurohitByAdmin(testAdmin.id, testUser.id, approveDto);
+        expect(result.success).toBe(true);
+        expect(result.data.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(testUser.isAdminCreated).toBe(false);
+      });
+
+      it('4. Admin can approve a complete Astrologer', async () => {
+        testAstrologerProfile = {
+          id: 302,
+          userId: 32,
+          city: 'Haridwar',
+          state: 'Uttarakhand',
+          bio: 'Bio here',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+        };
+        const astroUser = {
+          id: 32,
+          role: USER_ROLE.ASTROLOGER,
+          firstName: 'AstroComplete',
+          lastName: 'User',
+          email: 'astrocomplete@example.com',
+          isAdminCreated: true,
+        } as User;
+
+        const astroBankAccount = {
+          id: 55,
+          userId: 32,
+          accountNumber: '987654321099',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Astro Complete',
+          isPrimary: true,
+          verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
+        };
+        testBankAccounts.push(astroBankAccount);
+
+        mockUserRepo.findById.mockImplementation((id: any) => {
+          if (Number(id) === 32) return Promise.resolve(astroUser);
+          if (Number(id) === testAdmin.id) return Promise.resolve(testAdmin);
+          return Promise.resolve(null);
+        });
+
+        const approveDto: VerifyPurohitDto = {
+          status: PUROHIT_VERIFICATION_STATUS.APPROVED,
+        };
+
+        const result = await service.verifyUserByAdmin(testAdmin.id, 32, approveDto);
+        expect(result.success).toBe(true);
+        expect(result.data.userId).toBe(32);
+        expect(result.data.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(astroUser.isAdminCreated).toBe(false);
+      });
+    });
+  });
+
 });
 
 

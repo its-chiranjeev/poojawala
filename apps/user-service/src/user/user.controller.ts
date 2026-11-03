@@ -208,23 +208,55 @@ export class UserController {
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   @Post('admin/add-purohit')
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'profileImage', maxCount: 1 },
+      { name: 'aadhaarDoc', maxCount: 1 },
+      { name: 'panDoc', maxCount: 1 },
+      { name: 'certificate', maxCount: 1 },
+      { name: 'templeAffiliationProof', maxCount: 1 },
+    ]),
+  )
   @HttpCode(HttpStatus.CREATED)
   async addPurohitByAdmin(
+    @UploadedFiles()
+    files: {
+      profileImage?: Express.Multer.File[];
+      aadhaarDoc?: Express.Multer.File[];
+      panDoc?: Express.Multer.File[];
+      certificate?: Express.Multer.File[];
+      templeAffiliationProof?: Express.Multer.File[];
+    },
     @Body(new ValidationPipe({ whitelist: true }))
     dto: CreatePurohitByAdminDto,
   ) {
-    return this.userService.createPurohitByAdmin(dto);
+    return this.userService.createPurohitByAdmin(dto, files);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)
   @Roles(USER_ROLE.ADMIN)
   @Post('admin/add-astrologer')
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'profileImage', maxCount: 1 },
+      { name: 'aadhaarDoc', maxCount: 1 },
+      { name: 'panDoc', maxCount: 1 },
+      { name: 'certificate', maxCount: 1 },
+    ]),
+  )
   @HttpCode(HttpStatus.CREATED)
   async addAstrologerByAdmin(
+    @UploadedFiles()
+    files: {
+      profileImage?: Express.Multer.File[];
+      aadhaarDoc?: Express.Multer.File[];
+      panDoc?: Express.Multer.File[];
+      certificate?: Express.Multer.File[];
+    },
     @Body(new ValidationPipe({ whitelist: true }))
     dto: CreateAstrologerByAdminDto,
   ) {
-    return this.userService.createAstrologerByAdmin(dto);
+    return this.userService.createAstrologerByAdmin(dto, files);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, CsrfGuard)

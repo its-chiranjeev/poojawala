@@ -142,6 +142,33 @@ export function isValidAadhaar(value: unknown): boolean {
   return c === 0;
 }
 
+export interface ProfileCompletenessCheckData {
+  role: USER_ROLE.PUROHIT | USER_ROLE.ASTROLOGER;
+  user: {
+    firstName?: string | null;
+    lastName?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  };
+  profile: {
+    city?: string | null;
+    state?: string | null;
+    bio?: string | null;
+    qualification?: string[] | string | null;
+    education?: string[] | string | null;
+    aadhaarDocUrl?: string | null;
+    panDocUrl?: string | null;
+    certificateUrl?: string | null;
+  };
+  bankAccount?: {
+    accountNumber?: string | null;
+    ifscCode?: string | null;
+    accountHolderName?: string | null;
+    upiId?: string | null;
+  } | null;
+  serviceAreas?: Array<{ city?: string; addressLabel?: string; id?: number }> | string[] | null;
+}
+
 @Injectable()
 export class UserService {
   private readonly logger = new Logger(UserService.name);
@@ -4379,6 +4406,100 @@ export class UserService {
     }
   }
 
+
+  checkProfileCompleteness(data: ProfileCompletenessCheckData): {
+    isComplete: boolean;
+    missingFields: string[];
+  } {
+    const missingFields: string[] = [];
+
+    // 1. Basic user details
+    if (!data.user?.firstName || this.isEmptyValue(data.user.firstName)) {
+      missingFields.push('First name');
+    }
+    const hasEmail = Boolean(data.user?.email && !this.isEmptyValue(data.user.email));
+    const hasPhone = Boolean(data.user?.phone && !this.isEmptyValue(data.user.phone));
+    if (!hasEmail && !hasPhone) {
+      missingFields.push('Email or Phone number');
+    }
+
+    // 2. City
+    if (this.isEmptyValue(data.profile?.city)) {
+      missingFields.push('City');
+    }
+
+    // 3. State
+    if (this.isEmptyValue(data.profile?.state)) {
+      missingFields.push('State');
+    }
+
+    // 4. Bio
+    if (this.isEmptyValue(data.profile?.bio)) {
+      missingFields.push('Bio');
+    }
+
+    // 5. Identity Document: Aadhaar OR PAN document
+    const hasAadhaar = !this.isEmptyValue(data.profile?.aadhaarDocUrl);
+    const hasPan = !this.isEmptyValue(data.profile?.panDocUrl);
+    if (!hasAadhaar && !hasPan) {
+      missingFields.push('Aadhaar or PAN document');
+    }
+
+    // 6. Bank Account OR UPI ID
+    const accNum = data.bankAccount?.accountNumber?.trim();
+    const ifsc = data.bankAccount?.ifscCode?.trim();
+    const accHolder = data.bankAccount?.accountHolderName?.trim();
+    const upi = data.bankAccount?.upiId?.trim();
+
+    const hasValidBank = Boolean(
+      accNum &&
+      accNum.length >= 8 &&
+      ifsc &&
+      ifsc.length >= 4 &&
+      accHolder &&
+      accHolder.length > 0
+    );
+    const hasValidUpi = Boolean(
+      upi &&
+      upi.includes('@')
+    );
+    if (!hasValidBank && !hasValidUpi) {
+      missingFields.push('Bank Account or UPI ID');
+    }
+
+    // 7. Service Area: Mandatory for Purohit only, NEVER for Astrologer
+    if (data.role === USER_ROLE.PUROHIT) {
+      let hasValidServiceArea = false;
+      if (Array.isArray(data.serviceAreas) && data.serviceAreas.length > 0) {
+        hasValidServiceArea = data.serviceAreas.some((area) => {
+          if (typeof area === 'string') return area.trim().length > 0;
+          if (typeof area === 'object' && area !== null) {
+            return Boolean(area.city?.trim() || area.addressLabel?.trim() || area.id);
+          }
+          return false;
+        });
+      }
+      if (!hasValidServiceArea) {
+        missingFields.push('At least one valid service area');
+      }
+    }
+
+    return {
+      isComplete: missingFields.length === 0,
+      missingFields,
+    };
+  }
+
+  validateProfileCompleteness(data: ProfileCompletenessCheckData): void {
+    const { isComplete, missingFields } = this.checkProfileCompleteness(data);
+    if (!isComplete) {
+      const entityLabel = data.role === USER_ROLE.PUROHIT ? 'Purohit' : 'Astrologer';
+      throw new BadRequestException(
+        `${entityLabel} profile cannot be approved. Missing required details: ${missingFields.join(', ')}`
+      );
+    }
+  }
+
   private isEmptyValue(value: unknown): boolean {
     if (value === null || value === undefined) {
       return true;
@@ -4501,6 +4622,7 @@ export class UserService {
       .update(User)
       .set({
         status: USER_STATUS.ACTIVE,
+        isAdminCreated: false,
         rejectionReason: () => 'NULL',
       })
       .where('id = :userId', { userId })
@@ -4789,7 +4911,43 @@ export class UserService {
         const bankAccountRepository = manager.getRepository(BankAccount);
 
         switch (dto.status) {
-          case PUROHIT_VERIFICATION_STATUS.APPROVED:
+          case PUROHIT_VERIFICATION_STATUS.APPROVED: {
+            const bankAccount =
+              (await bankAccountRepository.findOne({
+                where: { userId: targetUserId, isPrimary: true },
+              })) ||
+              (await bankAccountRepository.findOne({
+                where: { userId: targetUserId },
+                order: { createdAt: 'DESC' },
+              }));
+
+            this.validateProfileCompleteness({
+              role: USER_ROLE.ASTROLOGER,
+              user: {
+                firstName: targetUser.firstName,
+                lastName: targetUser.lastName,
+                email: targetUser.email,
+                phone: targetUser.phone,
+              },
+              profile: {
+                city: astrologerProfile.city,
+                state: astrologerProfile.state,
+                bio: astrologerProfile.bio,
+                qualification: astrologerProfile.qualification,
+                aadhaarDocUrl: astrologerProfile.aadhaarDocUrl,
+                panDocUrl: astrologerProfile.panDocUrl,
+              },
+              bankAccount: bankAccount
+                ? {
+                    accountNumber: bankAccount.accountNumber,
+                    ifscCode: bankAccount.ifscCode,
+                    accountHolderName: bankAccount.accountHolderName,
+                    upiId: bankAccount.upiId,
+                  }
+                : null,
+              serviceAreas: null,
+            });
+
             astrologerProfile.verificationStatus =
               PUROHIT_VERIFICATION_STATUS.APPROVED;
             astrologerProfile.rejectionReason = undefined;
@@ -4809,6 +4967,7 @@ export class UserService {
               .andWhere('"deletedAt" IS NULL')
               .execute();
             break;
+          }
 
           case PUROHIT_VERIFICATION_STATUS.REJECTED:
             astrologerProfile.verificationStatus =
@@ -4883,11 +5042,56 @@ export class UserService {
       );
 
       switch (dto.status) {
-        case PUROHIT_VERIFICATION_STATUS.APPROVED:
+        case PUROHIT_VERIFICATION_STATUS.APPROVED: {
+          const bankAccountRepo = manager.getRepository(BankAccount);
+          const bankAccount =
+            (await bankAccountRepo.findOne({
+              where: { userId: targetUserId, isPrimary: true },
+            })) ||
+            (await bankAccountRepo.findOne({
+              where: { userId: targetUserId },
+              order: { createdAt: 'DESC' },
+            }));
+
+          const serviceAreaRepo = manager.getRepository(PurohitServiceArea);
+          const serviceAreas = await serviceAreaRepo.find({
+            where: { purohitId: targetUserId },
+          });
+
+          const defaultArea = serviceAreas.find((a) => (a as any).isDefault) || serviceAreas[0];
+          this.validateProfileCompleteness({
+            role: USER_ROLE.PUROHIT,
+            user: {
+              firstName: targetUser.firstName,
+              lastName: targetUser.lastName,
+              email: targetUser.email,
+              phone: targetUser.phone,
+            },
+            profile: {
+              city: profile.city || defaultArea?.city,
+              state: profile.state || (defaultArea as any)?.state,
+              bio: profile.bio,
+              qualification: profile.qualification,
+              aadhaarDocUrl: profile.aadhaarDocUrl,
+              panDocUrl: profile.panDocUrl,
+              certificateUrl: profile.certificateUrl,
+            },
+            bankAccount: bankAccount
+              ? {
+                  accountNumber: bankAccount.accountNumber,
+                  ifscCode: bankAccount.ifscCode,
+                  accountHolderName: bankAccount.accountHolderName,
+                  upiId: bankAccount.upiId,
+                }
+              : null,
+            serviceAreas,
+          });
+
           this.validatePurohitForApproval(targetUser, profile, media);
 
           await this.approvePurohit(manager, targetUser.id, profile.id);
           break;
+        }
 
         case PUROHIT_VERIFICATION_STATUS.REJECTED:
           await this.rejectPurohit(
@@ -5017,7 +5221,10 @@ export class UserService {
       templeAffiliationProofUrl?: string;
     },
     verificationStatus: PUROHIT_MEDIA_VERIFICATION_STATUS = PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING,
+    manager?: EntityManager,
   ): Promise<void> {
+    const mediaRepo = (manager ? manager.getRepository(PurohitMedia) : null) || this.purohitMediaRepository;
+
     const mappings: Array<{ docType: string; url?: string }> = [
       { docType: 'AADHAAR', url: docs.aadhaarDocUrl },
       { docType: 'PAN', url: docs.panDocUrl },
@@ -5028,7 +5235,7 @@ export class UserService {
     for (const item of mappings) {
       if (!item.url) continue;
 
-      const existingMedia = await this.purohitMediaRepository.findOne({
+      const existingMedia = await mediaRepo.findOne({
         where: {
           purohitId: purohitProfileId,
           documentType: item.docType,
@@ -5036,20 +5243,20 @@ export class UserService {
       });
 
       if (existingMedia) {
-        await this.purohitMediaRepository.update(existingMedia.id, {
+        await mediaRepo.update(existingMedia.id, {
           mediaUrl: item.url,
           verificationStatus,
           rejectionReason: () => 'NULL',
         });
       } else {
-        const newMedia = this.purohitMediaRepository.create({
+        const newMedia = mediaRepo.create({
           purohitId: purohitProfileId,
           mediaType: PUROHIT_MEDIA_TYPE.IMAGE,
           documentType: item.docType,
           mediaUrl: item.url,
           verificationStatus,
         });
-        await this.purohitMediaRepository.save(newMedia);
+        await mediaRepo.save(newMedia);
       }
     }
   }
@@ -5134,27 +5341,151 @@ export class UserService {
     };
   }
 
-  async createPurohitByAdmin(dto: CreatePurohitByAdminDto) {
+  async createPurohitByAdmin(
+    dto: CreatePurohitByAdminDto,
+    files?: {
+      profileImage?: Express.Multer.File[];
+      aadhaarDoc?: Express.Multer.File[];
+      panDoc?: Express.Multer.File[];
+      certificate?: Express.Multer.File[];
+      templeAffiliationProof?: Express.Multer.File[];
+    },
+  ) {
     if (!dto.email && !dto.phone) {
       throw new BadRequestException(
         'At least email or phone number must be provided',
       );
     }
 
+    if (dto.confirmPassword && dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('Passwords do not match');
+    }
+
     if (dto.phone) {
       const existingUserByPhone = await this.userRepository.findOne({
-        where: { phone: dto.phone },
+        where: { phone: dto.phone.trim() },
       });
       if (existingUserByPhone)
         throw new ConflictException('Phone number already in use');
     }
     if (dto.email) {
       const existingUserByEmail = await this.userRepository.findByEmail(
-        dto.email,
+        dto.email.trim().toLowerCase(),
       );
       if (existingUserByEmail)
         throw new ConflictException('Email already in use');
     }
+
+    const aadhaarFiles = (files as any)?.aadhaarDoc?.filter(
+      (f: Express.Multer.File) => f && f.buffer && f.buffer.length > 0,
+    );
+    const panFiles = (files as any)?.panDoc?.filter(
+      (f: Express.Multer.File) => f && f.buffer && f.buffer.length > 0,
+    );
+    const certificateFiles = (files as any)?.certificate?.filter(
+      (f: Express.Multer.File) => f && f.buffer && f.buffer.length > 0,
+    );
+    const templeFiles = (files as any)?.templeAffiliationProof?.filter(
+      (f: Express.Multer.File) => f && f.buffer && f.buffer.length > 0,
+    );
+    const profileImageFile = (files as any)?.profileImage?.[0];
+
+    let aadhaarDocUrl = (dto.aadhaarDocUrl ?? dto.aadhaarDoc)?.trim() || null;
+    let panDocUrl = (dto.panDocUrl ?? dto.panDoc)?.trim() || null;
+    let certificateUrl = (dto.certificateUrl ?? dto.certificate)?.trim() || null;
+    let templeAffiliationProofUrl = (dto.templeAffiliationProofUrl ?? dto.templeAffiliationProof)?.trim() || null;
+
+    let aadhaarNumber = dto.aadhaarNumber?.trim() || null;
+    if (aadhaarNumber) {
+      const cleanAadhaar = aadhaarNumber.replace(/[\s-]/g, '');
+      if (!isValidAadhaar(cleanAadhaar)) {
+        throw new BadRequestException(
+          'aadhaarNumber must be a valid Aadhaar number',
+        );
+      }
+      aadhaarNumber = cleanAadhaar;
+      const existingAadhaar = await this.purohitProfileRepository.findOne({
+        where: { aadhaarNumber },
+      });
+      if (existingAadhaar) {
+        throw new ConflictException('Aadhaar number already in use');
+      }
+    }
+
+    const bankData = (dto as any).bankAccount || ((dto as any).bankAccounts && (dto as any).bankAccounts[0]) || {};
+    const accountHolderName = (dto.accountHolderName ?? bankData.accountHolderName)?.trim() || null;
+    const accountNumber = (dto.accountNumber ?? bankData.accountNumber)?.trim() || null;
+    const ifscCode = (dto.ifscCode ?? bankData.ifscCode)?.trim() || null;
+    const bankName = (dto.bankName ?? bankData.bankName)?.trim() || null;
+    const upiId = (dto.upiId ?? bankData.upiId)?.trim() || null;
+    const paymentMethod = dto.paymentMethod ?? bankData.paymentMethod ?? (upiId ? PUROHIT_PAYMENT_METHOD.UPI : PUROHIT_PAYMENT_METHOD.BANK);
+
+    if (accountNumber) {
+      const existingAccount = await this.bankAccountRepository.findByAccountNumber(accountNumber);
+      if (existingAccount) {
+        throw new ConflictException('Bank account number already in use');
+      }
+    }
+
+    const rawQualification = dto.qualification ?? dto.education;
+    const parsedQual = parseStringArray(rawQualification) || (Array.isArray(rawQualification) ? rawQualification : (rawQualification ? [rawQualification] : null));
+
+    let combinedAreas = dto.serviceAreas;
+    if (!combinedAreas || combinedAreas.length === 0) {
+      if (dto.serviceArea) {
+        let parsed = dto.serviceArea;
+        if (typeof parsed === 'string') {
+          try {
+            parsed = JSON.parse(parsed);
+          } catch {
+            parsed = [parsed];
+          }
+        }
+        combinedAreas = Array.isArray(parsed) ? parsed : [parsed];
+      } else if (dto.fullAddress) {
+        combinedAreas = [{
+          fullAddress: dto.fullAddress,
+          addressLabel: dto.addressLabel || 'PRIMARY',
+          streetName: dto.streetName || dto.fullAddress.split(',')[0].trim(),
+          city: dto.city || 'City',
+          state: dto.state,
+          pincode: dto.pincode || '000000',
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          serviceRadiusKm: dto.serviceRadiusKm || 10,
+          isDefault: dto.isDefault ?? true,
+        }];
+      }
+    }
+
+    const hasAadhaar = !combinedAreas ? false : !!(aadhaarDocUrl || (aadhaarFiles && aadhaarFiles.length > 0));
+    const hasPan = !combinedAreas ? false : !!(panDocUrl || (panFiles && panFiles.length > 0));
+
+    const completeness = this.checkProfileCompleteness({
+      role: USER_ROLE.PUROHIT,
+      user: {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        email: dto.email,
+        phone: dto.phone,
+      },
+      profile: {
+        city: dto.city,
+        state: dto.state,
+        bio: dto.bio,
+        qualification: parsedQual,
+        aadhaarDocUrl: hasAadhaar ? (aadhaarDocUrl || 'pending_file') : (aadhaarDocUrl || null),
+        panDocUrl: hasPan ? (panDocUrl || 'pending_file') : (panDocUrl || null),
+      },
+      bankAccount: {
+        accountNumber,
+        ifscCode,
+        accountHolderName,
+        upiId,
+      },
+      serviceAreas: combinedAreas,
+    });
+    const isComplete = completeness.isComplete;
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
@@ -5162,33 +5493,155 @@ export class UserService {
       const userRepository = manager.getRepository(User);
 
       const username =
-        dto.firstName.replace(/\s+/g, '') + Math.floor(Math.random() * 1000);
+        dto.username?.trim() ||
+        (dto.firstName.replace(/\s+/g, '') + Math.floor(Math.random() * 1000));
+
+      let userProfileImage = dto.profileImage?.trim() || undefined;
 
       const user = userRepository.create({
         username,
-        email: dto.email,
-        phone: dto.phone,
-        countryCode: dto.countryCode,
+        email: dto.email?.trim().toLowerCase(),
+        phone: dto.phone?.trim(),
+        countryCode: dto.countryCode?.trim(),
         hashedPassword,
         role: USER_ROLE.PUROHIT,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        // TODO: PUROHIT_VERIFICATION_REWORK
-        // User account status is ACTIVE upon creation; Purohit verification status is PENDING.
+        firstName: dto.firstName.trim(),
+        lastName: dto.lastName.trim(),
         status: USER_STATUS.ACTIVE,
-        isAdminCreated: true,
+        isAdminCreated: !isComplete,
         dob: dto.dob ? new Date(dto.dob) : undefined,
+        profileImage: userProfileImage,
       });
 
       const savedUser = await userRepository.save(user);
+
+      if (profileImageFile && profileImageFile.buffer && profileImageFile.buffer.length > 0) {
+        try {
+          const imageUrl = await this.s3Service.uploadProfileImage(
+            savedUser.id,
+            profileImageFile,
+          );
+          savedUser.profileImage = imageUrl;
+          await userRepository.save(savedUser);
+        } catch (e) {
+          this.logger.warn(`Failed to upload profileImage: ${e}`);
+        }
+      }
+
+      if (aadhaarFiles?.length) {
+        try {
+          aadhaarDocUrl = (await this.s3Service.uploadFileHelper(
+            savedUser.id,
+            'aadhaarDoc',
+            aadhaarFiles,
+          )) || aadhaarDocUrl;
+        } catch (e) {
+          this.logger.warn(`Failed to upload aadhaarDoc: ${e}`);
+        }
+      }
+      if (panFiles?.length) {
+        try {
+          panDocUrl = (await this.s3Service.uploadFileHelper(
+            savedUser.id,
+            'panDoc',
+            panFiles,
+          )) || panDocUrl;
+        } catch (e) {
+          this.logger.warn(`Failed to upload panDoc: ${e}`);
+        }
+      }
+      if (certificateFiles?.length) {
+        try {
+          certificateUrl = (await this.s3Service.uploadFileHelper(
+            savedUser.id,
+            'certificate',
+            certificateFiles,
+          )) || certificateUrl;
+        } catch (e) {
+          this.logger.warn(`Failed to upload certificate: ${e}`);
+        }
+      }
+      if (templeFiles?.length) {
+        try {
+          templeAffiliationProofUrl = (await this.s3Service.uploadFileHelper(
+            savedUser.id,
+            'templeAffiliationProof',
+            templeFiles,
+          )) || templeAffiliationProofUrl;
+        } catch (e) {
+          this.logger.warn(`Failed to upload templeAffiliationProof: ${e}`);
+        }
+      }
+
+      const isOnlineAvailable = dto.isOnlineAvailable === true || dto.isOnlineAvailable === 'true';
+      const isOfflineAvailable = dto.isOfflineAvailable === true || dto.isOfflineAvailable === 'true';
 
       const profile = manager.create(PurohitProfile, {
         userId: savedUser.id,
         city: dto.city?.trim(),
         state: dto.state?.trim(),
-        verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+        bio: dto.bio?.trim(),
+        qualification: parsedQual || undefined,
+        experienceYears: dto.experienceYears ? Number(dto.experienceYears) : undefined,
+        languages: dto.languages,
+        specializations: dto.specializations,
+        aadhaarNumber: aadhaarNumber || undefined,
+        aadhaarDocUrl: aadhaarDocUrl || undefined,
+        panDocUrl: panDocUrl || undefined,
+        certificateUrl: certificateUrl || undefined,
+        templeAffiliationProofUrl: templeAffiliationProofUrl || undefined,
+        isOnlineAvailable,
+        isOfflineAvailable,
+        verificationStatus: isComplete
+          ? PUROHIT_VERIFICATION_STATUS.APPROVED
+          : PUROHIT_VERIFICATION_STATUS.PENDING,
+        rejectionReason: null as any,
       });
       const savedProfile = await manager.save(profile);
+
+      const hasAnyBankData = Boolean(
+        accountNumber ||
+        upiId ||
+        accountHolderName ||
+        ifscCode ||
+        bankName
+      );
+
+      let newAccount: BankAccount | null = null;
+      if (hasAnyBankData) {
+        const bankRepo = manager.getRepository(BankAccount);
+        newAccount = bankRepo.create({
+          userId: savedUser.id,
+          accountHolderName: accountHolderName || '',
+          accountNumber: accountNumber || '',
+          ifscCode: ifscCode || '',
+          bankName: bankName || '',
+          accountType: (dto as any).accountType || undefined,
+          paymentMethod,
+          upiId: upiId || null,
+          isPrimary: true,
+          verificationStatus: isComplete
+            ? BANK_VERIFICATION_STATUS.VERIFIED
+            : BANK_VERIFICATION_STATUS.PENDING,
+        });
+        await bankRepo.save(newAccount);
+      }
+
+      if (aadhaarDocUrl || panDocUrl || certificateUrl || templeAffiliationProofUrl) {
+        await this.syncPurohitMediaDocuments(
+          savedProfile.id,
+          {
+            aadhaarDocUrl: aadhaarDocUrl || undefined,
+            panDocUrl: panDocUrl || undefined,
+            certificateUrl: certificateUrl || undefined,
+            templeAffiliationProofUrl: templeAffiliationProofUrl || undefined,
+          },
+          isComplete
+            ? PUROHIT_MEDIA_VERIFICATION_STATUS.APPROVED
+            : PUROHIT_MEDIA_VERIFICATION_STATUS.PENDING,
+          manager,
+        );
+      }
 
       const createdServices: PurohitService[] = [];
       if (dto.services && dto.services.length > 0) {
@@ -5217,31 +5670,49 @@ export class UserService {
       }
 
       const createdAreas: PurohitServiceArea[] = [];
-      if (dto.serviceAreas && dto.serviceAreas.length > 0) {
-        const uniqueAreas = Array.from(
-          new Set(dto.serviceAreas.map((a) => a.trim()).filter(Boolean)),
-        );
+      if (combinedAreas && combinedAreas.length > 0) {
         const areaRepo = manager.getRepository(PurohitServiceArea);
         let isFirst = true;
-        for (const areaName of uniqueAreas) {
-          const area = areaRepo.create({
-            purohitId: savedUser.id,
-            addressLabel: areaName,
-            streetName: areaName,
-            fullAddress: areaName,
-            city: areaName,
-            pincode: '000000',
-            isDefault: isFirst,
-            serviceRadiusKm: 10,
-          });
-          createdAreas.push(await areaRepo.save(area));
-          isFirst = false;
+        for (const rawArea of combinedAreas) {
+          if (typeof rawArea === 'string' && rawArea.trim().length > 0) {
+            const areaName = rawArea.trim();
+            const area = areaRepo.create({
+              purohitId: savedUser.id,
+              addressLabel: areaName,
+              streetName: areaName,
+              fullAddress: areaName,
+              city: areaName,
+              pincode: '000000',
+              isDefault: isFirst,
+              serviceRadiusKm: 10,
+            });
+            createdAreas.push(await areaRepo.save(area));
+            isFirst = false;
+          } else if (typeof rawArea === 'object' && rawArea !== null) {
+            const areaObj = rawArea;
+            const area = areaRepo.create({
+              purohitId: savedUser.id,
+              addressLabel: areaObj.addressLabel?.trim() || areaObj.city?.trim() || 'Service Area',
+              streetName: areaObj.streetName?.trim() || areaObj.city?.trim() || 'Main Street',
+              fullAddress: areaObj.fullAddress?.trim() || areaObj.city?.trim() || 'Service Address',
+              city: areaObj.city?.trim() || dto.city?.trim() || 'City',
+              state: areaObj.state?.trim() || dto.state?.trim() || undefined,
+              pincode: areaObj.pincode?.trim() || '000000',
+              isDefault: isFirst,
+              serviceRadiusKm: areaObj.serviceRadiusKm ? Number(areaObj.serviceRadiusKm) : 10,
+              latitude: areaObj.latitude ? Number(areaObj.latitude) : undefined,
+              longitude: areaObj.longitude ? Number(areaObj.longitude) : undefined,
+            });
+            createdAreas.push(await areaRepo.save(area));
+            isFirst = false;
+          }
         }
       }
 
       return {
         user: savedUser,
         profile: savedProfile,
+        bankAccount: newAccount,
         services: createdServices,
         serviceAreas: createdAreas,
       };
@@ -5264,11 +5735,23 @@ export class UserService {
     };
   }
 
-  async createAstrologerByAdmin(dto: CreateAstrologerByAdminDto) {
+  async createAstrologerByAdmin(
+    dto: CreateAstrologerByAdminDto,
+    files?: {
+      profileImage?: Express.Multer.File[];
+      aadhaarDoc?: Express.Multer.File[];
+      panDoc?: Express.Multer.File[];
+      certificate?: Express.Multer.File[];
+    },
+  ) {
     if (!dto.email && !dto.phone) {
       throw new BadRequestException(
         'At least email or phone number must be provided',
       );
+    }
+
+    if (dto.confirmPassword && dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('Passwords do not match');
     }
 
     if (dto.phone) {
@@ -5286,24 +5769,87 @@ export class UserService {
         throw new ConflictException('Email already in use');
     }
 
-    if (dto.aadhaarNumber && typeof dto.aadhaarNumber === 'string' && dto.aadhaarNumber.trim() !== '') {
-      const cleanAadhaar = dto.aadhaarNumber.replace(/[\s-]/g, '');
+    const aadhaarFiles = (files as any)?.aadhaarDoc?.filter(
+      (f: Express.Multer.File) => f && f.buffer && f.buffer.length > 0,
+    );
+    const panFiles = (files as any)?.panDoc?.filter(
+      (f: Express.Multer.File) => f && f.buffer && f.buffer.length > 0,
+    );
+    const certificateFiles = (files as any)?.certificate?.filter(
+      (f: Express.Multer.File) => f && f.buffer && f.buffer.length > 0,
+    );
+    const profileImageFile = (files as any)?.profileImage?.[0];
+
+    let aadhaarDocUrl = (dto.aadhaarDocUrl ?? dto.aadhaarDoc)?.trim() || null;
+    let panDocUrl = (dto.panDocUrl ?? dto.panDoc)?.trim() || null;
+    let certificateUrl = (dto.certificateUrl ?? dto.certificate)?.trim() || null;
+
+    let aadhaarNumber = dto.aadhaarNumber?.trim() || null;
+    if (aadhaarNumber) {
+      const cleanAadhaar = aadhaarNumber.replace(/[\s-]/g, '');
       if (!isValidAadhaar(cleanAadhaar)) {
         throw new BadRequestException(
           'aadhaarNumber must be a valid Aadhaar number',
         );
       }
-      dto.aadhaarNumber = cleanAadhaar;
+      aadhaarNumber = cleanAadhaar;
 
       const existingAadhaar = await this.dataSource
         .getRepository(AstrologerProfile)
         .findOne({
-          where: { aadhaarNumber: dto.aadhaarNumber },
+          where: { aadhaarNumber },
         });
       if (existingAadhaar) {
         throw new ConflictException('Aadhaar number already in use');
       }
     }
+
+    const bankData = (dto as any).bankAccount || ((dto as any).bankAccounts && (dto as any).bankAccounts[0]) || {};
+    const accountHolderName = (dto.accountHolderName ?? bankData.accountHolderName)?.trim() || null;
+    const accountNumber = (dto.accountNumber ?? bankData.accountNumber)?.trim() || null;
+    const ifscCode = (dto.ifscCode ?? bankData.ifscCode)?.trim() || null;
+    const bankName = (dto.bankName ?? bankData.bankName)?.trim() || null;
+    const upiId = (dto.upiId ?? bankData.upiId)?.trim() || null;
+    const paymentMethod = dto.paymentMethod ?? bankData.paymentMethod ?? (upiId ? PUROHIT_PAYMENT_METHOD.UPI : PUROHIT_PAYMENT_METHOD.BANK);
+
+    if (accountNumber) {
+      const existingAccount = await this.bankAccountRepository.findByAccountNumber(accountNumber);
+      if (existingAccount) {
+        throw new ConflictException('Bank account number already in use');
+      }
+    }
+
+    const rawQualification = dto.qualification ?? dto.education;
+    const parsedQual = parseStringArray(rawQualification) || (Array.isArray(rawQualification) ? rawQualification : (rawQualification ? [rawQualification] : null));
+
+    const hasAadhaar = !!(aadhaarDocUrl || (aadhaarFiles && aadhaarFiles.length > 0));
+    const hasPan = !!(panDocUrl || (panFiles && panFiles.length > 0));
+
+    const completeness = this.checkProfileCompleteness({
+      role: USER_ROLE.ASTROLOGER,
+      user: {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        email: dto.email,
+        phone: dto.phone,
+      },
+      profile: {
+        city: dto.city,
+        state: dto.state,
+        bio: dto.bio,
+        qualification: parsedQual,
+        aadhaarDocUrl: hasAadhaar ? (aadhaarDocUrl || 'pending_file') : (aadhaarDocUrl || null),
+        panDocUrl: hasPan ? (panDocUrl || 'pending_file') : (panDocUrl || null),
+      },
+      bankAccount: {
+        accountNumber,
+        ifscCode,
+        accountHolderName,
+        upiId,
+      },
+      serviceAreas: null, // Astrologers never require service area
+    });
+    const isComplete = completeness.isComplete;
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
@@ -5334,6 +5880,8 @@ export class UserService {
         dto.username?.trim() ||
         (dto.firstName.replace(/\s+/g, '') + Math.floor(Math.random() * 1000));
 
+      let userProfileImage = dto.profileImage?.trim() || undefined;
+
       const user = userRepository.create({
         username,
         email: dto.email?.trim().toLowerCase(),
@@ -5344,11 +5892,59 @@ export class UserService {
         firstName: dto.firstName.trim(),
         lastName: dto.lastName.trim(),
         status: USER_STATUS.ACTIVE,
-        isAdminCreated: true,
+        isAdminCreated: !isComplete,
         dob: dto.dob ? new Date(dto.dob) : undefined,
+        profileImage: userProfileImage,
       });
 
       const savedUser = await userRepository.save(user);
+
+      if (profileImageFile && profileImageFile.buffer && profileImageFile.buffer.length > 0) {
+        try {
+          const imageUrl = await this.s3Service.uploadProfileImage(
+            savedUser.id,
+            profileImageFile,
+          );
+          savedUser.profileImage = imageUrl;
+          await userRepository.save(savedUser);
+        } catch (e) {
+          this.logger.warn(`Failed to upload profileImage: ${e}`);
+        }
+      }
+
+      if (aadhaarFiles?.length) {
+        try {
+          aadhaarDocUrl = (await this.s3Service.uploadFileHelper(
+            savedUser.id,
+            'aadhaarDoc',
+            aadhaarFiles,
+          )) || aadhaarDocUrl;
+        } catch (e) {
+          this.logger.warn(`Failed to upload aadhaarDoc: ${e}`);
+        }
+      }
+      if (panFiles?.length) {
+        try {
+          panDocUrl = (await this.s3Service.uploadFileHelper(
+            savedUser.id,
+            'panDoc',
+            panFiles,
+          )) || panDocUrl;
+        } catch (e) {
+          this.logger.warn(`Failed to upload panDoc: ${e}`);
+        }
+      }
+      if (certificateFiles?.length) {
+        try {
+          certificateUrl = (await this.s3Service.uploadFileHelper(
+            savedUser.id,
+            'certificate',
+            certificateFiles,
+          )) || certificateUrl;
+        } catch (e) {
+          this.logger.warn(`Failed to upload certificate: ${e}`);
+        }
+      }
 
       const ratePerMin =
         dto.ratePerMinute !== undefined && dto.ratePerMinute !== null && (dto.ratePerMinute as any) !== ''
@@ -5431,7 +6027,7 @@ export class UserService {
       const profile = manager.create(AstrologerProfile, {
         userId: savedUser.id,
         bio: dto.bio?.trim(),
-        qualification: dto.qualification,
+        qualification: parsedQual || undefined,
         experienceYears: dto.experienceYears,
         languages: dto.languages,
         specializations: dto.specializations,
@@ -5443,43 +6039,49 @@ export class UserService {
         commissionPercentage,
         commissionPrice,
         astrologerPayout,
-        aadhaarNumber: dto.aadhaarNumber,
-        verificationStatus: PUROHIT_VERIFICATION_STATUS.PENDING,
+        aadhaarNumber: aadhaarNumber || undefined,
+        aadhaarDocUrl: aadhaarDocUrl || undefined,
+        panDocUrl: panDocUrl || undefined,
+        certificateUrl: certificateUrl || undefined,
+        verificationStatus: isComplete
+          ? PUROHIT_VERIFICATION_STATUS.APPROVED
+          : PUROHIT_VERIFICATION_STATUS.PENDING,
+        rejectionReason: null as any,
       });
       const savedProfile = await manager.save(profile);
 
-      const bankData = (dto as any).bankAccount || ((dto as any).bankAccounts && (dto as any).bankAccounts[0]) || {};
-      const accountHolderName = dto.accountHolderName ?? bankData.accountHolderName;
-      const accountNumber = dto.accountNumber ?? bankData.accountNumber;
-      const ifscCode = dto.ifscCode ?? bankData.ifscCode;
-      const bankName = dto.bankName ?? bankData.bankName;
-      const paymentMethod = dto.paymentMethod ?? bankData.paymentMethod;
-      const upiId = dto.upiId ?? bankData.upiId;
+      const hasAnyBankData = Boolean(
+        accountNumber ||
+        upiId ||
+        accountHolderName ||
+        ifscCode ||
+        bankName
+      );
 
-      if (accountNumber || upiId) {
+      let newAccount: BankAccount | null = null;
+      if (hasAnyBankData) {
         const bankRepo = manager.getRepository(BankAccount);
-        const newAccount = bankRepo.create({
+        newAccount = bankRepo.create({
           userId: savedUser.id,
           accountHolderName: accountHolderName || '',
           accountNumber: accountNumber || '',
           ifscCode: ifscCode || '',
           bankName: bankName || '',
-          paymentMethod: paymentMethod || (upiId ? PUROHIT_PAYMENT_METHOD.UPI : PUROHIT_PAYMENT_METHOD.BANK),
+          accountType: (dto as any).accountType || undefined,
+          paymentMethod,
           upiId: upiId || null,
           isPrimary: true,
-          verificationStatus: BANK_VERIFICATION_STATUS.PENDING,
+          verificationStatus: isComplete
+            ? BANK_VERIFICATION_STATUS.VERIFIED
+            : BANK_VERIFICATION_STATUS.PENDING,
         });
         await bankRepo.save(newAccount);
-
-        if (this.hasValidPayoutMethod(newAccount)) {
-          savedUser.isAdminCreated = false;
-          await manager.update(User, savedUser.id, { isAdminCreated: false });
-        }
       }
 
       return {
         user: savedUser,
         profile: savedProfile,
+        bankAccount: newAccount,
       };
     });
 
@@ -5495,7 +6097,6 @@ export class UserService {
     (result as any).message = 'Astrologer created successfully by admin';
     return result;
   }
-
   async registerUserService(
     dto: RegisterNormalUserDto,
     files: {
