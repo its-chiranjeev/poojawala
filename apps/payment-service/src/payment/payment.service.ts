@@ -1824,7 +1824,12 @@ export class PaymentService {
       const order = await orderRepo.findOne({
         where: { paymentId: payment.id },
       });
-      if (order && order.paymentStatus !== ORDER_PAYMENT_STATUS.PAID) {
+      if (
+        order &&
+        order.paymentId === payment.id &&
+        order.paymentStatus !== ORDER_PAYMENT_STATUS.PAID &&
+        order.orderStatus === ORDER_STATUS.PENDING_PAYMENT
+      ) {
         order.paymentStatus = ORDER_PAYMENT_STATUS.FAILED;
         await orderRepo.save(order);
       }
@@ -2077,7 +2082,12 @@ export class PaymentService {
       const order = await orderRepo.findOne({
         where: { paymentId: payment.id },
       });
-      if (order && order.paymentStatus !== ORDER_PAYMENT_STATUS.PAID) {
+      if (
+        order &&
+        order.paymentId === payment.id &&
+        order.paymentStatus !== ORDER_PAYMENT_STATUS.PAID &&
+        order.orderStatus === ORDER_STATUS.PENDING_PAYMENT
+      ) {
         order.paymentStatus = ORDER_PAYMENT_STATUS.FAILED;
         await orderRepo.save(order);
       }
@@ -5679,23 +5689,47 @@ export class PaymentService {
         if (!order && paymentNotes?.orderId) {
           const parsedOrderId = Number(paymentNotes.orderId);
           if (!isNaN(parsedOrderId)) {
-            order = await orderRepo.findOne({
+            const candidateOrder = await orderRepo.findOne({
               where: { id: parsedOrderId },
               lock: { mode: 'pessimistic_write' },
             });
-            if (order && !order.paymentId) {
-              order.paymentId = payment.id;
+            if (candidateOrder) {
+              if (candidateOrder.paymentId && candidateOrder.paymentId !== payment.id) {
+                this.logger.warn(
+                  `Payment #${payment.id} succeeded for Order #${candidateOrder.id}, but Order is already associated with Payment #${candidateOrder.paymentId}. Late payment detected; leaving current order-payment association intact.`,
+                );
+                if (candidateOrder.paymentStatus === ORDER_PAYMENT_STATUS.PAID) {
+                  wasOrderAlreadyPaid = true;
+                }
+              } else {
+                order = candidateOrder;
+                if (!order.paymentId) {
+                  order.paymentId = payment.id;
+                }
+              }
             }
           }
         }
 
         if (!order && paymentNotes?.orderNumber) {
-          order = await orderRepo.findOne({
+          const candidateOrder = await orderRepo.findOne({
             where: { orderNumber: String(paymentNotes.orderNumber) },
             lock: { mode: 'pessimistic_write' },
           });
-          if (order && !order.paymentId) {
-            order.paymentId = payment.id;
+          if (candidateOrder) {
+            if (candidateOrder.paymentId && candidateOrder.paymentId !== payment.id) {
+              this.logger.warn(
+                `Payment #${payment.id} succeeded for Order #${candidateOrder.orderNumber}, but Order is already associated with Payment #${candidateOrder.paymentId}. Late payment detected; leaving current order-payment association intact.`,
+              );
+              if (candidateOrder.paymentStatus === ORDER_PAYMENT_STATUS.PAID) {
+                wasOrderAlreadyPaid = true;
+              }
+            } else {
+              order = candidateOrder;
+              if (!order.paymentId) {
+                order.paymentId = payment.id;
+              }
+            }
           }
         }
 
@@ -5718,7 +5752,7 @@ export class PaymentService {
         // Only removes the cart items that were part of this paid order.
         // Preserves newly added products and customer modifications made after checkout.
         const payerId = payment.payerId || order?.customerId;
-        if (payerId && order) {
+        if (payerId && order && !wasOrderAlreadyPaid) {
           try {
             const customerCart = await cartRepo.findOne({
               where: { customerId: payerId },

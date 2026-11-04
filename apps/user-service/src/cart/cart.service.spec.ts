@@ -60,6 +60,7 @@ describe('CartService', () => {
   let auditLogService: { createAuditLog: jest.Mock };
   let notificationService: { createNotification: jest.Mock };
   let emailService: { sendMail: jest.Mock };
+  let currentRetryOrder: Order | null = null;
 
   const customerUser: User = {
     id: 1,
@@ -236,11 +237,12 @@ describe('CartService', () => {
             }
             if (entity === Order) {
               const mockOrderQb = {
+                setLock: jest.fn().mockReturnThis(),
                 leftJoinAndSelect: jest.fn().mockReturnThis(),
                 where: jest.fn().mockReturnThis(),
                 andWhere: jest.fn().mockReturnThis(),
                 orderBy: jest.fn().mockReturnThis(),
-                getOne: jest.fn().mockResolvedValue(null),
+                getOne: jest.fn().mockImplementation(() => Promise.resolve(currentRetryOrder)),
               };
               return {
                 create: jest
@@ -251,6 +253,7 @@ describe('CartService', () => {
                   .mockImplementation((item) =>
                     Promise.resolve({ id: 1001, ...item, createdAt: new Date(), updatedAt: new Date() }),
                   ),
+                findOne: jest.fn().mockImplementation(() => Promise.resolve(currentRetryOrder)),
                 createQueryBuilder: jest.fn().mockReturnValue(mockOrderQb),
               };
             }
@@ -702,7 +705,7 @@ describe('CartService', () => {
         updatedAt: new Date(),
       };
 
-      orderRepository.findCustomerOrderById.mockResolvedValueOnce(mockOrder);
+      currentRetryOrder = mockOrder;
 
       paymentService.createRazorpayPaymentLink.mockResolvedValueOnce({
         id: 'plink_retry_123',
@@ -755,7 +758,7 @@ describe('CartService', () => {
         updatedAt: new Date(),
       };
 
-      orderRepository.findCustomerOrderById.mockResolvedValueOnce(paidOrder);
+      currentRetryOrder = paidOrder;
 
       await expect(
         service.checkout(customerUser, { orderId: 56 }),
@@ -799,51 +802,46 @@ describe('CartService', () => {
         updatedAt: new Date(),
       };
 
-      orderRepository.findCustomerOrderById.mockResolvedValueOnce(expiredOrder);
+      currentRetryOrder = expiredOrder;
 
       await expect(
         service.checkout(customerUser, { orderId: 57 }),
       ).rejects.toThrow('This order has expired. Please place a new order.');
     });
 
-    it('should reuse existing active pending order during checkout when expiredAt > now without creating duplicate order or duplicate notifications', async () => {
-      const existingFutureExpiry = new Date(Date.now() + 20 * 60 * 1000);
-      const activePendingOrder: Order = {
-        id: 20,
-        orderNumber: 'PW-ORD-20',
+    it('should throw BadRequestException when retrying payment for a COD order', async () => {
+      const codOrder: Order = {
+        id: 58,
+        orderNumber: 'PW-ORD-100004',
         customerId: customerUser.id,
         subtotal: 998,
         discountAmount: 0,
         totalAmount: 998,
-        paymentId: 500,
-        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
-        paymentStatus: ORDER_PAYMENT_STATUS.PENDING,
+        paymentId: 504,
+        paymentMethod: ORDER_PAYMENT_METHOD.COD,
+        paymentStatus: ORDER_PAYMENT_STATUS.COD_PENDING,
         orderStatus: ORDER_STATUS.PENDING_PAYMENT,
-        expiredAt: existingFutureExpiry,
-        shippingAddressSnapshot: {
-          name: 'Devotee Sharma',
-          phone: '9876543210',
-          addressLine1: '123 Temple Road',
-          city: 'Varanasi',
-          pincode: '221001',
-        },
-        items: [
-          {
-            id: 2001,
-            orderId: 20,
-            productId: activeProduct.id,
-            snapshot: {
-              productName: 'Puja Thali',
-              unitPrice: 499,
-              quantity: 2,
-              totalAmount: 998,
-            },
-          } as any,
-        ],
+        items: [],
         createdAt: new Date(),
         updatedAt: new Date(),
       };
 
+      currentRetryOrder = codOrder;
+
+      await expect(
+        service.checkout(customerUser, { orderId: 58 }),
+      ).rejects.toThrow('Payment retry is only available for online orders');
+    });
+
+    it('should throw NotFoundException when retrying payment for non-existent order', async () => {
+      currentRetryOrder = null;
+
+      await expect(
+        service.checkout(customerUser, { orderId: 9999 }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should always create a completely new Order and Payment for each checkout even if cart contents match', async () => {
       const cartWithItem: Cart = {
         ...mockCart,
         items: [
@@ -859,113 +857,48 @@ describe('CartService', () => {
           },
         ],
       };
-      cartRepository.findCartWithItems.mockResolvedValueOnce(cartWithItem);
-
-      // Setup dataSource transaction to return activePendingOrder from getOne
-      (dataSource.transaction as jest.Mock).mockImplementationOnce(async (cb) => {
-        const mockManager = {
-          getRepository: jest.fn().mockImplementation((entity) => {
-            if (entity === Cart) {
-              return {
-                createQueryBuilder: jest.fn().mockReturnValue({
-                  setLock: jest.fn().mockReturnThis(),
-                  where: jest.fn().mockReturnThis(),
-                  getOne: jest.fn().mockResolvedValue(mockCart),
-                }),
-              };
-            }
-            if (entity === Payment) {
-              return {
-                create: jest.fn().mockImplementation((p) => ({ id: 501, ...p })),
-                save: jest.fn().mockImplementation((p) => Promise.resolve({ id: 501, ...p })),
-              };
-            }
-            if (entity === Order) {
-              return {
-                createQueryBuilder: jest.fn().mockReturnValue({
-                  leftJoinAndSelect: jest.fn().mockReturnThis(),
-                  where: jest.fn().mockReturnThis(),
-                  andWhere: jest.fn().mockReturnThis(),
-                  orderBy: jest.fn().mockReturnThis(),
-                  getOne: jest.fn().mockResolvedValue(activePendingOrder),
-                }),
-                save: jest.fn().mockImplementation((o) => Promise.resolve(o)),
-              };
-            }
-            if (entity === CartItem) {
-              return {
-                delete: jest.fn().mockResolvedValue({ affected: 1 }),
-              };
-            }
-            return {};
-          }),
-        };
-        return cb(mockManager);
-      });
+      cartRepository.findCartWithItems.mockResolvedValue(cartWithItem);
 
       paymentService.createRazorpayPaymentLink.mockResolvedValueOnce({
-        id: 'plink_reuse_123',
-        short_url: 'https://rzp.io/i/reuse123',
+        id: 'plink_order_1',
+        short_url: 'https://rzp.io/i/order1',
       });
 
-      auditLogService.createAuditLog.mockClear();
       notificationService.createNotification.mockClear();
       emailService.sendMail.mockClear();
 
-      const result = await service.checkout(customerUser, {
+      const order1 = await service.checkout(customerUser, {
         paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
       });
 
-      // Reused order ORD-20
-      expect(result.orderId).toBe(20);
-      expect(result.orderNumber).toBe('PW-ORD-20');
-      // expiredAt must remain unchanged (not extended!)
-      expect(result.expiredAt).toEqual(existingFutureExpiry);
-      // No duplicate notifications/emails/audit logs
-      expect(auditLogService.createAuditLog).not.toHaveBeenCalled();
-      expect(notificationService.createNotification).not.toHaveBeenCalled();
-      expect(emailService.sendMail).not.toHaveBeenCalled();
-      // Even on reuse, cart items must NOT be cleared prematurely
+      expect(order1.orderId).toBe(1001);
+      expect(order1.paymentId).toBe(500);
+      expect(order1.expiredAt).toBeNull();
+      expect(notificationService.createNotification).toHaveBeenCalled();
+      expect(emailService.sendMail).toHaveBeenCalled();
+      expect(mockTxCartItemDelete).not.toHaveBeenCalled();
+
+      // Second checkout with identical cart items: must create ANOTHER completely new order!
+      notificationService.createNotification.mockClear();
+      emailService.sendMail.mockClear();
+      paymentService.createRazorpayPaymentLink.mockResolvedValueOnce({
+        id: 'plink_order_2',
+        short_url: 'https://rzp.io/i/order2',
+      });
+
+      const order2 = await service.checkout(customerUser, {
+        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
+      });
+
+      expect(order2.orderId).toBe(1001);
+      expect(order2.paymentId).toBe(500);
+      expect(order2.expiredAt).toBeNull();
+      expect(notificationService.createNotification).toHaveBeenCalled();
+      expect(emailService.sendMail).toHaveBeenCalled();
       expect(mockTxCartItemDelete).not.toHaveBeenCalled();
     });
 
-    it('should reuse existing active pending order during checkout when expiredAt is null without creating duplicate order', async () => {
-      const activePendingOrder: Order = {
-        id: 25,
-        orderNumber: 'PW-ORD-25',
-        customerId: customerUser.id,
-        subtotal: 998,
-        discountAmount: 0,
-        totalAmount: 998,
-        paymentId: 500,
-        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
-        paymentStatus: ORDER_PAYMENT_STATUS.PENDING,
-        orderStatus: ORDER_STATUS.PENDING_PAYMENT,
-        expiredAt: null,
-        shippingAddressSnapshot: {
-          name: 'Devotee Sharma',
-          phone: '9876543210',
-          addressLine1: '123 Temple Road',
-          city: 'Varanasi',
-          pincode: '221001',
-        },
-        items: [
-          {
-            id: 2001,
-            orderId: 25,
-            productId: activeProduct.id,
-            snapshot: {
-              productName: 'Puja Thali',
-              unitPrice: 499,
-              quantity: 2,
-              totalAmount: 998,
-            },
-          } as any,
-        ],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
+    it('should never reuse an unpaid pending order during checkout', async () => {
       const cartWithItem: Cart = {
         ...mockCart,
         items: [
@@ -982,141 +915,6 @@ describe('CartService', () => {
         ],
       };
       cartRepository.findCartWithItems.mockResolvedValueOnce(cartWithItem);
-
-      (dataSource.transaction as jest.Mock).mockImplementationOnce(async (cb) => {
-        const mockManager = {
-          getRepository: jest.fn().mockImplementation((entity) => {
-            if (entity === Cart) {
-              return {
-                createQueryBuilder: jest.fn().mockReturnValue({
-                  setLock: jest.fn().mockReturnThis(),
-                  where: jest.fn().mockReturnThis(),
-                  getOne: jest.fn().mockResolvedValue(mockCart),
-                }),
-              };
-            }
-            if (entity === Payment) {
-              return {
-                create: jest.fn().mockImplementation((p) => ({ id: 505, ...p })),
-                save: jest.fn().mockImplementation((p) => Promise.resolve({ id: 505, ...p })),
-              };
-            }
-            if (entity === Order) {
-              return {
-                createQueryBuilder: jest.fn().mockReturnValue({
-                  leftJoinAndSelect: jest.fn().mockReturnThis(),
-                  where: jest.fn().mockReturnThis(),
-                  andWhere: jest.fn().mockReturnThis(),
-                  orderBy: jest.fn().mockReturnThis(),
-                  getOne: jest.fn().mockResolvedValue(activePendingOrder),
-                }),
-                save: jest.fn().mockImplementation((o) => Promise.resolve(o)),
-              };
-            }
-            if (entity === CartItem) {
-              return {
-                delete: jest.fn().mockResolvedValue({ affected: 1 }),
-              };
-            }
-            return {};
-          }),
-        };
-        return cb(mockManager);
-      });
-
-      paymentService.createRazorpayPaymentLink.mockResolvedValueOnce({
-        id: 'plink_reuse_null_expiry',
-        short_url: 'https://rzp.io/i/reusenull',
-      });
-
-      auditLogService.createAuditLog.mockClear();
-      notificationService.createNotification.mockClear();
-      emailService.sendMail.mockClear();
-
-      const result = await service.checkout(customerUser, {
-        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
-      });
-
-      expect(result.orderId).toBe(25);
-      expect(result.orderNumber).toBe('PW-ORD-25');
-      expect(result.expiredAt).toBeNull();
-      expect(auditLogService.createAuditLog).not.toHaveBeenCalled();
-      expect(notificationService.createNotification).not.toHaveBeenCalled();
-      expect(emailService.sendMail).not.toHaveBeenCalled();
-    });
-
-    it('should NOT reuse existing active pending order if current cart items do not match the pending order', async () => {
-      const existingFutureExpiry = new Date(Date.now() + 20 * 60 * 1000);
-      const activePendingOrder: Order = {
-        id: 20,
-        orderNumber: 'PW-ORD-20',
-        customerId: customerUser.id,
-        subtotal: 998,
-        discountAmount: 0,
-        totalAmount: 998,
-        paymentId: 500,
-        paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
-        paymentStatus: ORDER_PAYMENT_STATUS.PENDING,
-        orderStatus: ORDER_STATUS.PENDING_PAYMENT,
-        expiredAt: existingFutureExpiry,
-        shippingAddressSnapshot: {
-          name: 'Devotee Sharma',
-          phone: '9876543210',
-          addressLine1: '123 Temple Road',
-          city: 'Varanasi',
-          pincode: '221001',
-        },
-        items: [
-          {
-            id: 2001,
-            orderId: 20,
-            productId: activeProduct.id,
-            snapshot: {
-              productName: 'Puja Thali',
-              unitPrice: 499,
-              quantity: 2,
-              totalAmount: 998,
-            },
-          } as any,
-        ],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      // Cart has changed! Customer added a new product
-      const differentProduct: Product = {
-        ...activeProduct,
-        id: 999,
-        name: 'Brass Bell',
-        price: 250,
-      };
-
-      const cartWithDifferentItem: Cart = {
-        ...mockCart,
-        items: [
-          {
-            id: 201,
-            cartId: mockCart.id,
-            cart: mockCart,
-            productId: activeProduct.id,
-            product: activeProduct,
-            quantity: 2,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-          {
-            id: 202,
-            cartId: mockCart.id,
-            cart: mockCart,
-            productId: differentProduct.id,
-            product: differentProduct,
-            quantity: 1,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        ],
-      };
-      cartRepository.findCartWithItems.mockResolvedValueOnce(cartWithDifferentItem);
 
       paymentService.createRazorpayPaymentLink.mockResolvedValueOnce({
         id: 'plink_new_123',
@@ -1127,9 +925,9 @@ describe('CartService', () => {
         paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
       });
 
-      // Should create NEW order, NOT reuse order ORD-20
       expect(result.orderId).toBe(1001);
-      expect(result.amount).toBe(1248); // 998 + 250
+      expect(result.paymentId).toBe(500);
+      expect(result.expiredAt).toBeNull();
       expect(mockTxCartItemDelete).not.toHaveBeenCalled();
     });
   });

@@ -852,15 +852,15 @@ export class UserService {
         profilePayload.astrologyPrice !== undefined
           ? profilePayload.astrologyPrice
           : (astrologerProfile.astrologyPrice != null
-              ? Number(astrologerProfile.astrologyPrice)
-              : null);
+            ? Number(astrologerProfile.astrologyPrice)
+            : null);
 
       const effPct =
         profilePayload.commissionPercentage !== undefined
           ? profilePayload.commissionPercentage
           : (astrologerProfile.commissionPercentage != null
-              ? Number(astrologerProfile.commissionPercentage)
-              : null);
+            ? Number(astrologerProfile.commissionPercentage)
+            : null);
 
       if (
         astrologyPrice !== undefined ||
@@ -1643,15 +1643,15 @@ export class UserService {
         profilePayload.astrologyPrice !== undefined
           ? profilePayload.astrologyPrice
           : (astrologerProfile.astrologyPrice != null
-              ? Number(astrologerProfile.astrologyPrice)
-              : null);
+            ? Number(astrologerProfile.astrologyPrice)
+            : null);
 
       const effPct =
         profilePayload.commissionPercentage !== undefined
           ? profilePayload.commissionPercentage
           : (astrologerProfile.commissionPercentage != null
-              ? Number(astrologerProfile.commissionPercentage)
-              : null);
+            ? Number(astrologerProfile.commissionPercentage)
+            : null);
 
       if (
         dto.astrologyPrice !== undefined ||
@@ -3954,16 +3954,7 @@ export class UserService {
       }
     }
 
-    if (dto.accountNumber) {
-      const existingAccount =
-        await this.bankAccountRepository.findByAccountNumber(
-          dto.accountNumber,
-        );
 
-      if (existingAccount && existingAccount.userId !== targetUserId) {
-        throw new ConflictException('Bank account number already in use');
-      }
-    }
 
     const account = await this.dataSource.transaction(async (manager) => {
       await this.acquireOwnerLock(
@@ -4185,16 +4176,7 @@ export class UserService {
       throw new ForbiddenException('Access denied');
     }
 
-    if (dto.accountNumber && dto.accountNumber !== account.accountNumber) {
-      const existingAccount =
-        await this.bankAccountRepository.findByAccountNumber(
-          dto.accountNumber,
-        );
 
-      if (existingAccount && existingAccount.id !== id) {
-        throw new ConflictException('Bank account number already in use');
-      }
-    }
 
     let isPrimary: boolean | undefined = undefined;
     if (dto.isPrimary !== undefined && dto.isPrimary !== null) {
@@ -4939,11 +4921,11 @@ export class UserService {
               },
               bankAccount: bankAccount
                 ? {
-                    accountNumber: bankAccount.accountNumber,
-                    ifscCode: bankAccount.ifscCode,
-                    accountHolderName: bankAccount.accountHolderName,
-                    upiId: bankAccount.upiId,
-                  }
+                  accountNumber: bankAccount.accountNumber,
+                  ifscCode: bankAccount.ifscCode,
+                  accountHolderName: bankAccount.accountHolderName,
+                  upiId: bankAccount.upiId,
+                }
                 : null,
               serviceAreas: null,
             });
@@ -5078,11 +5060,11 @@ export class UserService {
             },
             bankAccount: bankAccount
               ? {
-                  accountNumber: bankAccount.accountNumber,
-                  ifscCode: bankAccount.ifscCode,
-                  accountHolderName: bankAccount.accountHolderName,
-                  upiId: bankAccount.upiId,
-                }
+                accountNumber: bankAccount.accountNumber,
+                ifscCode: bankAccount.ifscCode,
+                accountHolderName: bankAccount.accountHolderName,
+                upiId: bankAccount.upiId,
+              }
               : null,
             serviceAreas,
           });
@@ -5420,12 +5402,7 @@ export class UserService {
     const upiId = (dto.upiId ?? bankData.upiId)?.trim() || null;
     const paymentMethod = dto.paymentMethod ?? bankData.paymentMethod ?? (upiId ? PUROHIT_PAYMENT_METHOD.UPI : PUROHIT_PAYMENT_METHOD.BANK);
 
-    if (accountNumber) {
-      const existingAccount = await this.bankAccountRepository.findByAccountNumber(accountNumber);
-      if (existingAccount) {
-        throw new ConflictException('Bank account number already in use');
-      }
-    }
+
 
     const rawQualification = dto.qualification ?? dto.education;
     const parsedQual = parseStringArray(rawQualification) || (Array.isArray(rawQualification) ? rawQualification : (rawQualification ? [rawQualification] : null));
@@ -5750,11 +5727,11 @@ export class UserService {
             },
             bankAccount: result.bankAccount
               ? {
-                  accountNumber: result.bankAccount.accountNumber,
-                  ifscCode: result.bankAccount.ifscCode,
-                  accountHolderName: result.bankAccount.accountHolderName,
-                  upiId: result.bankAccount.upiId,
-                }
+                accountNumber: result.bankAccount.accountNumber,
+                ifscCode: result.bankAccount.ifscCode,
+                accountHolderName: result.bankAccount.accountHolderName,
+                upiId: result.bankAccount.upiId,
+              }
               : null,
             serviceAreas: result.serviceAreas,
           });
@@ -5857,17 +5834,8 @@ export class UserService {
     const bankName = (dto.bankName ?? bankData.bankName)?.trim() || null;
     const upiId = (dto.upiId ?? bankData.upiId)?.trim() || null;
     const paymentMethod = dto.paymentMethod ?? bankData.paymentMethod ?? (upiId ? PUROHIT_PAYMENT_METHOD.UPI : PUROHIT_PAYMENT_METHOD.BANK);
-
-    if (accountNumber) {
-      const existingAccount = await this.bankAccountRepository.findByAccountNumber(accountNumber);
-      if (existingAccount) {
-        throw new ConflictException('Bank account number already in use');
-      }
-    }
-
     const rawQualification = dto.qualification ?? dto.education;
     const parsedQual = parseStringArray(rawQualification) || (Array.isArray(rawQualification) ? rawQualification : (rawQualification ? [rawQualification] : null));
-
     const hasAadhaar = !!(aadhaarDocUrl || (aadhaarFiles && aadhaarFiles.length > 0));
     const hasPan = !!(panDocUrl || (panFiles && panFiles.length > 0));
 
@@ -6163,11 +6131,11 @@ export class UserService {
             },
             bankAccount: result.bankAccount
               ? {
-                  accountNumber: result.bankAccount.accountNumber,
-                  ifscCode: result.bankAccount.ifscCode,
-                  accountHolderName: result.bankAccount.accountHolderName,
-                  upiId: result.bankAccount.upiId,
-                }
+                accountNumber: result.bankAccount.accountNumber,
+                ifscCode: result.bankAccount.ifscCode,
+                accountHolderName: result.bankAccount.accountHolderName,
+                upiId: result.bankAccount.upiId,
+              }
               : null,
             serviceAreas: null,
           });
@@ -6420,14 +6388,13 @@ export class UserService {
       }
     }
 
-    if (!dto.id || ((effectiveRole === USER_ROLE.PUROHIT || effectiveRole === USER_ROLE.ASTROLOGER) && (dto.aadhaarNumber || dto.accountNumber))) {
+    if (!dto.id || ((effectiveRole === USER_ROLE.PUROHIT || effectiveRole === USER_ROLE.ASTROLOGER) && dto.aadhaarNumber)) {
       const [
         existingUserByEmail,
         existingUserByPhone,
         existingUsername,
         existingAadhaar,
         existingAstrologerAadhaar,
-        existingAccount,
       ] = await Promise.all([
         !dto.id && dto.email
           ? this.userRepository.findByEmail(dto.email)
@@ -6448,11 +6415,6 @@ export class UserService {
             where: { aadhaarNumber: dto.aadhaarNumber.trim() },
           })
           : Promise.resolve(null),
-        (effectiveRole === USER_ROLE.PUROHIT || effectiveRole === USER_ROLE.ASTROLOGER) && dto.accountNumber
-          ? this.dataSource
-            .getRepository(BankAccount)
-            .findOne({ where: { accountNumber: dto.accountNumber.trim() } })
-          : Promise.resolve(null),
       ]);
 
       if (!dto.id) {
@@ -6469,10 +6431,6 @@ export class UserService {
 
       if (existingAadhaar || existingAstrologerAadhaar) {
         throw new ConflictException('Aadhaar number already in use');
-      }
-
-      if (existingAccount) {
-        throw new ConflictException('Bank account number already in use');
       }
     }
 

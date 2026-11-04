@@ -450,42 +450,7 @@ export class CartService {
    *    - In DB transaction: Create Payment, Order, and OrderItems. If COD, clear cart.
    *    - Outside DB transaction: If ONLINE, generate Razorpay payment link. If COD, confirm immediately.
    */
-  /**
-   * Helper to determine whether an existing pending order's items match the current checkout cart.
-   * Matches by item count, total amount, and each item's productId and quantity.
-   */
-  private orderMatchesCart(
-    existingOrder: Order,
-    validItems: {
-      cartItemId: number;
-      cartItemUpdatedAt?: Date;
-      product: Product;
-      quantity: number;
-      unitPrice: number;
-      subtotal: number;
-    }[],
-    totalAmount: number,
-  ): boolean {
-    const orderItems = existingOrder.items || [];
-    if (orderItems.length !== validItems.length) {
-      return false;
-    }
 
-    if (Math.abs(Number(existingOrder.totalAmount) - totalAmount) > 0.01) {
-      return false;
-    }
-
-    for (const validItem of validItems) {
-      const match = orderItems.find(
-        (oi) => oi.productId === validItem.product.id && oi.snapshot?.quantity === validItem.quantity,
-      );
-      if (!match) {
-        return false;
-      }
-    }
-
-    return true;
-  }
 
   async checkout(user: User, dto: CheckoutDto): Promise<CheckoutResponse> {
     if (user.role !== USER_ROLE.CUSTOMER) {
@@ -496,52 +461,67 @@ export class CartService {
     // 1. PAYMENT RETRY FLOW
     // ==========================================
     if (dto.orderId) {
-      const existingOrder = await this.orderRepository.findCustomerOrderById(
-        user.id,
-        dto.orderId,
-      );
-
-      if (!existingOrder) {
-        throw new NotFoundException(`Order #${dto.orderId} not found`);
-      }
-
-      if (existingOrder.paymentStatus === ORDER_PAYMENT_STATUS.PAID) {
-        throw new BadRequestException('This order has already been paid');
-      }
-
-      if (existingOrder.orderStatus === ORDER_STATUS.CANCELLED) {
-        throw new BadRequestException(
-          'Cannot retry payment for a cancelled order',
-        );
-      }
-
-      if (
-        existingOrder.orderStatus === ORDER_STATUS.EXPIRED ||
-        this.isOrderPaymentExpired(existingOrder)
-      ) {
-        if (existingOrder.orderStatus !== ORDER_STATUS.EXPIRED) {
-          existingOrder.orderStatus = ORDER_STATUS.EXPIRED;
-          if (!existingOrder.expiredAt) {
-            existingOrder.expiredAt = new Date();
-          }
-          await this.orderRepository.save(existingOrder);
-        }
-        throw new BadRequestException(
-          'This order has expired. Please place a new order.',
-        );
-      }
-
-      if (existingOrder.orderStatus !== ORDER_STATUS.PENDING_PAYMENT) {
-        throw new BadRequestException('This order is not eligible for payment');
-      }
-
-      const totalAmount = Number(existingOrder.totalAmount);
-      const amountInPaise = Math.round(totalAmount * 100);
-
-      const savedPayment = await this.dataSource.transaction(
-        async (manager) => {
-          const paymentRepo = manager.getRepository(Payment);
+      const { savedPayment, lockedOrder } =
+        await this.dataSource.transaction<{
+          savedPayment: Payment;
+          lockedOrder: Order;
+        }>(async (manager) => {
           const orderRepo = manager.getRepository(Order);
+          const paymentRepo = manager.getRepository(Payment);
+
+          const existingOrder = await orderRepo
+            .createQueryBuilder('order')
+            .setLock('pessimistic_write')
+            .leftJoinAndSelect('order.items', 'items')
+            .leftJoinAndSelect('items.product', 'product')
+            .leftJoinAndSelect('order.payment', 'payment')
+            .where('order.id = :orderId AND order.customerId = :customerId', {
+              orderId: dto.orderId,
+              customerId: user.id,
+            })
+            .getOne();
+
+          if (!existingOrder) {
+            throw new NotFoundException(`Order #${dto.orderId} not found`);
+          }
+
+          if (existingOrder.paymentMethod !== ORDER_PAYMENT_METHOD.ONLINE) {
+            throw new BadRequestException(
+              'Payment retry is only available for online orders',
+            );
+          }
+
+          if (existingOrder.paymentStatus === ORDER_PAYMENT_STATUS.PAID) {
+            throw new BadRequestException('This order has already been paid');
+          }
+
+          if (existingOrder.orderStatus === ORDER_STATUS.CANCELLED) {
+            throw new BadRequestException(
+              'Cannot retry payment for a cancelled order',
+            );
+          }
+
+          if (
+            existingOrder.orderStatus === ORDER_STATUS.EXPIRED ||
+            this.isOrderPaymentExpired(existingOrder)
+          ) {
+            if (existingOrder.orderStatus !== ORDER_STATUS.EXPIRED) {
+              existingOrder.orderStatus = ORDER_STATUS.EXPIRED;
+              if (!existingOrder.expiredAt) {
+                existingOrder.expiredAt = new Date();
+              }
+              await orderRepo.save(existingOrder);
+            }
+            throw new BadRequestException(
+              'This order has expired. Please place a new order.',
+            );
+          }
+
+          if (existingOrder.orderStatus !== ORDER_STATUS.PENDING_PAYMENT) {
+            throw new BadRequestException('This order is not eligible for payment');
+          }
+
+          const totalAmount = Number(existingOrder.totalAmount);
 
           const payment = paymentRepo.create({
             paymentType: PAYMENT_TYPE.PRODUCT_PAYMENT,
@@ -560,9 +540,11 @@ export class CartService {
           existingOrder.paymentStatus = ORDER_PAYMENT_STATUS.PENDING;
           await orderRepo.save(existingOrder);
 
-          return newPayment;
-        },
-      );
+          return { savedPayment: newPayment, lockedOrder: existingOrder };
+        });
+
+      const totalAmount = Number(lockedOrder.totalAmount);
+      const amountInPaise = Math.round(totalAmount * 100);
 
       // Audit log: ORDER_PAYMENT_RETRY_INITIATED
       if (this.auditLogService) {
@@ -573,17 +555,17 @@ export class CartService {
             actorRole: user.role,
             module: AUDIT_MODULE.PAYMENT,
             entity: 'Order',
-            entityId: String(existingOrder.id),
+            entityId: String(lockedOrder.id),
             action: 'ORDER_PAYMENT_RETRY_INITIATED',
-            message: `Customer initiated payment retry for Order #${existingOrder.orderNumber}.`,
+            message: `Customer initiated payment retry for Order #${lockedOrder.orderNumber}.`,
             newValue: {
               paymentId: savedPayment.id,
               amount: totalAmount,
               status: savedPayment.status,
             },
             metadata: {
-              orderId: existingOrder.id,
-              orderNumber: existingOrder.orderNumber,
+              orderId: lockedOrder.id,
+              orderNumber: lockedOrder.orderNumber,
               paymentId: savedPayment.id,
               amount: totalAmount,
             },
@@ -606,12 +588,12 @@ export class CartService {
             ...(user.email ? { email: user.email } : {}),
             ...(user.phone ? { contact: user.phone } : {}),
           },
-          `Poojawala Order #${existingOrder.orderNumber}`,
+          `Poojawala Order #${lockedOrder.orderNumber}`,
           {
             paymentId: String(savedPayment.id),
             customerId: String(user.id),
-            orderId: String(existingOrder.id),
-            orderNumber: existingOrder.orderNumber,
+            orderId: String(lockedOrder.id),
+            orderNumber: lockedOrder.orderNumber,
             paymentType: String(savedPayment.paymentType),
             isCartCheckout: 'true',
           },
@@ -620,18 +602,18 @@ export class CartService {
         // Notify Admins about the order repayment initiation via Socket.IO & DB
         if (this.notificationService) {
           try {
-            const orderCode = `ORD-${existingOrder.id}`;
+            const orderCode = `ORD-${lockedOrder.id}`;
             const paymentReference = `PAY-${savedPayment.id}`;
             await this.notificationService.notifyAdmins(
               'Order Repayment Initiated',
-              `Customer ${customerName} (ID: CM-${user.id}) initiated payment retry for Order ${orderCode} (#${existingOrder.orderNumber}). Amount: ₹${totalAmount}. Ref: ${paymentReference}.`,
+              `Customer ${customerName} (ID: CM-${user.id}) initiated payment retry for Order ${orderCode} (#${lockedOrder.orderNumber}). Amount: ₹${totalAmount}. Ref: ${paymentReference}.`,
               NOTIFICATION_TYPE.PAYMENT,
-              existingOrder.id,
+              lockedOrder.id,
               'ORDER',
               {
-                orderId: existingOrder.id,
+                orderId: lockedOrder.id,
                 orderCode,
-                orderNumber: existingOrder.orderNumber,
+                orderNumber: lockedOrder.orderNumber,
                 customerId: user.id,
                 customerName,
                 paymentId: savedPayment.id,
@@ -651,23 +633,23 @@ export class CartService {
         }
 
         return {
-          orderId: existingOrder.id,
-          orderNumber: existingOrder.orderNumber,
-          customerId: existingOrder.customerId,
+          orderId: lockedOrder.id,
+          orderNumber: lockedOrder.orderNumber,
+          customerId: lockedOrder.customerId,
           paymentId: savedPayment.id,
           paymentUrl: paymentLink.short_url,
           amount: totalAmount,
           amountInPaise,
           currency: 'INR',
-          subtotal: Number(existingOrder.subtotal),
-          discountAmount: Number(existingOrder.discountAmount),
+          subtotal: Number(lockedOrder.subtotal),
+          discountAmount: Number(lockedOrder.discountAmount),
           totalAmount,
-          paymentMethod: existingOrder.paymentMethod,
-          paymentStatus: existingOrder.paymentStatus,
-          orderStatus: existingOrder.orderStatus,
-          shippingAddressSnapshot: existingOrder.shippingAddressSnapshot,
+          paymentMethod: lockedOrder.paymentMethod,
+          paymentStatus: lockedOrder.paymentStatus,
+          orderStatus: lockedOrder.orderStatus,
+          shippingAddressSnapshot: lockedOrder.shippingAddressSnapshot,
           items: await Promise.all(
-            (existingOrder.items || []).map(async (item) => {
+            (lockedOrder.items || []).map(async (item) => {
               let img = item.snapshot?.productImage || item.product?.imageUrl || null;
               if (img && this.s3Service) {
                 try {
@@ -688,9 +670,9 @@ export class CartService {
               };
             }),
           ),
-          createdAt: existingOrder.createdAt,
-          updatedAt: existingOrder.updatedAt,
-          expiredAt: existingOrder.expiredAt ?? null,
+          createdAt: lockedOrder.createdAt,
+          updatedAt: lockedOrder.updatedAt,
+          expiredAt: lockedOrder.expiredAt ?? null,
           status: savedPayment.status,
         };
       } catch (error: unknown) {
@@ -706,8 +688,28 @@ export class CartService {
         savedPayment.failureReason = errorMessage;
         await this.paymentRepository.savePayment(savedPayment);
 
-        existingOrder.paymentStatus = ORDER_PAYMENT_STATUS.FAILED;
-        await this.orderRepository.save(existingOrder);
+        try {
+          await this.dataSource.transaction(async (errManager) => {
+            const errOrderRepo = errManager.getRepository(Order);
+            const currentOrder = await errOrderRepo.findOne({
+              where: { id: lockedOrder.id },
+              lock: { mode: 'pessimistic_write' },
+            });
+            if (
+              currentOrder &&
+              currentOrder.paymentId === savedPayment.id &&
+              currentOrder.paymentStatus !== ORDER_PAYMENT_STATUS.PAID &&
+              currentOrder.orderStatus === ORDER_STATUS.PENDING_PAYMENT
+            ) {
+              currentOrder.paymentStatus = ORDER_PAYMENT_STATUS.FAILED;
+              await errOrderRepo.save(currentOrder);
+            }
+          });
+        } catch (orderUpdateErr: any) {
+          this.logger.warn(
+            `Failed to update order status on payment retry link failure: ${orderUpdateErr?.message}`,
+          );
+        }
 
         this.logger.error(
           `Failed to create Razorpay payment link for payment #${savedPayment.id}: ${errorMessage}`,
@@ -825,12 +827,11 @@ export class CartService {
     const paymentMethod = dto.paymentMethod || ORDER_PAYMENT_METHOD.ONLINE;
     const isCod = paymentMethod === ORDER_PAYMENT_METHOD.COD;
 
-    // Inside DB transaction: Check existing active pending order or create Payment, Order, OrderItems
-    const { savedPayment, savedOrder, isReusedOrder } =
+    // Inside DB transaction: Create Payment, Order, OrderItems
+    const { savedPayment, savedOrder } =
       await this.dataSource.transaction<{
         savedPayment: Payment;
         savedOrder: Order;
-        isReusedOrder: boolean;
       }>(async (manager) => {
         const paymentRepo = manager.getRepository(Payment);
         const orderRepo = manager.getRepository(Order);
@@ -845,86 +846,7 @@ export class CartService {
           .where('cart.customerId = :customerId', { customerId: user.id })
           .getOne();
 
-        // For ONLINE payment: check if customer already has an active unpaid pending order that has not expired
-        if (!isCod) {
-          const existingPendingOrder = await manager
-            .getRepository(Order)
-            .createQueryBuilder('order')
-            .leftJoinAndSelect('order.items', 'items')
-            .leftJoinAndSelect('items.product', 'product')
-            .leftJoinAndSelect('order.payment', 'payment')
-            .where('order.customerId = :customerId', { customerId: user.id })
-            .andWhere('order.paymentMethod = :paymentMethod', {
-              paymentMethod: ORDER_PAYMENT_METHOD.ONLINE,
-            })
-            .andWhere('order.paymentStatus = :paymentStatus', {
-              paymentStatus: ORDER_PAYMENT_STATUS.PENDING,
-            })
-            .andWhere('order.orderStatus = :orderStatus', {
-              orderStatus: ORDER_STATUS.PENDING_PAYMENT,
-            })
-            .andWhere(
-              '("order"."expiredAt" IS NULL OR "order"."expiredAt" > (now() AT TIME ZONE \'UTC\'))',
-            )
-            .orderBy('order.createdAt', 'DESC')
-            .getOne();
-
-          if (existingPendingOrder && this.orderMatchesCart(existingPendingOrder, validItems, totalAmount)) {
-            // Reusing existing active order: do not create another order!
-            // Note: existingPendingOrder.expiredAt MUST REMAIN UNCHANGED
-            const orderTotal = Number(existingPendingOrder.totalAmount);
-            const payment = paymentRepo.create({
-              paymentType: PAYMENT_TYPE.PRODUCT_PAYMENT,
-              createdById: user.id,
-              payerId: user.id,
-              amount: orderTotal,
-              currency: 'INR',
-              customerPaymentMethod: CUSTOMER_PAYMENT_METHOD.ONLINE,
-              status: PAYMENT_STATUS.CREATED,
-              remark: `Payment attempt for Order #${existingPendingOrder.orderNumber}`,
-            });
-
-            const newPayment = await paymentRepo.save(payment);
-            existingPendingOrder.paymentId = newPayment.id;
-            existingPendingOrder.paymentStatus = ORDER_PAYMENT_STATUS.PENDING;
-            if (resolvedAddress) {
-              existingPendingOrder.shippingAddressSnapshot = resolvedAddress;
-            }
-            if (existingPendingOrder.items && existingPendingOrder.items.length > 0) {
-              for (const validItem of validItems) {
-                const match = existingPendingOrder.items.find(
-                  (oi) => oi.productId === validItem.product.id,
-                );
-                if (match) {
-                  if (validItem.cartItemId) {
-                    match.cartItemId = validItem.cartItemId;
-                  }
-                  if (match.snapshot) {
-                    match.snapshot.cartItemUpdatedAt = validItem.cartItemUpdatedAt
-                      ? validItem.cartItemUpdatedAt.toISOString()
-                      : match.snapshot.cartItemUpdatedAt;
-                  }
-                }
-              }
-              if (typeof orderItemRepo.save === 'function') {
-                await orderItemRepo.save(existingPendingOrder.items);
-              }
-            }
-            await orderRepo.save(existingPendingOrder);
-
-            // TODO: Deprecated premature cart clearing.
-            // Cart items must only be cleared upon verified payment success, not order creation/reuse.
-            // await cartItemRepo.delete({ cartId: cart.id });
-
-            return {
-              savedPayment: newPayment,
-              savedOrder: existingPendingOrder,
-              isReusedOrder: true,
-            };
-          }
-        }
-
-        // Normal flow: create new Payment, Order, and OrderItems
+        // Normal flow: always create new Payment, Order, and OrderItems
         const payment = paymentRepo.create({
           paymentType: PAYMENT_TYPE.PRODUCT_PAYMENT,
           createdById: user.id,
@@ -991,10 +913,7 @@ export class CartService {
         await orderItemRepo.save(createdItems);
         newOrder.items = createdItems;
 
-        // TODO: Deprecated premature cart clearing for ONLINE checkout.
-        // For ONLINE checkout, cart items must only be cleared upon verified payment success from Razorpay.
         // For COD checkout, since the order is immediately CONFIRMED, clear the purchased cart items.
-        // await cartItemRepo.delete({ cartId: cart.id });
         if (isCod) {
           for (const validItem of validItems) {
             await cartItemRepo.delete({
@@ -1007,7 +926,6 @@ export class CartService {
         return {
           savedPayment: newPayment,
           savedOrder: newOrder,
-          isReusedOrder: false,
         };
       });
 
@@ -1087,15 +1005,13 @@ export class CartService {
         },
       );
 
-      // Only notify and email if this is a newly placed order (not reused retry)
-      if (!isReusedOrder) {
-        await this.notifyAndEmailOrderPlaced(
-          user,
-          savedOrder,
-          false,
-          paymentLink.short_url,
-        );
-      }
+      // Notify and email order placed for newly created order
+      await this.notifyAndEmailOrderPlaced(
+        user,
+        savedOrder,
+        false,
+        paymentLink.short_url,
+      );
 
       return {
         orderId: savedOrder.id,
@@ -1153,8 +1069,28 @@ export class CartService {
       savedPayment.failureReason = errorMessage;
       await this.paymentRepository.savePayment(savedPayment);
 
-      savedOrder.paymentStatus = ORDER_PAYMENT_STATUS.FAILED;
-      await this.orderRepository.save(savedOrder);
+      try {
+        await this.dataSource.transaction(async (errManager) => {
+          const errOrderRepo = errManager.getRepository(Order);
+          const currentOrder = await errOrderRepo.findOne({
+            where: { id: savedOrder.id },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (
+            currentOrder &&
+            currentOrder.paymentId === savedPayment.id &&
+            currentOrder.paymentStatus !== ORDER_PAYMENT_STATUS.PAID &&
+            currentOrder.orderStatus === ORDER_STATUS.PENDING_PAYMENT
+          ) {
+            currentOrder.paymentStatus = ORDER_PAYMENT_STATUS.FAILED;
+            await errOrderRepo.save(currentOrder);
+          }
+        });
+      } catch (orderUpdateErr: any) {
+        this.logger.warn(
+          `Failed to update order status on checkout link failure: ${orderUpdateErr?.message}`,
+        );
+      }
 
       // Audit and notify payment link failure
       if (this.auditLogService) {

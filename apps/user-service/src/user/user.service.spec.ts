@@ -3613,7 +3613,7 @@ describe('UserService - Purohit Verification Rework', () => {
     });
 
     describe('Bank Account Business Logic & Invariants', () => {
-      it('15. Reject duplicate account number', async () => {
+      it('15. Allows duplicate account number when validation is removed', async () => {
         testBankAccounts = [
           {
             id: 5,
@@ -3632,12 +3632,12 @@ describe('UserService - Purohit Verification Rework', () => {
           ifscCode: 'SBIN0001234',
         };
 
-        await expect(
-          service.addPurohitBankAccount(
-            { id: testUser.id, role: USER_ROLE.PUROHIT },
-            dto as any,
-          ),
-        ).rejects.toThrow(ConflictException);
+        const res = await service.addPurohitBankAccount(
+          { id: testUser.id, role: USER_ROLE.PUROHIT },
+          dto as any,
+        );
+        expect(res.success).toBe(true);
+        expect(res.data.accountNumber).toBe('111122223333');
       });
 
       it('16. When adding second account with isPrimary=true, previous primary is cleared', async () => {
