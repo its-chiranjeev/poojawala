@@ -864,7 +864,7 @@ export class CartService {
               orderStatus: ORDER_STATUS.PENDING_PAYMENT,
             })
             .andWhere(
-              'order.expiredAt IS NOT NULL AND "order"."expiredAt" > (now() AT TIME ZONE \'UTC\')',
+              '("order"."expiredAt" IS NULL OR "order"."expiredAt" > (now() AT TIME ZONE \'UTC\'))',
             )
             .orderBy('order.createdAt', 'DESC')
             .getOne();
@@ -944,10 +944,7 @@ export class CartService {
         const randomPart = Math.floor(1000 + Math.random() * 9000);
         const orderNumber = `PW-ORD-${timestamp}-${randomPart}`;
 
-        const expiryMinutes = this.getPaymentExpiryMinutes();
-        const expiredAt = isCod
-          ? null
-          : (new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString() as unknown as Date);
+        const expiredAt = null;
 
         const order = orderRepo.create({
           orderNumber,
@@ -1060,6 +1057,7 @@ export class CartService {
         ),
         createdAt: savedOrder.createdAt,
         updatedAt: savedOrder.updatedAt,
+        expiredAt: savedOrder.expiredAt ?? null,
         status: savedPayment.status,
       };
     }

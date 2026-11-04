@@ -10,6 +10,7 @@ import {
   User,
   USER_ROLE,
   USER_STATUS,
+  LOGIN_PAGE,
   PurohitProfile,
   PUROHIT_VERIFICATION_STATUS,
 } from '@poojawala/entities';
@@ -614,6 +615,188 @@ describe('AuthModuleService - Google Authentication', () => {
       delete process.env['GOOGLE_CLIENT_ID'];
 
       expect(() => service.getGoogleOAuthRedirect('CUSTOMER')).toThrow(BadRequestException);
+    });
+  });
+  describe('loginService & forgotPasswordService - LOGIN_PAGE query role enforcement', () => {
+    const password = 'Password@123';
+    let hashedPassword: string;
+
+    beforeAll(async () => {
+      hashedPassword = await bcrypt.hash(password, 10);
+    });
+
+    const setupMocksForRole = (role: USER_ROLE) => {
+      const mockUser = {
+        id: 99,
+        email: `${role.toLowerCase()}@test.com`,
+        username: `${role.toLowerCase()}user`,
+        hashedPassword,
+        role,
+        status: USER_STATUS.ACTIVE,
+        isVerified: true,
+      } as User;
+
+      userRepository.findByEmailOrUsername!.mockResolvedValue(mockUser);
+      userRepository.findByEmail!.mockResolvedValue(mockUser);
+      userRepository.findOne!.mockResolvedValue(mockUser);
+
+      dataSource.getRepository = jest.fn(() => ({
+        findOne: jest.fn().mockResolvedValue(null),
+      }));
+    };
+
+    describe('loginService on HOME_PAGE', () => {
+      it('allows CUSTOMER to login', async () => {
+        setupMocksForRole(USER_ROLE.CUSTOMER);
+        const res = await service.loginService(
+          { email: 'customer@test.com', password },
+          LOGIN_PAGE.HOME_PAGE,
+        );
+        expect(res.message).toBe('Login successful');
+      });
+
+      it('allows PUROHIT to login', async () => {
+        setupMocksForRole(USER_ROLE.PUROHIT);
+        const res = await service.loginService(
+          { email: 'purohit@test.com', password },
+          LOGIN_PAGE.HOME_PAGE,
+        );
+        expect(res.message).toBe('Login successful');
+      });
+
+      it('allows ASTROLOGER to login', async () => {
+        setupMocksForRole(USER_ROLE.ASTROLOGER);
+        const res = await service.loginService(
+          { email: 'astrologer@test.com', password },
+          LOGIN_PAGE.HOME_PAGE,
+        );
+        expect(res.message).toBe('Login successful');
+      });
+
+      it('rejects ADMIN with BadRequestException', async () => {
+        setupMocksForRole(USER_ROLE.ADMIN);
+        await expect(
+          service.loginService(
+            { email: 'admin@test.com', password },
+            LOGIN_PAGE.HOME_PAGE,
+          ),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Admin accounts cannot log in through the home page. Please use the admin portal.',
+          ),
+        );
+      });
+    });
+
+    describe('loginService on ADMIN_PAGE', () => {
+      it('allows ADMIN to login', async () => {
+        setupMocksForRole(USER_ROLE.ADMIN);
+        const res = await service.loginService(
+          { email: 'admin@test.com', password },
+          LOGIN_PAGE.ADMIN_PAGE,
+        );
+        expect(res.message).toBe('Login successful');
+      });
+
+      it('rejects CUSTOMER with BadRequestException', async () => {
+        setupMocksForRole(USER_ROLE.CUSTOMER);
+        await expect(
+          service.loginService(
+            { email: 'customer@test.com', password },
+            LOGIN_PAGE.ADMIN_PAGE,
+          ),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Access denied. Only administrators are allowed to log in through the admin portal.',
+          ),
+        );
+      });
+
+      it('rejects PUROHIT with BadRequestException', async () => {
+        setupMocksForRole(USER_ROLE.PUROHIT);
+        await expect(
+          service.loginService(
+            { email: 'purohit@test.com', password },
+            LOGIN_PAGE.ADMIN_PAGE,
+          ),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Access denied. Only administrators are allowed to log in through the admin portal.',
+          ),
+        );
+      });
+
+      it('rejects ASTROLOGER with BadRequestException', async () => {
+        setupMocksForRole(USER_ROLE.ASTROLOGER);
+        await expect(
+          service.loginService(
+            { email: 'astrologer@test.com', password },
+            LOGIN_PAGE.ADMIN_PAGE,
+          ),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Access denied. Only administrators are allowed to log in through the admin portal.',
+          ),
+        );
+      });
+    });
+
+    describe('forgotPasswordService on HOME_PAGE and ADMIN_PAGE', () => {
+      it('rejects ADMIN on HOME_PAGE with BadRequestException', async () => {
+        setupMocksForRole(USER_ROLE.ADMIN);
+        await expect(
+          service.forgotPasswordService(
+            { email: 'admin@test.com' },
+            LOGIN_PAGE.HOME_PAGE,
+          ),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Admin accounts cannot reset password through the home page. Please use the admin portal.',
+          ),
+        );
+      });
+
+      it('rejects CUSTOMER on ADMIN_PAGE with BadRequestException', async () => {
+        setupMocksForRole(USER_ROLE.CUSTOMER);
+        await expect(
+          service.forgotPasswordService(
+            { email: 'customer@test.com' },
+            LOGIN_PAGE.ADMIN_PAGE,
+          ),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Access denied. Only administrators are allowed to reset password through the admin portal.',
+          ),
+        );
+      });
+
+      it('rejects PUROHIT on ADMIN_PAGE with BadRequestException', async () => {
+        setupMocksForRole(USER_ROLE.PUROHIT);
+        await expect(
+          service.forgotPasswordService(
+            { email: 'purohit@test.com' },
+            LOGIN_PAGE.ADMIN_PAGE,
+          ),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Access denied. Only administrators are allowed to reset password through the admin portal.',
+          ),
+        );
+      });
+
+      it('rejects ASTROLOGER on ADMIN_PAGE with BadRequestException', async () => {
+        setupMocksForRole(USER_ROLE.ASTROLOGER);
+        await expect(
+          service.forgotPasswordService(
+            { email: 'astrologer@test.com' },
+            LOGIN_PAGE.ADMIN_PAGE,
+          ),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Access denied. Only administrators are allowed to reset password through the admin portal.',
+          ),
+        );
+      });
     });
   });
 });

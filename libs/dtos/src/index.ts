@@ -8,6 +8,7 @@ export * from './auth/update-user.dto';
 export * from './auth/verify-otp.dto';
 export * from './auth/google-auth.dto';
 export * from './auth/switch-intent.dto';
+export * from './auth/auth-page-query.dto';
 
 export * from './booking/assign-booking.dto';
 export * from './booking/booking-query.dto';

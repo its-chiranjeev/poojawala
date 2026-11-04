@@ -32,6 +32,11 @@ export enum USER_STATUS {
   PENDING = 'PENDING',
 }
 
+export enum LOGIN_PAGE {
+  HOME_PAGE = 'HOME_PAGE',
+  ADMIN_PAGE = 'ADMIN_PAGE'
+}
+
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn()

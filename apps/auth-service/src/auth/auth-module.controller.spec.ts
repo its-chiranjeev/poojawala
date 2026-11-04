@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AuthModuleController } from './auth-module.controller';
 import { AuthModuleService } from './auth-module.service';
 import { S3Service } from '@poojawala/s3';
-import { USER_ROLE, USER_STATUS } from '@poojawala/entities';
+import { USER_ROLE, USER_STATUS, LOGIN_PAGE } from '@poojawala/entities';
 import { ROLE_COOKIE_MAP } from '@poojawala/common';
 import { BadRequestException } from '@nestjs/common';
 
@@ -406,6 +406,37 @@ describe('AuthModuleController - Google OAuth & Intent Flow', () => {
       expect(res.clearCookie).toHaveBeenCalledWith(
         ROLE_COOKIE_MAP[USER_ROLE.PUROHIT].access,
         expect.any(Object),
+      );
+    });
+    it('login forwards loginPage query param to loginService', async () => {
+      authService.loginService = jest.fn().mockResolvedValue({
+        message: 'Login successful',
+        tokens: { accessToken: 'admin-access', refreshToken: 'admin-refresh' },
+        user: { id: 1, role: USER_ROLE.ADMIN, status: USER_STATUS.ACTIVE },
+      });
+      const res: any = { cookie: jest.fn() };
+      await controller.login(
+        { email: 'admin@poojawala.com', password: 'password' } as any,
+        res,
+        { loginPage: LOGIN_PAGE.ADMIN_PAGE },
+      );
+      expect(authService.loginService).toHaveBeenCalledWith(
+        { email: 'admin@poojawala.com', password: 'password' },
+        LOGIN_PAGE.ADMIN_PAGE,
+      );
+    });
+
+    it('forgotPassword forwards loginPage query param to forgotPasswordService', async () => {
+      authService.forgotPasswordService = jest.fn().mockResolvedValue({
+        message: 'OTP sent successfully',
+      });
+      await controller.forgotPassword(
+        { email: 'user@test.com' },
+        { loginPage: LOGIN_PAGE.HOME_PAGE },
+      );
+      expect(authService.forgotPasswordService).toHaveBeenCalledWith(
+        { email: 'user@test.com' },
+        LOGIN_PAGE.HOME_PAGE,
       );
     });
   });

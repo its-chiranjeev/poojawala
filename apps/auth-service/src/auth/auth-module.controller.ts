@@ -37,8 +37,9 @@ import {
   ResendOtpDto,
   GoogleAuthDto,
   SwitchIntentDto,
+  AuthPageQueryDto,
 } from '@poojawala/dtos';
-import { USER_ROLE } from '@poojawala/entities';
+import { USER_ROLE, LOGIN_PAGE } from '@poojawala/entities';
 import type { Response } from 'express';
 import * as crypto from 'crypto';
 import { S3Service } from '@poojawala/s3';
@@ -230,8 +231,10 @@ export class AuthModuleController {
   async login(
     @Body(new ValidationPipe()) dto: LoginDto,
     @Res({ passthrough: true }) res: Response,
+    @Query(new ValidationPipe({ transform: true })) query?: AuthPageQueryDto,
   ) {
-    const result = await this.authModuleService.loginService(dto);
+    const loginPage = query?.loginPage || query?.page;
+    const result = await this.authModuleService.loginService(dto, loginPage);
     const csrfToken = crypto.randomUUID();
     this.setAuthCookies(
       res,
@@ -738,8 +741,10 @@ export class AuthModuleController {
   async forgotPassword(
     @Body(new ValidationPipe({ whitelist: true, transform: true }))
     dto: forgotPasswordDto,
+    @Query(new ValidationPipe({ transform: true })) query?: AuthPageQueryDto,
   ) {
-    return this.authModuleService.forgotPasswordService(dto);
+    const loginPage = query?.loginPage || query?.page;
+    return this.authModuleService.forgotPasswordService(dto, loginPage);
   }
 
   @Patch('reset-password')

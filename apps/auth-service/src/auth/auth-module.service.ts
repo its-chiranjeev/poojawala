@@ -14,6 +14,7 @@ import {
   User,
   USER_STATUS,
   USER_ROLE,
+  LOGIN_PAGE,
   Otp,
   PurohitProfile,
   PUROHIT_VERIFICATION_STATUS,
@@ -274,11 +275,49 @@ export class AuthModuleService {
     };
   }
 
-  async loginService(dto: LoginDto) {
+  private validateLoginPageRole(
+    userRole: USER_ROLE,
+    loginPage?: LOGIN_PAGE,
+    action: 'login' | 'forgot-password' = 'login',
+  ): void {
+    if (!loginPage) {
+      return;
+    }
+
+    const actionText = action === 'login' ? 'log in' : 'reset password';
+
+    if (loginPage === LOGIN_PAGE.HOME_PAGE) {
+      if (userRole === USER_ROLE.ADMIN) {
+        throw new BadRequestException(
+          `Your account cannot ${actionText} through this page.`,
+        );
+      }
+      const allowedRoles = [
+        USER_ROLE.CUSTOMER,
+        USER_ROLE.PUROHIT,
+        USER_ROLE.ASTROLOGER,
+      ];
+      if (!allowedRoles.includes(userRole)) {
+        throw new BadRequestException(
+          `This account role (${userRole}) is not permitted to ${actionText} through this page.`,
+        );
+      }
+    } else if (loginPage === LOGIN_PAGE.ADMIN_PAGE) {
+      if (userRole !== USER_ROLE.ADMIN) {
+        throw new BadRequestException(
+          `Access denied. Only administrators are allowed to ${actionText} through the admin portal.`,
+        );
+      }
+    }
+  }
+
+  async loginService(dto: LoginDto, loginPage?: LOGIN_PAGE) {
     const user = await this.userRepository.findByEmailOrUsername(dto.email);
     if (!user) {
       throw new NotFoundException('User not found');
     }
+
+    this.validateLoginPageRole(user.role, loginPage, 'login');
 
     if (!user.hashedPassword) {
       throw new UnauthorizedException(
@@ -532,7 +571,7 @@ export class AuthModuleService {
     };
   }*/
 
-  async forgotPasswordService(dto: forgotPasswordDto) {
+  async forgotPasswordService(dto: forgotPasswordDto, loginPage?: LOGIN_PAGE) {
     // 1. Validate input
     if (!dto.email && !dto.phone) {
       throw new BadRequestException('Either phone or email must be provided');
@@ -556,6 +595,8 @@ export class AuthModuleService {
         throw new NotFoundException('User with this email not found');
       }
     }
+
+    this.validateLoginPageRole(user.role, loginPage, 'forgot-password');
 
     if (user.isVerified === false) {
       throw new BadRequestException(
