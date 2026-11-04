@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
-import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, BOOKING_PAYMENT_TYPE, BOOKING_TYPE, USER_ROLE, ASSIGNMENT_TYPE, PAYMENT_TYPE, PAYMENT_STATUS, CANCELLED_BY } from '@poojawala/entities';
+import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, BOOKING_PAYMENT_TYPE, BOOKING_TYPE, BOOKING_MODE, USER_ROLE, ASSIGNMENT_TYPE, PAYMENT_TYPE, PAYMENT_STATUS, CANCELLED_BY } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
 
 interface FindBookingsByRoleOptions {
@@ -15,6 +15,7 @@ interface FindBookingsByRoleOptions {
   partnerPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
   purohitPayoutStatus?: BOOKING_PAYMENT_STATUS | BOOKING_PAYMENT_STATUS[];
   bookingType?: BOOKING_TYPE | BOOKING_TYPE[];
+  bookingMode?: BOOKING_MODE | BOOKING_MODE[];
   search?: string;
 }
 
@@ -180,6 +181,7 @@ export class BookingRepository extends BaseRepository<Booking> {
       bookingPaymentStatus,
       partnerPayoutStatus = options.partnerPayoutStatus ?? options.purohitPayoutStatus,
       bookingType,
+      bookingMode = options.bookingMode,
       search,
     } = options;
 
@@ -288,6 +290,18 @@ export class BookingRepository extends BaseRepository<Booking> {
     query.andWhere('booking.status != :excludedCreatedStatus', {
       excludedCreatedStatus: BOOKING_STATUS.CREATED,
     });
+
+    if (bookingMode) {
+      if (Array.isArray(bookingMode)) {
+        query.andWhere('booking.bookingMode IN (:...bookingMode)', {
+          bookingMode,
+        });
+      } else {
+        query.andWhere('booking.bookingMode = :bookingMode', {
+          bookingMode,
+        });
+      }
+    }
 
     if (bookingType) {
       if (Array.isArray(bookingType)) {

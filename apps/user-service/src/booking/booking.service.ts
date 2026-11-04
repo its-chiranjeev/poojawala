@@ -1136,19 +1136,19 @@ export class BookingService {
             : null;
           const bookingDate = scheduledAtDate
             ? scheduledAtDate.toLocaleDateString('en-IN', {
-                timeZone: 'Asia/Kolkata',
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-              })
+              timeZone: 'Asia/Kolkata',
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit',
+            })
             : 'Scheduled Date';
           const bookingTime = scheduledAtDate
             ? scheduledAtDate.toLocaleTimeString('en-IN', {
-                timeZone: 'Asia/Kolkata',
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: true,
-              })
+              timeZone: 'Asia/Kolkata',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true,
+            })
             : 'Scheduled Time';
 
           const addressSnapshot = transactionResult.savedBooking.addressSnapshot as Record<string, any> | undefined;
@@ -1623,19 +1623,19 @@ export class BookingService {
             : null;
           const bookingDate = scheduledAtDate
             ? scheduledAtDate.toLocaleDateString('en-IN', {
-                timeZone: 'Asia/Kolkata',
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-              })
+              timeZone: 'Asia/Kolkata',
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit',
+            })
             : 'Scheduled Date';
           const bookingTime = scheduledAtDate
             ? scheduledAtDate.toLocaleTimeString('en-IN', {
-                timeZone: 'Asia/Kolkata',
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: true,
-              })
+              timeZone: 'Asia/Kolkata',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true,
+            })
             : 'Scheduled Time';
 
           await this.emailService.sendCustomerBookingCreatedEmail({
@@ -1789,6 +1789,7 @@ export class BookingService {
         bookingPaymentStatus: query.bookingPaymentStatus,
         partnerPayoutStatus: query.partnerPayoutStatus ?? query.purohitPayoutStatus,
         bookingType: query.bookingType,
+        bookingMode: query.bookingMode ?? (query as any).BOOKING_MODE,
         search,
       },
     );

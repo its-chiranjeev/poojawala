@@ -2394,6 +2394,40 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
         }),
       );
     });
+
+    it('getBookings passes bookingMode ONLINE to bookingRepository.findBookingsByRole', async () => {
+      mockBookingRepository.findBookingsByRole = jest.fn().mockResolvedValue({
+        bookings: [],
+        total: 0,
+      });
+
+      await bookingService.getBookings(customerUser, { bookingMode: BOOKING_MODE.ONLINE } as any);
+
+      expect(mockBookingRepository.findBookingsByRole).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: customerUser.id,
+          userRole: USER_ROLE.CUSTOMER,
+          bookingMode: BOOKING_MODE.ONLINE,
+        }),
+      );
+    });
+
+    it('getBookings passes bookingMode OFFLINE (via BOOKING_MODE query param) to bookingRepository.findBookingsByRole', async () => {
+      mockBookingRepository.findBookingsByRole = jest.fn().mockResolvedValue({
+        bookings: [],
+        total: 0,
+      });
+
+      await bookingService.getBookings(customerUser, { BOOKING_MODE: BOOKING_MODE.OFFLINE } as any);
+
+      expect(mockBookingRepository.findBookingsByRole).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: customerUser.id,
+          userRole: USER_ROLE.CUSTOMER,
+          bookingMode: BOOKING_MODE.OFFLINE,
+        }),
+      );
+    });
   });
 
   // ══════════════════════════════════════════════════════════════════════════════

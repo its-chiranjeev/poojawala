@@ -1,6 +1,6 @@
 import { Type, Transform } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
-import { BOOKING_STATUS, BOOKING_PAYMENT_STATUS, BOOKING_TYPE } from '@poojawala/entities';
+import { BOOKING_STATUS, BOOKING_PAYMENT_STATUS, BOOKING_TYPE, BOOKING_MODE } from '@poojawala/entities';
 
 export class BookingQueryDto {
   @IsOptional()
@@ -107,4 +107,21 @@ export class BookingQueryDto {
     message: 'Booking type must be a valid booking type',
   })
   bookingType?: BOOKING_TYPE | BOOKING_TYPE[];
+
+  @IsOptional()
+  @Transform(({ value, obj }) => {
+    const raw = value ?? obj?.BOOKING_MODE;
+    if (typeof raw === 'string') {
+      if (raw.includes(',')) {
+        return raw.split(',').map(v => v.trim().toUpperCase());
+      }
+      return raw.trim().toUpperCase();
+    }
+    return raw;
+  })
+  @IsEnum(BOOKING_MODE, {
+    each: true,
+    message: 'Booking mode must be a valid booking mode (ONLINE, OFFLINE)',
+  })
+  bookingMode?: BOOKING_MODE | BOOKING_MODE[];
 }
