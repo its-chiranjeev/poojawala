@@ -8,6 +8,7 @@ import { ServiceService } from '../service/service.service';
 import {
   Booking,
   BOOKING_STATUS,
+  CANCELLED_BY,
   BOOKING_PAYMENT_STATUS,
   BOOKING_PAYMENT_TYPE,
   BOOKING_MODE,
@@ -23,6 +24,7 @@ import {
   PUROHIT_VERIFICATION_STATUS,
   AstrologerProfile,
   BOOKING_TYPE,
+  PurohitServiceArea,
 } from '@poojawala/entities';
 
 describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Service Plans (Scenarios 1-35)', () => {
@@ -135,11 +137,13 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
 
     mockBookingRepo = {
       createQueryBuilder: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         setLock: jest.fn().mockReturnThis(),
         getExists: jest.fn().mockResolvedValue(false),
         getOne: jest.fn().mockResolvedValue(null),
+        getMany: jest.fn().mockResolvedValue([]),
       }),
       exists: jest.fn().mockResolvedValue(false),
       create: jest.fn().mockImplementation((data) => ({ ...data, id: 999 })),
@@ -1651,6 +1655,8 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
 
       const createChainableQb = (result: any) => {
         const qb: any = {};
+        qb.select = jest.fn().mockReturnValue(qb);
+        qb.getMany = jest.fn().mockResolvedValue([]);
         qb.where = jest.fn().mockReturnValue(qb);
         qb.andWhere = jest.fn().mockReturnValue(qb);
         qb.setLock = jest.fn().mockReturnValue(qb);
@@ -1699,6 +1705,8 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
 
       const createChainableQb = (result: any) => {
         const qb: any = {};
+        qb.select = jest.fn().mockReturnValue(qb);
+        qb.getMany = jest.fn().mockResolvedValue([]);
         qb.where = jest.fn().mockReturnValue(qb);
         qb.andWhere = jest.fn().mockReturnValue(qb);
         qb.setLock = jest.fn().mockReturnValue(qb);
@@ -2883,6 +2891,8 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
 
       const createChainableQb = (result: any) => {
         const qb: any = {};
+        qb.select = jest.fn().mockReturnValue(qb);
+        qb.getMany = jest.fn().mockResolvedValue([]);
         qb.where = jest.fn().mockReturnValue(qb);
         qb.andWhere = jest.fn().mockReturnValue(qb);
         qb.setLock = jest.fn().mockReturnValue(qb);
@@ -2982,7 +2992,10 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
 
       const createChainableQb = (result: any) => {
         const qb: any = {};
+        qb.select = jest.fn().mockReturnValue(qb);
+        qb.getMany = jest.fn().mockResolvedValue([]);
         qb.where = jest.fn().mockReturnValue(qb);
+        qb.andWhere = jest.fn().mockReturnValue(qb);
         qb.setLock = jest.fn().mockReturnValue(qb);
         qb.innerJoinAndSelect = jest.fn().mockReturnValue(qb);
         qb.getOne = jest.fn().mockResolvedValue(result);
@@ -3035,6 +3048,1861 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       expect(res.message).toBe('Booking assigned to Purohit successfully');
       expect(booking.status).toBe(BOOKING_STATUS.ACCEPTED);
       expect(booking.purohitId).toBe(88);
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // Section: Booking Time Restrictions for Customers, Purohits, and Admin Manual Assignment
+  // ══════════════════════════════════════════════════════════════════════════════
+  describe('Booking Time Restrictions for Customers, Purohits, and Admin Manual Assignment', () => {
+    const baseTime = Date.now() + 48 * 60 * 60 * 1000; // 48 hours in future
+    const requestedScheduledAt = new Date(baseTime);
+    const mockAdminUser = {
+      id: 99,
+      role: USER_ROLE.ADMIN,
+      status: USER_STATUS.ACTIVE,
+      firstName: 'Admin',
+      lastName: 'User',
+      email: 'admin@poojawala.com',
+    } as User;
+
+    describe('1. Customer Same-Service 24-Hour Restriction (createBooking & createBookingByAdmin)', () => {
+      it('allows createBooking when existing booking is CREATED within 24 hours', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        const existingBookingTime = new Date(baseTime - 5 * 60 * 60 * 1000);
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 11,
+              customerId: mockCustomerUser.id,
+              serviceId: 5,
+              scheduledAt: existingBookingTime,
+              status: BOOKING_STATUS.CREATED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('rejects createBooking when existing booking is PENDING within 24 hours (< 24h)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        const existingBookingTime = new Date(baseTime - 5 * 60 * 60 * 1000);
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 11,
+              customerId: mockCustomerUser.id,
+              serviceId: 5,
+              scheduledAt: existingBookingTime,
+              status: BOOKING_STATUS.PENDING,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        await expect(
+          bookingService.createBooking(mockCustomerUser, {
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: requestedScheduledAt.toISOString(),
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          }),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'You can book this service again only after 24 hours from your previous booking time.',
+          ),
+        );
+      });
+
+      it('rejects createBooking when existing booking is 23h 59m away (boundary < 24h)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        const existingBookingTime = new Date(baseTime - (23 * 60 + 59) * 60 * 1000);
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 12,
+              customerId: mockCustomerUser.id,
+              serviceId: 5,
+              scheduledAt: existingBookingTime,
+              status: BOOKING_STATUS.PENDING,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        await expect(
+          bookingService.createBooking(mockCustomerUser, {
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: requestedScheduledAt.toISOString(),
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          }),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'You can book this service again only after 24 hours from your previous booking time.',
+          ),
+        );
+      });
+
+      it('rejects createBooking when existing booking is in future within 24h (e.g. 10 hours later)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        const futureBookingTime = new Date(baseTime + 10 * 60 * 60 * 1000);
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 13,
+              customerId: mockCustomerUser.id,
+              serviceId: 5,
+              scheduledAt: futureBookingTime,
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        await expect(
+          bookingService.createBooking(mockCustomerUser, {
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: requestedScheduledAt.toISOString(),
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          }),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'You can book this service again only after 24 hours from your previous booking time.',
+          ),
+        );
+      });
+
+      it('allows createBooking when existing booking is exactly 24 hours away (boundary = 24h)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        const exact24hAway = new Date(baseTime - 24 * 60 * 60 * 1000);
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 14,
+              customerId: mockCustomerUser.id,
+              serviceId: 5,
+              scheduledAt: exact24hAway,
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('allows createBooking when existing booking is > 24 hours away (e.g. 25 hours)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        const olderBookingTime = new Date(baseTime - 25 * 60 * 60 * 1000);
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 15,
+              customerId: mockCustomerUser.id,
+              serviceId: 5,
+              scheduledAt: olderBookingTime,
+              status: BOOKING_STATUS.COMPLETED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('allows createBooking when existing booking within 24h is for a DIFFERENT service (>= 1 hour gap)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 99,
+              customerId: mockCustomerUser.id,
+              serviceId: 8,
+              scheduledAt: new Date(baseTime - 2 * 60 * 60 * 1000), // 2 hours away (>= 1h gap)
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('allows createBooking when existing booking within 24h is for a DIFFERENT customer', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('ignores CANCELLED bookings within 24 hours', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 16,
+              customerId: mockCustomerUser.id,
+              serviceId: 5,
+              scheduledAt: new Date(baseTime - 2 * 60 * 60 * 1000),
+              status: BOOKING_STATUS.CANCELLED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('ignores soft-deleted bookings (deletedAt IS NOT NULL) within 24 hours', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 17,
+              customerId: mockCustomerUser.id,
+              serviceId: 5,
+              scheduledAt: new Date(baseTime - 2 * 60 * 60 * 1000),
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: new Date(),
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('allows createBooking when existing booking is COMPLETED within 24 hours', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 18,
+              customerId: mockCustomerUser.id,
+              serviceId: 5,
+              scheduledAt: new Date(baseTime - 6 * 60 * 60 * 1000),
+              status: BOOKING_STATUS.COMPLETED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('rejects createBooking when existing booking is ONGOING within 24 hours', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 181,
+              customerId: mockCustomerUser.id,
+              serviceId: 5,
+              scheduledAt: new Date(baseTime - 3 * 60 * 60 * 1000),
+              status: BOOKING_STATUS.ONGOING,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        await expect(
+          bookingService.createBooking(mockCustomerUser, {
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: requestedScheduledAt.toISOString(),
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          }),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'You can book this service again only after 24 hours from your previous booking time.',
+          ),
+        );
+      });
+
+      it('rejects createBookingByAdmin when customer has an existing booking for the same service within 24 hours', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 19,
+              customerId: 3,
+              serviceId: 5,
+              scheduledAt: new Date(baseTime - 4 * 60 * 60 * 1000),
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        await expect(
+          bookingService.createBookingByAdmin(mockAdminUser, {
+            customerId: 3,
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: requestedScheduledAt.toISOString(),
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          }),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'You can book this service again only after 24 hours from your previous booking time.',
+          ),
+        );
+      });
+
+      it('allows createBookingByAdmin when customer has an existing COMPLETED booking for the same service within 24 hours', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 191,
+              customerId: 3,
+              serviceId: 5,
+              scheduledAt: new Date(baseTime - 4 * 60 * 60 * 1000),
+              status: BOOKING_STATUS.COMPLETED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBookingByAdmin(mockAdminUser, {
+          customerId: 3,
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('allows createBookingByAdmin when customer has an existing CREATED booking for the same service within 24 hours', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 192,
+              customerId: 3,
+              serviceId: 5,
+              scheduledAt: new Date(baseTime - 4 * 60 * 60 * 1000),
+              status: BOOKING_STATUS.CREATED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBookingByAdmin(mockAdminUser, {
+          customerId: 3,
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('allows createBookingByAdmin when customer has an existing CANCELLED booking for the same service within 24 hours', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 193,
+              customerId: 3,
+              serviceId: 5,
+              scheduledAt: new Date(baseTime - 4 * 60 * 60 * 1000),
+              status: BOOKING_STATUS.CANCELLED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBookingByAdmin(mockAdminUser, {
+          customerId: 3,
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('acquires advisory lock customer_service_booking:customerId:serviceId in createBooking', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        mockEntityManager.query.mockClear();
+
+        await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(mockEntityManager.query).toHaveBeenCalledWith(
+          expect.stringContaining('pg_advisory_xact_lock'),
+          [`customer_service_booking:${mockCustomerUser.id}:5`],
+        );
+      });
+    });
+
+    describe('1b. Customer Cross-Service 1-Hour Scheduling Gap Restriction (createBooking & createBookingByAdmin)', () => {
+      it('rejects createBooking when existing booking for a different service has the same scheduled time (0m gap)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 501,
+              customerId: mockCustomerUser.id,
+              serviceId: 8,
+              scheduledAt: new Date(baseTime),
+              status: BOOKING_STATUS.PENDING,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        await expect(
+          bookingService.createBooking(mockCustomerUser, {
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: requestedScheduledAt.toISOString(),
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          }),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'You must maintain at least a 1-hour gap between two service bookings.',
+          ),
+        );
+      });
+
+      it('rejects createBooking when existing booking for a different service is 30 minutes before (< 1h)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 502,
+              customerId: mockCustomerUser.id,
+              serviceId: 8,
+              scheduledAt: new Date(baseTime - 30 * 60 * 1000),
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        await expect(
+          bookingService.createBooking(mockCustomerUser, {
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: requestedScheduledAt.toISOString(),
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          }),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'You must maintain at least a 1-hour gap between two service bookings.',
+          ),
+        );
+      });
+
+      it('rejects createBooking when existing booking for a different service is 30 minutes after (< 1h)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 503,
+              customerId: mockCustomerUser.id,
+              serviceId: 8,
+              scheduledAt: new Date(baseTime + 30 * 60 * 1000),
+              status: BOOKING_STATUS.ENROUTE,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        await expect(
+          bookingService.createBooking(mockCustomerUser, {
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: requestedScheduledAt.toISOString(),
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          }),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'You must maintain at least a 1-hour gap between two service bookings.',
+          ),
+        );
+      });
+
+      it('rejects createBooking when existing booking for a different service is 59 minutes away (boundary < 60m)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 504,
+              customerId: mockCustomerUser.id,
+              serviceId: 8,
+              scheduledAt: new Date(baseTime - 59 * 60 * 1000),
+              status: BOOKING_STATUS.ARRIVED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        await expect(
+          bookingService.createBooking(mockCustomerUser, {
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: requestedScheduledAt.toISOString(),
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          }),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'You must maintain at least a 1-hour gap between two service bookings.',
+          ),
+        );
+      });
+
+      it('allows createBooking when existing booking for a different service is exactly 60 minutes before (boundary = 60m)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 505,
+              customerId: mockCustomerUser.id,
+              serviceId: 8,
+              scheduledAt: new Date(baseTime - 60 * 60 * 1000),
+              status: BOOKING_STATUS.ONGOING,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('allows createBooking when existing booking for a different service is exactly 60 minutes after (boundary = 60m)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 506,
+              customerId: mockCustomerUser.id,
+              serviceId: 8,
+              scheduledAt: new Date(baseTime + 60 * 60 * 1000),
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('allows createBooking when existing booking for a different service is > 1 hour away (e.g. 75 minutes)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 507,
+              customerId: mockCustomerUser.id,
+              serviceId: 8,
+              scheduledAt: new Date(baseTime - 75 * 60 * 1000),
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it.each([
+        BOOKING_STATUS.PENDING,
+        BOOKING_STATUS.ACCEPTED,
+        BOOKING_STATUS.ENROUTE,
+        BOOKING_STATUS.ARRIVED,
+        BOOKING_STATUS.ONGOING,
+      ])(
+        'enforces 1-hour gap when existing booking for different service has active status %s',
+        async (status) => {
+          const service = createPlanService();
+          mockServiceRepo.findOne.mockResolvedValue(service);
+
+          mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            andWhere: jest.fn().mockReturnThis(),
+            setLock: jest.fn().mockReturnThis(),
+            getMany: jest.fn().mockResolvedValue([
+              {
+                id: 508,
+                customerId: mockCustomerUser.id,
+                serviceId: 8,
+                scheduledAt: new Date(baseTime - 30 * 60 * 1000),
+                status,
+                deletedAt: null,
+              },
+            ]),
+            getOne: jest.fn().mockResolvedValue(null),
+            getExists: jest.fn().mockResolvedValue(false),
+          });
+
+          await expect(
+            bookingService.createBooking(mockCustomerUser, {
+              serviceId: 5,
+              customerAddressId: mockAddress.id,
+              scheduledAt: requestedScheduledAt.toISOString(),
+              bookingMode: 'OFFLINE',
+              plan: 'basic',
+            }),
+          ).rejects.toThrow(
+            new BadRequestException(
+              'You must maintain at least a 1-hour gap between two service bookings.',
+            ),
+          );
+        },
+      );
+
+      it.each([
+        BOOKING_STATUS.CREATED,
+        BOOKING_STATUS.COMPLETED,
+        BOOKING_STATUS.CANCELLED,
+      ])(
+        'does not enforce 1-hour gap when existing booking for different service has excluded status %s',
+        async (status) => {
+          const service = createPlanService();
+          mockServiceRepo.findOne.mockResolvedValue(service);
+
+          mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            andWhere: jest.fn().mockReturnThis(),
+            setLock: jest.fn().mockReturnThis(),
+            getMany: jest.fn().mockResolvedValue([
+              {
+                id: 509,
+                customerId: mockCustomerUser.id,
+                serviceId: 8,
+                scheduledAt: new Date(baseTime - 30 * 60 * 1000),
+                status,
+                deletedAt: null,
+              },
+            ]),
+            getOne: jest.fn().mockResolvedValue(null),
+            getExists: jest.fn().mockResolvedValue(false),
+          });
+
+          const res = await bookingService.createBooking(mockCustomerUser, {
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: requestedScheduledAt.toISOString(),
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          });
+
+          expect(res).toBeDefined();
+          expect(res.bookingId).toBe(999);
+        },
+      );
+
+      it('ignores soft-deleted bookings (deletedAt IS NOT NULL) for different service within 1 hour', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 510,
+              customerId: mockCustomerUser.id,
+              serviceId: 8,
+              scheduledAt: new Date(baseTime - 30 * 60 * 1000),
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: new Date(),
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('rejects createBookingByAdmin when customer has existing booking for different service within 1 hour (< 60m)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 511,
+              customerId: 3,
+              serviceId: 8,
+              scheduledAt: new Date(baseTime - 30 * 60 * 1000),
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        await expect(
+          bookingService.createBookingByAdmin(mockAdminUser, {
+            customerId: 3,
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: requestedScheduledAt.toISOString(),
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+          }),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'You must maintain at least a 1-hour gap between two service bookings.',
+          ),
+        );
+      });
+
+      it('allows createBookingByAdmin when customer has existing booking for different service >= 1 hour away (60m boundary)', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 512,
+              customerId: 3,
+              serviceId: 8,
+              scheduledAt: new Date(baseTime - 60 * 60 * 1000),
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBookingByAdmin(mockAdminUser, {
+          customerId: 3,
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('allows createBookingByAdmin when existing booking for different service is COMPLETED within 1 hour', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 513,
+              customerId: 3,
+              serviceId: 8,
+              scheduledAt: new Date(baseTime - 30 * 60 * 1000),
+              status: BOOKING_STATUS.COMPLETED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBookingByAdmin(mockAdminUser, {
+          customerId: 3,
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(res).toBeDefined();
+        expect(res.bookingId).toBe(999);
+      });
+
+      it('acquires customer-level advisory lock customer_booking:customerId in createBooking and createBookingByAdmin', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        mockEntityManager.query.mockClear();
+
+        await bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(mockEntityManager.query).toHaveBeenCalledWith(
+          expect.stringContaining('pg_advisory_xact_lock'),
+          [`customer_booking:${mockCustomerUser.id}`],
+        );
+        expect(mockEntityManager.query).toHaveBeenCalledWith(
+          expect.stringContaining('pg_advisory_xact_lock'),
+          [`customer_service_booking:${mockCustomerUser.id}:5`],
+        );
+
+        mockEntityManager.query.mockClear();
+        mockUserRepo.findOne.mockResolvedValueOnce({
+          ...mockCustomerUser,
+          id: 3,
+        });
+
+        await bookingService.createBookingByAdmin(mockAdminUser, {
+          customerId: 3,
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        });
+
+        expect(mockEntityManager.query).toHaveBeenCalledWith(
+          expect.stringContaining('pg_advisory_xact_lock'),
+          [`customer_booking:3`],
+        );
+        expect(mockEntityManager.query).toHaveBeenCalledWith(
+          expect.stringContaining('pg_advisory_xact_lock'),
+          [`customer_service_booking:3:5`],
+        );
+      });
+    });
+
+    describe('2. Purohit 1-Hour Acceptance Gap Restriction (respondToBooking)', () => {
+      const purohitUser = { id: 50, role: USER_ROLE.PUROHIT, status: USER_STATUS.ACTIVE } as User;
+      const purohitProfile = { id: 101, userId: 50, status: 'APPROVED' };
+
+      const getBaseBooking = () => ({
+        id: 200,
+        status: BOOKING_STATUS.PENDING,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+        purohitId: null,
+        scheduledAt: new Date(baseTime),
+        bookingMode: BOOKING_MODE.OFFLINE,
+        servicePrice: 4100,
+        filteredPurohitIds: [101],
+      });
+
+      const createFakePurohitManager = (existingAssignedBookings: any[]) => {
+        const bookingInstance = getBaseBooking();
+        const createChainableQb = () => {
+          const qb: any = {};
+          qb.select = jest.fn().mockReturnValue(qb);
+          qb.where = jest.fn().mockReturnValue(qb);
+          qb.andWhere = jest.fn().mockReturnValue(qb);
+          qb.setLock = jest.fn().mockReturnValue(qb);
+          qb.innerJoinAndSelect = jest.fn().mockReturnValue(qb);
+          qb.leftJoinAndSelect = jest.fn().mockReturnValue(qb);
+          qb.getOne = jest.fn().mockResolvedValue(bookingInstance);
+          qb.getMany = jest.fn().mockResolvedValue(existingAssignedBookings);
+          return qb;
+        };
+
+        return {
+          query: jest.fn().mockResolvedValue([]),
+          getRepository: (entity: any) => {
+            if (entity === PurohitProfile) {
+              return { findOne: jest.fn().mockResolvedValue(purohitProfile) };
+            }
+            if (entity === PurohitService) {
+              return {
+                findOne: jest.fn().mockResolvedValue({
+                  purohitId: 101,
+                  serviceId: 5,
+                  isActive: true,
+                  isOffline: true,
+                }),
+              };
+            }
+            if (entity === Booking) {
+              return {
+                createQueryBuilder: () => createChainableQb(),
+                save: jest.fn().mockImplementation(async (b) => b),
+                findOne: jest.fn().mockResolvedValue({
+                  ...bookingInstance,
+                  purohitId: 101,
+                  status: BOOKING_STATUS.ACCEPTED,
+                }),
+              };
+            }
+            if (entity === User) {
+              return { findOne: jest.fn().mockResolvedValue(purohitUser) };
+            }
+            return {
+              findOne: jest.fn().mockResolvedValue(null),
+              find: jest.fn().mockResolvedValue([]),
+              save: jest.fn().mockImplementation(async (x) => x),
+            };
+          },
+        };
+      };
+
+      it('rejects Purohit acceptance when another assigned booking is scheduled 45 minutes before (< 1h)', async () => {
+        const conflictingTime = new Date(baseTime - 45 * 60 * 1000);
+        const fakeManager = createFakePurohitManager([
+          {
+            id: 201,
+            purohitId: 101,
+            scheduledAt: conflictingTime,
+            status: BOOKING_STATUS.ACCEPTED,
+            deletedAt: null,
+          },
+        ]);
+        mockDataSource.transaction.mockImplementationOnce(async (cb: any) => cb(fakeManager));
+
+        await expect(
+          bookingService.respondToBooking(purohitUser, 200, { action: 'ACCEPT' as any }),
+        ).rejects.toThrow(
+          new BadRequestException('You must maintain at least a 1-hour gap between assigned bookings.'),
+        );
+      });
+
+      it('rejects Purohit acceptance when another assigned booking is scheduled 45 minutes after (< 1h)', async () => {
+        const conflictingTime = new Date(baseTime + 45 * 60 * 1000);
+        const fakeManager = createFakePurohitManager([
+          {
+            id: 202,
+            purohitId: 101,
+            scheduledAt: conflictingTime,
+            status: BOOKING_STATUS.ACCEPTED,
+            deletedAt: null,
+          },
+        ]);
+        mockDataSource.transaction.mockImplementationOnce(async (cb: any) => cb(fakeManager));
+
+        await expect(
+          bookingService.respondToBooking(purohitUser, 200, { action: 'ACCEPT' as any }),
+        ).rejects.toThrow(
+          new BadRequestException('You must maintain at least a 1-hour gap between assigned bookings.'),
+        );
+      });
+
+      it('allows Purohit acceptance when existing assigned booking is exactly 60 minutes away (= 1h boundary)', async () => {
+        const exact1hAway = new Date(baseTime - 60 * 60 * 1000);
+        const fakeManager = createFakePurohitManager([
+          {
+            id: 203,
+            purohitId: 101,
+            scheduledAt: exact1hAway,
+            status: BOOKING_STATUS.ACCEPTED,
+            deletedAt: null,
+          },
+        ]);
+        mockDataSource.transaction.mockImplementationOnce(async (cb: any) => cb(fakeManager));
+
+        const res = await bookingService.respondToBooking(purohitUser, 200, { action: 'ACCEPT' as any });
+        expect(res.booking.status).toBe(BOOKING_STATUS.ACCEPTED);
+      });
+
+      it('allows Purohit acceptance when existing assigned booking is > 60 minutes away (e.g. 75 min)', async () => {
+        const safeTime = new Date(baseTime - 75 * 60 * 1000);
+        const fakeManager = createFakePurohitManager([
+          {
+            id: 204,
+            purohitId: 101,
+            scheduledAt: safeTime,
+            status: BOOKING_STATUS.COMPLETED,
+            deletedAt: null,
+          },
+        ]);
+        mockDataSource.transaction.mockImplementationOnce(async (cb: any) => cb(fakeManager));
+
+        const res = await bookingService.respondToBooking(purohitUser, 200, { action: 'ACCEPT' as any });
+        expect(res.booking.status).toBe(BOOKING_STATUS.ACCEPTED);
+      });
+
+      it('ignores the booking currently being accepted (excludeBookingId === booking.id)', async () => {
+        const fakeManager = createFakePurohitManager([
+          {
+            id: 200, // Same booking ID
+            purohitId: 101,
+            scheduledAt: new Date(baseTime),
+            status: BOOKING_STATUS.ACCEPTED,
+            deletedAt: null,
+          },
+        ]);
+        mockDataSource.transaction.mockImplementationOnce(async (cb: any) => cb(fakeManager));
+
+        const res = await bookingService.respondToBooking(purohitUser, 200, { action: 'ACCEPT' as any });
+        expect(res.booking.status).toBe(BOOKING_STATUS.ACCEPTED);
+      });
+
+      it('ignores soft-deleted bookings (deletedAt IS NOT NULL) during Purohit acceptance', async () => {
+        const fakeManager = createFakePurohitManager([
+          {
+            id: 205,
+            purohitId: 101,
+            scheduledAt: new Date(baseTime + 15 * 60 * 1000), // 15 min after, but soft-deleted
+            status: BOOKING_STATUS.ACCEPTED,
+            deletedAt: new Date(),
+          },
+        ]);
+        mockDataSource.transaction.mockImplementationOnce(async (cb: any) => cb(fakeManager));
+
+        const res = await bookingService.respondToBooking(purohitUser, 200, { action: 'ACCEPT' as any });
+        expect(res.booking.status).toBe(BOOKING_STATUS.ACCEPTED);
+      });
+
+      it('blocks on any assigned status (ACCEPTED, ENROUTE, ARRIVED, ONGOING, COMPLETED)', async () => {
+        const conflictingTime = new Date(baseTime + 20 * 60 * 1000);
+        for (const status of [
+          BOOKING_STATUS.ACCEPTED,
+          BOOKING_STATUS.ENROUTE,
+          BOOKING_STATUS.ARRIVED,
+          BOOKING_STATUS.ONGOING,
+          BOOKING_STATUS.COMPLETED,
+        ]) {
+          const fakeManager = createFakePurohitManager([
+            {
+              id: 300,
+              purohitId: 101,
+              scheduledAt: conflictingTime,
+              status,
+              deletedAt: null,
+            },
+          ]);
+          mockDataSource.transaction.mockImplementationOnce(async (cb: any) => cb(fakeManager));
+
+          await expect(
+            bookingService.respondToBooking(purohitUser, 200, { action: 'ACCEPT' as any }),
+          ).rejects.toThrow(
+            new BadRequestException('You must maintain at least a 1-hour gap between assigned bookings.'),
+          );
+        }
+      });
+
+      it('acquires advisory lock purohit_assignment:purohitId during Purohit acceptance', async () => {
+        const fakeManager = createFakePurohitManager([]);
+        mockDataSource.transaction.mockImplementationOnce(async (cb: any) => cb(fakeManager));
+
+        await bookingService.respondToBooking(purohitUser, 200, { action: 'ACCEPT' as any });
+
+        expect(fakeManager.query).toHaveBeenCalledWith(
+          expect.stringContaining('pg_advisory_xact_lock'),
+          [`purohit_assignment:${purohitProfile.id}`],
+        );
+      });
+    });
+
+    describe('3. Admin Manual Assignment 1-Hour Gap Restriction (assignBookingToPurohit & createBookingByAdmin with dto.purohitId)', () => {
+      const purohitProfile = {
+        id: 88,
+        userId: 201,
+        isOfflineAvailable: true,
+        verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+        user: { id: 201, role: USER_ROLE.PUROHIT, status: USER_STATUS.ACTIVE },
+      };
+
+      const getBookingToAssign = () => ({
+        id: 502,
+        scheduledAt: new Date(baseTime),
+        bookingMode: BOOKING_MODE.OFFLINE,
+        serviceId: 5,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PARTIAL,
+        status: BOOKING_STATUS.CREATED,
+        purohitId: null,
+        addressSnapshot: { city: 'Varanasi' },
+      });
+
+      it('assignBookingToPurohit rejects when Purohit has another assigned booking scheduled within 1 hour (< 60m)', async () => {
+        const conflictingTime = new Date(baseTime + 30 * 60 * 1000); // 30 min after
+
+        const bookingInstance = getBookingToAssign();
+        const createChainableQb = (result: any) => {
+          const qb: any = {};
+          qb.select = jest.fn().mockReturnValue(qb);
+          qb.where = jest.fn().mockReturnValue(qb);
+          qb.andWhere = jest.fn().mockReturnValue(qb);
+          qb.setLock = jest.fn().mockReturnValue(qb);
+          qb.innerJoinAndSelect = jest.fn().mockReturnValue(qb);
+          qb.getOne = jest.fn().mockResolvedValue(result);
+          qb.getMany = jest.fn().mockResolvedValue([
+            {
+              id: 901,
+              purohitId: 88,
+              scheduledAt: conflictingTime,
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: null,
+            },
+          ]);
+          return qb;
+        };
+
+        mockDataSource.transaction.mockImplementationOnce(async (cb: any) => {
+          const fakeManager = {
+            query: jest.fn().mockResolvedValue([]),
+            getRepository: (entity: any) => {
+              if (entity === Booking) {
+                return {
+                  createQueryBuilder: () => createChainableQb(bookingInstance),
+                  save: jest.fn().mockImplementation(async (b) => b),
+                  findOne: jest.fn().mockResolvedValue(bookingInstance),
+                };
+              }
+              if (entity === PurohitProfile) {
+                return {
+                  createQueryBuilder: () => createChainableQb(purohitProfile),
+                };
+              }
+              if (entity === PurohitService) {
+                return {
+                  findOne: jest.fn().mockResolvedValue({
+                    id: 77,
+                    purohitId: 88,
+                    serviceId: 5,
+                    isActive: true,
+                    isOffline: true,
+                  }),
+                };
+              }
+              return { findOne: jest.fn(), save: jest.fn() };
+            },
+          };
+          return cb(fakeManager);
+        });
+
+        await expect(
+          bookingService.assignBookingToPurohit(mockAdminUser, 502, { purohitId: 201 }),
+        ).rejects.toThrow(
+          new BadRequestException('You must maintain at least a 1-hour gap between assigned bookings.'),
+        );
+      });
+
+      it('assignBookingToPurohit allows when Purohit has existing assigned booking >= 1 hour away', async () => {
+        const safeTime = new Date(baseTime + 65 * 60 * 1000); // 65 min after
+
+        mockAssignmentService.findEligiblePurohitIds.mockResolvedValueOnce([88]);
+
+        const bookingInstance = getBookingToAssign();
+        const createChainableQb = (result: any) => {
+          const qb: any = {};
+          qb.select = jest.fn().mockReturnValue(qb);
+          qb.where = jest.fn().mockReturnValue(qb);
+          qb.andWhere = jest.fn().mockReturnValue(qb);
+          qb.setLock = jest.fn().mockReturnValue(qb);
+          qb.innerJoinAndSelect = jest.fn().mockReturnValue(qb);
+          qb.getOne = jest.fn().mockResolvedValue(result);
+          qb.getMany = jest.fn().mockResolvedValue([
+            {
+              id: 902,
+              purohitId: 88,
+              scheduledAt: safeTime,
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: null,
+            },
+          ]);
+          return qb;
+        };
+
+        mockDataSource.transaction.mockImplementationOnce(async (cb: any) => {
+          const fakeManager = {
+            query: jest.fn().mockResolvedValue([]),
+            getRepository: (entity: any) => {
+              if (entity === Booking) {
+                return {
+                  createQueryBuilder: () => createChainableQb(bookingInstance),
+                  save: jest.fn().mockImplementation(async (b) => b),
+                  findOne: jest.fn().mockResolvedValue({
+                    ...bookingInstance,
+                    purohitId: 88,
+                    status: BOOKING_STATUS.ACCEPTED,
+                  }),
+                };
+              }
+              if (entity === PurohitProfile) {
+                return {
+                  createQueryBuilder: () => createChainableQb(purohitProfile),
+                };
+              }
+              if (entity === PurohitService) {
+                return {
+                  findOne: jest.fn().mockResolvedValue({
+                    id: 77,
+                    purohitId: 88,
+                    serviceId: 5,
+                    isActive: true,
+                    isOffline: true,
+                  }),
+                };
+              }
+              if (entity === Service) {
+                return { findOne: jest.fn().mockResolvedValue({ id: 5, name: 'Puja' }) };
+              }
+              return {
+                findOne: jest.fn().mockResolvedValue(null),
+                find: jest.fn().mockResolvedValue([]),
+                save: jest.fn().mockImplementation(async (x) => x),
+              };
+            },
+          };
+          return cb(fakeManager);
+        });
+
+        const res = await bookingService.assignBookingToPurohit(mockAdminUser, 502, { purohitId: 201 });
+        expect(res.message).toBe('Booking assigned to Purohit successfully');
+      });
+
+      it('createBookingByAdmin with dto.purohitId rejects when assigned Purohit has another assigned booking within 1 hour', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        const purohitUser = {
+          id: 201,
+          role: USER_ROLE.PUROHIT,
+          status: USER_STATUS.ACTIVE,
+          firstName: 'Pandit',
+          lastName: 'Shastri',
+          email: 'shastri@example.com',
+        };
+
+        const assignedPurohitProfile = {
+          id: 101,
+          userId: 201,
+          user: purohitUser,
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+        };
+
+        mockPurohitProfileRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          innerJoinAndSelect: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue(assignedPurohitProfile),
+        });
+
+        mockPurohitServiceRepo.findOne.mockResolvedValue({
+          id: 77,
+          purohitId: 101,
+          serviceId: 5,
+          isActive: true,
+        });
+
+        const conflictingTime = new Date(baseTime - 30 * 60 * 1000); // 30 min before
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 903,
+              purohitId: 101,
+              scheduledAt: conflictingTime,
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        await expect(
+          bookingService.createBookingByAdmin(mockAdminUser, {
+            customerId: 3,
+            serviceId: 5,
+            customerAddressId: mockAddress.id,
+            scheduledAt: requestedScheduledAt.toISOString(),
+            bookingMode: 'OFFLINE',
+            plan: 'basic',
+            purohitId: 101,
+          }),
+        ).rejects.toThrow(
+          new BadRequestException('You must maintain at least a 1-hour gap between assigned bookings.'),
+        );
+      });
+
+      it('createBookingByAdmin with dto.purohitId allows when assigned Purohit has no conflicting bookings within 1 hour', async () => {
+        const service = createPlanService();
+        mockServiceRepo.findOne.mockResolvedValue(service);
+
+        const purohitUser = {
+          id: 201,
+          role: USER_ROLE.PUROHIT,
+          status: USER_STATUS.ACTIVE,
+          firstName: 'Pandit',
+          lastName: 'Shastri',
+          email: 'shastri@example.com',
+        };
+
+        const assignedPurohitProfile = {
+          id: 101,
+          userId: 201,
+          user: purohitUser,
+          verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+        };
+
+        mockPurohitProfileRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          innerJoinAndSelect: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue(assignedPurohitProfile),
+        });
+
+        mockPurohitServiceRepo.findOne.mockResolvedValue({
+          id: 77,
+          purohitId: 101,
+          serviceId: 5,
+          isActive: true,
+        });
+
+        const safeBookingTime = new Date(baseTime - 25 * 60 * 60 * 1000); // 25 hours before (safe for Purohit > 1h and Customer > 24h)
+
+        mockBookingRepo.createQueryBuilder = jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([
+            {
+              id: 904,
+              purohitId: 101,
+              scheduledAt: safeBookingTime,
+              status: BOOKING_STATUS.ACCEPTED,
+              deletedAt: null,
+            },
+          ]),
+          getOne: jest.fn().mockResolvedValue(null),
+          getExists: jest.fn().mockResolvedValue(false),
+        });
+
+        const res = await bookingService.createBookingByAdmin(mockAdminUser, {
+          customerId: 3,
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: requestedScheduledAt.toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+          purohitId: 101,
+        });
+
+        expect(res).toBeDefined();
+        expect(res.purohitId).toBe(101);
+        expect(res.status).toBe(BOOKING_STATUS.ACCEPTED);
+      });
+
+      it('acquires advisory lock purohit_assignment:purohitId during admin assignment', async () => {
+        mockAssignmentService.findEligiblePurohitIds.mockResolvedValueOnce([88]);
+
+        const bookingInstance = getBookingToAssign();
+        const createChainableQb = (result: any) => {
+          const qb: any = {};
+          qb.select = jest.fn().mockReturnValue(qb);
+          qb.where = jest.fn().mockReturnValue(qb);
+          qb.andWhere = jest.fn().mockReturnValue(qb);
+          qb.setLock = jest.fn().mockReturnValue(qb);
+          qb.innerJoinAndSelect = jest.fn().mockReturnValue(qb);
+          qb.getOne = jest.fn().mockResolvedValue(result);
+          qb.getMany = jest.fn().mockResolvedValue([]);
+          return qb;
+        };
+
+        const querySpy = jest.fn().mockResolvedValue([]);
+
+        mockDataSource.transaction.mockImplementationOnce(async (cb: any) => {
+          const fakeManager = {
+            query: querySpy,
+            getRepository: (entity: any) => {
+              if (entity === Booking) {
+                return {
+                  createQueryBuilder: () => createChainableQb(bookingInstance),
+                  save: jest.fn().mockImplementation(async (b) => b),
+                  findOne: jest.fn().mockResolvedValue({
+                    ...bookingInstance,
+                    purohitId: 88,
+                    status: BOOKING_STATUS.ACCEPTED,
+                  }),
+                };
+              }
+              if (entity === PurohitProfile) {
+                return {
+                  createQueryBuilder: () => createChainableQb(purohitProfile),
+                };
+              }
+              if (entity === PurohitService) {
+                return {
+                  findOne: jest.fn().mockResolvedValue({
+                    id: 77,
+                    purohitId: 88,
+                    serviceId: 5,
+                    isActive: true,
+                    isOffline: true,
+                  }),
+                };
+              }
+              if (entity === Service) {
+                return { findOne: jest.fn().mockResolvedValue({ id: 5, name: 'Puja' }) };
+              }
+              return {
+                findOne: jest.fn().mockResolvedValue(null),
+                find: jest.fn().mockResolvedValue([]),
+                save: jest.fn().mockImplementation(async (x) => x),
+              };
+            },
+          };
+          return cb(fakeManager);
+        });
+
+        await bookingService.assignBookingToPurohit(mockAdminUser, 502, { purohitId: 201 });
+
+        expect(querySpy).toHaveBeenCalledWith(
+          expect.stringContaining('pg_advisory_xact_lock'),
+          [`purohit_assignment:${purohitProfile.id}`],
+        );
+      });
+    });
+  });
+
+  describe('cancelBooking with PAID payment status', () => {
+    it('allows a customer to cancel a booking even when paymentStatus is PAID', async () => {
+      const paidBooking = {
+        id: 701,
+        customerId: mockCustomerUser.id,
+        status: BOOKING_STATUS.ACCEPTED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+        scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      } as unknown as Booking;
+
+      mockDataSource.transaction.mockImplementation(async (cb: any) => {
+        const fakeManager = {
+          getRepository: (entity: any) => {
+            if (entity === Booking) {
+              return {
+                createQueryBuilder: () => ({
+                  where: jest.fn().mockReturnThis(),
+                  setLock: jest.fn().mockReturnThis(),
+                  getOne: jest.fn().mockResolvedValue({ ...paidBooking }),
+                }),
+                save: jest.fn().mockImplementation(async (b) => b),
+                findOne: jest.fn().mockResolvedValue({
+                  ...paidBooking,
+                  status: BOOKING_STATUS.CANCELLED,
+                  cancelledBy: CANCELLED_BY.CUSTOMER,
+                }),
+              };
+            }
+            return {
+              findOne: jest.fn().mockResolvedValue(null),
+              find: jest.fn().mockResolvedValue([]),
+              save: jest.fn().mockImplementation(async (x) => x),
+            };
+          },
+        };
+        return cb(fakeManager);
+      });
+
+      const res = await bookingService.cancelBooking(mockCustomerUser, 701, {
+        cancellationReason: 'Need to cancel',
+      });
+
+      expect(res).toBeDefined();
+      expect(res.message).toBe('Booking cancelled successfully');
+    });
+
+    it('allows an admin to cancel a booking even when paymentStatus is PAID', async () => {
+      const paidBooking = {
+        id: 702,
+        customerId: 1,
+        status: BOOKING_STATUS.ACCEPTED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+        scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      } as unknown as Booking;
+
+      mockDataSource.transaction.mockImplementation(async (cb: any) => {
+        const fakeManager = {
+          getRepository: (entity: any) => {
+            if (entity === Booking) {
+              return {
+                createQueryBuilder: () => ({
+                  where: jest.fn().mockReturnThis(),
+                  setLock: jest.fn().mockReturnThis(),
+                  getOne: jest.fn().mockResolvedValue({ ...paidBooking }),
+                }),
+                save: jest.fn().mockImplementation(async (b) => b),
+                findOne: jest.fn().mockResolvedValue({
+                  ...paidBooking,
+                  status: BOOKING_STATUS.CANCELLED,
+                  cancelledBy: CANCELLED_BY.ADMIN,
+                }),
+              };
+            }
+            return {
+              findOne: jest.fn().mockResolvedValue(null),
+              find: jest.fn().mockResolvedValue([]),
+              save: jest.fn().mockImplementation(async (x) => x),
+            };
+          },
+        };
+        return cb(fakeManager);
+      });
+
+      const adminUser = {
+        id: 99,
+        role: USER_ROLE.ADMIN,
+        status: USER_STATUS.ACTIVE,
+      } as User;
+
+      const res = await bookingService.cancelBooking(adminUser, 702, {
+        cancellationReason: 'Admin cancelled',
+      });
+
+      expect(res).toBeDefined();
+      expect(res.message).toBe('Booking cancelled successfully');
     });
   });
 });
