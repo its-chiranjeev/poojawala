@@ -5458,8 +5458,8 @@ export class UserService {
       }
     }
 
-    const hasAadhaar = !combinedAreas ? false : !!(aadhaarDocUrl || (aadhaarFiles && aadhaarFiles.length > 0));
-    const hasPan = !combinedAreas ? false : !!(panDocUrl || (panFiles && panFiles.length > 0));
+    const hasAadhaar = !!(aadhaarDocUrl || (aadhaarFiles && aadhaarFiles.length > 0));
+    const hasPan = !!(panDocUrl || (panFiles && panFiles.length > 0));
 
     const completeness = this.checkProfileCompleteness({
       role: USER_ROLE.PUROHIT,
@@ -5719,13 +5719,59 @@ export class UserService {
     });
 
     if (dto.email) {
-      await this.emailService.sendPurohitCreatedByAdminEmail(
-        dto.email,
-        `${dto.firstName} ${dto.lastName || ''}`.trim(),
-        result.user.username,
-        dto.phone ?? 'N/A',
-        dto.password,
-      );
+      try {
+        const isApprovedAndComplete =
+          result.user.isAdminCreated === false &&
+          result.profile.verificationStatus === PUROHIT_VERIFICATION_STATUS.APPROVED;
+
+        if (isApprovedAndComplete) {
+          await this.emailService.sendPurohitWelcomeApprovedEmail(
+            dto.email,
+            `${dto.firstName} ${dto.lastName || ''}`.trim(),
+            result.user.username,
+            dto.phone ?? 'N/A',
+          );
+        } else {
+          const persistedCompleteness = this.checkProfileCompleteness({
+            role: USER_ROLE.PUROHIT,
+            user: {
+              firstName: result.user.firstName,
+              lastName: result.user.lastName,
+              email: result.user.email,
+              phone: result.user.phone,
+            },
+            profile: {
+              city: result.profile.city,
+              state: result.profile.state,
+              bio: result.profile.bio,
+              qualification: result.profile.qualification,
+              aadhaarDocUrl: result.profile.aadhaarDocUrl,
+              panDocUrl: result.profile.panDocUrl,
+            },
+            bankAccount: result.bankAccount
+              ? {
+                  accountNumber: result.bankAccount.accountNumber,
+                  ifscCode: result.bankAccount.ifscCode,
+                  accountHolderName: result.bankAccount.accountHolderName,
+                  upiId: result.bankAccount.upiId,
+                }
+              : null,
+            serviceAreas: result.serviceAreas,
+          });
+
+          await this.emailService.sendPurohitCreatedByAdminEmail(
+            dto.email,
+            `${dto.firstName} ${dto.lastName || ''}`.trim(),
+            result.user.username,
+            dto.phone ?? 'N/A',
+            dto.password,
+            persistedCompleteness.missingFields,
+          );
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to send Purohit creation email to ${dto.email}: ${errMsg}`);
+      }
     }
 
     return {
@@ -6086,13 +6132,59 @@ export class UserService {
     });
 
     if (dto.email) {
-      await this.emailService.sendAstrologerCreatedByAdminEmail(
-        dto.email,
-        `${dto.firstName} ${dto.lastName || ''}`.trim(),
-        result.user.username,
-        dto.phone ?? 'N/A',
-        dto.password,
-      );
+      try {
+        const isApprovedAndComplete =
+          result.user.isAdminCreated === false &&
+          result.profile.verificationStatus === PUROHIT_VERIFICATION_STATUS.APPROVED;
+
+        if (isApprovedAndComplete) {
+          await this.emailService.sendAstrologerWelcomeApprovedEmail(
+            dto.email,
+            `${dto.firstName} ${dto.lastName || ''}`.trim(),
+            result.user.username,
+            dto.phone ?? 'N/A',
+          );
+        } else {
+          const persistedCompleteness = this.checkProfileCompleteness({
+            role: USER_ROLE.ASTROLOGER,
+            user: {
+              firstName: result.user.firstName,
+              lastName: result.user.lastName,
+              email: result.user.email,
+              phone: result.user.phone,
+            },
+            profile: {
+              city: result.profile.city,
+              state: result.profile.state,
+              bio: result.profile.bio,
+              qualification: result.profile.qualification,
+              aadhaarDocUrl: result.profile.aadhaarDocUrl,
+              panDocUrl: result.profile.panDocUrl,
+            },
+            bankAccount: result.bankAccount
+              ? {
+                  accountNumber: result.bankAccount.accountNumber,
+                  ifscCode: result.bankAccount.ifscCode,
+                  accountHolderName: result.bankAccount.accountHolderName,
+                  upiId: result.bankAccount.upiId,
+                }
+              : null,
+            serviceAreas: null,
+          });
+
+          await this.emailService.sendAstrologerCreatedByAdminEmail(
+            dto.email,
+            `${dto.firstName} ${dto.lastName || ''}`.trim(),
+            result.user.username,
+            dto.phone ?? 'N/A',
+            dto.password,
+            persistedCompleteness.missingFields,
+          );
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to send Astrologer creation email to ${dto.email}: ${errMsg}`);
+      }
     }
     (result as any).message = 'Astrologer created successfully by admin';
     return result;

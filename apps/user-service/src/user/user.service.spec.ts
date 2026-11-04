@@ -554,7 +554,9 @@ describe('UserService - Purohit Verification Rework', () => {
       sendPurohitApprovalEmail: jest.fn().mockResolvedValue(true),
       sendPurohitRejectionEmail: jest.fn().mockResolvedValue(true),
       sendPurohitCreatedByAdminEmail: jest.fn().mockResolvedValue(true),
+      sendPurohitWelcomeApprovedEmail: jest.fn().mockResolvedValue(true),
       sendAstrologerCreatedByAdminEmail: jest.fn().mockResolvedValue(true),
+      sendAstrologerWelcomeApprovedEmail: jest.fn().mockResolvedValue(true),
       sendAstrologerRegistrationEmail: jest.fn().mockResolvedValue(true),
       sendAstrologerApprovalEmail: jest.fn().mockResolvedValue(true),
       sendAstrologerRejectionEmail: jest.fn().mockResolvedValue(true),
@@ -1423,13 +1425,13 @@ describe('UserService - Purohit Verification Rework', () => {
         expect(result.user.isAdminCreated).toBe(false);
         expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
         expect(result.bankAccount.verificationStatus).toBe(BANK_VERIFICATION_STATUS.VERIFIED);
-        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).toHaveBeenCalledWith(
+        expect(mockEmailService.sendAstrologerWelcomeApprovedEmail).toHaveBeenCalledWith(
           dto.email,
           'Anand Mishra',
           expect.any(String),
           dto.phone,
-          dto.password,
         );
+        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).not.toHaveBeenCalled();
       });
 
       it('throws BadRequestException if neither email nor phone is provided', async () => {
@@ -4934,6 +4936,565 @@ describe('UserService - Purohit Verification Rework', () => {
         expect(result.data.userId).toBe(32);
         expect(result.data.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
         expect(astroUser.isAdminCreated).toBe(false);
+      });
+    });
+  });
+
+  describe('Conditional Welcome Emails for Admin-Created Purohit & Astrologer', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+    });
+
+    describe('Purohit Email Selection', () => {
+      it('1. Complete profile -> new Purohit welcome email sent exactly once', async () => {
+        const dto = {
+          firstName: 'Vaidik',
+          lastName: 'Shastri',
+          email: 'vaidik.purohit@example.com',
+          phone: '9812345601',
+          password: 'Password123!',
+          city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          bio: 'Specialized in Griha Pravesh and Rudrabhishek',
+          qualification: ['Acharya'],
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '112233445566',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Vaidik Shastri',
+          serviceAreas: ['Varanasi', 'Assi Ghat'],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.success).toBe(true);
+        expect(result.data.user.isAdminCreated).toBe(false);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+
+        expect(mockEmailService.sendPurohitWelcomeApprovedEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendPurohitWelcomeApprovedEmail).toHaveBeenCalledWith(
+          dto.email,
+          'Vaidik Shastri',
+          expect.any(String),
+          dto.phone,
+        );
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).not.toHaveBeenCalled();
+      });
+
+      it('2. Incomplete profile -> existing Purohit email sent exactly once with credentials', async () => {
+        const dto = {
+          firstName: 'Incomplete',
+          lastName: 'Purohit',
+          email: 'incomplete.purohit@example.com',
+          phone: '9812345602',
+          password: 'Password123!',
+          city: 'Varanasi',
+          // missing state, bio, docs, bank, service areas
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.success).toBe(true);
+        expect(result.data.user.isAdminCreated).toBe(true);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).toHaveBeenCalledWith(
+          dto.email,
+          'Incomplete Purohit',
+          expect.any(String),
+          dto.phone,
+          dto.password,
+          expect.arrayContaining(['State', 'Bio', 'Aadhaar or PAN document', 'Bank Account or UPI ID', 'At least one valid service area']),
+        );
+        expect(mockEmailService.sendPurohitWelcomeApprovedEmail).not.toHaveBeenCalled();
+      });
+
+      it('3. Complete profile with Aadhaar + Bank -> new email', async () => {
+        const dto = {
+          firstName: 'AadhaarBank',
+          lastName: 'Pandit',
+          email: 'aadhaarbank@example.com',
+          phone: '9812345603',
+          password: 'Password123!',
+          city: 'Ujjain',
+          state: 'Madhya Pradesh',
+          bio: 'Mahakal Mandir Vedic Purohit',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '998877665544',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'AadhaarBank Pandit',
+          serviceAreas: ['Ujjain'],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(mockEmailService.sendPurohitWelcomeApprovedEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).not.toHaveBeenCalled();
+      });
+
+      it('4. Complete profile with PAN + UPI -> new email', async () => {
+        const dto = {
+          firstName: 'PanUpi',
+          lastName: 'Pandit',
+          email: 'panupi@example.com',
+          phone: '9812345604',
+          password: 'Password123!',
+          city: 'Ujjain',
+          state: 'Madhya Pradesh',
+          bio: 'Mahakal Mandir Vedic Purohit',
+          panDocUrl: 'https://storage.poojawala.com/pan.jpg',
+          upiId: 'panupi@upi',
+          serviceAreas: ['Ujjain'],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(mockEmailService.sendPurohitWelcomeApprovedEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).not.toHaveBeenCalled();
+      });
+
+      it('5. Missing service area -> existing email', async () => {
+        const dto = {
+          firstName: 'NoArea',
+          lastName: 'Pandit',
+          email: 'noarea@example.com',
+          phone: '9812345605',
+          password: 'Password123!',
+          city: 'Ujjain',
+          state: 'Madhya Pradesh',
+          bio: 'Mahakal Mandir Vedic Purohit',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '998877665544',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'NoArea Pandit',
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).toHaveBeenCalledWith(
+          dto.email,
+          'NoArea Pandit',
+          expect.any(String),
+          dto.phone,
+          dto.password,
+          ['At least one valid service area'],
+        );
+        expect(mockEmailService.sendPurohitWelcomeApprovedEmail).not.toHaveBeenCalled();
+      });
+
+      it('6. Missing city/state/bio -> existing email', async () => {
+        const dto = {
+          firstName: 'NoBio',
+          lastName: 'Pandit',
+          email: 'nobio@example.com',
+          phone: '9812345606',
+          password: 'Password123!',
+          city: 'Ujjain',
+          state: 'Madhya Pradesh',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '998877665544',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'NoBio Pandit',
+          serviceAreas: ['Ujjain'],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).toHaveBeenCalledWith(
+          dto.email,
+          'NoBio Pandit',
+          expect.any(String),
+          dto.phone,
+          dto.password,
+          ['Bio'],
+        );
+        expect(mockEmailService.sendPurohitWelcomeApprovedEmail).not.toHaveBeenCalled();
+      });
+
+      it('7. Missing identity document -> existing email', async () => {
+        const dto = {
+          firstName: 'NoDocs',
+          lastName: 'Pandit',
+          email: 'nodocs@example.com',
+          phone: '9812345607',
+          password: 'Password123!',
+          city: 'Ujjain',
+          state: 'Madhya Pradesh',
+          bio: 'Mahakal Mandir Vedic Purohit',
+          accountNumber: '998877665544',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'NoDocs Pandit',
+          serviceAreas: ['Ujjain'],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).toHaveBeenCalledWith(
+          dto.email,
+          'NoDocs Pandit',
+          expect.any(String),
+          dto.phone,
+          dto.password,
+          ['Aadhaar or PAN document'],
+        );
+        expect(mockEmailService.sendPurohitWelcomeApprovedEmail).not.toHaveBeenCalled();
+      });
+
+      it('8. Missing bank and UPI -> existing email', async () => {
+        const dto = {
+          firstName: 'NoBank',
+          lastName: 'Pandit',
+          email: 'nobank@example.com',
+          phone: '9812345608',
+          password: 'Password123!',
+          city: 'Ujjain',
+          state: 'Madhya Pradesh',
+          bio: 'Mahakal Mandir Vedic Purohit',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          serviceAreas: ['Ujjain'],
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).toHaveBeenCalledWith(
+          dto.email,
+          'NoBank Pandit',
+          expect.any(String),
+          dto.phone,
+          dto.password,
+          ['Bank Account or UPI ID'],
+        );
+        expect(mockEmailService.sendPurohitWelcomeApprovedEmail).not.toHaveBeenCalled();
+      });
+
+      it('9. Missing city, identity document, and service area -> pending email with those exact missing fields', async () => {
+        const dto = {
+          firstName: 'MultiMissing',
+          lastName: 'Purohit',
+          email: 'multimissing.purohit@example.com',
+          phone: '9812345688',
+          password: 'Password123!',
+          state: 'Uttar Pradesh',
+          bio: 'Specialized in Hawans',
+          accountNumber: '112233445588',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'MultiMissing Purohit',
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).toHaveBeenCalledWith(
+          dto.email,
+          'MultiMissing Purohit',
+          expect.any(String),
+          dto.phone,
+          dto.password,
+          ['City', 'Aadhaar or PAN document', 'At least one valid service area'],
+        );
+      });
+
+      it('10. Purohit missing only qualification is auto-approved because qualification is optional', async () => {
+        const dto = {
+          firstName: 'NoQual',
+          lastName: 'Purohit',
+          email: 'noqual.purohit@example.com',
+          phone: '9812345689',
+          password: 'Password123!',
+          city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          bio: 'Specialized in Hawans',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '112233445599',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'NoQual Purohit',
+          serviceAreas: ['Varanasi'],
+          // qualification intentionally omitted
+        };
+
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(mockEmailService.sendPurohitWelcomeApprovedEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('Astrologer Email Selection', () => {
+      it('1. Complete profile with Aadhaar + Bank -> new Astrologer welcome email', async () => {
+        const dto = {
+          firstName: 'Bhrigu',
+          lastName: 'Sharma',
+          email: 'bhrigu.astro@example.com',
+          phone: '9812345609',
+          password: 'Password123!',
+          city: 'Kashi',
+          state: 'Uttar Pradesh',
+          bio: 'Renowned expert in Vedic astrology and horoscope reading',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '112233998877',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Bhrigu Sharma',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(mockEmailService.sendAstrologerWelcomeApprovedEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendAstrologerWelcomeApprovedEmail).toHaveBeenCalledWith(
+          dto.email,
+          'Bhrigu Sharma',
+          expect.any(String),
+          dto.phone,
+        );
+        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).not.toHaveBeenCalled();
+      });
+
+      it('2. Complete profile with PAN + UPI -> new Astrologer welcome email', async () => {
+        const dto = {
+          firstName: 'Parashar',
+          lastName: 'Acharya',
+          email: 'parashar.astro@example.com',
+          phone: '9812345610',
+          password: 'Password123!',
+          city: 'Kashi',
+          state: 'Uttar Pradesh',
+          bio: 'Master in Prashna Kundali',
+          panDocUrl: 'https://storage.poojawala.com/pan.jpg',
+          upiId: 'parashar@upi',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(mockEmailService.sendAstrologerWelcomeApprovedEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).not.toHaveBeenCalled();
+      });
+
+      it('3. Missing city/state/bio -> existing Astrologer email', async () => {
+        const dto = {
+          firstName: 'NoBio',
+          lastName: 'Astro',
+          email: 'nobio.astro@example.com',
+          phone: '9812345611',
+          password: 'Password123!',
+          city: 'Kashi',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          upiId: 'nobio@upi',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).toHaveBeenCalledWith(
+          dto.email,
+          'NoBio Astro',
+          expect.any(String),
+          dto.phone,
+          dto.password,
+          ['State', 'Bio'],
+        );
+        expect(mockEmailService.sendAstrologerWelcomeApprovedEmail).not.toHaveBeenCalled();
+      });
+
+      it('4. Missing identity document -> existing Astrologer email', async () => {
+        const dto = {
+          firstName: 'NoDoc',
+          lastName: 'Astro',
+          email: 'nodoc.astro@example.com',
+          phone: '9812345612',
+          password: 'Password123!',
+          city: 'Kashi',
+          state: 'Uttar Pradesh',
+          bio: 'Experienced astrologer',
+          upiId: 'nodoc@upi',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).toHaveBeenCalledWith(
+          dto.email,
+          'NoDoc Astro',
+          expect.any(String),
+          dto.phone,
+          dto.password,
+          ['Aadhaar or PAN document'],
+        );
+        expect(mockEmailService.sendAstrologerWelcomeApprovedEmail).not.toHaveBeenCalled();
+      });
+
+      it('5. Missing bank and UPI -> existing Astrologer email', async () => {
+        const dto = {
+          firstName: 'NoBank',
+          lastName: 'Astro',
+          email: 'nobank.astro@example.com',
+          phone: '9812345613',
+          password: 'Password123!',
+          city: 'Kashi',
+          state: 'Uttar Pradesh',
+          bio: 'Experienced astrologer',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).toHaveBeenCalledWith(
+          dto.email,
+          'NoBank Astro',
+          expect.any(String),
+          dto.phone,
+          dto.password,
+          ['Bank Account or UPI ID'],
+        );
+        expect(mockEmailService.sendAstrologerWelcomeApprovedEmail).not.toHaveBeenCalled();
+      });
+
+      it('6. No service area but otherwise complete -> new Astrologer welcome email', async () => {
+        const dto = {
+          firstName: 'Complete',
+          lastName: 'Astrologer',
+          email: 'complete.noarea.astro@example.com',
+          phone: '9812345614',
+          password: 'Password123!',
+          city: 'Haridwar',
+          state: 'Uttarakhand',
+          bio: 'Expert Vedic Astrologer with 10 years experience',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '998877112233',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'Complete Astrologer',
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(mockEmailService.sendAstrologerWelcomeApprovedEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).not.toHaveBeenCalled();
+      });
+
+      it('7. Astrologer missing state and identity doc -> pending email without service area warning', async () => {
+        const dto = {
+          firstName: 'StateDocMissing',
+          lastName: 'Astro',
+          email: 'statedoc.astro@example.com',
+          phone: '9812345691',
+          password: 'Password123!',
+          city: 'Kashi',
+          bio: 'Expert Vedic Astrologer',
+          upiId: 'statedoc@upi',
+          // missing state and identity document
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.PENDING);
+        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).toHaveBeenCalledWith(
+          dto.email,
+          'StateDocMissing Astro',
+          expect.any(String),
+          dto.phone,
+          dto.password,
+          ['State', 'Aadhaar or PAN document'],
+        );
+        // Ensure service area is NEVER present in missing fields for Astrologer
+        const callArgs = mockEmailService.sendAstrologerCreatedByAdminEmail.mock.calls[0];
+        const missingFields = callArgs[5];
+        expect(missingFields).not.toContain('At least one valid service area');
+        expect(missingFields).not.toContain('Service area');
+      });
+
+      it('8. Astrologer missing only qualification is auto-approved because qualification is optional', async () => {
+        const dto = {
+          firstName: 'NoQual',
+          lastName: 'Astro',
+          email: 'noqual.astro@example.com',
+          phone: '9812345692',
+          password: 'Password123!',
+          city: 'Haridwar',
+          state: 'Uttarakhand',
+          bio: 'Master in Prashna Kundali with 12 years experience',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '998877112244',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'NoQual Astro',
+          // qualification intentionally omitted
+        };
+
+        const result = await service.createAstrologerByAdmin(dto);
+        expect(result.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+        expect(mockEmailService.sendAstrologerWelcomeApprovedEmail).toHaveBeenCalledTimes(1);
+        expect(mockEmailService.sendAstrologerCreatedByAdminEmail).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('Transaction & Fault Isolation Tests', () => {
+      it('1. Transaction rollback -> no email sent', async () => {
+        const dto = {
+          firstName: 'Rollback',
+          lastName: 'User',
+          email: 'rollback@example.com',
+          phone: '9812345615',
+          password: 'Password123!',
+          city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          bio: 'Bio',
+          services: [999999], // invalid service forces NotFoundException inside transaction
+          serviceAreas: ['Varanasi'],
+        };
+
+        await expect(service.createPurohitByAdmin(dto)).rejects.toThrow();
+        expect(mockEmailService.sendPurohitWelcomeApprovedEmail).not.toHaveBeenCalled();
+        expect(mockEmailService.sendPurohitCreatedByAdminEmail).not.toHaveBeenCalled();
+      });
+
+      it('2. Email provider failure -> account creation remains successful', async () => {
+        mockEmailService.sendPurohitWelcomeApprovedEmail.mockRejectedValueOnce(
+          new Error('SMTP connection timeout'),
+        );
+
+        const dto = {
+          firstName: 'EmailFail',
+          lastName: 'Purohit',
+          email: 'emailfail@example.com',
+          phone: '9812345616',
+          password: 'Password123!',
+          city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          bio: 'Specialized in Hawans',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '112233445577',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'EmailFail Purohit',
+          serviceAreas: ['Varanasi'],
+        };
+
+        // Must succeed without throwing 500 error
+        const result = await service.createPurohitByAdmin(dto);
+        expect(result.success).toBe(true);
+        expect(result.data.user.id).toBeDefined();
+        expect(result.data.profile.verificationStatus).toBe(PUROHIT_VERIFICATION_STATUS.APPROVED);
+      });
+
+      it('3. Exactly one email is sent per creation', async () => {
+        const dto = {
+          firstName: 'SingleEmail',
+          lastName: 'Purohit',
+          email: 'singleemail@example.com',
+          phone: '9812345617',
+          password: 'Password123!',
+          city: 'Varanasi',
+          state: 'Uttar Pradesh',
+          bio: 'Specialized in Hawans',
+          aadhaarDocUrl: 'https://storage.poojawala.com/aadhaar.jpg',
+          accountNumber: '112233445588',
+          ifscCode: 'SBIN0001234',
+          accountHolderName: 'SingleEmail Purohit',
+          serviceAreas: ['Varanasi'],
+        };
+
+        await service.createPurohitByAdmin(dto);
+        const totalCalls =
+          mockEmailService.sendPurohitWelcomeApprovedEmail.mock.calls.length +
+          mockEmailService.sendPurohitCreatedByAdminEmail.mock.calls.length;
+        expect(totalCalls).toBe(1);
       });
     });
   });

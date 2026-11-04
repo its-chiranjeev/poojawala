@@ -3,6 +3,17 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ResendProvider } from './providers/resend.provider';
 import { renderPoojawalaEmail, EmailTableRow } from './templates/email-base.template';
 import { platformBrandName, getPlatformWebsiteUrl } from './config/platform.config';
+import {
+  MissingFieldGuidance,
+  mapMissingFieldToGuidance,
+  renderMissingFieldsHtml,
+} from './templates/missing-fields.template';
+
+export type { MissingFieldGuidance };
+export {
+  mapMissingFieldToGuidance,
+  renderMissingFieldsHtml,
+};
 
 export interface SendEmailOptions {
   to: string | string[];
@@ -264,7 +275,11 @@ export class EmailService {
     username: string,
     phone: string,
     plainPassword: string,
+    missingFields?: string[],
   ): Promise<void> {
+    const missingHtml = renderMissingFieldsHtml('PUROHIT', missingFields);
+    const hasMissing = Boolean(missingHtml && missingHtml.length > 0);
+
     const html = renderPoojawalaEmail({
       statusBadge: 'Purohit Account Created',
       userName: name || 'Purohit',
@@ -280,9 +295,14 @@ export class EmailService {
         ],
       },
       highlight: {
-        title: 'Next Steps to Complete Verification',
-        text: 'For your security, please log in and change your password immediately. Next, go to your profile to upload your verification documents (Aadhaar, PAN, Certificate) and bank account details so Admin can approve your profile.',
+        title: hasMissing
+          ? 'Account Created — Profile Approval Pending'
+          : 'Next Steps to Complete Verification',
+        text: hasMissing
+          ? 'For your security, please log in and change your password immediately. Your account has been registered, but full profile approval is pending until the missing details below are submitted and reviewed by our administration team.'
+          : 'For your security, please log in and change your password immediately. Next, go to your profile to upload your verification documents (Aadhaar, PAN, Certificate) and bank account details so Admin can approve your profile.',
       },
+      additionalContentHtml: missingHtml || undefined,
     });
 
     await this.sendMail({
@@ -298,7 +318,11 @@ export class EmailService {
     username: string,
     phone: string,
     plainPassword: string,
+    missingFields?: string[],
   ): Promise<void> {
+    const missingHtml = renderMissingFieldsHtml('ASTROLOGER', missingFields);
+    const hasMissing = Boolean(missingHtml && missingHtml.length > 0);
+
     const html = renderPoojawalaEmail({
       statusBadge: 'Astrologer Account Created',
       userName: name || 'Astrologer',
@@ -314,14 +338,131 @@ export class EmailService {
         ],
       },
       highlight: {
-        title: 'Next Steps to Complete Verification',
-        text: 'For your security, please log in and change your password immediately. Next, go to your profile to review your profile and verification documents.',
+        title: hasMissing
+          ? 'Account Created — Profile Approval Pending'
+          : 'Next Steps to Complete Verification',
+        text: hasMissing
+          ? 'For your security, please log in and change your password immediately. Your account has been registered, but full profile approval is pending until the missing details below are submitted and reviewed by our administration team.'
+          : 'For your security, please log in and change your password immediately. Next, go to your profile to review your profile and verification documents.',
       },
+      additionalContentHtml: missingHtml || undefined,
     });
 
     await this.sendMail({
       to: email,
       subject: `Your ${platformBrandName} Astrologer Account Has Been Created`,
+      html,
+    });
+  }
+
+  async sendPurohitWelcomeApprovedEmail(
+    email: string,
+    name: string,
+    username: string,
+    phone?: string,
+  ): Promise<void> {
+    const websiteUrl = (getPlatformWebsiteUrl() || '').replace(/\/+$/, '');
+    const loginUrl = `${websiteUrl}/login`;
+
+    const featureListHtml = `
+      <div style="background-color: #FFF9F5; border: 1px solid #FFE0D0; border-radius: 8px; padding: 18px 20px; margin: 20px 0;">
+        <h4 style="margin: 0 0 10px 0; color: #D32F2F; font-size: 14.5px; font-weight: 700;">
+          Once logged in, you can:
+        </h4>
+        <ul style="margin: 0; padding-left: 20px; color: #4A3E39; font-size: 13.5px; line-height: 1.6;">
+          <li style="margin-bottom: 6px;">Review and manage your Purohit profile.</li>
+          <li style="margin-bottom: 6px;">Add the puja and religious services you want to provide.</li>
+          <li style="margin-bottom: 6px;">Set your service details, pricing, and availability.</li>
+          <li style="margin-bottom: 0;">Manage your bookings and connect with customers.</li>
+        </ul>
+      </div>
+      <div style="text-align: center; margin: 26px 0 16px;">
+        <a href="${loginUrl}" target="_blank" rel="noopener noreferrer" style="background-color: #FF6200; color: #ffffff; padding: 13px 30px; text-decoration: none; font-size: 14.5px; font-weight: 700; border-radius: 8px; display: inline-block; box-shadow: 0 4px 12px rgba(255, 98, 0, 0.35);">
+          Log In to Your Account
+        </a>
+      </div>
+    `;
+
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Profile Approved',
+      userName: name || 'Purohit',
+      preheaderText: `Your ${platformBrandName} Purohit account is ready and approved!`,
+      emailMessage: `Welcome to ${platformBrandName}! Your Purohit account has been successfully created, and your profile is complete and approved. We look forward to having you as a part of ${platformBrandName} and helping you grow your services.`,
+      highlight: {
+        title: 'Next Steps: Secure Your Password',
+        text: `You can now log in to your ${platformBrandName} account and change your password to a secure personal password.`,
+      },
+      detailsTable: {
+        title: 'Account Information',
+        rows: [
+          { label: 'Email', value: email },
+          { label: 'Username', value: username },
+          ...(phone && phone !== 'N/A' ? [{ label: 'Phone', value: phone }] : []),
+          { label: 'Account Status', value: 'APPROVED', isHighlight: true },
+        ],
+      },
+      additionalContentHtml: featureListHtml,
+    });
+
+    await this.sendMail({
+      to: email,
+      subject: `Welcome to ${platformBrandName} – Your Purohit Account Is Ready!`,
+      html,
+    });
+  }
+
+  async sendAstrologerWelcomeApprovedEmail(
+    email: string,
+    name: string,
+    username: string,
+    phone?: string,
+  ): Promise<void> {
+    const websiteUrl = (getPlatformWebsiteUrl() || '').replace(/\/+$/, '');
+    const loginUrl = `${websiteUrl}/login`;
+
+    const featureListHtml = `
+      <div style="background-color: #FFF9F5; border: 1px solid #FFE0D0; border-radius: 8px; padding: 18px 20px; margin: 20px 0;">
+        <h4 style="margin: 0 0 10px 0; color: #D32F2F; font-size: 14.5px; font-weight: 700;">
+          Once logged in, you can:
+        </h4>
+        <ul style="margin: 0; padding-left: 20px; color: #4A3E39; font-size: 13.5px; line-height: 1.6;">
+          <li style="margin-bottom: 6px;">Review and manage your Astrologer profile.</li>
+          <li style="margin-bottom: 6px;">Add or manage your astrology consultation services, where supported.</li>
+          <li style="margin-bottom: 6px;">Set your consultation details, pricing, and availability.</li>
+          <li style="margin-bottom: 0;">Manage your bookings and connect with customers.</li>
+        </ul>
+      </div>
+      <div style="text-align: center; margin: 26px 0 16px;">
+        <a href="${loginUrl}" target="_blank" rel="noopener noreferrer" style="background-color: #FF6200; color: #ffffff; padding: 13px 30px; text-decoration: none; font-size: 14.5px; font-weight: 700; border-radius: 8px; display: inline-block; box-shadow: 0 4px 12px rgba(255, 98, 0, 0.35);">
+          Log In to Your Account
+        </a>
+      </div>
+    `;
+
+    const html = renderPoojawalaEmail({
+      statusBadge: 'Profile Approved',
+      userName: name || 'Astrologer',
+      preheaderText: `Your ${platformBrandName} Astrologer account is ready and approved!`,
+      emailMessage: `Welcome to ${platformBrandName}! Your Astrologer account has been successfully created, and your profile is complete and approved. We are glad to have you on ${platformBrandName} and look forward to supporting your astrology services.`,
+      highlight: {
+        title: 'Next Steps: Secure Your Password',
+        text: `You can now log in to your ${platformBrandName} account and change your password to a secure personal password.`,
+      },
+      detailsTable: {
+        title: 'Account Information',
+        rows: [
+          { label: 'Email', value: email },
+          { label: 'Username', value: username },
+          ...(phone && phone !== 'N/A' ? [{ label: 'Phone', value: phone }] : []),
+          { label: 'Account Status', value: 'APPROVED', isHighlight: true },
+        ],
+      },
+      additionalContentHtml: featureListHtml,
+    });
+
+    await this.sendMail({
+      to: email,
+      subject: `Welcome to ${platformBrandName} – Your Astrologer Account Is Ready!`,
       html,
     });
   }

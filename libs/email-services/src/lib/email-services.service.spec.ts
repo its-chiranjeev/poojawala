@@ -419,5 +419,151 @@ describe('EmailService - Centralized Platform Branding', () => {
       expect(sentHtml).toContain('Trust registration certificate is expired.');
     });
   });
+
+  describe('Admin-Created Incomplete Profiles - Dynamic Missing Fields Emails', () => {
+    it('1. Purohit missing only qualification: renders qualification guidance', async () => {
+      await service.sendPurohitCreatedByAdminEmail(
+        'purohit.qual@example.com',
+        'Vaidik Shastri',
+        'vaidik123',
+        '9876543210',
+        'TempPass@123',
+        ['Qualification'],
+      );
+
+      const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+      expect(sentHtml).toContain('Complete Your Purohit Profile');
+      expect(sentHtml).toContain('Details requiring attention:');
+      expect(sentHtml).toContain('Qualification:');
+      expect(sentHtml).toContain('Please add your educational or professional qualification.');
+      expect(sentHtml).toContain('TempPass@123');
+      expect(sentHtml).not.toContain('City:');
+      expect(sentHtml).not.toContain('Identity document:');
+      expect(sentHtml).not.toContain('Service area:');
+    });
+
+    it('2. Purohit missing city, identity document, and service area', async () => {
+      await service.sendPurohitCreatedByAdminEmail(
+        'purohit.multi@example.com',
+        'Madhav Pandit',
+        'madhav123',
+        '9876543211',
+        'TempPass@123',
+        ['City', 'Aadhaar or PAN document', 'At least one valid service area'],
+      );
+
+      const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+      expect(sentHtml).toContain('Complete Your Purohit Profile');
+      expect(sentHtml).toContain('City:');
+      expect(sentHtml).toContain('Please provide your current city.');
+      expect(sentHtml).toContain('Identity document:');
+      expect(sentHtml).toContain('Please upload your Aadhaar or PAN document.');
+      expect(sentHtml).toContain('Service area:');
+      expect(sentHtml).toContain('Please add at least one valid service area.');
+      expect(sentHtml).not.toContain('Bank account or UPI:');
+    });
+
+    it('3. Purohit missing bank/UPI information', async () => {
+      await service.sendPurohitCreatedByAdminEmail(
+        'purohit.bank@example.com',
+        'Ramesh Joshi',
+        'ramesh123',
+        '9876543212',
+        'TempPass@123',
+        ['Bank Account or UPI ID'],
+      );
+
+      const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+      expect(sentHtml).toContain('Complete Your Purohit Profile');
+      expect(sentHtml).toContain('Bank account or UPI:');
+      expect(sentHtml).toContain('Please add valid bank account details or a UPI ID.');
+      expect(sentHtml).not.toContain('City:');
+    });
+
+    it('4. Astrologer missing only qualification: renders astrology-specific guidance', async () => {
+      await service.sendAstrologerCreatedByAdminEmail(
+        'astro.qual@example.com',
+        'Bhrigu Sharma',
+        'bhrigu123',
+        '9876543213',
+        'TempPass@123',
+        ['Qualification'],
+      );
+
+      const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+      expect(sentHtml).toContain('Complete Your Astrologer Profile');
+      expect(sentHtml).toContain('Details requiring attention:');
+      expect(sentHtml).toContain('Qualification:');
+      expect(sentHtml).toContain('Please add your astrology-related educational or professional qualification.');
+      expect(sentHtml).toContain('TempPass@123');
+      expect(sentHtml).not.toContain('Service area');
+    });
+
+    it('5. Astrologer missing multiple required fields: state and identity document', async () => {
+      await service.sendAstrologerCreatedByAdminEmail(
+        'astro.multi@example.com',
+        'Parashar Acharya',
+        'parashar123',
+        '9876543214',
+        'TempPass@123',
+        ['State', 'Aadhaar or PAN document'],
+      );
+
+      const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+      expect(sentHtml).toContain('Complete Your Astrologer Profile');
+      expect(sentHtml).toContain('State:');
+      expect(sentHtml).toContain('Please provide your state.');
+      expect(sentHtml).toContain('Identity document:');
+      expect(sentHtml).toContain('Please upload your Aadhaar or PAN document.');
+      expect(sentHtml).not.toContain('Service area');
+    });
+
+    it('6. Astrologer must not receive a service-area warning even if passed in array', async () => {
+      await service.sendAstrologerCreatedByAdminEmail(
+        'astro.noarea@example.com',
+        'Varaha Mihira',
+        'varaha123',
+        '9876543215',
+        'TempPass@123',
+        ['City', 'At least one valid service area'],
+      );
+
+      const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+      expect(sentHtml).toContain('Complete Your Astrologer Profile');
+      expect(sentHtml).toContain('City:');
+      expect(sentHtml).not.toContain('Service area:');
+      expect(sentHtml).not.toContain('Please add at least one valid service area.');
+    });
+
+    it('7. When missingFields is empty or omitted, falls back to default clean email without missing block', async () => {
+      await service.sendPurohitCreatedByAdminEmail(
+        'purohit.clean@example.com',
+        'Dev Sharma',
+        'dev123',
+        '9876543216',
+        'TempPass@123',
+      );
+
+      const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+      expect(sentHtml).toContain('Next Steps to Complete Verification');
+      expect(sentHtml).not.toContain('Details requiring attention:');
+    });
+
+    it('8. Complete profile welcome email does not contain missing-field warnings or password', async () => {
+      await service.sendPurohitWelcomeApprovedEmail(
+        'approved.purohit@example.com',
+        'Acharya Dev',
+        'dev123',
+        '9876543217',
+      );
+
+      const sentHtml = mockResendProvider.sendMail.mock.calls[0][0].html;
+      expect(sentHtml).toContain('Profile Approved');
+      expect(sentHtml).toContain('Account Status');
+      expect(sentHtml).toContain('APPROVED');
+      expect(sentHtml).not.toContain('Details requiring attention:');
+      expect(sentHtml).not.toContain('Temporary Password');
+    });
+  });
 });
 
