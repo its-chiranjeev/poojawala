@@ -77,6 +77,8 @@ export interface PaymentInvoiceTemplateData {
   paidAmount?: string | number | null;
   remainingAmount?: string | number | null;
   tokenAmount?: string | number | null;
+  paymentTypeLabel?: string;
+  paymentOption?: string;
 
   [key: string]: any;
 }
@@ -238,6 +240,40 @@ export const paymentInvoiceTemplate = (
   const assignedPersonValue = isAstrology
     ? (data.astrologerName || data.purohitName)
     : data.purohitName;
+
+  // Determine Token Payment vs Full Payment
+  let isTokenPayment = false;
+  if (!isOrder && !isAstrology) {
+    if (data.paymentTypeLabel) {
+      isTokenPayment =
+        data.paymentTypeLabel.toLowerCase().includes('token') ||
+        data.paymentTypeLabel.toUpperCase() === 'TOKEN';
+    } else if (data.paymentOption) {
+      isTokenPayment =
+        data.paymentOption.toUpperCase() === 'TOKEN' ||
+        data.paymentOption.toLowerCase().includes('token');
+    } else if (
+      (data.paymentStatus || '').trim().toUpperCase() === 'PARTIAL' ||
+      (data['bookingPaymentStatus'] || '').trim().toUpperCase() === 'PARTIAL'
+    ) {
+      isTokenPayment = true;
+    } else if (
+      data.remainingAmount != null &&
+      Number(data.remainingAmount) > 0 &&
+      data.paidAmount != null &&
+      Number(data.paidAmount) > 0
+    ) {
+      isTokenPayment = true;
+    } else if (
+      data['paymentRemark'] === 'BOOKING_TOKEN_PAYMENT' ||
+      data['remark'] === 'BOOKING_TOKEN_PAYMENT'
+    ) {
+      isTokenPayment = true;
+    }
+  }
+
+  const paymentTypeLabel =
+    data.paymentTypeLabel ?? (isTokenPayment ? 'Token Payment' : 'Full Payment');
 
   const isProformaInvoice = data.invoiceTitle
     .toLowerCase()
@@ -796,26 +832,17 @@ export const paymentInvoiceTemplate = (
       display: grid;
       grid-template-columns:
         repeat(3, minmax(0, 1fr));
-      gap: 0;
+      gap: 1px;
       border: 1px solid var(--line);
       border-radius: 14px;
       overflow: hidden;
-      background: #ffffff;
+      background: var(--line);
     }
 
     .payment-cell {
       min-height: 66px;
       padding: 10px 12px;
-      border-right: 1px solid var(--line);
-      border-bottom: 1px solid var(--line);
-    }
-
-    .payment-cell:nth-child(3n) {
-      border-right: 0;
-    }
-
-    .payment-cell:nth-last-child(-n + 3) {
-      border-bottom: 0;
+      background: #ffffff;
     }
 
     .payment-label {
@@ -1178,6 +1205,18 @@ export const paymentInvoiceTemplate = (
 
                 <div class="booking-item">
                   <div class="booking-item-label">
+                    Payment Type
+                  </div>
+
+                  <div class="booking-item-value">
+                    <span class="pill success">
+                      ${displayValue(paymentTypeLabel)}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="booking-item">
+                  <div class="booking-item-label">
                     Order Status
                   </div>
 
@@ -1234,6 +1273,18 @@ export const paymentInvoiceTemplate = (
 
                   <div class="booking-item-value">
                     ${displayValue(assignedPersonValue)}
+                  </div>
+                </div>
+
+                <div class="booking-item">
+                  <div class="booking-item-label">
+                    Payment Type
+                  </div>
+
+                  <div class="booking-item-value">
+                    <span class="pill ${isTokenPayment ? 'info' : 'success'}">
+                      ${displayValue(paymentTypeLabel)}
+                    </span>
                   </div>
                 </div>
 
@@ -1529,7 +1580,7 @@ export const paymentInvoiceTemplate = (
                   ${!isAstrology && data.paidAmount != null
                     ? `
                         <tr>
-                          <td>Paid Amount</td>
+                          <td>Paid Amount (${displayValue(paymentTypeLabel)})</td>
                           <td class="amount">${currency} ${(Number(data.paidAmount) || 0).toFixed(2)}</td>
                         </tr>
                       `
@@ -1564,6 +1615,18 @@ export const paymentInvoiceTemplate = (
             <div class="payment-value">
               <span class="pill ${paymentStatusClass}">
                 ${displayValue(data.paymentStatus || 'Pending')}
+              </span>
+            </div>
+          </div>
+
+          <div class="payment-cell">
+            <div class="payment-label">
+              Payment Type
+            </div>
+
+            <div class="payment-value">
+              <span class="pill ${isTokenPayment ? 'info' : 'success'}">
+                ${displayValue(paymentTypeLabel)}
               </span>
             </div>
           </div>
@@ -1615,6 +1678,26 @@ export const paymentInvoiceTemplate = (
 
             <div class="payment-value">
               ${isProformaInvoice ? 'Proforma Invoice' : 'Tax Invoice'}
+            </div>
+          </div>
+
+          <div class="payment-cell">
+            <div class="payment-label">
+              Currency
+            </div>
+
+            <div class="payment-value">
+              ${displayValue(currency)}
+            </div>
+          </div>
+
+          <div class="payment-cell">
+            <div class="payment-label">
+              Transaction Date
+            </div>
+
+            <div class="payment-value">
+              ${displayValue(data.date)}
             </div>
           </div>
 

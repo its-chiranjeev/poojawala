@@ -98,7 +98,10 @@ export class CategoryRepository extends BaseRepository<Category> {
     qb.loadRelationCountAndMap('category.totalServices', 'category.services');
     qb.loadRelationCountAndMap('category.totalProducts', 'category.products');
 
-    qb.orderBy('category.sortOrder', 'ASC').addOrderBy('category.name', 'ASC');
+    const sortRaw = (query.sort ?? (query as any).order ?? (query as any).sortOrder)?.toString().trim().toUpperCase();
+    const sortDirection: 'ASC' | 'DESC' = sortRaw === 'ASC' ? 'ASC' : 'DESC';
+
+    qb.orderBy('category.createdAt', sortDirection).addOrderBy('category.id', sortDirection);
 
     // 6. Pagination
     const total = await qb.getCount();

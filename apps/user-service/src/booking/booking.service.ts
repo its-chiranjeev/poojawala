@@ -935,12 +935,10 @@ export class BookingService {
             'Customer';
           const serviceName =
             transactionResult.service?.name || 'Pooja Service';
-          const scheduledDateStr = transactionResult.savedBooking.scheduledAt
-            ? new Date(
-              transactionResult.savedBooking.scheduledAt,
-            ).toLocaleString('en-IN', {
-              timeZone: 'Asia/Kolkata',
-            })
+          const scheduledAt = transactionResult.savedBooking.scheduledAt
+            ? (transactionResult.savedBooking.scheduledAt instanceof Date
+              ? transactionResult.savedBooking.scheduledAt.toISOString()
+              : new Date(transactionResult.savedBooking.scheduledAt).toISOString())
             : 'Scheduled Date';
           const bookingDisplayId =
             transactionResult.savedBooking.bookingNumber ||
@@ -951,8 +949,8 @@ export class BookingService {
             : '';
           // TODO: SERVICE_MESSAGE_IMPROVEMENT
           // Old message retained for reference; replaced with plan-aware message.
-          // `New booking ${bookingDisplayId} for ${serviceName} created by ${customerName}. Scheduled at: ${scheduledDateStr}. Total: ₹${transactionResult.savedBooking.finalAmount}.`
-          const adminBookingMessage = `New booking ${bookingDisplayId} for service '${serviceName}'${planPart} created by ${customerName}. Scheduled at: ${scheduledDateStr}. Total: ₹${transactionResult.savedBooking.finalAmount}.`;
+          // `New booking ${bookingDisplayId} for ${serviceName} created by ${customerName}. Scheduled at: ${scheduledAt}. Total: ₹${transactionResult.savedBooking.finalAmount}.`
+          const adminBookingMessage = `New booking ${bookingDisplayId} for service '${serviceName}'${planPart} created by ${customerName}. Scheduled at: ${scheduledAt}. Total: ₹${transactionResult.savedBooking.finalAmount}.`;
 
           await this.notificationService.notifyAdmins(
             'New Booking Request',
@@ -1459,20 +1457,18 @@ export class BookingService {
             [transactionResult.customer.firstName, transactionResult.customer.lastName].filter(Boolean).join(' ') ||
             transactionResult.customer.phone ||
             'Customer';
-          const scheduledDateStr = transactionResult.savedBooking.scheduledAt
-            ? new Date(
-              transactionResult.savedBooking.scheduledAt,
-            ).toLocaleString('en-IN', {
-              timeZone: 'Asia/Kolkata',
-            })
+          const scheduledAt = transactionResult.savedBooking.scheduledAt
+            ? (transactionResult.savedBooking.scheduledAt instanceof Date
+              ? transactionResult.savedBooking.scheduledAt.toISOString()
+              : new Date(transactionResult.savedBooking.scheduledAt).toISOString())
             : 'Scheduled Date';
           const bookingDisplayId =
             transactionResult.savedBooking.bookingNumber ||
             `B-${transactionResult.savedBooking.id}`;
 
           const adminBookingMessage = user.role === USER_ROLE.ADMIN
-            ? `New Astrology booking ${bookingDisplayId} created by Admin for customer ${customerName}. Scheduled at: ${scheduledDateStr}. Total: ₹${transactionResult.savedBooking.finalAmount}.`
-            : `New Astrology booking ${bookingDisplayId} created by ${customerName}. Scheduled at: ${scheduledDateStr}. Total: ₹${transactionResult.savedBooking.finalAmount}.`;
+            ? `New Astrology booking ${bookingDisplayId} created by Admin for customer ${customerName}. Scheduled at: ${scheduledAt}. Total: ₹${transactionResult.savedBooking.finalAmount}.`
+            : `New Astrology booking ${bookingDisplayId} created by ${customerName}. Scheduled at: ${scheduledAt}. Total: ₹${transactionResult.savedBooking.finalAmount}.`;
 
           await this.notificationService.notifyAdmins(
             'New Astrology Booking Request',
@@ -1497,7 +1493,7 @@ export class BookingService {
             await this.notificationService.createNotification(
               transactionResult.customer.id,
               'New Astrology Consultation Scheduled',
-              `An astrology consultation (${bookingDisplayId}) has been scheduled for you by Admin for ${scheduledDateStr}.`,
+              `An astrology consultation (${bookingDisplayId}) has been scheduled for you by Admin for ${scheduledAt}.`,
               NOTIFICATION_TYPE.BOOKING,
               transactionResult.savedBooking.id,
               'BOOKING',
@@ -1512,8 +1508,8 @@ export class BookingService {
 
           if (transactionResult.astrologer.userId) {
             const astrologerBookingMessage = user.role === USER_ROLE.ADMIN
-              ? `A new astrology consultation (${bookingDisplayId}) has been scheduled by Admin for ${customerName} on ${scheduledDateStr}.`
-              : `A new astrology consultation (${bookingDisplayId}) has been scheduled by ${customerName} for ${scheduledDateStr}.`;
+              ? `A new astrology consultation (${bookingDisplayId}) has been scheduled by Admin for ${customerName} on ${scheduledAt}.`
+              : `A new astrology consultation (${bookingDisplayId}) has been scheduled by ${customerName} for ${scheduledAt}.`;
 
             await this.notificationService.createNotification(
               transactionResult.astrologer.userId,
@@ -1835,9 +1831,6 @@ export class BookingService {
         partnerPayoutAmount: user.role === USER_ROLE.CUSTOMER ? null : (booking.partnerPayoutAmount ?? null),
         purohitPayoutAmount: user.role === USER_ROLE.CUSTOMER ? null : (booking.partnerPayoutAmount ?? null),
         astrologerPayoutAmount: user.role === USER_ROLE.CUSTOMER ? null : (booking.partnerPayoutAmount ?? null),
-        scheduledAtIst: this.toIstString(booking.scheduledAt),
-        createdAtIst: this.toIstString(booking.createdAt),
-        updatedAtIst: this.toIstString(booking.updatedAt),
       };
     });
 
@@ -1927,9 +1920,6 @@ export class BookingService {
           bookingPayment,
           purohitPayout,
           astrologerPayout,
-          scheduledAtIst: this.toIstString(booking.scheduledAt),
-          createdAtIst: this.toIstString(booking.createdAt),
-          updatedAtIst: this.toIstString(booking.updatedAt),
         };
       }
 
@@ -1988,9 +1978,6 @@ export class BookingService {
           astrologerPayout: null,
           astrologerPayoutStatus: null,
           astrologerPayoutAmount: null,
-          scheduledAtIst: this.toIstString(booking.scheduledAt),
-          createdAtIst: this.toIstString(booking.createdAt),
-          updatedAtIst: this.toIstString(booking.updatedAt),
         };
       }
 
@@ -2025,9 +2012,6 @@ export class BookingService {
           astrologerProfile,
           bookingPayment,
           purohitPayout,
-          scheduledAtIst: this.toIstString(booking.scheduledAt),
-          createdAtIst: this.toIstString(booking.createdAt),
-          updatedAtIst: this.toIstString(booking.updatedAt),
         };
       }
 
@@ -2052,9 +2036,6 @@ export class BookingService {
           partnerPayoutAmount: booking.partnerPayoutAmount ?? null,
           purohitPayoutAmount: booking.partnerPayoutAmount ?? null,
           astrologerPayoutAmount: booking.partnerPayoutAmount ?? null,
-          scheduledAtIst: this.toIstString(booking.scheduledAt),
-          createdAtIst: this.toIstString(booking.createdAt),
-          updatedAtIst: this.toIstString(booking.updatedAt),
         };
       }
 
@@ -3539,13 +3520,24 @@ export class BookingService {
           if (isOnlineBooking) {
             // Notify Purohit with customer contact details and scheduled time for the online booking
             try {
+              const scheduledAt = b.scheduledAt
+                ? (b.scheduledAt instanceof Date
+                  ? b.scheduledAt.toISOString()
+                  : new Date(b.scheduledAt).toISOString())
+                : 'Scheduled Date';
               await this.notificationService.createNotification(
                 user.id,
                 'Online Booking Details',
-                `You have accepted online booking #${bookingRef} for ${serviceName} scheduled on ${bookingDate} at ${bookingTime}. Customer: ${customerName}, Phone: ${customerPhone}${customerEmail !== 'N/A' ? `, Email: ${customerEmail}` : ''}. Please connect and coordinate with the customer correspondingly.`,
+                `You have accepted online booking #${bookingRef} for ${serviceName} scheduled at ${scheduledAt}. Customer: ${customerName}, Phone: ${customerPhone}${customerEmail !== 'N/A' ? `, Email: ${customerEmail}` : ''}. Please connect and coordinate with the customer correspondingly.`,
                 NOTIFICATION_TYPE.BOOKING_STATUS,
                 savedBooking.id,
                 'BOOKING',
+                true,
+                {
+                  bookingId: savedBooking.id,
+                  bookingNumber: bookingRef,
+                  scheduledAt: b.scheduledAt,
+                },
               );
             } catch (notifErr) {
               this.logger.error(`[BookingNotification] Failed to send online booking notification to purohit for booking ${bookingRef}`, notifErr instanceof Error ? notifErr.stack : String(notifErr));
@@ -4673,7 +4665,7 @@ export class BookingService {
   }
 
   private buildPurohitBookingNotification(
-    booking: { id: number; bookingNumber?: string },
+    booking: { id: number; bookingNumber?: string; scheduledAt?: Date | string },
     service: { id: number; name: string; templeId?: number | null; temple?: { id: number; name: string } | null },
     isManualAssignment: boolean = false,
   ): {
@@ -4681,6 +4673,8 @@ export class BookingService {
     message: string;
     extraData: {
       bookingId: number;
+      bookingNumber?: string;
+      scheduledAt?: Date | string;
       serviceId: number;
       templeId: number | null;
       templeName: string | null;
@@ -4689,6 +4683,8 @@ export class BookingService {
         title: string;
         message: string;
         bookingId: number;
+        bookingNumber?: string;
+        scheduledAt?: Date | string;
         serviceId: number;
         templeId: number | null;
         templeName: string | null;
@@ -4724,6 +4720,8 @@ export class BookingService {
 
     const extraData = {
       bookingId: booking.id,
+      bookingNumber: booking.bookingNumber,
+      scheduledAt: booking.scheduledAt,
       serviceId: service?.id,
       templeId,
       templeName,
@@ -4732,6 +4730,8 @@ export class BookingService {
         title: hasTemple ? 'New Temple Service Booking' : (isManualAssignment ? 'Booking Assigned' : 'New Service Booking'),
         message,
         bookingId: booking.id,
+        bookingNumber: booking.bookingNumber,
+        scheduledAt: booking.scheduledAt,
         serviceId: service?.id,
         templeId,
         templeName,
@@ -5085,11 +5085,8 @@ export class BookingService {
         id: booking.id,
         bookingNumber: booking.bookingNumber,
         scheduledAt: booking.scheduledAt,
-        scheduledAtIst: this.toIstString(booking.scheduledAt),
         createdAt: booking.createdAt,
-        createdAtIst: this.toIstString(booking.createdAt),
         updatedAt: booking.updatedAt,
-        updatedAtIst: this.toIstString(booking.updatedAt),
         status: booking.status,
         paymentStatus: booking.paymentStatus,
         assignmentType: booking.assignmentType,
@@ -5608,11 +5605,8 @@ export class BookingService {
       id: booking.id,
       bookingNumber: booking.bookingNumber,
       scheduledAt: booking.scheduledAt,
-      scheduledAtIst: this.toIstString(booking.scheduledAt),
       createdAt: booking.createdAt,
-      createdAtIst: this.toIstString(booking.createdAt),
       updatedAt: booking.updatedAt,
-      updatedAtIst: this.toIstString(booking.updatedAt),
       status: booking.status,
       paymentStatus: booking.paymentStatus,
       assignmentType: booking.assignmentType,
@@ -5734,11 +5728,8 @@ export class BookingService {
       id: number;
       bookingNumber: string;
       scheduledAt: Date;
-      scheduledAtIst: string | null;
       createdAt: Date;
-      createdAtIst: string | null;
       updatedAt: Date;
-      updatedAtIst: string | null;
       status: BOOKING_STATUS;
       paymentStatus: BOOKING_PAYMENT_STATUS;
       assignmentType: ASSIGNMENT_TYPE;
@@ -5860,11 +5851,8 @@ export class BookingService {
         id: repeatedBooking.id,
         bookingNumber: repeatedBooking.bookingNumber,
         scheduledAt: repeatedBooking.scheduledAt,
-        scheduledAtIst: this.toIstString(repeatedBooking.scheduledAt),
         createdAt: repeatedBooking.createdAt,
-        createdAtIst: this.toIstString(repeatedBooking.createdAt),
         updatedAt: repeatedBooking.updatedAt,
-        updatedAtIst: this.toIstString(repeatedBooking.updatedAt),
         status: repeatedBooking.status,
         paymentStatus: repeatedBooking.paymentStatus,
         assignmentType: repeatedBooking.assignmentType,
@@ -6419,13 +6407,24 @@ export class BookingService {
 
       // Notify customer
       try {
+        const scheduledAt = transactionResult.savedBooking.scheduledAt
+          ? (transactionResult.savedBooking.scheduledAt instanceof Date
+            ? transactionResult.savedBooking.scheduledAt.toISOString()
+            : new Date(transactionResult.savedBooking.scheduledAt).toISOString())
+          : 'Scheduled Date';
         await this.notificationService.createNotification(
           transactionResult.customer.id,
           'Booking Created',
-          `Booking B-${transactionResult.savedBooking.id} created by admin for you`,
+          `Booking B-${transactionResult.savedBooking.id} created by admin for you. Scheduled at: ${scheduledAt}.`,
           NOTIFICATION_TYPE.BOOKING,
           transactionResult.savedBooking.id,
           'BOOKING',
+          true,
+          {
+            bookingId: transactionResult.savedBooking.id,
+            bookingNumber: transactionResult.savedBooking.bookingNumber,
+            scheduledAt: transactionResult.savedBooking.scheduledAt,
+          },
         );
       } catch (err: any) {
         this.logger.warn(`Failed to notify customer: ${err?.message}`);

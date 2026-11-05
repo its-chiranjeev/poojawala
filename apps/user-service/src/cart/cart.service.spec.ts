@@ -192,7 +192,23 @@ describe('CartService', () => {
 
     mockTxCartItemDelete = jest.fn().mockResolvedValue({ affected: 1 });
 
+    const mockCartItemQb = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    };
+
     dataSource = {
+      getRepository: jest.fn().mockImplementation((entity) => {
+        if (entity === CartItem) {
+          return {
+            createQueryBuilder: jest.fn().mockReturnValue(mockCartItemQb),
+          };
+        }
+        return {};
+      }),
       transaction: jest.fn().mockImplementation(async (cb) => {
         const mockManager = {
           getRepository: jest.fn().mockImplementation((entity) => {
@@ -420,6 +436,29 @@ describe('CartService', () => {
       expect(result.limit).toBe(10);
       expect(result.totalItems).toBe(1);
       expect(result.totalPages).toBe(1);
+    });
+
+    it('should lazily reconcile and remove cart items that were already paid in an order', async () => {
+      const mockPaidQb = {
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ id: '84' }]),
+      };
+      (dataSource.getRepository as jest.Mock).mockReturnValueOnce({
+        createQueryBuilder: jest.fn().mockReturnValue(mockPaidQb),
+      });
+
+      cartItemRepository.findCartItemsWithPagination.mockResolvedValueOnce({
+        items: [],
+        totalItems: 0,
+      });
+      cartItemRepository.findAllValidItemsByCartId.mockResolvedValueOnce([]);
+
+      await service.getCart(customerUser);
+
+      expect(cartItemRepository.delete).toHaveBeenCalledWith(84);
     });
 
     it('should pass search filter to repository and return matching items', async () => {

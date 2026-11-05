@@ -1,5 +1,5 @@
 import { Type, Transform } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min, MaxLength } from 'class-validator';
+import { IsInt, IsOptional, IsString, Max, Min, MaxLength, IsIn } from 'class-validator';
 
 export class GetServicesQueryDto {
   @IsOptional()
@@ -129,4 +129,15 @@ export class GetServicesQueryDto {
   @IsString({ message: 'categoryType must be a string' })
   @MaxLength(50, { message: 'categoryType cannot exceed 50 characters' })
   categoryType?: string;
+
+  /**
+   * Sort direction for categories: 'ASC' | 'DESC' (case-insensitive).
+   * Defaults to 'DESC' according to createdAt.
+   */
+  @IsOptional()
+  @IsString({ message: 'sort must be a string' })
+  @IsIn(['ASC', 'DESC', 'asc', 'desc'], {
+    message: 'sort must be either ASC or DESC',
+  })
+  sort?: string;
 }

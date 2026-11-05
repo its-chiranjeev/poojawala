@@ -3,7 +3,6 @@ import { NotificationRepository, UserRepository } from '@poojawala/repositories'
 import { NotificationQueryDto } from '@poojawala/dtos';
 import { NOTIFICATION_TYPE, USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { BookingGateway } from '@poojawala/gateway';
-import axios from 'axios';
 
 @Injectable()
 export class NotificationService {
@@ -17,47 +16,6 @@ export class NotificationService {
 
   getGateway(): BookingGateway {
     return this.bookingGateway;
-  }
-
-  private async bridgeSocketToUserService(
-    rooms: string[],
-    event: string,
-    payload: any,
-  ): Promise<void> {
-    if (process.env.CURRENT_SERVICE === 'user-service') {
-      return;
-    }
-
-    const primaryPort = process.env.USER_MANAGEMENT_PORT || 8011;
-    try {
-      await axios.post(
-        `http://127.0.0.1:${primaryPort}/api/users/internal/emit-notification`,
-        {
-          rooms,
-          event,
-          payload,
-        },
-        { timeout: 3000 },
-      );
-    } catch (err: unknown) {
-      const errCode = (err as { code?: string })?.code;
-      const message = err instanceof Error ? err.message : String(err);
-      if (errCode === 'ECONNREFUSED' && Number(primaryPort) !== 5001) {
-        try {
-          await axios.post(
-            `http://127.0.0.1:5001/api/users/internal/emit-notification`,
-            { rooms, event, payload },
-            { timeout: 3000 },
-          );
-          return;
-        } catch {
-          // ignore fallback error
-        }
-      }
-      this.logger.debug(
-        `Cross-service socket bridge to user-service failed: ${message}`,
-      );
-    }
   }
 
   async createNotification(
@@ -89,22 +47,10 @@ export class NotificationService {
 
       // Emit real-time notification
       this.bookingGateway.emitNotification(userId, socketPayload);
-      
+
       // Also broadcast unread count
       const unreadCount = await this.getUnreadCount(userId);
       this.bookingGateway.notifyUser(userId, 'notification:unread-count', unreadCount);
-
-      // If running outside user-service (e.g. payment-service), bridge to user-service
-      await this.bridgeSocketToUserService(
-        [`user:${userId}`],
-        'notification:new',
-        socketPayload,
-      );
-      await this.bridgeSocketToUserService(
-        [`user:${userId}`],
-        'notification:unread-count',
-        unreadCount,
-      );
     }
 
     return savedNotification;
@@ -247,21 +193,7 @@ export class NotificationService {
       new Set(['admin', ...adminUserIds.map((id) => `user:${id}`)]),
     );
 
-    if (this.bookingGateway.server) {
-      this.bookingGateway.server.to(targetRooms).emit('notification:new', payload);
-    }
-
-    // Bridge to user-service if running outside user-service (e.g. payment-service)
-    await this.bridgeSocketToUserService(targetRooms, 'notification:new', payload);
-
-    for (const adminId of adminUserIds) {
-      const count = await this.getUnreadCount(adminId);
-      await this.bridgeSocketToUserService(
-        [`user:${adminId}`],
-        'notification:unread-count',
-        count,
-      );
-    }
+    this.bookingGateway.emitToRooms(targetRooms, 'notification:new', payload);
 
     return savedNotifications;
   }

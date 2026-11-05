@@ -33,6 +33,8 @@ describe('BlogService', () => {
     id: 1,
     name: 'Puja & Rituals',
     description: 'Articles related to puja',
+    metaTitle: null,
+    metaDescription: null,
     isActive: true,
     sortOrder: 1,
     posts: [],

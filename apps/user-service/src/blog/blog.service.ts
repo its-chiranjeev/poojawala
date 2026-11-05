@@ -33,6 +33,7 @@ export interface BlogPostsQuery {
   status?: BlogPostStatus;
   isFeatured?: boolean | string;
   search?: string;
+  sort?: 'ASC' | 'DESC' | string;
 }
 
 export interface BlogCategoriesQuery {
@@ -40,6 +41,7 @@ export interface BlogCategoriesQuery {
   limit?: number | string;
   isActive?: boolean | string;
   search?: string;
+  sort?: 'ASC' | 'DESC' | string;
 }
 
 @Injectable()
@@ -80,7 +82,9 @@ export class BlogService {
         );
       }
 
-      qb.orderBy('category.sortOrder', 'ASC').addOrderBy('category.createdAt', 'DESC');
+      const sortRaw = query?.sort?.toString().trim().toUpperCase();
+      const sortDirection: 'ASC' | 'DESC' = sortRaw === 'ASC' ? 'ASC' : 'DESC';
+      qb.orderBy('category.createdAt', sortDirection).addOrderBy('category.id', sortDirection);
 
       const total = await qb.getCount();
       qb.skip((page - 1) * limit).take(limit);
@@ -106,7 +110,7 @@ export class BlogService {
       const cats = await this.categoryRepo.find({
         where: { isActive: true, deletedAt: IsNull() },
         select: ['id', 'name', 'slug', 'description', 'metaTitle', 'metaDescription', 'sortOrder'],
-        order: { sortOrder: 'ASC', name: 'ASC' },
+        order: { createdAt: (query?.sort?.toString().trim().toUpperCase() === 'ASC' ? 'ASC' : 'DESC'), id: (query?.sort?.toString().trim().toUpperCase() === 'ASC' ? 'ASC' : 'DESC') },
       });
       return cats.map((cat) => ({
         ...cat,

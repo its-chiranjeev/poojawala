@@ -1095,4 +1095,382 @@ describe('Unified Invoice System', () => {
       );
     });
   });
+  describe('Invoice Token Payment vs Full Payment display rules', () => {
+    it('should render "Token Payment" in Booking Summary, Price Breakdown, and Payment Details for a token payment', () => {
+      const tokenInvoiceData: PaymentInvoiceTemplateData = {
+        invoiceType: 'BOOKING',
+        invoiceTitle: 'Poojawala Tax Invoice',
+        invoiceId: 'INV-PW-BK-TOKEN-1',
+        dateLabel: 'Payment Date',
+        companyName: '1Pooja',
+        companyEmail: 'support@1pooja.com',
+        companyPhone: '+91 9876543210',
+        companyAddress: 'Varanasi',
+        companyGstin: '09AAACP1234A1Z5',
+        customerName: 'Aarav Mehta',
+        customerEmail: 'aarav@example.com',
+        customerPhone: '+91 9999911111',
+        billingAddress: 'Varanasi, UP',
+        bookingId: 101,
+        bookingNumber: 'PW-BK-TOKEN-1',
+        bookingStatus: 'ACCEPTED',
+        serviceName: 'Rudrabhishek Pooja',
+        purohitName: 'Pt. Sharma',
+        paymentId: 'pay_token_123',
+        orderId: 'order_token_456',
+        paymentStatus: 'Paid',
+        paymentMethod: 'UPI',
+        statusClass: 'success',
+        errorMessage: '-',
+        currency: 'INR',
+        amount: '600.00',
+        finalAmount: '2000.00',
+        paidAmount: '600.00',
+        remainingAmount: '1400.00',
+        donationAmount: '0.00',
+        discountAmount: '0.00',
+        date: '25 Sep 2026, 10:00 AM',
+        paymentTypeLabel: 'Token Payment',
+        paymentOption: 'TOKEN',
+      };
+
+      const html = paymentInvoiceTemplate(tokenInvoiceData);
+
+      expect(html).toContain('Token Payment');
+      expect(html).toContain('Paid Amount (Token Payment)');
+      expect(html).not.toContain('Full Payment');
+    });
+
+    it('should render "Full Payment" in Booking Summary, Price Breakdown, and Payment Details for a full payment', () => {
+      const fullInvoiceData: PaymentInvoiceTemplateData = {
+        invoiceType: 'BOOKING',
+        invoiceTitle: 'Poojawala Tax Invoice',
+        invoiceId: 'INV-PW-BK-FULL-1',
+        dateLabel: 'Payment Date',
+        companyName: '1Pooja',
+        companyEmail: 'support@1pooja.com',
+        companyPhone: '+91 9876543210',
+        companyAddress: 'Varanasi',
+        companyGstin: '09AAACP1234A1Z5',
+        customerName: 'Aarav Mehta',
+        customerEmail: 'aarav@example.com',
+        customerPhone: '+91 9999911111',
+        billingAddress: 'Varanasi, UP',
+        bookingId: 102,
+        bookingNumber: 'PW-BK-FULL-1',
+        bookingStatus: 'COMPLETED',
+        serviceName: 'Rudrabhishek Pooja',
+        purohitName: 'Pt. Sharma',
+        paymentId: 'pay_full_123',
+        orderId: 'order_full_456',
+        paymentStatus: 'Paid',
+        paymentMethod: 'UPI',
+        statusClass: 'success',
+        errorMessage: '-',
+        currency: 'INR',
+        amount: '2000.00',
+        finalAmount: '2000.00',
+        paidAmount: '2000.00',
+        remainingAmount: '0.00',
+        donationAmount: '0.00',
+        discountAmount: '0.00',
+        date: '25 Sep 2026, 10:00 AM',
+        paymentTypeLabel: 'Full Payment',
+        paymentOption: 'FULL',
+      };
+
+      const html = paymentInvoiceTemplate(fullInvoiceData);
+
+      expect(html).toContain('Full Payment');
+      expect(html).toContain('Paid Amount (Full Payment)');
+      expect(html).not.toContain('Token Payment');
+    });
+
+    it('should deduce "Token Payment" automatically when paymentStatus is PARTIAL and remainingAmount > 0', () => {
+      const autoTokenData: PaymentInvoiceTemplateData = {
+        invoiceType: 'BOOKING',
+        invoiceTitle: 'Poojawala Tax Invoice',
+        invoiceId: 'INV-PW-BK-AUTO-1',
+        dateLabel: 'Payment Date',
+        companyName: '1Pooja',
+        companyEmail: 'support@1pooja.com',
+        companyPhone: '+91 9876543210',
+        companyAddress: 'Varanasi',
+        companyGstin: '09AAACP1234A1Z5',
+        customerName: 'Aarav Mehta',
+        customerEmail: 'aarav@example.com',
+        customerPhone: '+91 9999911111',
+        billingAddress: 'Varanasi, UP',
+        bookingId: 103,
+        bookingNumber: 'PW-BK-AUTO-1',
+        bookingStatus: 'ACCEPTED',
+        serviceName: 'Rudrabhishek Pooja',
+        purohitName: 'Pt. Sharma',
+        paymentId: 'pay_auto_123',
+        orderId: 'order_auto_456',
+        paymentStatus: 'PARTIAL',
+        paymentMethod: 'UPI',
+        statusClass: 'success',
+        errorMessage: '-',
+        currency: 'INR',
+        amount: '600.00',
+        finalAmount: '2000.00',
+        paidAmount: '600.00',
+        remainingAmount: '1400.00',
+        donationAmount: '0.00',
+        discountAmount: '0.00',
+        date: '25 Sep 2026, 10:00 AM',
+      };
+
+      const html = paymentInvoiceTemplate(autoTokenData);
+
+      expect(html).toContain('Token Payment');
+      expect(html).toContain('Paid Amount (Token Payment)');
+      expect(html).not.toContain('Full Payment');
+    });
+
+    it('PaymentService.generateBookingInvoicePdf should display "Token Payment" when booking has token payment', async () => {
+      const mockBookingRepo = {
+        findBookingById: jest.fn(),
+      };
+      const mockPaymentRepo = {
+        findPaymentById: jest.fn(),
+        findLatestByBookingId: jest.fn(),
+      };
+      const mockDataSource = {
+        getRepository: jest.fn().mockReturnValue({}),
+      };
+
+      const testService = new PaymentService(
+        mockBookingRepo as any,
+        mockPaymentRepo as any,
+        mockDataSource as any,
+        { createNotification: jest.fn(), notifyAdmins: jest.fn() } as any,
+        {} as any,
+        { createAuditLog: jest.fn() } as any,
+      );
+
+      jest.spyOn<any, any>(testService, 'renderHtmlToPdf').mockImplementation(
+        async (html: string, filename: string) => ({
+          buffer: Buffer.from(html),
+          filename,
+        }),
+      );
+
+      const tokenBooking = {
+        id: 701,
+        bookingNumber: 'PW-BK-701',
+        customerId: 10,
+        customer: { id: 10, firstName: 'Aarav', email: 'aarav@example.com', phone: '9999911111' },
+        status: BOOKING_STATUS.ACCEPTED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PARTIAL,
+        paymentType: 'TOKEN',
+        finalAmount: 2000,
+        paidAmount: 600,
+        remainingAmount: 1400,
+        donationAmount: 0,
+        discountAmount: 0,
+        service: { name: 'Ganesh Pooja' },
+        customerAddress: { addressLine1: 'Varanasi' },
+      };
+
+      mockBookingRepo.findBookingById.mockResolvedValue(tokenBooking);
+      mockPaymentRepo.findLatestByBookingId.mockResolvedValue({
+        id: 801,
+        amount: 600,
+        paymentMethod: 'UPI',
+        status: PAYMENT_STATUS.SUCCESS,
+        remark: 'BOOKING_TOKEN_PAYMENT',
+        paidAt: new Date(),
+      });
+
+      const result = await testService.generateBookingInvoicePdf({ id: 10, role: USER_ROLE.CUSTOMER } as any, 701);
+      const renderedHtml = result.buffer.toString();
+
+      expect(renderedHtml).toContain('Token Payment');
+      expect(renderedHtml).toContain('Paid Amount (Token Payment)');
+      expect(renderedHtml).not.toContain('Full Payment');
+    });
+
+    it('PaymentService.generateBookingInvoicePdf should display "Full Payment" when booking is fully paid', async () => {
+      const mockBookingRepo = {
+        findBookingById: jest.fn(),
+      };
+      const mockPaymentRepo = {
+        findPaymentById: jest.fn(),
+        findLatestByBookingId: jest.fn(),
+      };
+      const mockDataSource = {
+        getRepository: jest.fn().mockReturnValue({}),
+      };
+
+      const testService = new PaymentService(
+        mockBookingRepo as any,
+        mockPaymentRepo as any,
+        mockDataSource as any,
+        { createNotification: jest.fn(), notifyAdmins: jest.fn() } as any,
+        {} as any,
+        { createAuditLog: jest.fn() } as any,
+      );
+
+      jest.spyOn<any, any>(testService, 'renderHtmlToPdf').mockImplementation(
+        async (html: string, filename: string) => ({
+          buffer: Buffer.from(html),
+          filename,
+        }),
+      );
+
+      const fullBooking = {
+        id: 702,
+        bookingNumber: 'PW-BK-702',
+        customerId: 10,
+        customer: { id: 10, firstName: 'Aarav', email: 'aarav@example.com', phone: '9999911111' },
+        status: BOOKING_STATUS.COMPLETED,
+        paymentStatus: BOOKING_PAYMENT_STATUS.PAID,
+        paymentType: 'FULL',
+        finalAmount: 2000,
+        paidAmount: 2000,
+        remainingAmount: 0,
+        donationAmount: 0,
+        discountAmount: 0,
+        service: { name: 'Ganesh Pooja' },
+        customerAddress: { addressLine1: 'Varanasi' },
+      };
+
+      mockBookingRepo.findBookingById.mockResolvedValue(fullBooking);
+      mockPaymentRepo.findLatestByBookingId.mockResolvedValue({
+        id: 802,
+        amount: 2000,
+        paymentMethod: 'UPI',
+        status: PAYMENT_STATUS.SUCCESS,
+        remark: 'BOOKING_FULL_PAYMENT',
+        paidAt: new Date(),
+      });
+
+      const result = await testService.generateBookingInvoicePdf({ id: 10, role: USER_ROLE.CUSTOMER } as any, 702);
+      const renderedHtml = result.buffer.toString();
+
+      expect(renderedHtml).toContain('Full Payment');
+      expect(renderedHtml).toContain('Paid Amount (Full Payment)');
+      expect(renderedHtml).not.toContain('Token Payment');
+    });
+  });
+
+  describe('Frontend URL resolution and Purohit Redirect route', () => {
+    let prevFrontendUrl: string | undefined;
+    let prevCallbackUrl: string | undefined;
+
+    beforeEach(() => {
+      prevFrontendUrl = process.env['FRONTEND_URL'];
+      prevCallbackUrl = process.env['FRONTEND_PAYMENT_CALLBACK_URL'];
+    });
+
+    afterEach(() => {
+      if (prevFrontendUrl !== undefined) {
+        process.env['FRONTEND_URL'] = prevFrontendUrl;
+      } else {
+        delete process.env['FRONTEND_URL'];
+      }
+      if (prevCallbackUrl !== undefined) {
+        process.env['FRONTEND_PAYMENT_CALLBACK_URL'] = prevCallbackUrl;
+      } else {
+        delete process.env['FRONTEND_PAYMENT_CALLBACK_URL'];
+      }
+    });
+
+    it('should dynamically read FRONTEND_URL from environment and append /partner/bookings without hardcoding', () => {
+      process.env['FRONTEND_URL'] = 'https://dev-frontend.1pooja.com/';
+      delete process.env['FRONTEND_PAYMENT_CALLBACK_URL'];
+
+      const testService = new PaymentService(
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
+
+      expect(testService.getFrontendBaseUrl()).toBe('https://dev-frontend.1pooja.com');
+      expect(testService.getPartnerBookingsUrl()).toBe('https://dev-frontend.1pooja.com/partner/bookings');
+    });
+
+    it('should fallback to FRONTEND_PAYMENT_CALLBACK_URL when FRONTEND_URL is absent and append /partner/bookings', () => {
+      delete process.env['FRONTEND_URL'];
+      process.env['FRONTEND_PAYMENT_CALLBACK_URL'] = 'https://custom-callback.1pooja.com///';
+
+      const testService = new PaymentService(
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
+
+      expect(testService.getFrontendBaseUrl()).toBe('https://custom-callback.1pooja.com');
+      expect(testService.getPartnerBookingsUrl()).toBe('https://custom-callback.1pooja.com/partner/bookings');
+    });
+
+    it('should set callback_url in Razorpay link to /partner/bookings from .env for purohit payment', async () => {
+      process.env['FRONTEND_URL'] = 'https://portal.1pooja.com';
+
+      const mockBookingRepo = { findBookingById: jest.fn() };
+      const mockPaymentRepo = {
+        findOne: jest.fn(),
+        savePayment: jest.fn(),
+      };
+      const mockDataSource = {
+        transaction: jest.fn(),
+        getRepository: jest.fn().mockReturnValue({}),
+      };
+
+      const testService = new PaymentService(
+        mockBookingRepo as any,
+        mockPaymentRepo as any,
+        mockDataSource as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
+
+      const mockRazorpay = {
+        paymentLink: {
+          create: jest.fn().mockResolvedValue({
+            id: 'plink_test_purohit',
+            short_url: 'https://rzp.io/i/test_purohit',
+            currency: 'INR',
+          }),
+        },
+      };
+      jest.spyOn<any, any>(testService, 'razorpay', 'get').mockReturnValue(mockRazorpay);
+
+      const mockPayment = {
+        id: 999,
+        amount: 1500,
+        currency: 'INR',
+        paymentType: 'BOOKING_PAYMENT',
+      };
+      const mockBooking = {
+        id: 111,
+        bookingNumber: 'PW-BK-111',
+        purohit: { userId: 55 },
+      };
+
+      await testService.createRazorpayPaymentLink(
+        mockPayment as any,
+        mockBooking as any,
+        { name: 'Customer' },
+        'Purohit payment',
+        { initiatedByRole: USER_ROLE.PUROHIT },
+      );
+
+      expect(mockRazorpay.paymentLink.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          callback_url: 'https://portal.1pooja.com/partner/bookings',
+        }),
+      );
+    });
+  });
+
 });

@@ -59,7 +59,7 @@ export class BookingGateway
   private async bridgeSocketToUserService(
     rooms: string[],
     event: string,
-    payload: any,
+    payload: unknown,
   ): Promise<void> {
     if (process.env.CURRENT_SERVICE === 'user-service') {
       return;
@@ -92,13 +92,24 @@ export class BookingGateway
     }
   }
 
+  emitToRooms(
+    rooms: string[],
+    event: string,
+    payload: unknown,
+  ): void {
+    if (!rooms || rooms.length === 0) return;
+    const uniqueRooms = Array.from(new Set(rooms));
+    if (uniqueRooms.length === 0) return;
+    this.server?.to(uniqueRooms).emit(event, payload);
+    this.bridgeSocketToUserService(uniqueRooms, event, payload).catch(() => {});
+  }
+
   notifyUser(
     userId: string | number,
     eventName: string,
     data: unknown,
   ): void {
-    this.server?.to(`user:${userId}`).emit(eventName, data);
-    this.bridgeSocketToUserService([`user:${userId}`], eventName, data).catch(() => {});
+    this.emitToRooms([`user:${userId}`], eventName, data);
   }
 
   notifyUsers(
@@ -108,27 +119,22 @@ export class BookingGateway
   ): void {
     if (!userIds || userIds.length === 0) return;
     const rooms = userIds.map((id) => `user:${id}`);
-    this.server?.to(rooms).emit(eventName, data);
-    this.bridgeSocketToUserService(rooms, eventName, data).catch(() => {});
+    this.emitToRooms(rooms, eventName, data);
   }
 
   emitNotification(userId: string | number, data: unknown): void {
-    this.server?.to(`user:${userId}`).emit('notification:new', data);
-    this.bridgeSocketToUserService([`user:${userId}`], 'notification:new', data).catch(() => {});
+    this.emitToRooms([`user:${userId}`], 'notification:new', data);
   }
 
   notifyAdmin(eventName: string, data: unknown): void {
-    this.server?.to('admin').emit(eventName, data);
-    this.bridgeSocketToUserService(['admin'], eventName, data).catch(() => {});
+    this.emitToRooms(['admin'], eventName, data);
   }
 
   emitAdminNotification(data: unknown): void {
-    this.server?.to('admin').emit('notification:new', data);
-    this.bridgeSocketToUserService(['admin'], 'notification:new', data).catch(() => {});
+    this.emitToRooms(['admin'], 'notification:new', data);
   }
 
-  dismissNotification(userId: string | number) {
-    this.server?.to(`user:${userId}`).emit('booking_taken');
-    this.bridgeSocketToUserService([`user:${userId}`], 'booking_taken', {}).catch(() => {});
+  dismissNotification(userId: string | number): void {
+    this.emitToRooms([`user:${userId}`], 'booking_taken', {});
   }
 }

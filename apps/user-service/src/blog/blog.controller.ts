@@ -26,7 +26,7 @@ import {
   CreateBlogPostDto,
   UpdateBlogPostDto,
 } from '@poojawala/dtos';
-import { BlogService } from './blog.service';
+import { BlogService, BlogCategoriesQuery } from './blog.service';
 
 interface AuthenticatedRequest extends Request {
   user: User;
@@ -54,16 +54,21 @@ export class BlogController {
     @Query('limit') limit?: string,
     @Query('isActive') isActive?: string,
     @Query('search') search?: string,
+    @Query('sort') sort?: string,
   ) {
     const isAdmin = req.user?.role === USER_ROLE.ADMIN;
     const isActiveBool =
       isActive === undefined ? undefined : isActive === 'true' || isActive === '1';
-    return this.blogService.getCategories(isAdmin, {
+    const queryObj: BlogCategoriesQuery = {
       page,
       limit,
       isActive: isActiveBool,
       search,
-    });
+    };
+    if (sort !== undefined) {
+      queryObj.sort = sort;
+    }
+    return this.blogService.getCategories(isAdmin, queryObj);
   }
 
   @Get('categories/:id')

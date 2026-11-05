@@ -181,6 +181,9 @@ export class ServiceController {
     if (query.isActive === undefined && (req as any).query?.isActive !== undefined) {
       query.isActive = (req as any).query.isActive;
     }
+    if (!query.sort && (req as any).query?.sort !== undefined) {
+      query.sort = (req as any).query.sort;
+    }
     return this.serviceService.findAllCategories(query);
   }
 

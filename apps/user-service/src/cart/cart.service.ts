@@ -282,6 +282,45 @@ export class CartService {
   }
 
   /**
+   * Lazily reconciles and cleans up any cart items that were already purchased
+   * in a completed/PAID order. Ensures that if webhook processing was slightly
+   * delayed or historical cleanup was missed, the customer immediately sees their
+   * cart emptied of paid items upon loading the cart.
+   */
+  private async reconcilePaidCartItems(
+    cartId: number,
+    customerId: number,
+  ): Promise<void> {
+    try {
+      const paidCartItemRows = await this.dataSource
+        .getRepository(CartItem)
+        .createQueryBuilder('ci')
+        .innerJoin(OrderItem, 'oi', 'oi."cartItemId" = ci.id')
+        .innerJoin(Order, 'o', 'o.id = oi."orderId"')
+        .where('ci."cartId" = :cartId', { cartId })
+        .andWhere('o."customerId" = :customerId', { customerId })
+        .andWhere('o."paymentStatus" = :paidStatus', {
+          paidStatus: ORDER_PAYMENT_STATUS.PAID,
+        })
+        .select('ci.id', 'id')
+        .getRawMany();
+
+      if (paidCartItemRows && paidCartItemRows.length > 0) {
+        for (const row of paidCartItemRows) {
+          await this.cartItemRepository.delete(Number(row.id));
+          this.logger.log(
+            `Reconciled and removed paid cart item #${row.id} from cart #${cartId} for customer #${customerId}.`,
+          );
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to reconcile paid cart items for cart #${cartId}: ${err?.message}`,
+      );
+    }
+  }
+
+  /**
    * Returns the authenticated customer's cart with up-to-date DB prices,
    * pagination, and optional product search filter.
    */
@@ -295,6 +334,9 @@ export class CartService {
 
     // Ensure customer cart exists
     const cart = await this.cartRepository.findOrCreateCart(user.id);
+
+    // Reconcile and clear any cart items that have already been purchased in a completed/PAID order
+    await this.reconcilePaidCartItems(cart.id, user.id);
 
     const page = query?.page && Number(query.page) > 0 ? Number(query.page) : 1;
     const limit =
@@ -530,7 +572,7 @@ export class CartService {
             amount: totalAmount,
             currency: 'INR',
             customerPaymentMethod: CUSTOMER_PAYMENT_METHOD.ONLINE,
-            status: PAYMENT_STATUS.CREATED,
+            status: PAYMENT_STATUS.PENDING,
             remark: `Payment retry for Order #${existingOrder.orderNumber}`,
           });
 
@@ -856,7 +898,7 @@ export class CartService {
           customerPaymentMethod: isCod
             ? CUSTOMER_PAYMENT_METHOD.CASH
             : CUSTOMER_PAYMENT_METHOD.ONLINE,
-          status: isCod ? PAYMENT_STATUS.PENDING : PAYMENT_STATUS.CREATED,
+          status: PAYMENT_STATUS.PENDING,
           remark: `Product purchase Order - ${paymentMethod}`,
         });
 

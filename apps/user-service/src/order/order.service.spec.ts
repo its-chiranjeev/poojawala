@@ -320,10 +320,10 @@ describe('OrderService', () => {
   });
 
   // ══════════════════════════════════════════════════════════════════════════
-  // materializeExpiredOrders cron
+  // materializeExpiredOrders cron (disabled in commit a434a97)
   // ══════════════════════════════════════════════════════════════════════════
 
-  describe('materializeExpiredOrders', () => {
+  describe.skip('materializeExpiredOrders', () => {
     function buildCronQueryBuilder(affectedRows: number) {
       const executeMock = jest.fn().mockResolvedValue({ affected: affectedRows });
       const qb: any = {
@@ -490,6 +490,52 @@ describe('OrderService', () => {
       const order = await service.getOrderById(adminUser, 202);
       expect(orderRepository.findOrderByIdWithDetails).toHaveBeenCalledWith(202);
       expect(order).toBeDefined();
+    });
+
+    it('CUSTOMER: returns payment details in full when payment status is PENDING', async () => {
+      const pendingPayment = {
+        id: 301,
+        status: PAYMENT_STATUS.PENDING,
+        amount: 500,
+        currency: 'INR',
+      } as Payment;
+      orderRepository.findCustomerOrderById.mockResolvedValueOnce(
+        makeOnlineOrder({ payment: pendingPayment }),
+      );
+      const order = await service.getOrderById(customerUser, 101);
+      expect(order.payment).toBeDefined();
+      expect(order.payment.id).toBe(301);
+      expect(order.payment.status).toBe(PAYMENT_STATUS.PENDING);
+    });
+
+    it('CUSTOMER: masks payment to null when payment status is CREATED (historical draft)', async () => {
+      const createdPayment = {
+        id: 302,
+        status: PAYMENT_STATUS.CREATED,
+        amount: 500,
+        currency: 'INR',
+      } as Payment;
+      orderRepository.findCustomerOrderById.mockResolvedValueOnce(
+        makeOnlineOrder({ payment: createdPayment }),
+      );
+      const order = await service.getOrderById(customerUser, 101);
+      expect(order.payment).toBeNull();
+    });
+
+    it('ADMIN: returns payment details in full even when payment status is CREATED', async () => {
+      const createdPayment = {
+        id: 303,
+        status: PAYMENT_STATUS.CREATED,
+        amount: 500,
+        currency: 'INR',
+      } as Payment;
+      orderRepository.findOrderByIdWithDetails.mockResolvedValueOnce(
+        makeOnlineOrder({ payment: createdPayment }),
+      );
+      const order = await service.getOrderById(adminUser, 101);
+      expect(order.payment).toBeDefined();
+      expect(order.payment.id).toBe(303);
+      expect(order.payment.status).toBe(PAYMENT_STATUS.CREATED);
     });
   });
 

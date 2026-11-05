@@ -75,6 +75,7 @@ import {
   buildAstrologyTransparencyNotices,
   AstrologyTransparencyData,
   getPlatformLogoUrl,
+  getPlatformWebsiteUrl,
 } from '@poojawala/common';
 import { EmailService, renderPoojawalaEmail, platformBrandName } from '@poojawala/email-services';
 import { AssignmentService } from '../../../user-service/src/assignment/assignment.service';
@@ -306,6 +307,7 @@ export interface BookingPaymentLinkResponse {
   consultationChargesNoticeTitle?: string;
   consultationFeeNotice?: string;
   astrologyTransparency?: AstrologyTransparencyData | null;
+  callbackUrl?: string;
 }
 
 export interface RazorpayWebhookPaymentEntity {
@@ -438,6 +440,22 @@ export class PaymentService {
     this.cachedPlatformLogoUrl = { url: fallbackUrl, expiresAt: now + 30 * 1000 };
     return fallbackUrl;
   }
+
+  public getFrontendBaseUrl(): string {
+    const envUrl =
+      this.configService?.get<string>('FRONTEND_URL')?.trim() ||
+      this.configService?.get<string>('FRONTEND_PAYMENT_CALLBACK_URL')?.trim() ||
+      process.env['FRONTEND_URL']?.trim() ||
+      process.env['FRONTEND_PAYMENT_CALLBACK_URL']?.trim() ||
+      getPlatformWebsiteUrl();
+    return envUrl.replace(/\/+$/, '');
+  }
+
+  public getPartnerBookingsUrl(): string {
+    return `${this.getFrontendBaseUrl()}/partner/bookings`;
+  }
+
+
 
   // TODO: Replaced unmemoized getter that called dotenv.config() and instantiated new Razorpay on every property access
   // private get razorpay(): Razorpay {
@@ -1123,7 +1141,8 @@ export class PaymentService {
         }
       } else if (
         Number(existingPayment.amount) === Number(amount) &&
-        existingPayment.razorpayPaymentLinkId
+        existingPayment.razorpayPaymentLinkId &&
+        (user.role !== USER_ROLE.PUROHIT || existingPayment.createdById === user.id)
       ) {
         try {
           const paymentLink = await this.razorpay.paymentLink.fetch(
@@ -1171,6 +1190,7 @@ export class PaymentService {
               consultationChargesNoticeTitle: astrologyTransparency?.consultationChargesNoticeTitle,
               consultationFeeNotice: astrologyTransparency?.consultationFeeNotice,
               astrologyTransparency,
+              callbackUrl: user.role === USER_ROLE.PUROHIT ? this.getPartnerBookingsUrl() : undefined,
             };
           } else {
             // Status is cancelled, expired, paid, or partially_paid
@@ -1248,11 +1268,22 @@ export class PaymentService {
     try {
       const customer = this.getPaymentCustomer(user, booking);
 
+      const cleanBase = this.getFrontendBaseUrl();
+      const isPurohit = user.role === USER_ROLE.PUROHIT;
+      const partnerBookingsUrl = this.getPartnerBookingsUrl();
+      const customCallbackUrl =
+        dto.callbackUrl?.trim() ||
+        (isPurohit ? partnerBookingsUrl : undefined);
+
       const paymentLink = await this.createRazorpayPaymentLink(
         savedPayment,
         booking,
         customer,
         dto.description,
+        {
+          initiatedByRole: user.role,
+        },
+        customCallbackUrl,
       );
 
       const isAstrology = booking.bookingType === BOOKING_TYPE.ASTROLOGY;
@@ -1283,6 +1314,7 @@ export class PaymentService {
         consultationChargesNoticeTitle: astrologyTransparency?.consultationChargesNoticeTitle,
         consultationFeeNotice: astrologyTransparency?.consultationFeeNotice,
         astrologyTransparency,
+        callbackUrl: isPurohit ? partnerBookingsUrl : (customCallbackUrl || `${cleanBase}/customer/bookings`),
       };
     } catch (error) {
       savedPayment.status = PAYMENT_STATUS.FAILED;
@@ -1469,17 +1501,23 @@ export class PaymentService {
   ): Promise<RazorpayPaymentLinkData> {
     const amountInPaise = Math.round(Number(payment.amount) * 100);
 
-    const baseFrontendUrl =
-      this.configService?.get<string>('FRONTEND_PAYMENT_CALLBACK_URL')?.trim() ||
-      process.env['FRONTEND_PAYMENT_CALLBACK_URL']?.trim() ||
-      'http://localhost:3000';
-
-    const cleanBase = baseFrontendUrl.replace(/\/+$/, '');
+    const cleanBase = this.getFrontendBaseUrl();
+    const partnerBookingsUrl = this.getPartnerBookingsUrl();
 
     let callbackUrl: string | undefined;
 
+    const isPurohitPayment =
+      customCallbackUrl?.includes('/partner/bookings') ||
+      extraNotes?.['initiatedByRole'] === USER_ROLE.PUROHIT ||
+      extraNotes?.['payerRole'] === USER_ROLE.PUROHIT ||
+      payment.createdBy?.role === USER_ROLE.PUROHIT ||
+      (booking?.purohit?.userId != null &&
+        payment.createdById === booking.purohit.userId);
+
     if (customCallbackUrl?.trim()) {
       callbackUrl = customCallbackUrl.trim();
+    } else if (isPurohitPayment) {
+      callbackUrl = partnerBookingsUrl;
     } else if (
       payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT ||
       extraNotes?.['isCartCheckout'] === 'true'
@@ -2607,8 +2645,9 @@ export class PaymentService {
     let booking = await this.bookingRepository.findBookingById(bookingId);
 
     // If not found by bookingId, verify if caller passed a paymentId referencing a booking
+    let paymentById: Payment | null = null;
     if (!booking) {
-      const paymentById = await this.paymentRepository.findPaymentById(bookingId);
+      paymentById = await this.paymentRepository.findPaymentById(bookingId);
       const linkedBookingId =
         paymentById?.bookingId ??
         paymentById?.booking?.id ??
@@ -2637,8 +2676,8 @@ export class PaymentService {
     }
 
     // 1. Try to load confirmed payment via bookingPaymentId if set
-    let payment: Payment | null = null;
-    if (booking.bookingPaymentId) {
+    let payment: Payment | null = paymentById ?? null;
+    if (!payment && booking.bookingPaymentId) {
       payment = await this.paymentRepository.findPaymentById(
         booking.bookingPaymentId,
       );
@@ -2724,6 +2763,30 @@ export class PaymentService {
         : '-');
 
     const isAstrology = booking.bookingType === BOOKING_TYPE.ASTROLOGY;
+
+    let isTokenPayment = false;
+    if (!isAstrology) {
+      if (payment?.remark === 'BOOKING_TOKEN_PAYMENT') {
+        isTokenPayment = true;
+      } else if (booking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL) {
+        isTokenPayment = true;
+      } else if (
+        booking.paymentType === BOOKING_PAYMENT_TYPE.TOKEN &&
+        booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID &&
+        Number(booking.remainingAmount ?? 0) > 0
+      ) {
+        isTokenPayment = true;
+      } else if (
+        Number(booking.remainingAmount ?? 0) > 0 &&
+        Number(booking.paidAmount ?? 0) > 0 &&
+        booking.paymentStatus !== BOOKING_PAYMENT_STATUS.PAID
+      ) {
+        isTokenPayment = true;
+      }
+    }
+
+    const paymentTypeLabel = isTokenPayment ? 'Token Payment' : 'Full Payment';
+
     let astrologerName: string | undefined = undefined;
     if (isAstrology) {
       if (
@@ -2741,6 +2804,8 @@ export class PaymentService {
 
     const html = paymentInvoiceTemplate({
       invoiceType: 'BOOKING',
+      paymentTypeLabel,
+      paymentOption: isTokenPayment ? 'TOKEN' : 'FULL',
       logoUrl,
       bookingType: booking.bookingType ?? (isAstrology ? BOOKING_TYPE.ASTROLOGY : BOOKING_TYPE.POOJA),
       companyName: process.env['POOJAWALA_COMPANY_NAME'] ?? '1Pooja',
@@ -2748,11 +2813,7 @@ export class PaymentService {
       companyPhone: process.env['POOJAWALA_COMPANY_PHONE'] ?? '-',
       companyAddress: process.env['POOJAWALA_COMPANY_ADDRESS'] ?? '-',
       companyGstin: process.env['POOJAWALA_GSTIN'] ?? '-',
-      websiteUrl: (
-        process.env['FRONTEND_URL']?.trim() ||
-        process.env['FRONTEND_PAYMENT_CALLBACK_URL']?.trim() ||
-        'https://1pooja.com'
-      ).replace(/\/+$/, ''),
+      websiteUrl: this.getFrontendBaseUrl(),
       billingAddress: this.getBillingAddress(booking),
       purohitName,
       astrologerName,
@@ -2963,17 +3024,15 @@ export class PaymentService {
 
     const html = paymentInvoiceTemplate({
       invoiceType: 'ORDER',
+      paymentTypeLabel: 'Full Payment',
+      paymentOption: 'FULL',
       logoUrl: await this.getPlatformLogoUrl(),
       companyName: process.env['POOJAWALA_COMPANY_NAME'] ?? '1Pooja',
       companyEmail: process.env['POOJAWALA_COMPANY_EMAIL'] ?? '-',
       companyPhone: process.env['POOJAWALA_COMPANY_PHONE'] ?? '-',
       companyAddress: process.env['POOJAWALA_COMPANY_ADDRESS'] ?? '-',
       companyGstin: process.env['POOJAWALA_GSTIN'] ?? '-',
-      websiteUrl: (
-        process.env['FRONTEND_URL']?.trim() ||
-        process.env['FRONTEND_PAYMENT_CALLBACK_URL']?.trim() ||
-        'https://1pooja.com'
-      ).replace(/\/+$/, ''),
+      websiteUrl: this.getFrontendBaseUrl(),
       billingAddress,
       customerName,
       customerEmail,
@@ -3423,14 +3482,14 @@ export class PaymentService {
       case 'failed':
         return PAYMENT_STATUS.FAILED;
 
-      case 'created':
-        return PAYMENT_STATUS.CREATED;
+      // case 'created':
+      //   return PAYMENT_STATUS.CREATED;
 
       case 'refunded':
         return PAYMENT_STATUS.SUCCESS;
 
       default:
-        return databaseStatus ?? PAYMENT_STATUS.CREATED;
+        return databaseStatus ?? PAYMENT_STATUS.PENDING;
     }
   }
 
@@ -5448,6 +5507,8 @@ export class PaymentService {
     const wasPaymentPaid =
       payment.booking?.paymentStatus === BOOKING_PAYMENT_STATUS.PAID;
     let wasOrderAlreadyPaid = false;
+    let wasPaymentAlreadySuccessful = false;
+    let isBookingSoftDeleted = false;
     let newlyAssignedPurohitUserIds: number[] = [];
     let previousBookingStatus: BOOKING_STATUS | undefined;
     let previousBookingPaymentStatus: BOOKING_PAYMENT_STATUS | undefined;
@@ -5463,17 +5524,57 @@ export class PaymentService {
         });
       }
 
-      if (lockedPayment) {
-        lockedPayment.status = payment.status;
-        if (payment.paidAt) lockedPayment.paidAt = payment.paidAt;
-        if (payment.razorpayPaymentId) lockedPayment.razorpayPaymentId = payment.razorpayPaymentId;
-        if (payment.razorpayOrderId) lockedPayment.razorpayOrderId = payment.razorpayOrderId;
-        if (payment.paymentMethod) lockedPayment.paymentMethod = payment.paymentMethod;
-        lockedPayment.failureReason = undefined;
-        await paymentRepo.save(lockedPayment);
-      } else {
-        await paymentRepo.save(payment);
+      if (!lockedPayment) {
+        throw new NotFoundException(
+          `Payment #${payment.id} not found under pessimistic lock during finalization`,
+        );
       }
+
+      wasPaymentAlreadySuccessful =
+        lockedPayment.status === PAYMENT_STATUS.SUCCESS;
+
+      if (!wasPaymentAlreadySuccessful) {
+        lockedPayment.status = PAYMENT_STATUS.SUCCESS;
+      }
+
+      // Metadata reconciliation: non-destructive updates only (never overwrite existing valid values with null/undefined)
+      if (payment.paidAt && !lockedPayment.paidAt) {
+        lockedPayment.paidAt = payment.paidAt;
+      }
+      if (payment.razorpayPaymentId && !lockedPayment.razorpayPaymentId) {
+        lockedPayment.razorpayPaymentId = payment.razorpayPaymentId;
+      }
+      if (payment.razorpayOrderId && !lockedPayment.razorpayOrderId) {
+        lockedPayment.razorpayOrderId = payment.razorpayOrderId;
+      }
+      if (payment.paymentMethod && !lockedPayment.paymentMethod) {
+        lockedPayment.paymentMethod = payment.paymentMethod;
+      }
+      if (payment.razorpayPaymentLinkId && !lockedPayment.razorpayPaymentLinkId) {
+        lockedPayment.razorpayPaymentLinkId = payment.razorpayPaymentLinkId;
+      }
+      if (payment.customerPaidAmount != null && lockedPayment.customerPaidAmount == null) {
+        lockedPayment.customerPaidAmount = payment.customerPaidAmount;
+      }
+      if (payment.razorpayFee != null && lockedPayment.razorpayFee == null) {
+        lockedPayment.razorpayFee = payment.razorpayFee;
+      }
+      if (payment.razorpayTax != null && lockedPayment.razorpayTax == null) {
+        lockedPayment.razorpayTax = payment.razorpayTax;
+      }
+      lockedPayment.failureReason = undefined;
+      await paymentRepo.save(lockedPayment);
+
+      // Keep incoming payment instance in sync with authoritative lockedPayment
+      payment.status = lockedPayment.status;
+      if (lockedPayment.paidAt) payment.paidAt = lockedPayment.paidAt;
+      if (lockedPayment.razorpayPaymentId) payment.razorpayPaymentId = lockedPayment.razorpayPaymentId;
+      if (lockedPayment.razorpayOrderId) payment.razorpayOrderId = lockedPayment.razorpayOrderId;
+      if (lockedPayment.paymentMethod) payment.paymentMethod = lockedPayment.paymentMethod;
+      if (lockedPayment.razorpayPaymentLinkId) payment.razorpayPaymentLinkId = lockedPayment.razorpayPaymentLinkId;
+      if (lockedPayment.customerPaidAmount != null) payment.customerPaidAmount = lockedPayment.customerPaidAmount;
+      if (lockedPayment.razorpayFee != null) payment.razorpayFee = lockedPayment.razorpayFee;
+      if (lockedPayment.razorpayTax != null) payment.razorpayTax = lockedPayment.razorpayTax;
 
       const bookingId = payment.bookingId ?? payment.booking?.id;
       const isBookingOrAstrology =
@@ -5490,187 +5591,192 @@ export class PaymentService {
           previousBookingStatus = booking.status;
           previousBookingPaymentStatus = booking.paymentStatus;
           if (booking.deletedAt) {
-            this.logger.warn(
-              `Payment #${payment.id} completed for booking #${booking.id}, but the booking was already soft-deleted (unpaid reservation expired/failed). Booking remains soft-deleted. Flagged for refund/reconciliation.`,
-            );
-            booking.paidAmount = Number(payment.amount);
-            booking.paymentStatus = BOOKING_PAYMENT_STATUS.PAID;
-            booking.bookingPaymentId = payment.id;
-            await manager.getRepository(Booking).save(booking);
-            return;
-          }
-          // Idempotent calculation: sum all successful payments for this booking
-          const successfulPayments = await manager.getRepository(Payment).find({
-            where: {
-              bookingId: booking.id,
-              paymentType: In([
-                PAYMENT_TYPE.BOOKING_PAYMENT,
-                PAYMENT_TYPE.ASTROLOGY_PAYMENT,
-              ]),
-              status: PAYMENT_STATUS.SUCCESS,
-            },
-          });
-
-          const totalPaid = Number(
-            successfulPayments
-              .reduce((sum, p) => sum + Number(p.amount), 0)
-              .toFixed(2),
-          );
-
-          const finalAmount = Number(booking.finalAmount ?? 0);
-          const effectiveTokenPercentage =
-            booking.tokenPercentage != null && Number(booking.tokenPercentage) > 0
-              ? Number(booking.tokenPercentage)
-              : 30;
-
-          const tokenAmount =
-            booking.tokenAmount != null
-              ? Number(booking.tokenAmount)
-              : Number(
-                ((finalAmount * effectiveTokenPercentage) / 100).toFixed(2),
-              );
-
-          booking.paidAmount = totalPaid;
-          booking.remainingAmount = Math.max(
-            0,
-            Number((finalAmount - totalPaid).toFixed(2)),
-          );
-          booking.bookingPaymentId = payment.id;
-
-          // Webhook payment success:
-          // 1. Astrology booking: Astrologer is already selected, payment confirms/accepts the appointment directly (ACCEPTED)
-          // 2. Pooja booking: Transitions to PENDING awaiting Purohit acceptance
-          if (booking.bookingType === BOOKING_TYPE.ASTROLOGY) {
-            if (
-              booking.status === BOOKING_STATUS.CREATED ||
-              booking.status === BOOKING_STATUS.PENDING ||
-              (booking.status as string) === 'CREATED' ||
-              (booking.status as string) === 'PENDING'
-            ) {
-              booking.status = BOOKING_STATUS.ACCEPTED;
-            }
-          } else {
-            if (
-              booking.status === BOOKING_STATUS.CREATED ||
-              (booking.status as string) === 'CREATED'
-            ) {
-              booking.status = BOOKING_STATUS.PENDING;
-            }
-          }
-
-          if (totalPaid >= finalAmount) {
-            booking.paymentStatus = BOOKING_PAYMENT_STATUS.PAID;
-            // In token payment flow, if booking was ONGOING, full settlement completes it.
-            if (booking.status === BOOKING_STATUS.ONGOING) {
-              booking.status = BOOKING_STATUS.COMPLETED;
-              booking.completionConfirmedAt = new Date();
-            } else if (booking.status === BOOKING_STATUS.CANCELLED) {
+            isBookingSoftDeleted = true;
+            if (!wasPaymentAlreadySuccessful) {
               this.logger.warn(
-                `Payment #${payment.id} completed for booking #${booking.id}, but booking was already CANCELLED (reservation expired or cancelled). Status remains CANCELLED.`,
+                `Payment #${payment.id} completed for booking #${booking.id}, but the booking was already soft-deleted (unpaid reservation expired/failed). Booking remains soft-deleted. Flagged for refund/reconciliation.`,
               );
+              booking.paidAmount = Number(payment.amount);
+              booking.paymentStatus = BOOKING_PAYMENT_STATUS.PAID;
+              booking.bookingPaymentId = payment.id;
+              await manager.getRepository(Booking).save(booking);
             }
+          } else if (!wasPaymentAlreadySuccessful) {
+            // Idempotent calculation: sum all successful payments for this booking
+            const successfulPayments = await manager.getRepository(Payment).find({
+              where: {
+                bookingId: booking.id,
+                paymentType: In([
+                  PAYMENT_TYPE.BOOKING_PAYMENT,
+                  PAYMENT_TYPE.ASTROLOGY_PAYMENT,
+                ]),
+                status: PAYMENT_STATUS.SUCCESS,
+              },
+            });
 
-            if (booking.bookingType !== BOOKING_TYPE.ASTROLOGY) {
-              // Create real PUROHIT_PAYOUT record when booking is fully paid
-              await this.ensurePurohitPendingPayout(manager, booking);
-            }
-          } else if (totalPaid >= tokenAmount) {
-            booking.paymentStatus = BOOKING_PAYMENT_STATUS.PARTIAL;
-          } else {
-            booking.paymentStatus = BOOKING_PAYMENT_STATUS.PENDING;
-          }
+            const totalPaid = Number(
+              successfulPayments
+                .reduce((sum, p) => sum + Number(p.amount), 0)
+                .toFixed(2),
+            );
 
-          // TOKEN PAYMENT GATE: Trigger AUTO assignment only when token (or full) payment is confirmed (or deferred for admin)
-          // For astrology bookings, astrologer is already assigned, skip purohit assignment
-          const isEligibleForAssignment =
-            booking.bookingType !== BOOKING_TYPE.ASTROLOGY &&
-            (booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
-              booking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL ||
-              booking.paymentType === BOOKING_PAYMENT_TYPE.DEFERRED) &&
-            booking.status === BOOKING_STATUS.PENDING &&
-            !booking.purohitId;
+            const finalAmount = Number(booking.finalAmount ?? 0);
+            const effectiveTokenPercentage =
+              booking.tokenPercentage != null && Number(booking.tokenPercentage) > 0
+                ? Number(booking.tokenPercentage)
+                : 30;
 
-          if (isEligibleForAssignment) {
-            if (
-              (!booking.filteredPurohitIds || booking.filteredPurohitIds.length === 0) &&
-              this.assignmentService
-            ) {
-              const eligiblePurohitIds =
-                await this.assignmentService.findEligiblePurohitIds(
-                  manager,
-                  booking,
+            const tokenAmount =
+              booking.tokenAmount != null
+                ? Number(booking.tokenAmount)
+                : Number(
+                  ((finalAmount * effectiveTokenPercentage) / 100).toFixed(2),
                 );
-              booking.filteredPurohitIds = eligiblePurohitIds;
-              booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
+
+            booking.paidAmount = totalPaid;
+            booking.remainingAmount = Math.max(
+              0,
+              Number((finalAmount - totalPaid).toFixed(2)),
+            );
+            booking.bookingPaymentId = payment.id;
+
+            // Webhook payment success:
+            // 1. Astrology booking: Astrologer is already selected, payment confirms/accepts the appointment directly (ACCEPTED)
+            // 2. Pooja booking: Transitions to PENDING awaiting Purohit acceptance
+            if (booking.bookingType === BOOKING_TYPE.ASTROLOGY) {
+              if (
+                booking.status === BOOKING_STATUS.CREATED ||
+                booking.status === BOOKING_STATUS.PENDING ||
+                (booking.status as string) === 'CREATED' ||
+                (booking.status as string) === 'PENDING'
+              ) {
+                booking.status = BOOKING_STATUS.ACCEPTED;
+              }
+            } else {
+              if (
+                booking.status === BOOKING_STATUS.CREATED ||
+                (booking.status as string) === 'CREATED'
+              ) {
+                booking.status = BOOKING_STATUS.PENDING;
+              }
             }
 
-            if (booking.filteredPurohitIds && booking.filteredPurohitIds.length > 0) {
-              const purohitProfiles = await manager
-                .getRepository(PurohitProfile)
-                .createQueryBuilder('profile')
-                .select(['profile.id', 'profile.userId'])
-                .where('profile.id IN (:...purohitProfileIds)', {
-                  purohitProfileIds: booking.filteredPurohitIds,
-                })
-                .getMany();
+            if (totalPaid >= finalAmount) {
+              booking.paymentStatus = BOOKING_PAYMENT_STATUS.PAID;
+              // In token payment flow, if booking was ONGOING, full settlement completes it.
+              if (booking.status === BOOKING_STATUS.ONGOING) {
+                booking.status = BOOKING_STATUS.COMPLETED;
+                booking.completionConfirmedAt = new Date();
+              } else if (booking.status === BOOKING_STATUS.CANCELLED) {
+                this.logger.warn(
+                  `Payment #${payment.id} completed for booking #${booking.id}, but booking was already CANCELLED (reservation expired or cancelled). Status remains CANCELLED.`,
+                );
+              }
 
-              newlyAssignedPurohitUserIds = purohitProfiles.map(
-                (p) => p.userId,
-              );
+              if (booking.bookingType !== BOOKING_TYPE.ASTROLOGY) {
+                // Create real PUROHIT_PAYOUT record when booking is fully paid
+                await this.ensurePurohitPendingPayout(manager, booking);
+              }
+            } else if (totalPaid >= tokenAmount) {
+              booking.paymentStatus = BOOKING_PAYMENT_STATUS.PARTIAL;
+            } else {
+              booking.paymentStatus = BOOKING_PAYMENT_STATUS.PENDING;
             }
+
+            // TOKEN PAYMENT GATE: Trigger AUTO assignment only when token (or full) payment is confirmed (or deferred for admin)
+            // For astrology bookings, astrologer is already assigned, skip purohit assignment
+            const isEligibleForAssignment =
+              booking.bookingType !== BOOKING_TYPE.ASTROLOGY &&
+              (booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID ||
+                booking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL ||
+                booking.paymentType === BOOKING_PAYMENT_TYPE.DEFERRED) &&
+              booking.status === BOOKING_STATUS.PENDING &&
+              !booking.purohitId;
+
+            if (isEligibleForAssignment) {
+              if (
+                (!booking.filteredPurohitIds || booking.filteredPurohitIds.length === 0) &&
+                this.assignmentService
+              ) {
+                const eligiblePurohitIds =
+                  await this.assignmentService.findEligiblePurohitIds(
+                    manager,
+                    booking,
+                  );
+                booking.filteredPurohitIds = eligiblePurohitIds;
+                booking.assignmentType = ASSIGNMENT_TYPE.AUTO;
+              }
+
+              if (booking.filteredPurohitIds && booking.filteredPurohitIds.length > 0) {
+                const purohitProfiles = await manager
+                  .getRepository(PurohitProfile)
+                  .createQueryBuilder('profile')
+                  .select(['profile.id', 'profile.userId'])
+                  .where('profile.id IN (:...purohitProfileIds)', {
+                    purohitProfileIds: booking.filteredPurohitIds,
+                  })
+                  .getMany();
+
+                newlyAssignedPurohitUserIds = purohitProfiles.map(
+                  (p) => p.userId,
+                );
+              }
+            }
+
+            await manager.save(Booking, booking);
           }
-
-          await manager.save(Booking, booking);
           payment.booking = booking;
         }
       }
 
       // Safe, idempotent cart clearing and BookingProduct synchronization
-      const bookingProductRepo = manager.getRepository(BookingProduct);
       const cartRepo = manager.getRepository(Cart);
       const cartItemRepo = manager.getRepository(CartItem);
+      if (!wasPaymentAlreadySuccessful) {
+        const bookingProductRepo = manager.getRepository(BookingProduct);
 
-      // Link any unlinked BookingProduct records for this booking/customer to this payment
-      if (payment.bookingId && payment.payerId) {
-        await bookingProductRepo
-          .createQueryBuilder()
-          .update(BookingProduct)
-          .set({ paymentId: payment.id })
-          .where(
-            'customerId = :customerId AND bookingId = :bookingId AND paymentId IS NULL',
-            {
-              customerId: payment.payerId,
-              bookingId: payment.bookingId,
-            },
-          )
-          .execute();
-      }
+        // Link any unlinked BookingProduct records for this booking/customer to this payment
+        if (payment.bookingId && payment.payerId) {
+          await bookingProductRepo
+            .createQueryBuilder()
+            .update(BookingProduct)
+            .set({ paymentId: payment.id })
+            .where(
+              'customerId = :customerId AND bookingId = :bookingId AND paymentId IS NULL',
+              {
+                customerId: payment.payerId,
+                bookingId: payment.bookingId,
+              },
+            )
+            .execute();
+        }
 
-      // Find purchased products linked to this payment
-      const purchasedProducts = await bookingProductRepo.find({
-        where: { paymentId: payment.id },
-      });
-
-      if (payment.payerId && purchasedProducts.length > 0) {
-        const customerCart = await cartRepo.findOne({
-          where: { customerId: payment.payerId },
+        // Find purchased products linked to this payment
+        const purchasedProducts = await bookingProductRepo.find({
+          where: { paymentId: payment.id },
         });
 
-        if (customerCart) {
-          // Safe removal: only remove the items that were actually purchased
-          for (const purchased of purchasedProducts) {
-            const cartItem = await cartItemRepo.findOne({
-              where: {
-                cartId: customerCart.id,
-                productId: purchased.productId,
-              },
-            });
-            if (cartItem) {
-              if (cartItem.quantity <= purchased.quantity) {
-                await cartItemRepo.delete(cartItem.id);
-              } else {
-                cartItem.quantity -= purchased.quantity;
-                await cartItemRepo.save(cartItem);
+        if (payment.payerId && purchasedProducts?.length > 0) {
+          const customerCart = await cartRepo.findOne({
+            where: { customerId: payment.payerId },
+          });
+
+          if (customerCart) {
+            // Safe removal: only remove the items that were actually purchased
+            for (const purchased of purchasedProducts) {
+              const cartItem = await cartItemRepo.findOne({
+                where: {
+                  cartId: customerCart.id,
+                  productId: purchased.productId,
+                },
+              });
+              if (cartItem) {
+                if (cartItem.quantity <= purchased.quantity) {
+                  await cartItemRepo.delete(cartItem.id);
+                } else {
+                  cartItem.quantity -= purchased.quantity;
+                  await cartItemRepo.save(cartItem);
+                }
               }
             }
           }
@@ -5748,11 +5854,10 @@ export class PaymentService {
           }
         }
 
-        // Selective, safe, and idempotent cart item cleanup upon payment confirmation.
-        // Only removes the cart items that were part of this paid order.
-        // Preserves newly added products and customer modifications made after checkout.
+        // Safe, clean, and idempotent cart item cleanup upon payment confirmation.
+        // Removes all cart items that were purchased in this paid order.
         const payerId = payment.payerId || order?.customerId;
-        if (payerId && order && !wasOrderAlreadyPaid) {
+        if (payerId && order) {
           try {
             const customerCart = await cartRepo.findOne({
               where: { customerId: payerId },
@@ -5764,100 +5869,54 @@ export class PaymentService {
                 where: { orderId: order.id },
               });
 
-              const getTimestamp = (val: any): number => {
-                if (!val) return 0;
-                if (val instanceof Date) return val.getTime();
-                const parsed = new Date(val).getTime();
-                return isNaN(parsed) ? 0 : parsed;
-              };
-
-              const checkoutTime =
-                getTimestamp(payment.createdAt) ||
-                getTimestamp(order.createdAt) ||
-                0;
-
               for (const orderItem of orderItems) {
                 if (!orderItem.productId) {
                   continue;
                 }
 
-                let cartItem: CartItem | null = null;
+                const purchasedQuantity = Number(
+                  orderItem.snapshot?.quantity ?? (orderItem as any).quantity ?? 1,
+                );
 
-                // 1. Try finding by cartItemId if captured at checkout
+                // Find matching cart item(s) by cartItemId first, or by productId in customerCart
+                let cartItems: CartItem[] = [];
                 if (orderItem.cartItemId) {
-                  cartItem = await cartItemRepo.findOne({
+                  const item = await cartItemRepo.findOne({
                     where: {
                       id: orderItem.cartItemId,
                       cartId: customerCart.id,
                     },
                   });
-                } else {
-                  // 2. Historical order fallback (cartItemId is null):
-                  // Match by productId ONLY IF the cart item existed at or before checkout
-                  const candidate = await cartItemRepo.findOne({
+                  if (item) {
+                    cartItems.push(item);
+                  }
+                }
+
+                if (cartItems.length === 0) {
+                  cartItems = await cartItemRepo.find({
                     where: {
                       cartId: customerCart.id,
                       productId: orderItem.productId,
                     },
                   });
-                  if (candidate) {
-                    const candidateCreatedAt = getTimestamp(candidate.createdAt);
-                    if (
-                      candidateCreatedAt === 0 ||
-                      checkoutTime === 0 ||
-                      candidateCreatedAt <= checkoutTime
-                    ) {
-                      cartItem = candidate;
-                    }
-                  }
                 }
 
-                if (!cartItem) {
-                  // Item was already removed by customer, deleted in previous cleanup run,
-                  // or re-added as a new cart item after checkout. Do not touch.
-                  continue;
-                }
-
-                const snap = orderItem.snapshot;
-                const itemUpdatedAt = getTimestamp(cartItem.updatedAt);
-                const itemSnapshotTime = getTimestamp(
-                  snap?.cartItemUpdatedAt ||
-                  (orderItem as any).cartItemUpdatedAtSnapshot,
-                );
-                const cutoffTime = itemSnapshotTime || checkoutTime;
-
-                const wasModifiedAfterCheckout =
-                  cutoffTime > 0 &&
-                  itemUpdatedAt > 0 &&
-                  itemUpdatedAt > cutoffTime;
-
-                const purchasedQuantity = Number(
-                  snap?.quantity ?? (orderItem as any).quantity ?? 1,
-                );
-
-                if (wasModifiedAfterCheckout) {
-                  // Customer modified this cart item after checkout!
-                  if (cartItem.quantity > purchasedQuantity) {
-                    // Scenario 1: Customer increased quantity after checkout (e.g. 2 -> 5).
-                    // Deduct only the purchased checkout quantity, keeping excess in cart.
-                    cartItem.quantity -= purchasedQuantity;
-                    await cartItemRepo.save(cartItem);
-                  } else {
-                    // Scenario 2: Customer decreased quantity after checkout (e.g. 2 -> 1).
-                    // Preserve the customer's post-checkout modification. Do NOT delete or decrement!
-                    this.logger.log(
-                      `Cart item #${cartItem.id} for product #${cartItem.productId} was modified after checkout (current qty: ${cartItem.quantity}, order qty: ${purchasedQuantity}). Preserving post-checkout modification.`,
-                    );
-                  }
-                } else {
-                  // Cart item was untouched since checkout.
-                  if (cartItem.quantity <= purchasedQuantity) {
-                    // Entire quantity was checked out in this order. Safely delete it.
+                let remainingToDeduct = purchasedQuantity;
+                for (const cartItem of cartItems) {
+                  if (remainingToDeduct <= 0) break;
+                  if (cartItem.quantity <= remainingToDeduct) {
+                    remainingToDeduct -= cartItem.quantity;
                     await cartItemRepo.delete(cartItem.id);
+                    this.logger.log(
+                      `Cart item #${cartItem.id} (product #${cartItem.productId}, qty: ${cartItem.quantity}) removed from cart #${customerCart.id} after payment of Order #${order.id}.`,
+                    );
                   } else {
-                    // Quantity was larger than checkout quantity. Decrement purchased amount.
-                    cartItem.quantity -= purchasedQuantity;
+                    cartItem.quantity -= remainingToDeduct;
+                    remainingToDeduct = 0;
                     await cartItemRepo.save(cartItem);
+                    this.logger.log(
+                      `Cart item #${cartItem.id} (product #${cartItem.productId}) decremented to ${cartItem.quantity} in cart #${customerCart.id} after payment of Order #${order.id}.`,
+                    );
                   }
                 }
               }
@@ -5999,288 +6058,161 @@ export class PaymentService {
       payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT ||
       payment.paymentType === PAYMENT_TYPE.ASTROLOGY_PAYMENT;
 
-    if (payment.booking && isBookingOrAstrology) {
-      const remaining = Number(payment.booking.remainingAmount ?? 0);
-      const notificationMsg =
-        remaining > 0
-          ? `Your payment for Booking #${payment.booking.bookingNumber} was successful. Paid: ₹${payment.amount}, Remaining: ₹${remaining}.`
-          : `Your payment for Booking #${payment.booking.bookingNumber} was successful. Paid: ₹${payment.amount}, Remaining: ₹0.`;
-
-      await this.notificationService.createNotification(
-        payment.booking.customerId,
-        'Payment Successful',
-        notificationMsg,
-        NOTIFICATION_TYPE.PAYMENT,
-        payment.id,
-        'PAYMENT',
-      );
-
-      // Notify Admin on Booking Payment Success
-      const bookingCustomer = payment.booking.customer;
-      const bookingCustomerName =
-        [bookingCustomer?.firstName, bookingCustomer?.lastName].filter(Boolean).join(' ') ||
-        'Customer';
-      await this.notificationService.notifyAdmins(
-        'Booking Payment Received',
-        `Booking Payment Successful — Booking #${payment.booking.bookingNumber} has been successfully paid by ${bookingCustomerName}. Payment ID: ${payment.razorpayPaymentId || `PAY-${payment.id}`}. Amount: ₹${payment.amount}.`,
-        NOTIFICATION_TYPE.PAYMENT,
-        payment.booking.id,
-        'BOOKING',
-        {
-          bookingId: payment.booking.id,
-          bookingNumber: payment.booking.bookingNumber,
-          customerId: payment.booking.customerId,
-          customerName: bookingCustomerName,
-          paymentId: payment.id,
-          razorpayPaymentId: payment.razorpayPaymentId,
-          amount: payment.amount,
-          status: 'PAID',
-        },
-      );
-
-      // Manage Audit Logs for Booking payment
-      try {
-        await this.auditLogService.createAuditLog({
-          actorId: payment.payerId || null,
-          actorType: payment.payerId ? ACTOR_TYPE.USER : ACTOR_TYPE.SYSTEM,
-          actorRole: undefined,
-          module: AUDIT_MODULE.BOOKING,
-          entity: 'Booking',
-          entityId: String(payment.booking.id),
-          action:
-            payment.booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID
-              ? 'BOOKING_PAYMENT_COMPLETED'
-              : 'BOOKING_TOKEN_PAID',
-          message: `Booking #${payment.booking.bookingNumber || payment.booking.id} payment of ₹${payment.amount} finalized. Status: ${payment.booking.status}, Payment Status: ${payment.booking.paymentStatus}.`,
-          oldValue: {
-            status: previousBookingStatus,
-            paymentStatus: previousBookingPaymentStatus,
-          },
-          newValue: {
-            status: payment.booking.status,
-            paymentStatus: payment.booking.paymentStatus,
-            paidAmount: payment.booking.paidAmount,
-            remainingAmount: payment.booking.remainingAmount,
-            paymentId: payment.id,
-            razorpayPaymentId: payment.razorpayPaymentId,
-          },
-        });
-
-        await this.auditLogService.createAuditLog({
-          actorId: payment.payerId || null,
-          actorType: payment.payerId ? ACTOR_TYPE.USER : ACTOR_TYPE.SYSTEM,
-          actorRole: undefined,
-          module: AUDIT_MODULE.PAYMENT,
-          entity: 'Payment',
-          entityId: String(payment.id),
-          action: 'PAYMENT_SUCCESS',
-          message: `Payment #${payment.id} for Booking #${payment.booking.bookingNumber || payment.booking.id} completed successfully (Amount: ₹${payment.amount}).`,
-          oldValue: { status: PAYMENT_STATUS.PENDING },
-          newValue: {
-            status: PAYMENT_STATUS.SUCCESS,
-            amount: payment.amount,
-            bookingId: payment.booking.id,
-            razorpayPaymentId: payment.razorpayPaymentId,
-          },
-        });
-      } catch (auditErr: any) {
-        this.logger.warn(`Failed to create payment audit log: ${auditErr?.message}`);
-      }
-
-      if (newlyAssignedPurohitUserIds.length > 0) {
-        for (const purohitUserId of newlyAssignedPurohitUserIds) {
-          try {
-            await this.notificationService.createNotification(
-              purohitUserId,
-              'New Booking',
-              `You have received a new booking request (Booking B-${payment.booking.id}).`,
-              NOTIFICATION_TYPE.BOOKING,
-              payment.booking.id,
-              'BOOKING',
-              true,
-              {
-                bookingId: payment.booking.id,
-                bookingNumber: payment.booking.bookingNumber,
-                status: payment.booking.status,
-                booking: payment.booking,
-              },
-            );
-
-            this.bookingGateway.notifyUser(
-              purohitUserId,
-              'new_booking',
-              {
-                message: `You have received a new booking request (Booking B-${payment.booking.id}).`,
-                booking: payment.booking,
-                bookingId: payment.booking.id,
-              },
-            );
-
-            this.bookingGateway.notifyUser(
-              purohitUserId,
-              'booking_status_updated',
-              {
-                message: `Booking status updated to ${payment.booking.status}`,
-                booking: payment.booking,
-              },
-            );
-          } catch (notifyErr: any) {
-            this.logger.warn(
-              `Failed to notify Purohit ${purohitUserId}: ${notifyErr?.message}`,
-            );
-          }
-        }
-      }
-
-      if (!wasBookingCompleted) {
-        this.bookingGateway.notifyUser(
-          payment.booking.customerId,
-          'booking_status_updated',
+    if (payment.booking && isBookingOrAstrology && !wasPaymentAlreadySuccessful) {
+      if (isBookingSoftDeleted) {
+        await this.notificationService.notifyAdmins(
+          'Late Payment on Expired Booking',
+          `Payment #${payment.id} (₹${payment.amount}) was received for soft-deleted Booking #${payment.booking.bookingNumber || payment.booking.id}. Please review for refund or manual reactivation.`,
+          NOTIFICATION_TYPE.PAYMENT,
+          payment.booking.id,
+          'BOOKING',
           {
-            message: `Booking status updated to ${payment.booking.status}`,
-            booking: payment.booking,
+            bookingId: payment.booking.id,
+            bookingNumber: payment.booking.bookingNumber,
+            paymentId: payment.id,
+            amount: payment.amount,
+            status: 'EXPIRED_PAID',
           },
         );
+      } else {
+        const remaining = Number(payment.booking.remainingAmount ?? 0);
+        const notificationMsg =
+          remaining > 0
+            ? `Your payment for Booking #${payment.booking.bookingNumber} was successful. Paid: ₹${payment.amount}, Remaining: ₹${remaining}.`
+            : `Your payment for Booking #${payment.booking.bookingNumber} was successful. Paid: ₹${payment.amount}, Remaining: ₹0.`;
 
         await this.notificationService.createNotification(
           payment.booking.customerId,
-          'Booking Status Updated',
-          `Your booking B-${payment.booking.id} status has been updated to ${payment.booking.status}.`,
-          NOTIFICATION_TYPE.BOOKING_STATUS,
-          payment.booking.id,
-          'BOOKING',
+          'Payment Successful',
+          notificationMsg,
+          NOTIFICATION_TYPE.PAYMENT,
+          payment.id,
+          'PAYMENT',
         );
 
-        if (this.emailService) {
-          try {
-            const fullBooking = await this.bookingRepository.findBookingById(
-              payment.booking.id,
-            );
-            if (fullBooking?.customer?.email) {
-              const customerName = fullBooking.customer.firstName
-                ? `${fullBooking.customer.firstName} ${fullBooking.customer.lastName || ''}`.trim()
-                : 'Devotee';
-              const purohitUser = fullBooking.purohit?.user;
-              const purohitName = purohitUser?.firstName
-                ? `${purohitUser.firstName} ${purohitUser.lastName || ''}`.trim()
-                : 'Assigned Purohit';
-              const bookingDate = fullBooking.scheduledAt
-                ? new Date(fullBooking.scheduledAt).toLocaleDateString(
-                  'en-IN',
-                  {
-                    timeZone: 'Asia/Kolkata',
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                  },
-                )
-                : 'Scheduled Date';
-              const bookingTime = fullBooking.scheduledAt
-                ? new Date(fullBooking.scheduledAt).toLocaleTimeString(
-                  'en-IN',
-                  {
-                    timeZone: 'Asia/Kolkata',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: true,
-                  },
-                )
-                : 'Scheduled Time';
+        // Notify Admin on Booking Payment Success
+        const bookingCustomer = payment.booking.customer;
+        const bookingCustomerName =
+          [bookingCustomer?.firstName, bookingCustomer?.lastName].filter(Boolean).join(' ') ||
+          'Customer';
+        await this.notificationService.notifyAdmins(
+          'Booking Payment Received',
+          `Booking Payment Successful — Booking #${payment.booking.bookingNumber} has been successfully paid by ${bookingCustomerName}. Payment ID: ${payment.razorpayPaymentId || `PAY-${payment.id}`}. Amount: ₹${payment.amount}.`,
+          NOTIFICATION_TYPE.PAYMENT,
+          payment.booking.id,
+          'BOOKING',
+          {
+            bookingId: payment.booking.id,
+            bookingNumber: payment.booking.bookingNumber,
+            customerId: payment.booking.customerId,
+            customerName: bookingCustomerName,
+            paymentId: payment.id,
+            razorpayPaymentId: payment.razorpayPaymentId,
+            amount: payment.amount,
+            status: 'PAID',
+            scheduledAt: payment.booking.scheduledAt,
+          },
+        );
 
-              const totalAmountVal = Number(fullBooking.finalAmount) || Number(payment.amount) || 0;
-              const paidAmountVal = Number(fullBooking.paidAmount) || Number(payment.amount) || 0;
-              const remainingAmountVal = Number(fullBooking.remainingAmount ?? 0);
-              const isAstrology = fullBooking.bookingType === BOOKING_TYPE.ASTROLOGY;
-              const effectiveServiceName = fullBooking.service?.name || (isAstrology ? 'Astrology Consultation' : 'Vedic Pooja');
+        // Manage Audit Logs for Booking payment
+        try {
+          await this.auditLogService.createAuditLog({
+            actorId: payment.payerId || null,
+            actorType: payment.payerId ? ACTOR_TYPE.USER : ACTOR_TYPE.SYSTEM,
+            actorRole: undefined,
+            module: AUDIT_MODULE.BOOKING,
+            entity: 'Booking',
+            entityId: String(payment.booking.id),
+            action:
+              payment.booking.paymentStatus === BOOKING_PAYMENT_STATUS.PAID
+                ? 'BOOKING_PAYMENT_COMPLETED'
+                : 'BOOKING_TOKEN_PAID',
+            message: `Booking #${payment.booking.bookingNumber || payment.booking.id} payment of ₹${payment.amount} finalized. Status: ${payment.booking.status}, Payment Status: ${payment.booking.paymentStatus}.`,
+            oldValue: {
+              status: previousBookingStatus,
+              paymentStatus: previousBookingPaymentStatus,
+            },
+            newValue: {
+              status: payment.booking.status,
+              paymentStatus: payment.booking.paymentStatus,
+              paidAmount: payment.booking.paidAmount,
+              remainingAmount: payment.booking.remainingAmount,
+              paymentId: payment.id,
+              razorpayPaymentId: payment.razorpayPaymentId,
+            },
+          });
 
-              const addressSnapshot = fullBooking.addressSnapshot as Record<string, any> | undefined;
-              const bookingAddress =
-                addressSnapshot?.['fullAddress'] ||
-                [
-                  addressSnapshot?.['addressLine1'],
-                  addressSnapshot?.['addressLine2'],
-                  addressSnapshot?.['city'],
-                  addressSnapshot?.['state'],
-                  addressSnapshot?.['pincode'],
-                ].filter(Boolean).join(', ') ||
-                (isAstrology ? 'Online Video / Audio Consultation' : 'Scheduled Location');
-
-              if (fullBooking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL) {
-                // Token / Partial Payment: send meaningful reminder to complete remaining balance before puja completion
-                this.logger.log(
-                  `[BookingEmail] Sending advance token payment email to customer for booking #${fullBooking.bookingNumber}...`,
-                );
-                await this.emailService.sendCustomerBookingTokenPaymentEmail({
-                  email: fullBooking.customer.email,
-                  customerName,
-                  bookingId: fullBooking.bookingNumber || `B-${fullBooking.id}`,
-                  bookingNumber: fullBooking.bookingNumber,
-                  serviceName: effectiveServiceName,
-                  servicePlan: fullBooking.plan ? String(fullBooking.plan) : undefined,
-                  planName: fullBooking.plan ? String(fullBooking.plan) : undefined,
-                  bookingDate,
-                  bookingTime,
-                  bookingAddress,
-                  purohitName,
-                  totalAmount: totalAmountVal,
-                  amountPaid: Number(payment.amount),
-                  remainingAmount: remainingAmountVal,
-                });
-                this.logger.log(
-                  `[BookingEmail] Advance token payment email sent successfully for booking #${fullBooking.bookingNumber}.`,
-                );
-              } else {
-                // Full payment completed (upfront or settled balance): send Booking Scheduled / Confirmed Email.
-                // Note: Booking Completed email is ONLY sent when Purohit or Astrologer marks the booking as COMPLETED.
-                this.logger.log(
-                  `[BookingEmail] Sending booking scheduled confirmation email to customer for booking #${fullBooking.bookingNumber}...`,
-                );
-                await this.emailService.sendCustomerBookingConfirmationEmail({
-                  email: fullBooking.customer.email,
-                  customerName,
-                  bookingId: fullBooking.bookingNumber || `B-${fullBooking.id}`,
-                  serviceName: effectiveServiceName,
-                  servicePlan: fullBooking.plan ? String(fullBooking.plan) : undefined,
-                  planName: fullBooking.plan ? String(fullBooking.plan) : undefined,
-                  bookingDate,
-                  bookingTime,
-                  bookingAddress,
-                  purohitName,
-                  totalAmount: totalAmountVal,
-                  amountPaid: paidAmountVal,
-                  pendingAmount: remainingAmountVal,
-                  paymentStatus: 'PAID',
-                  bookingStatus: fullBooking.status,
-                });
-                this.logger.log(
-                  `[BookingEmail] Booking scheduled confirmation email sent successfully for booking #${fullBooking.bookingNumber}.`,
-                );
-              }
-            }
-          } catch (emailErr) {
-            this.logger.error(
-              `[BookingEmail] Failed to send customer booking completed email for booking #${payment.booking.bookingNumber}`,
-              emailErr instanceof Error ? emailErr.stack : String(emailErr),
-            );
-          }
+          await this.auditLogService.createAuditLog({
+            actorId: payment.payerId || null,
+            actorType: payment.payerId ? ACTOR_TYPE.USER : ACTOR_TYPE.SYSTEM,
+            actorRole: undefined,
+            module: AUDIT_MODULE.PAYMENT,
+            entity: 'Payment',
+            entityId: String(payment.id),
+            action: 'PAYMENT_SUCCESS',
+            message: `Payment #${payment.id} for Booking #${payment.booking.bookingNumber || payment.booking.id} completed successfully (Amount: ₹${payment.amount}).`,
+            oldValue: { status: PAYMENT_STATUS.PENDING },
+            newValue: {
+              status: PAYMENT_STATUS.SUCCESS,
+              amount: payment.amount,
+              bookingId: payment.booking.id,
+              razorpayPaymentId: payment.razorpayPaymentId,
+            },
+          });
+        } catch (auditErr: any) {
+          this.logger.warn(`Failed to create payment audit log: ${auditErr?.message}`);
         }
-      }
 
-      if (payment.booking.astrologerId) {
-        if (!wasPaymentPaid) {
-          await this.notificationService.createNotification(
-            payment.booking.astrologerId,
-            'Payment Successful',
-            `The customer has paid for Astrology Booking #${payment.booking.bookingNumber || payment.booking.id}.`,
-            NOTIFICATION_TYPE.PAYMENT,
-            payment.id,
-            'PAYMENT',
-          );
+        if (newlyAssignedPurohitUserIds.length > 0) {
+          for (const purohitUserId of newlyAssignedPurohitUserIds) {
+            try {
+              await this.notificationService.createNotification(
+                purohitUserId,
+                'New Booking',
+                `You have received a new booking request (Booking B-${payment.booking.id}).`,
+                NOTIFICATION_TYPE.BOOKING,
+                payment.booking.id,
+                'BOOKING',
+                true,
+                {
+                  bookingId: payment.booking.id,
+                  bookingNumber: payment.booking.bookingNumber,
+                  status: payment.booking.status,
+                  scheduledAt: payment.booking.scheduledAt,
+                  booking: payment.booking,
+                },
+              );
+
+              this.bookingGateway.notifyUser(
+                purohitUserId,
+                'new_booking',
+                {
+                  message: `You have received a new booking request (Booking B-${payment.booking.id}).`,
+                  booking: payment.booking,
+                  bookingId: payment.booking.id,
+                  scheduledAt: payment.booking.scheduledAt,
+                },
+              );
+
+              this.bookingGateway.notifyUser(
+                purohitUserId,
+                'booking_status_updated',
+                {
+                  message: `Booking status updated to ${payment.booking.status}`,
+                  booking: payment.booking,
+                },
+              );
+            } catch (notifyErr: any) {
+              this.logger.warn(
+                `Failed to notify Purohit ${purohitUserId}: ${notifyErr?.message}`,
+              );
+            }
+          }
         }
 
         if (!wasBookingCompleted) {
           this.bookingGateway.notifyUser(
-            payment.booking.astrologerId,
+            payment.booking.customerId,
             'booking_status_updated',
             {
               message: `Booking status updated to ${payment.booking.status}`,
@@ -6289,29 +6221,135 @@ export class PaymentService {
           );
 
           await this.notificationService.createNotification(
-            payment.booking.astrologerId,
+            payment.booking.customerId,
             'Booking Status Updated',
-            `Astrology booking ${payment.booking.bookingNumber || `B-${payment.booking.id}`} status has been updated to ${payment.booking.status}.`,
+            `Your booking B-${payment.booking.id} status has been updated to ${payment.booking.status}.`,
             NOTIFICATION_TYPE.BOOKING_STATUS,
             payment.booking.id,
             'BOOKING',
           );
+
+          if (this.emailService) {
+            try {
+              const fullBooking = await this.bookingRepository.findBookingById(
+                payment.booking.id,
+              );
+              if (fullBooking?.customer?.email) {
+                const customerName = fullBooking.customer.firstName
+                  ? `${fullBooking.customer.firstName} ${fullBooking.customer.lastName || ''}`.trim()
+                  : 'Devotee';
+                const purohitUser = fullBooking.purohit?.user;
+                const purohitName = purohitUser?.firstName
+                  ? `${purohitUser.firstName} ${purohitUser.lastName || ''}`.trim()
+                  : 'Assigned Purohit';
+                const bookingDate = fullBooking.scheduledAt
+                  ? new Date(fullBooking.scheduledAt).toLocaleDateString(
+                    'en-IN',
+                    {
+                      timeZone: 'Asia/Kolkata',
+                      year: 'numeric',
+                      month: '2-digit',
+                      day: '2-digit',
+                    },
+                  )
+                  : 'Scheduled Date';
+                const bookingTime = fullBooking.scheduledAt
+                  ? new Date(fullBooking.scheduledAt).toLocaleTimeString(
+                    'en-IN',
+                    {
+                      timeZone: 'Asia/Kolkata',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: true,
+                    },
+                  )
+                  : 'Scheduled Time';
+
+                const totalAmountVal = Number(fullBooking.finalAmount) || Number(payment.amount) || 0;
+                const paidAmountVal = Number(fullBooking.paidAmount) || Number(payment.amount) || 0;
+                const remainingAmountVal = Number(fullBooking.remainingAmount ?? 0);
+                const isAstrology = fullBooking.bookingType === BOOKING_TYPE.ASTROLOGY;
+                const effectiveServiceName = fullBooking.service?.name || (isAstrology ? 'Astrology Consultation' : 'Vedic Pooja');
+
+                const addressSnapshot = fullBooking.addressSnapshot as Record<string, any> | undefined;
+                const bookingAddress =
+                  addressSnapshot?.['fullAddress'] ||
+                  [
+                    addressSnapshot?.['addressLine1'],
+                    addressSnapshot?.['addressLine2'],
+                    addressSnapshot?.['city'],
+                    addressSnapshot?.['state'],
+                    addressSnapshot?.['pincode'],
+                  ].filter(Boolean).join(', ') ||
+                  (isAstrology ? 'Online Video / Audio Consultation' : 'Scheduled Location');
+
+                if (fullBooking.paymentStatus === BOOKING_PAYMENT_STATUS.PARTIAL) {
+                  // Token / Partial Payment: send meaningful reminder to complete remaining balance before puja completion
+                  this.logger.log(
+                    `[BookingEmail] Sending advance token payment email to customer for booking #${fullBooking.bookingNumber}...`,
+                  );
+                  await this.emailService.sendCustomerBookingTokenPaymentEmail({
+                    email: fullBooking.customer.email,
+                    customerName,
+                    bookingId: fullBooking.bookingNumber || `B-${fullBooking.id}`,
+                    bookingNumber: fullBooking.bookingNumber,
+                    serviceName: effectiveServiceName,
+                    servicePlan: fullBooking.plan ? String(fullBooking.plan) : undefined,
+                    planName: fullBooking.plan ? String(fullBooking.plan) : undefined,
+                    bookingDate,
+                    bookingTime,
+                    bookingAddress,
+                    purohitName,
+                    totalAmount: totalAmountVal,
+                    amountPaid: Number(payment.amount),
+                    remainingAmount: remainingAmountVal,
+                  });
+                  this.logger.log(
+                    `[BookingEmail] Advance token payment email sent successfully for booking #${fullBooking.bookingNumber}.`,
+                  );
+                } else {
+                  // Full payment completed (upfront or settled balance): send Booking Scheduled / Confirmed Email.
+                  // Note: Booking Completed email is ONLY sent when Purohit or Astrologer marks the booking as COMPLETED.
+                  this.logger.log(
+                    `[BookingEmail] Sending booking scheduled confirmation email to customer for booking #${fullBooking.bookingNumber}...`,
+                  );
+                  await this.emailService.sendCustomerBookingConfirmationEmail({
+                    email: fullBooking.customer.email,
+                    customerName,
+                    bookingId: fullBooking.bookingNumber || `B-${fullBooking.id}`,
+                    serviceName: effectiveServiceName,
+                    servicePlan: fullBooking.plan ? String(fullBooking.plan) : undefined,
+                    planName: fullBooking.plan ? String(fullBooking.plan) : undefined,
+                    bookingDate,
+                    bookingTime,
+                    bookingAddress,
+                    purohitName,
+                    totalAmount: totalAmountVal,
+                    amountPaid: paidAmountVal,
+                    pendingAmount: remainingAmountVal,
+                    paymentStatus: 'PAID',
+                    bookingStatus: fullBooking.status,
+                  });
+                  this.logger.log(
+                    `[BookingEmail] Booking scheduled confirmation email sent successfully for booking #${fullBooking.bookingNumber}.`,
+                  );
+                }
+              }
+            } catch (emailErr) {
+              this.logger.error(
+                `[BookingEmail] Failed to send customer booking completed email for booking #${payment.booking.bookingNumber}`,
+                emailErr instanceof Error ? emailErr.stack : String(emailErr),
+              );
+            }
+          }
         }
-      }
 
-      if (payment.booking.purohitId) {
-        const purohitProfile = await this.dataSource
-          .getRepository(PurohitProfile)
-          .findOne({
-            where: { id: payment.booking.purohitId },
-          });
-
-        if (purohitProfile) {
+        if (payment.booking.astrologerId) {
           if (!wasPaymentPaid) {
             await this.notificationService.createNotification(
-              purohitProfile.userId,
+              payment.booking.astrologerId,
               'Payment Successful',
-              `The customer has paid for Booking #${payment.booking.bookingNumber}.`,
+              `The customer has paid for Astrology Booking #${payment.booking.bookingNumber || payment.booking.id}.`,
               NOTIFICATION_TYPE.PAYMENT,
               payment.id,
               'PAYMENT',
@@ -6320,7 +6358,7 @@ export class PaymentService {
 
           if (!wasBookingCompleted) {
             this.bookingGateway.notifyUser(
-              purohitProfile.userId,
+              payment.booking.astrologerId,
               'booking_status_updated',
               {
                 message: `Booking status updated to ${payment.booking.status}`,
@@ -6329,13 +6367,54 @@ export class PaymentService {
             );
 
             await this.notificationService.createNotification(
-              purohitProfile.userId,
+              payment.booking.astrologerId,
               'Booking Status Updated',
-              `Booking B-${payment.booking.id} status has been updated to ${payment.booking.status}.`,
+              `Astrology booking ${payment.booking.bookingNumber || `B-${payment.booking.id}`} status has been updated to ${payment.booking.status}.`,
               NOTIFICATION_TYPE.BOOKING_STATUS,
               payment.booking.id,
               'BOOKING',
             );
+          }
+        }
+
+        if (payment.booking.purohitId) {
+          const purohitProfile = await this.dataSource
+            .getRepository(PurohitProfile)
+            .findOne({
+              where: { id: payment.booking.purohitId },
+            });
+
+          if (purohitProfile) {
+            if (!wasPaymentPaid) {
+              await this.notificationService.createNotification(
+                purohitProfile.userId,
+                'Payment Successful',
+                `The customer has paid for Booking #${payment.booking.bookingNumber}.`,
+                NOTIFICATION_TYPE.PAYMENT,
+                payment.id,
+                'PAYMENT',
+              );
+            }
+
+            if (!wasBookingCompleted) {
+              this.bookingGateway.notifyUser(
+                purohitProfile.userId,
+                'booking_status_updated',
+                {
+                  message: `Booking status updated to ${payment.booking.status}`,
+                  booking: payment.booking,
+                },
+              );
+
+              await this.notificationService.createNotification(
+                purohitProfile.userId,
+                'Booking Status Updated',
+                `Booking B-${payment.booking.id} status has been updated to ${payment.booking.status}.`,
+                NOTIFICATION_TYPE.BOOKING_STATUS,
+                payment.booking.id,
+                'BOOKING',
+              );
+            }
           }
         }
       }
@@ -7051,7 +7130,7 @@ export class PaymentService {
         amount: totalAmount,
         currency: 'INR',
         customerPaymentMethod: CUSTOMER_PAYMENT_METHOD.ONLINE,
-        status: PAYMENT_STATUS.CREATED,
+        status: PAYMENT_STATUS.PENDING,
         remark: `Payment retry for Order ORD-${order.id}`,
       });
 

@@ -39,6 +39,7 @@ describe('NotificationService - Duplicate Delivery & Persistence Verification', 
       notifyUser: jest.fn(),
       notifyAdmin: jest.fn(),
       emitAdminNotification: jest.fn(),
+      emitToRooms: jest.fn(),
     };
 
     process.env.CURRENT_SERVICE = 'user-service';
@@ -86,6 +87,59 @@ describe('NotificationService - Duplicate Delivery & Persistence Verification', 
         expect.anything(),
       );
     });
+
+    it('preserves extraData attached to socketPayload', async () => {
+      await service.createNotification(
+        10,
+        'Booking Confirmed',
+        'Your pooja has been confirmed',
+        NOTIFICATION_TYPE.BOOKING,
+        99,
+        'BOOKING',
+        true,
+        { bookingId: 99, status: 'CONFIRMED' },
+      );
+
+      expect(mockBookingGateway.emitNotification).toHaveBeenCalledTimes(1);
+      expect(mockBookingGateway.emitNotification).toHaveBeenCalledWith(
+        10,
+        expect.objectContaining({
+          bookingId: 99,
+          status: 'CONFIRMED',
+          title: 'Booking Confirmed',
+        }),
+      );
+    });
+
+    it('does not emit socket event when emitSocket is false', async () => {
+      await service.createNotification(
+        10,
+        'Silent Note',
+        'Internal note',
+        NOTIFICATION_TYPE.SYSTEM,
+        undefined,
+        undefined,
+        false,
+      );
+
+      expect(mockBookingGateway.emitNotification).not.toHaveBeenCalled();
+      expect(mockBookingGateway.notifyUser).not.toHaveBeenCalled();
+    });
+
+    it('delegates cross-service delivery purely to BookingGateway without duplicate bridging', async () => {
+      process.env.CURRENT_SERVICE = 'payment-service';
+
+      await service.createNotification(
+        25,
+        'Payment Success',
+        '₹500 received',
+        NOTIFICATION_TYPE.PAYMENT,
+      );
+
+      // Exactly 1 emitNotification and 1 notifyUser (unread-count), delegated cleanly to BookingGateway
+      expect(mockBookingGateway.emitNotification).toHaveBeenCalledTimes(1);
+      expect(mockBookingGateway.notifyUser).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('notifyAdmins() - Database Record & Socket Delivery Deduplication', () => {
@@ -109,10 +163,7 @@ describe('NotificationService - Duplicate Delivery & Persistence Verification', 
       expect(savedUserIds).toEqual([101, 102]);
     });
 
-    it('emits exactly 1 broadcast socket event for all target rooms without duplicates', async () => {
-      const emitSpy = jest.fn();
-      mockBookingGateway.server.to.mockReturnValue({ emit: emitSpy });
-
+    it('emits exactly 1 broadcast socket event for all target rooms without duplicates via emitToRooms', async () => {
       await service.notifyAdmins(
         'Purohit Verification Resubmitted',
         'Rahul Sharma resubmitted profile',
@@ -122,16 +173,10 @@ describe('NotificationService - Duplicate Delivery & Persistence Verification', 
         { purohitId: 10 },
       );
 
-      // to() called with deduplicated target rooms
-      expect(mockBookingGateway.server.to).toHaveBeenCalledWith([
-        'admin',
-        'user:101',
-        'user:102',
-      ]);
-
-      // Exactly 1 broadcast emit call: 'notification:new'
-      expect(emitSpy).toHaveBeenCalledTimes(1);
-      expect(emitSpy).toHaveBeenCalledWith(
+      // emitToRooms() called with deduplicated target rooms
+      expect(mockBookingGateway.emitToRooms).toHaveBeenCalledTimes(1);
+      expect(mockBookingGateway.emitToRooms).toHaveBeenCalledWith(
+        ['admin', 'user:101', 'user:102'],
         'notification:new',
         expect.objectContaining({
           title: 'Purohit Verification Resubmitted',
@@ -141,9 +186,6 @@ describe('NotificationService - Duplicate Delivery & Persistence Verification', 
           purohitId: 10,
         }),
       );
-
-      // Duplicate event 'notification' must NOT be emitted
-      expect(emitSpy).not.toHaveBeenCalledWith('notification', expect.anything());
 
       // Each admin receives exactly 1 unread count update: 'notification:unread-count'
       expect(mockBookingGateway.notifyUser).toHaveBeenCalledWith(
@@ -183,10 +225,9 @@ describe('NotificationService - Duplicate Delivery & Persistence Verification', 
         return entity;
       });
 
-      const emitSpy = jest.fn().mockImplementation(() => {
+      mockBookingGateway.emitToRooms.mockImplementation(() => {
         callOrder.push('socket_emit');
       });
-      mockBookingGateway.server.to.mockReturnValue({ emit: emitSpy });
 
       await service.notifyAdmins(
         'New Temple Submitted for Verification',
@@ -202,10 +243,9 @@ describe('NotificationService - Duplicate Delivery & Persistence Verification', 
     });
 
     it('7. retains persisted notification if Socket.IO delivery throws an error', async () => {
-      const emitSpy = jest.fn().mockImplementation(() => {
+      mockBookingGateway.emitToRooms.mockImplementation(() => {
         throw new Error('Socket.IO connection disconnected');
       });
-      mockBookingGateway.server.to.mockReturnValue({ emit: emitSpy });
 
       let result;
       try {

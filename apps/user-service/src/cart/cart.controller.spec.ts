@@ -78,7 +78,7 @@ describe('CartController', () => {
         amountInPaise: 99800,
         currency: 'INR',
         bookingId: null,
-        status: PAYMENT_STATUS.CREATED,
+        status: PAYMENT_STATUS.PENDING,
         items: [
           {
             productId: 10,
