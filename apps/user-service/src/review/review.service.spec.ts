@@ -106,6 +106,32 @@ describe('ReviewService', () => {
       expect(mockAuditLogService.createAuditLog).toHaveBeenCalled();
     });
 
+    it('allows a customer to review a cancelled booking and sets customer rating/review', async () => {
+      const customerUser = { id: 10, role: USER_ROLE.CUSTOMER } as User;
+      const cancelledBooking: any = {
+        id: 101,
+        bookingType: BOOKING_TYPE.POOJA,
+        status: BOOKING_STATUS.CANCELLED,
+        customerId: 10,
+        purohitId: 20,
+        customerRating: null,
+        customerReview: null,
+      };
+
+      mockBookingRepository.findOne.mockResolvedValue(cancelledBooking);
+
+      const result = await service.create(customerUser, 101, {
+        rating: 4,
+        review: 'Cancelled but service was responsive',
+      });
+
+      expect(result).toEqual({ message: 'Review submitted successfully' });
+      expect(cancelledBooking.customerRating).toBe(4);
+      expect(cancelledBooking.customerReview).toBe('Cancelled but service was responsive');
+      expect(cancelledBooking.reviewStatus).toBe(REVIEW_STATUS.DRAFT);
+      expect(mockBookingRepository.save).toHaveBeenCalledWith(cancelledBooking);
+    });
+
     it('rejects customer review if booking is not completed', async () => {
       const customerUser = { id: 10, role: USER_ROLE.CUSTOMER } as User;
       const pendingBooking: any = {

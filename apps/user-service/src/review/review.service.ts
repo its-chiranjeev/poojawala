@@ -46,9 +46,12 @@ export class ReviewService {
       throw new NotFoundException('Booking not found.');
     }
 
-    if (booking.status !== BOOKING_STATUS.COMPLETED) {
+    if (
+      booking.status !== BOOKING_STATUS.COMPLETED &&
+      booking.status !== BOOKING_STATUS.CANCELLED
+    ) {
       throw new BadRequestException(
-        'Review can only be added after booking completion.',
+        'Review can only be added after booking completion or cancellation.',
       );
     }
 
