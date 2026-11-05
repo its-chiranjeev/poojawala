@@ -1,4 +1,4 @@
-import { NotificationService } from './notification.service';
+import { NotificationService, formatScheduledAt } from './notification.service';
 import { NOTIFICATION_TYPE, USER_ROLE, USER_STATUS } from '@poojawala/entities';
 
 describe('NotificationService - Duplicate Delivery & Persistence Verification', () => {
@@ -299,6 +299,105 @@ describe('NotificationService - Duplicate Delivery & Persistence Verification', 
         101,
         'notification:unread-count',
         { unreadCount: 2 },
+      );
+    });
+  });
+
+  describe('formatScheduledAt and scheduled date/time separation', () => {
+    it('formats ISO date string into understandable date and time separately in IST', () => {
+      // 2026-11-05T10:30:00.000Z -> 04:00 PM IST (10:30 UTC + 5:30)
+      const res = formatScheduledAt('2026-11-05T10:30:00.000Z');
+      expect(res.scheduledDate).toBe('05 Nov 2026');
+      expect(res.scheduledTime).toBe('04:00 PM');
+      expect(res.formattedSchedule).toBe('Date: 05 Nov 2026, Time: 04:00 PM');
+    });
+
+    it('formats Date object into understandable date and time separately', () => {
+      const d = new Date('2026-08-15T03:30:00.000Z'); // 09:00 AM IST
+      const res = formatScheduledAt(d);
+      expect(res.scheduledDate).toBe('15 Aug 2026');
+      expect(res.scheduledTime).toBe('09:00 AM');
+      expect(res.formattedSchedule).toBe('Date: 15 Aug 2026, Time: 09:00 AM');
+    });
+
+    it('gracefully handles null, undefined, and invalid date input', () => {
+      expect(formatScheduledAt(null)).toEqual({
+        scheduledDate: null,
+        scheduledTime: null,
+        formattedSchedule: null,
+      });
+      expect(formatScheduledAt(undefined)).toEqual({
+        scheduledDate: null,
+        scheduledTime: null,
+        formattedSchedule: null,
+      });
+      expect(formatScheduledAt('invalid-date')).toEqual({
+        scheduledDate: null,
+        scheduledTime: null,
+        formattedSchedule: null,
+      });
+    });
+
+    it('createNotification enriches socketPayload with scheduledDate and scheduledTime when scheduledAt is present in extraData', async () => {
+      const scheduledIso = '2026-11-05T10:30:00.000Z';
+      await service.createNotification(
+        10,
+        'Booking Created',
+        'Booking B-101 created. Date: 05 Nov 2026, Time: 04:00 PM.',
+        NOTIFICATION_TYPE.BOOKING,
+        101,
+        'BOOKING',
+        true,
+        {
+          bookingId: 101,
+          scheduledAt: scheduledIso,
+          notification: {
+            bookingId: 101,
+            scheduledAt: scheduledIso,
+          },
+        },
+      );
+
+      expect(mockBookingGateway.emitNotification).toHaveBeenCalledTimes(1);
+      expect(mockBookingGateway.emitNotification).toHaveBeenCalledWith(
+        10,
+        expect.objectContaining({
+          bookingId: 101,
+          scheduledAt: scheduledIso,
+          scheduledDate: '05 Nov 2026',
+          scheduledTime: '04:00 PM',
+          notification: expect.objectContaining({
+            scheduledDate: '05 Nov 2026',
+            scheduledTime: '04:00 PM',
+          }),
+        }),
+      );
+    });
+
+    it('notifyAdmins enriches broadcast socketPayload with scheduledDate and scheduledTime separately', async () => {
+      const scheduledIso = '2026-11-05T10:30:00.000Z';
+      await service.notifyAdmins(
+        'New Booking Request',
+        'New booking B-101. Date: 05 Nov 2026, Time: 04:00 PM.',
+        NOTIFICATION_TYPE.BOOKING,
+        101,
+        'BOOKING',
+        {
+          bookingId: 101,
+          scheduledAt: scheduledIso,
+        },
+      );
+
+      expect(mockBookingGateway.emitToRooms).toHaveBeenCalledTimes(1);
+      expect(mockBookingGateway.emitToRooms).toHaveBeenCalledWith(
+        expect.any(Array),
+        'notification:new',
+        expect.objectContaining({
+          bookingId: 101,
+          scheduledAt: scheduledIso,
+          scheduledDate: '05 Nov 2026',
+          scheduledTime: '04:00 PM',
+        }),
       );
     });
   });

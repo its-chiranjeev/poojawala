@@ -1471,6 +1471,200 @@ describe('Unified Invoice System', () => {
         }),
       );
     });
+
+    it('should set callback_url to /customer/bookings and payment method to ONLINE for customer payment', async () => {
+      process.env['FRONTEND_URL'] = 'https://portal.1pooja.com';
+
+      const mockBookingRepo = { findBookingById: jest.fn() };
+      const mockPaymentRepo = {
+        findOne: jest.fn(),
+        savePayment: jest.fn(),
+      };
+      const mockDataSource = {
+        transaction: jest.fn(),
+        getRepository: jest.fn().mockReturnValue({}),
+      };
+
+      const testService = new PaymentService(
+        mockBookingRepo as any,
+        mockPaymentRepo as any,
+        mockDataSource as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
+
+      const mockRazorpay = {
+        paymentLink: {
+          create: jest.fn().mockResolvedValue({
+            id: 'plink_test_customer',
+            short_url: 'https://rzp.io/i/test_customer',
+            currency: 'INR',
+          }),
+        },
+      };
+      jest.spyOn<any, any>(testService, 'razorpay', 'get').mockReturnValue(mockRazorpay);
+
+      const mockPayment = {
+        id: 998,
+        amount: 2500,
+        currency: 'INR',
+        paymentType: 'BOOKING_PAYMENT',
+        customerPaymentMethod: CUSTOMER_PAYMENT_METHOD.ONLINE,
+      };
+      const mockBooking = {
+        id: 112,
+        bookingNumber: 'PW-BK-112',
+        customerId: 10,
+      };
+
+      await testService.createRazorpayPaymentLink(
+        mockPayment as any,
+        mockBooking as any,
+        { name: 'Customer User' },
+        'Customer online payment',
+        { initiatedByRole: USER_ROLE.CUSTOMER },
+      );
+
+      expect(mockRazorpay.paymentLink.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          callback_url: 'https://portal.1pooja.com/customer/bookings',
+        }),
+      );
+    });
+
+    it('should assign CASH payment method when payment made by Purohit and ONLINE/respected method when made by Customer', () => {
+      const testService = new PaymentService(
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
+
+      // Purohit initiated payment
+      const purohitPayment = {
+        id: 555,
+        paymentType: 'BOOKING_PAYMENT',
+        customerPaymentMethod: CUSTOMER_PAYMENT_METHOD.CASH,
+        createdById: 99,
+        createdBy: { role: USER_ROLE.PUROHIT },
+        amount: 1500,
+        currency: 'INR',
+        status: PAYMENT_STATUS.SUCCESS,
+        booking: { id: 10, purohit: { userId: 99 } },
+      } as any;
+
+      const purohitResponse = (testService as any).buildCombinedPaymentResponse(
+        purohitPayment,
+        { status: 'paid', method: 'upi', amount: 150000, currency: 'INR' },
+        USER_ROLE.PUROHIT,
+      );
+
+      expect(purohitResponse.customerPaymentMethod).toBe('CASH');
+      expect(purohitResponse.paymentMethod).toBe('CASH');
+
+      // Customer online payment
+      const customerPayment = {
+        id: 556,
+        paymentType: 'BOOKING_PAYMENT',
+        customerPaymentMethod: CUSTOMER_PAYMENT_METHOD.ONLINE,
+        createdById: 10,
+        createdBy: { role: USER_ROLE.CUSTOMER },
+        amount: 2500,
+        currency: 'INR',
+        status: PAYMENT_STATUS.SUCCESS,
+        booking: { id: 11, customerId: 10 },
+      } as any;
+
+      const customerResponse = (testService as any).buildCombinedPaymentResponse(
+        customerPayment,
+        { status: 'paid', method: 'upi', amount: 250000, currency: 'INR' },
+        USER_ROLE.CUSTOMER,
+      );
+
+      expect(customerResponse.customerPaymentMethod).toBe('ONLINE');
+      expect(customerResponse.paymentMethod).toBe('UPI');
+    });
+
+    it('should NOT allow a customer to reuse an active payment link created by a Purohit (preventing redirect to partner/bookings)', async () => {
+      const mockBookingRepo = {
+        findBookingById: jest.fn().mockResolvedValue({
+          id: 101,
+          bookingNumber: 'PW-BK-101',
+          finalAmount: 1500,
+          remainingAmount: 1500,
+          paidAmount: 0,
+          paymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
+          customerId: 10,
+        }),
+      };
+
+      const mockPaymentRepo = {
+        findActivePaymentByBookingId: jest.fn().mockResolvedValue({
+          id: 401,
+          amount: 1500,
+          razorpayPaymentLinkId: 'plink_purohit_created',
+          createdById: 99, // created by Purohit, not customer 10
+          customerPaymentMethod: CUSTOMER_PAYMENT_METHOD.CASH,
+          status: PAYMENT_STATUS.PENDING,
+        }),
+        savePayment: jest.fn(),
+      };
+
+      const mockDataSource = {
+        transaction: jest.fn().mockImplementation(async (callback) => {
+          const fakePaymentRepo = {
+            create: jest.fn().mockImplementation((val) => ({ id: 402, ...val })),
+            save: jest.fn().mockImplementation(async (val) => val),
+          };
+          const fakePaymentBookingRepo = {
+            create: jest.fn().mockImplementation((val) => val),
+            save: jest.fn().mockResolvedValue({}),
+          };
+          return callback({
+            getRepository: (entity: any) => {
+              if (entity.name === 'Payment' || entity === Payment) return fakePaymentRepo;
+              return fakePaymentBookingRepo;
+            },
+          });
+        }),
+      };
+
+      const testService = new PaymentService(
+        mockBookingRepo as any,
+        mockPaymentRepo as any,
+        mockDataSource as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
+
+      jest.spyOn<any, any>(testService, 'createRazorpayPaymentLink').mockResolvedValue({
+        id: 'plink_customer_fresh',
+        short_url: 'https://rzp.io/i/fresh_customer',
+        currency: 'INR',
+      });
+
+      const customerUser = { id: 10, role: USER_ROLE.CUSTOMER } as any;
+      const res = await testService.createBookingPaymentLink(customerUser, {
+        bookingId: 101,
+        paymentOption: 'FULL',
+      });
+
+      // Assert that previous purohit payment was superseded and a fresh customer payment link was created
+      expect(mockPaymentRepo.savePayment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 401,
+          status: PAYMENT_STATUS.FAILED,
+        }),
+      );
+
+      expect(res.paymentId).toBe(402);
+      expect(res.callbackUrl).toContain('/customer/bookings');
+      expect(res.customerPaymentMethod).toBe('ONLINE');
+    });
   });
 
 });

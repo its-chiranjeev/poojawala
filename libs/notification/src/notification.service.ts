@@ -4,6 +4,52 @@ import { NotificationQueryDto } from '@poojawala/dtos';
 import { NOTIFICATION_TYPE, USER_ROLE, USER_STATUS } from '@poojawala/entities';
 import { BookingGateway } from '@poojawala/gateway';
 
+export interface FormattedSchedule {
+  scheduledDate: string | null;
+  scheduledTime: string | null;
+  formattedSchedule: string | null;
+}
+
+export function formatScheduledAt(scheduledAt?: Date | string | null): FormattedSchedule {
+  if (!scheduledAt) {
+    return {
+      scheduledDate: null,
+      scheduledTime: null,
+      formattedSchedule: null,
+    };
+  }
+
+  const d = scheduledAt instanceof Date ? scheduledAt : new Date(scheduledAt);
+  if (isNaN(d.getTime())) {
+    return {
+      scheduledDate: null,
+      scheduledTime: null,
+      formattedSchedule: null,
+    };
+  }
+
+  const scheduledDate = d.toLocaleDateString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+
+  const rawTime = d.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+  const scheduledTime = rawTime ? rawTime.toUpperCase() : rawTime;
+
+  return {
+    scheduledDate,
+    scheduledTime,
+    formattedSchedule: `Date: ${scheduledDate}, Time: ${scheduledTime}`,
+  };
+}
+
 @Injectable()
 export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
@@ -18,6 +64,36 @@ export class NotificationService {
     return this.bookingGateway;
   }
 
+  private enrichWithFormattedSchedule(extraData?: Record<string, any>): Record<string, any> | undefined {
+    if (!extraData || typeof extraData !== 'object') {
+      return extraData;
+    }
+
+    const cloned: Record<string, any> = { ...extraData };
+    const scheduledAtVal = cloned.scheduledAt || cloned.booking?.scheduledAt;
+
+    if (scheduledAtVal) {
+      const { scheduledDate, scheduledTime } = formatScheduledAt(scheduledAtVal);
+      if (scheduledDate && scheduledTime) {
+        if (!cloned.scheduledDate) {
+          cloned.scheduledDate = scheduledDate;
+        }
+        if (!cloned.scheduledTime) {
+          cloned.scheduledTime = scheduledTime;
+        }
+        if (cloned.notification && typeof cloned.notification === 'object') {
+          cloned.notification = {
+            ...cloned.notification,
+            scheduledDate: cloned.notification.scheduledDate || scheduledDate,
+            scheduledTime: cloned.notification.scheduledTime || scheduledTime,
+          };
+        }
+      }
+    }
+
+    return cloned;
+  }
+
   async createNotification(
     userId: number,
     title: string,
@@ -28,6 +104,8 @@ export class NotificationService {
     emitSocket: boolean = true,
     extraData?: Record<string, any>,
   ) {
+    const enrichedExtraData = this.enrichWithFormattedSchedule(extraData);
+
     const entity = this.notificationRepository.create({
       userId,
       title,
@@ -41,8 +119,8 @@ export class NotificationService {
     const savedNotification = await this.notificationRepository.save(entity);
 
     if (emitSocket) {
-      const socketPayload = extraData
-        ? { ...savedNotification, ...extraData }
+      const socketPayload = enrichedExtraData
+        ? { ...savedNotification, ...enrichedExtraData }
         : savedNotification;
 
       // Emit real-time notification
@@ -177,6 +255,8 @@ export class NotificationService {
       }
     }
 
+    const enrichedExtraData = this.enrichWithFormattedSchedule(extraData);
+
     const payload = {
       id: savedNotifications[0]?.id || Date.now(),
       title,
@@ -185,7 +265,7 @@ export class NotificationService {
       referenceId,
       referenceType,
       createdAt: new Date(),
-      ...extraData,
+      ...enrichedExtraData,
     };
 
     // Socket.IO automatically deduplicates across all rooms when an array is passed to .to()

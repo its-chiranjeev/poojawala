@@ -60,7 +60,7 @@ import {
   paymentInvoiceTemplate,
   InvoiceOrderItem,
 } from './templates/invoice.template';
-import { NotificationService } from '@poojawala/notification';
+import { NotificationService, formatScheduledAt } from '@poojawala/notification';
 import {
   NOTIFICATION_TYPE,
   PurohitProfile,
@@ -1142,7 +1142,12 @@ export class PaymentService {
       } else if (
         Number(existingPayment.amount) === Number(amount) &&
         existingPayment.razorpayPaymentLinkId &&
-        (user.role !== USER_ROLE.PUROHIT || existingPayment.createdById === user.id)
+        ((user.role === USER_ROLE.PUROHIT &&
+          existingPayment.createdById === user.id &&
+          existingPayment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH) ||
+          (user.role === USER_ROLE.CUSTOMER &&
+            existingPayment.createdById === user.id &&
+            existingPayment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.ONLINE))
       ) {
         try {
           const paymentLink = await this.razorpay.paymentLink.fetch(
@@ -1170,6 +1175,10 @@ export class PaymentService {
               ? buildAstrologyTransparencyNotices(amount, ratePerMinute, false)
               : null;
 
+            const isPurohit = user.role === USER_ROLE.PUROHIT;
+            const partnerBookingsUrl = this.getPartnerBookingsUrl();
+            const customerBookingsUrl = `${this.getFrontendBaseUrl()}/customer/bookings`;
+
             return {
               paymentId: existingPayment.id,
               paymentUrl: paymentLink.short_url,
@@ -1179,8 +1188,9 @@ export class PaymentService {
               bookingId: booking.id,
               bookingNumber: booking.bookingNumber,
               status: existingPayment.status,
-              customerPaymentMethod: existingPayment.customerPaymentMethod,
-              paymentMethod: existingPayment.paymentMethod,
+              customerPaymentMethod: isPurohit
+                ? CUSTOMER_PAYMENT_METHOD.CASH
+                : (existingPayment.customerPaymentMethod ?? CUSTOMER_PAYMENT_METHOD.ONLINE),
               razorpayOrderId: existingPayment.razorpayOrderId ?? undefined,
               razorpayPaymentLinkId:
                 existingPayment.razorpayPaymentLinkId ?? undefined,
@@ -1190,7 +1200,7 @@ export class PaymentService {
               consultationChargesNoticeTitle: astrologyTransparency?.consultationChargesNoticeTitle,
               consultationFeeNotice: astrologyTransparency?.consultationFeeNotice,
               astrologyTransparency,
-              callbackUrl: user.role === USER_ROLE.PUROHIT ? this.getPartnerBookingsUrl() : undefined,
+              callbackUrl: isPurohit ? partnerBookingsUrl : customerBookingsUrl,
             };
           } else {
             // Status is cancelled, expired, paid, or partially_paid
@@ -1271,9 +1281,10 @@ export class PaymentService {
       const cleanBase = this.getFrontendBaseUrl();
       const isPurohit = user.role === USER_ROLE.PUROHIT;
       const partnerBookingsUrl = this.getPartnerBookingsUrl();
-      const customCallbackUrl =
-        dto.callbackUrl?.trim() ||
-        (isPurohit ? partnerBookingsUrl : undefined);
+      const customerBookingsUrl = `${cleanBase}/customer/bookings`;
+      const customCallbackUrl = isPurohit
+        ? partnerBookingsUrl
+        : (dto.callbackUrl?.trim() || customerBookingsUrl);
 
       const paymentLink = await this.createRazorpayPaymentLink(
         savedPayment,
@@ -1282,6 +1293,7 @@ export class PaymentService {
         dto.description,
         {
           initiatedByRole: user.role,
+          payerRole: user.role,
         },
         customCallbackUrl,
       );
@@ -1304,8 +1316,12 @@ export class PaymentService {
         bookingId: booking.id,
         bookingNumber: booking.bookingNumber,
         status: savedPayment.status,
-        customerPaymentMethod: savedPayment.customerPaymentMethod,
-        paymentMethod: savedPayment.paymentMethod,
+        customerPaymentMethod: isPurohit
+          ? CUSTOMER_PAYMENT_METHOD.CASH
+          : (savedPayment.customerPaymentMethod ?? CUSTOMER_PAYMENT_METHOD.ONLINE),
+        paymentMethod: isPurohit
+          ? ('CASH' as any)
+          : (savedPayment.paymentMethod ?? ('ONLINE' as any)),
         razorpayOrderId: savedPayment.razorpayOrderId ?? undefined,
         razorpayPaymentLinkId: savedPayment.razorpayPaymentLinkId ?? undefined,
         razorpayPaymentId: savedPayment.razorpayPaymentId ?? undefined,
@@ -1314,7 +1330,7 @@ export class PaymentService {
         consultationChargesNoticeTitle: astrologyTransparency?.consultationChargesNoticeTitle,
         consultationFeeNotice: astrologyTransparency?.consultationFeeNotice,
         astrologyTransparency,
-        callbackUrl: isPurohit ? partnerBookingsUrl : (customCallbackUrl || `${cleanBase}/customer/bookings`),
+        callbackUrl: isPurohit ? partnerBookingsUrl : customerBookingsUrl,
       };
     } catch (error) {
       savedPayment.status = PAYMENT_STATUS.FAILED;
@@ -1506,28 +1522,31 @@ export class PaymentService {
 
     let callbackUrl: string | undefined;
 
+    const customerBookingsUrl = `${cleanBase}/customer/bookings`;
+
     const isPurohitPayment =
       customCallbackUrl?.includes('/partner/bookings') ||
       extraNotes?.['initiatedByRole'] === USER_ROLE.PUROHIT ||
       extraNotes?.['payerRole'] === USER_ROLE.PUROHIT ||
       payment.createdBy?.role === USER_ROLE.PUROHIT ||
+      payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH ||
       (booking?.purohit?.userId != null &&
         payment.createdById === booking.purohit.userId);
 
-    if (customCallbackUrl?.trim()) {
-      callbackUrl = customCallbackUrl.trim();
-    } else if (isPurohitPayment) {
+    if (isPurohitPayment) {
       callbackUrl = partnerBookingsUrl;
     } else if (
       payment.paymentType === PAYMENT_TYPE.PRODUCT_PAYMENT ||
       extraNotes?.['isCartCheckout'] === 'true'
     ) {
-      callbackUrl = `${cleanBase}/customer/orders`;
+      callbackUrl = customCallbackUrl?.trim() || `${cleanBase}/customer/orders`;
     } else if (
       payment.paymentType === PAYMENT_TYPE.BOOKING_PAYMENT ||
       booking != null
     ) {
-      callbackUrl = `${cleanBase}/customer/bookings`;
+      callbackUrl = customCallbackUrl?.trim() || customerBookingsUrl;
+    } else if (customCallbackUrl?.trim()) {
+      callbackUrl = customCallbackUrl.trim();
     } else if (cleanBase) {
       callbackUrl = cleanBase;
     }
@@ -2752,8 +2771,14 @@ export class PaymentService {
     const paymentDate =
       payment?.paidAt ?? payment?.createdAt ?? booking.createdAt;
 
+    const isPurohitPaymentMethod =
+      payment?.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH ||
+      payment?.createdBy?.role === USER_ROLE.PUROHIT ||
+      (booking.purohit?.userId != null && payment?.createdById === booking.purohit.userId) ||
+      (payment?.paymentMethod as string)?.toUpperCase() === 'CASH';
+
     const paymentMethodDisplay = payment
-      ? (payment.customerPaymentMethod === CUSTOMER_PAYMENT_METHOD.CASH
+      ? (isPurohitPaymentMethod
         ? 'Cash'
         : this.formatPaymentMethod(
           razorpayPayment?.method ?? payment.paymentMethod ?? '-',
@@ -4080,22 +4105,18 @@ export class PaymentService {
 
       providerStatus: razorpayPayment?.status ?? null,
 
-      customerPaymentMethod: payment.customerPaymentMethod ?? null,
+      customerPaymentMethod:
+        isInitiatedByPurohit || isCashPayment
+          ? CUSTOMER_PAYMENT_METHOD.CASH
+          : (payment.customerPaymentMethod ?? CUSTOMER_PAYMENT_METHOD.ONLINE),
 
-      // TODO: Old paymentMethod mapping
-      // paymentMethod:
-      //   this.mapRazorpayMethod(
-      //     razorpayPayment?.method,
-      //     payment.paymentMethod,
-      //   ) ?? null,
       paymentMethod:
-        isCashPayment ||
-          (viewerRole === USER_ROLE.CUSTOMER && isInitiatedByPurohit)
+        isCashPayment || isInitiatedByPurohit
           ? 'CASH'
           : (this.mapRazorpayMethod(
             razorpayPayment?.method,
             payment.paymentMethod,
-          ) ?? null),
+          ) ?? 'ONLINE'),
 
       razorpayOrderId:
         razorpayPayment?.order_id ?? payment.razorpayOrderId ?? null,
@@ -6095,6 +6116,7 @@ export class PaymentService {
         const bookingCustomerName =
           [bookingCustomer?.firstName, bookingCustomer?.lastName].filter(Boolean).join(' ') ||
           'Customer';
+        const paymentScheduleInfo = formatScheduledAt(payment.booking.scheduledAt);
         await this.notificationService.notifyAdmins(
           'Booking Payment Received',
           `Booking Payment Successful — Booking #${payment.booking.bookingNumber} has been successfully paid by ${bookingCustomerName}. Payment ID: ${payment.razorpayPaymentId || `PAY-${payment.id}`}. Amount: ₹${payment.amount}.`,
@@ -6111,6 +6133,8 @@ export class PaymentService {
             amount: payment.amount,
             status: 'PAID',
             scheduledAt: payment.booking.scheduledAt,
+            scheduledDate: paymentScheduleInfo.scheduledDate,
+            scheduledTime: paymentScheduleInfo.scheduledTime,
           },
         );
 
@@ -6164,12 +6188,16 @@ export class PaymentService {
         }
 
         if (newlyAssignedPurohitUserIds.length > 0) {
+          const purohitScheduleInfo = formatScheduledAt(payment.booking.scheduledAt);
+          const purohitSchedulePart = purohitScheduleInfo.formattedSchedule
+            ? ` Date: ${purohitScheduleInfo.scheduledDate}, Time: ${purohitScheduleInfo.scheduledTime}.`
+            : '';
           for (const purohitUserId of newlyAssignedPurohitUserIds) {
             try {
               await this.notificationService.createNotification(
                 purohitUserId,
                 'New Booking',
-                `You have received a new booking request (Booking B-${payment.booking.id}).`,
+                `You have received a new booking request (Booking B-${payment.booking.id}).${purohitSchedulePart}`,
                 NOTIFICATION_TYPE.BOOKING,
                 payment.booking.id,
                 'BOOKING',
@@ -6179,6 +6207,8 @@ export class PaymentService {
                   bookingNumber: payment.booking.bookingNumber,
                   status: payment.booking.status,
                   scheduledAt: payment.booking.scheduledAt,
+                  scheduledDate: purohitScheduleInfo.scheduledDate,
+                  scheduledTime: purohitScheduleInfo.scheduledTime,
                   booking: payment.booking,
                 },
               );
@@ -6187,10 +6217,12 @@ export class PaymentService {
                 purohitUserId,
                 'new_booking',
                 {
-                  message: `You have received a new booking request (Booking B-${payment.booking.id}).`,
+                  message: `You have received a new booking request (Booking B-${payment.booking.id}).${purohitSchedulePart}`,
                   booking: payment.booking,
                   bookingId: payment.booking.id,
                   scheduledAt: payment.booking.scheduledAt,
+                  scheduledDate: purohitScheduleInfo.scheduledDate,
+                  scheduledTime: purohitScheduleInfo.scheduledTime,
                 },
               );
 
