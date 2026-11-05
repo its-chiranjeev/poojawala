@@ -326,4 +326,35 @@ export class TempleRepository extends BaseRepository<Temple> {
 
     return qb.getMany();
   }
+
+  async findDuplicateTemple(
+    name: string,
+    address?: string | null,
+    excludeId?: number,
+  ): Promise<Temple | null> {
+    const normalizedName = (name || '').trim().toLowerCase();
+    const normalizedAddress = (address || '').trim().toLowerCase();
+
+    if (!normalizedName) {
+      return null;
+    }
+
+    const qb = this.repo.createQueryBuilder('temple');
+    qb.where('temple.deletedAt IS NULL');
+    qb.andWhere('LOWER(TRIM(temple.name)) = :name', { name: normalizedName });
+
+    if (normalizedAddress) {
+      qb.andWhere("LOWER(TRIM(COALESCE(temple.address, ''))) = :address", {
+        address: normalizedAddress,
+      });
+    } else {
+      qb.andWhere("(temple.address IS NULL OR TRIM(temple.address) = '')");
+    }
+
+    if (excludeId) {
+      qb.andWhere('temple.id != :excludeId', { excludeId });
+    }
+
+    return qb.getOne();
+  }
 }

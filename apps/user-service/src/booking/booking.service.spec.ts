@@ -1,7 +1,7 @@
 // Must be the VERY FIRST statement — prevents Jest from crashing on puppeteer ESM
 jest.mock('puppeteer', () => ({}));
 
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { BookingService } from './booking.service';
 import { BookingController } from './booking.controller';
 import { ServiceService } from '../service/service.service';
@@ -170,6 +170,7 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
 
     mockDataSource = {
       transaction: jest.fn().mockImplementation(async (cb) => cb(mockEntityManager)),
+      getRepository: jest.fn().mockImplementation((entity) => mockEntityManager.getRepository(entity)),
     };
 
     mockBookingRepository = {
@@ -4903,6 +4904,74 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
 
       expect(res).toBeDefined();
       expect(res.message).toBe('Booking cancelled successfully');
+    });
+  });
+
+  describe('getAvailableBookings — Available bookings for Purohit', () => {
+    it('returns available bookings sorted newest first from repository', async () => {
+      const purohitUser = {
+        id: 200,
+        role: USER_ROLE.PUROHIT,
+        status: USER_STATUS.ACTIVE,
+      } as User;
+
+      const mockProfile = {
+        id: 50,
+        userId: 200,
+        verificationStatus: PUROHIT_VERIFICATION_STATUS.APPROVED,
+        user: {
+          id: 200,
+          status: USER_STATUS.ACTIVE,
+        },
+      };
+
+      mockPurohitProfileRepo.findOne = jest.fn().mockResolvedValue(mockProfile);
+
+      const mockBookings = [
+        {
+          id: 802,
+          bookingNumber: 'BK-802',
+          createdAt: new Date('2026-11-05T10:00:00Z'),
+          scheduledAt: new Date('2026-11-10T10:00:00Z'),
+        },
+        {
+          id: 801,
+          bookingNumber: 'BK-801',
+          createdAt: new Date('2026-11-04T10:00:00Z'),
+          scheduledAt: new Date('2026-11-08T10:00:00Z'),
+        },
+      ];
+
+      mockBookingRepository.findAvailableBookingsForPurohit = jest.fn().mockResolvedValue({
+        bookings: mockBookings,
+        total: 2,
+      });
+
+      const res = await bookingService.getAvailableBookings(purohitUser, {
+        page: 1,
+        limit: 10,
+      } as any);
+
+      expect(mockBookingRepository.findAvailableBookingsForPurohit).toHaveBeenCalledWith(
+        50,
+        1,
+        10,
+        undefined,
+      );
+      expect(res.bookings[0].id).toBe(802);
+      expect(res.bookings[1].id).toBe(801);
+      expect(res.pagination.total).toBe(2);
+    });
+
+    it('throws ForbiddenException if user is not a purohit', async () => {
+      const customerUser = {
+        id: 100,
+        role: USER_ROLE.CUSTOMER,
+      } as User;
+
+      await expect(
+        bookingService.getAvailableBookings(customerUser, { page: 1, limit: 10 } as any),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });

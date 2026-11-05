@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
@@ -356,6 +357,76 @@ export class TempleService {
     return result;
   }
 
+  async checkDuplicateTemple(
+    templeRepo: any,
+    name: string,
+    address?: string | null,
+    excludeId?: number,
+  ): Promise<void> {
+    const normalizedName = (name || '').trim().toLowerCase();
+    const normalizedAddress = (address || '').trim().toLowerCase();
+
+    if (!normalizedName) {
+      return;
+    }
+
+    if (templeRepo && typeof templeRepo.findDuplicateTemple === 'function') {
+      const duplicate = await templeRepo.findDuplicateTemple(
+        normalizedName,
+        normalizedAddress,
+        excludeId,
+      );
+      if (duplicate) {
+        throw new ConflictException(
+          'A temple with the same name and address already exists',
+        );
+      }
+      return;
+    }
+
+    if (templeRepo && typeof templeRepo.createQueryBuilder === 'function') {
+      const qb = templeRepo.createQueryBuilder('temple');
+      qb.where('temple.deletedAt IS NULL');
+      qb.andWhere('LOWER(TRIM(temple.name)) = :name', { name: normalizedName });
+
+      if (normalizedAddress) {
+        qb.andWhere("LOWER(TRIM(COALESCE(temple.address, ''))) = :address", {
+          address: normalizedAddress,
+        });
+      } else {
+        qb.andWhere("(temple.address IS NULL OR TRIM(temple.address) = '')");
+      }
+
+      if (excludeId) {
+        qb.andWhere('temple.id != :excludeId', { excludeId });
+      }
+
+      const duplicate = await qb.getOne();
+      if (duplicate) {
+        throw new ConflictException(
+          'A temple with the same name and address already exists',
+        );
+      }
+      return;
+    }
+
+    if (templeRepo && typeof templeRepo.find === 'function') {
+      const all = await templeRepo.find({ withDeleted: false });
+      const duplicate = all.find((t: any) => {
+        if (excludeId && t.id === excludeId) return false;
+        if (t.deletedAt) return false;
+        const tName = (t.name || '').trim().toLowerCase();
+        const tAddress = (t.address || '').trim().toLowerCase();
+        return tName === normalizedName && tAddress === normalizedAddress;
+      });
+      if (duplicate) {
+        throw new ConflictException(
+          'A temple with the same name and address already exists',
+        );
+      }
+    }
+  }
+
   async createTemple(
     dto: CreateTempleDto,
     files?: {
@@ -407,6 +478,14 @@ export class TempleService {
       verificationRemarks = null;
     }
 
+    if (dto.name) {
+      await this.checkDuplicateTemple(
+        this.templeRepository,
+        dto.name,
+        dto.address,
+      );
+    }
+
     let imageUrl: string | null = dto.imageUrl ? dto.imageUrl.trim() : null;
     const fileToUpload = files?.imageUrl || files?.image;
     if (fileToUpload?.length) {
@@ -444,6 +523,12 @@ export class TempleService {
       async (manager: EntityManager) => {
         const templeRepo = manager.getRepository(Temple);
         const aartiRepo = manager.getRepository(TempleAarti);
+
+        await this.checkDuplicateTemple(
+          templeRepo,
+          dto.name,
+          dto.address,
+        );
 
         const slug = dto.slug?.trim()
           ? await generateUniqueSlug(templeRepo, dto.slug.trim())
@@ -729,6 +814,16 @@ export class TempleService {
         if (!temple || temple.deletedAt) {
           throw new NotFoundException(`Temple with id ${id} not found`);
         }
+
+        const candidateName = dto.name !== undefined ? dto.name.trim() : temple.name;
+        const candidateAddress = dto.address !== undefined ? dto.address : temple.address;
+
+        await this.checkDuplicateTemple(
+          templeRepo,
+          candidateName,
+          candidateAddress,
+          temple.id,
+        );
 
         if (isPurohit) {
           if (temple.submittedByUserId !== user!.id) {

@@ -545,8 +545,8 @@ export class BookingRepository extends BaseRepository<Booking> {
     }
 
     const [bookings, total] = await query
-      .orderBy('booking.scheduledAt', 'ASC')
-      .addOrderBy('booking.createdAt', 'DESC')
+      .orderBy('booking.createdAt', 'DESC')
+      .addOrderBy('booking.scheduledAt', 'ASC')
       .skip(skip)
       .take(safeLimit)
       .getManyAndCount();

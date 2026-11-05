@@ -42,6 +42,7 @@ describe('TempleService', () => {
     findActiveServicesByTempleId: jest.Mock;
     findAartisByTempleId: jest.Mock;
     findAartisByTempleIds: jest.Mock;
+    findDuplicateTemple?: jest.Mock;
     manager?: any;
   };
   let mockAartiRepo: {
@@ -142,6 +143,7 @@ describe('TempleService', () => {
       findActiveServicesByTempleIds: jest.fn().mockResolvedValue([]),
       findAartisByTempleId: jest.fn().mockResolvedValue([]),
       findAartisByTempleIds: jest.fn().mockResolvedValue([]),
+      findDuplicateTemple: jest.fn().mockResolvedValue(null),
     };
 
     mockAartiRepo = {
@@ -3785,6 +3787,107 @@ describe('TempleService', () => {
           expect((mockServiceRepo as unknown as Record<string, unknown>).delete).toBeUndefined();
         });
       });
+    });
+  });
+
+  describe('Duplicate Temple Validation on POST and PATCH', () => {
+    const mockAdminUser = { id: 1, role: USER_ROLE.ADMIN } as User;
+
+    it('rejects POST /temple/add when a temple with the same name and address exists (case-insensitive with toLowerCase)', async () => {
+      const existingTemple = {
+        id: 1,
+        name: 'Shri Somnath Temple',
+        address: 'Prabhas Patan, Veraval, Gujarat',
+      };
+      mockTempleRepo.findDuplicateTemple.mockResolvedValueOnce(existingTemple);
+
+      const dto = plainToInstance(CreateTempleDto, {
+        name: '  shri somnath temple  ',
+        address: '  prabhas patan, veraval, gujarat  ',
+      });
+
+      await expect(service.createTemple(dto, undefined, 99)).rejects.toThrow(
+        new ConflictException('A temple with the same name and address already exists'),
+      );
+    });
+
+    it('allows POST /temple/add when a temple has the same name but different address', async () => {
+      mockTempleRepo.findDuplicateTemple.mockResolvedValue(null);
+
+      const dto = plainToInstance(CreateTempleDto, {
+        name: 'Shri Somnath Temple',
+        address: 'Different Location Road, Surat',
+      });
+
+      const res = await service.createTemple(dto, undefined, 99);
+      expect(res.success).toBe(true);
+    });
+
+    it('rejects PATCH /temple/:id when updating to the same name and address of another existing temple', async () => {
+      const currentTemple = {
+        id: 2,
+        name: 'Somnath Mandir',
+        address: 'Old Address',
+        deletedAt: null,
+      };
+      const anotherTemple = {
+        id: 1,
+        name: 'Shri Somnath Temple',
+        address: 'Prabhas Patan, Veraval, Gujarat',
+      };
+
+      mockTempleRepo.findOne.mockResolvedValueOnce({ ...currentTemple });
+      mockTempleRepo.findDuplicateTemple.mockResolvedValueOnce(anotherTemple);
+
+      const dto: UpdateTempleDto = {
+        name: 'shri somnath temple',
+        address: 'prabhas patan, veraval, gujarat',
+      };
+
+      await expect(
+        service.updateTempleWithUser(2, dto, undefined, mockAdminUser),
+      ).rejects.toThrow(
+        new ConflictException('A temple with the same name and address already exists'),
+      );
+    });
+
+    it('allows PATCH /temple/:id when updating own details with same name and address (no self-collision)', async () => {
+      const currentTemple = {
+        id: 1,
+        name: 'Shri Somnath Temple',
+        address: 'Prabhas Patan, Veraval, Gujarat',
+        deletedAt: null,
+      };
+
+      mockTempleRepo.findOne.mockResolvedValue({ ...currentTemple });
+      mockTempleRepo.findDuplicateTemple.mockResolvedValue(null);
+
+      const dto: UpdateTempleDto = {
+        name: 'Shri Somnath Temple',
+        address: 'Prabhas Patan, Veraval, Gujarat',
+      };
+
+      const res = await service.updateTempleWithUser(1, dto, undefined, mockAdminUser);
+      expect(res.success).toBe(true);
+    });
+
+    it('allows PATCH /temple/:id when updating name but address remains distinct', async () => {
+      const currentTemple = {
+        id: 2,
+        name: 'Old Name',
+        address: 'Unique Address 456',
+        deletedAt: null,
+      };
+
+      mockTempleRepo.findOne.mockResolvedValue({ ...currentTemple });
+      mockTempleRepo.findDuplicateTemple.mockResolvedValue(null);
+
+      const dto: UpdateTempleDto = {
+        name: 'Shri Somnath Temple',
+      };
+
+      const res = await service.updateTempleWithUser(2, dto, undefined, mockAdminUser);
+      expect(res.success).toBe(true);
     });
   });
 });
