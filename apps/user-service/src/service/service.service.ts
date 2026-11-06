@@ -1474,16 +1474,31 @@ export class ServiceService {
 
     const updated = await serviceRepo.save(service);
 
-    const purohitServiceRepo = manager
-      ? manager.getRepository(PurohitService)
-      : this.PurohitServiceRepository;
-    await purohitServiceRepo.update(
-      { serviceId: updated.id } as any,
-      {
-        isOnline: updated.isOnline ?? false,
-        isOffline: updated.isOffline ?? true,
-      } as any,
-    );
+    if (manager) {
+      await manager.getRepository(PurohitService).update(
+        { serviceId: updated.id } as any,
+        {
+          isOnline: updated.isOnline ?? false,
+          isOffline: updated.isOffline ?? true,
+        } as any,
+      );
+    } else if (typeof this.PurohitServiceRepository?.updateMany === 'function') {
+      await this.PurohitServiceRepository.updateMany(
+        { serviceId: updated.id },
+        {
+          isOnline: updated.isOnline ?? false,
+          isOffline: updated.isOffline ?? true,
+        } as any,
+      );
+    } else if (typeof this.PurohitServiceRepository?.update === 'function') {
+      await this.PurohitServiceRepository.update(
+        { serviceId: updated.id } as any,
+        {
+          isOnline: updated.isOnline ?? false,
+          isOffline: updated.isOffline ?? true,
+        } as any,
+      );
+    }
 
     if (basicFeaturesToSync !== undefined) {
       await this.syncServiceFeatures(

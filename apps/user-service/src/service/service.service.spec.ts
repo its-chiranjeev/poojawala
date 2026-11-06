@@ -160,7 +160,10 @@ describe('ServiceService - Temple ↔ Service Integration (Part 2)', () => {
       getDownloadUrl: jest.fn().mockImplementation(async (url) => url),
     };
 
-    mockPurohitServiceRepo = {};
+    mockPurohitServiceRepo = {
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      updateMany: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
     mockPurohitProfileRepo = {};
     mockAuditLogService = {
       createAuditLog: jest.fn().mockResolvedValue(undefined),

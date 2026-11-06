@@ -40,9 +40,12 @@ export class BaseRepository<T extends ObjectLiteral> {
     });
   }
 
-  async update(id: string | number, data: QueryDeepPartialEntity<T>) {
-    await this.repo.update(id as any, data);
-    return this.findById(id);
+  async update(id: string | number | any, data: QueryDeepPartialEntity<T>) {
+    const result = await this.repo.update(id as any, data);
+    if (typeof id === 'string' || typeof id === 'number') {
+      return this.findById(id);
+    }
+    return result;
   }
 
   async updateMany(criteria: any, data: QueryDeepPartialEntity<T>) {
