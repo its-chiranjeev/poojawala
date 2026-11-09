@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import { Booking, BOOKING_STATUS, BOOKING_PAYMENT_STATUS, BOOKING_PAYMENT_TYPE, BOOKING_TYPE, BOOKING_MODE, USER_ROLE, ASSIGNMENT_TYPE, PAYMENT_TYPE, PAYMENT_STATUS, CANCELLED_BY } from '@poojawala/entities';
 import { BaseRepository } from './baseDb.repository';
+import { getEquivalentCities } from '@poojawala/common/utils/city.util';
 
 interface FindBookingsByRoleOptions {
   userId: number;
@@ -430,6 +431,38 @@ export class BookingRepository extends BaseRepository<Booking> {
 
     const skip = (safePage - 1) * safeLimit;
 
+    const rawAreas = await this.bookingRepo.manager.query(
+      `
+      SELECT DISTINCT psa.city
+      FROM purohit_service_areas psa
+      JOIN purohit_profiles pp ON pp."userId" = psa."purohitId"
+      WHERE pp.id = $1 AND psa."deletedAt" IS NULL
+      `,
+      [purohitId],
+    );
+
+    const distinctCities: string[] = (rawAreas || [])
+      .map((row: any) => (typeof row?.city === 'string' ? row.city.trim() : ''))
+      .filter((c: string) => c.length > 0);
+
+    if (distinctCities.length === 0) {
+      return {
+        bookings: [],
+        total: 0,
+      };
+    }
+
+    const matchingCities = Array.from(
+      new Set(distinctCities.flatMap((c) => getEquivalentCities(c))),
+    ).filter((c) => c.length > 0);
+
+    if (matchingCities.length === 0) {
+      return {
+        bookings: [],
+        total: 0,
+      };
+    }
+
     const query = this.bookingRepo
       .createQueryBuilder('booking')
       .leftJoin('booking.customer', 'customer')
@@ -508,21 +541,21 @@ export class BookingRepository extends BaseRepository<Booking> {
         },
       )
       .andWhere(
-        `
-        EXISTS (
-          SELECT 1
-          FROM purohit_service_areas psa
-          JOIN purohit_profiles pp ON pp."userId" = psa."purohitId"
-          WHERE pp.id = :purohitId
-            AND psa."deletedAt" IS NULL
-            AND (
-              LOWER(TRIM(psa.city)) = LOWER(TRIM("customerAddress"."city"))
-              OR LOWER(TRIM(psa.city)) = LOWER(TRIM(booking."addressSnapshot"->>'city'))
-            )
-        )
-        `,
+        `(
+          (
+            "customerAddress"."city" IS NOT NULL
+            AND TRIM("customerAddress"."city") != ''
+            AND LOWER(TRIM("customerAddress"."city")) IN (:...matchingCities)
+          )
+          OR (
+            ("customerAddress"."city" IS NULL OR TRIM("customerAddress"."city") = '')
+            AND booking."addressSnapshot"->>'city' IS NOT NULL
+            AND TRIM(booking."addressSnapshot"->>'city') != ''
+            AND LOWER(TRIM(booking."addressSnapshot"->>'city')) IN (:...matchingCities)
+          )
+        )`,
         {
-          purohitId,
+          matchingCities,
         },
       );
 

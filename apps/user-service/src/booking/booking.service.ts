@@ -77,6 +77,7 @@ import { AUDIT_MODULE, ACTOR_TYPE } from '@poojawala/entities';
 import {
   AuditLogService,
   normalizeCityName,
+  isCityMatch,
   buildAstrologyTransparencyNotices,
   AstrologyTransparencyData,
 } from '@poojawala/common';
@@ -499,10 +500,10 @@ export class BookingService {
 
           if (!service.isGlobal) {
             const serviceCities = Array.isArray(service.cities) ? service.cities : [];
-            const normalizedBookingCity = normalizeCityName(bookingCity);
-            const isCityAvailable = serviceCities.some(
-              (c) => normalizeCityName(c.name) === normalizedBookingCity,
-            );
+            const isCityAvailable = serviceCities.some((c) => {
+              const cityName = typeof c === 'string' ? c : c?.name;
+              return cityName ? isCityMatch(cityName, bookingCity) : false;
+            });
 
             if (!isCityAvailable) {
               throw new BadRequestException(
@@ -3827,9 +3828,8 @@ export class BookingService {
             bookingCity = (addr?.city || '').trim();
           }
 
-          const normalizedBookingCity = normalizeCityName(bookingCity);
           const servesCity = serviceAreas.some(
-            (area) => normalizeCityName(area.city) === normalizedBookingCity,
+            (area) => isCityMatch(area.city, bookingCity),
           );
 
           if (!servesCity) {
@@ -6056,10 +6056,10 @@ export class BookingService {
 
           if (!service.isGlobal) {
             const serviceCities = Array.isArray(service.cities) ? service.cities : [];
-            const normalizedBookingCity = normalizeCityName(bookingCity);
-            const isCityAvailable = serviceCities.some(
-              (c) => normalizeCityName(c.name) === normalizedBookingCity,
-            );
+            const isCityAvailable = serviceCities.some((c) => {
+              const cityName = typeof c === 'string' ? c : c?.name;
+              return cityName ? isCityMatch(cityName, bookingCity) : false;
+            });
 
             if (!isCityAvailable) {
               throw new BadRequestException(

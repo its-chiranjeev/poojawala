@@ -4974,4 +4974,164 @@ describe('POOJAWALA — Complete Removal of Legacy Samagri-Based Pricing & Servi
       ).rejects.toThrow(ForbiddenException);
     });
   });
+
+  describe('City Matching in createBooking & createBookingByAdmin', () => {
+    it('allows createBooking when customer address has "Bangalore" and service has "Bangalore Urban"', async () => {
+      const service = createPlanService({
+        cities: [{ name: 'Bangalore Urban', state: 'Karnataka' } as any],
+      });
+      mockServiceRepo.findOne.mockResolvedValue(service);
+      mockAddressRepo.findOne.mockResolvedValue({
+        ...mockAddress,
+        city: 'Bangalore',
+      });
+
+      const res = await bookingService.createBooking(mockCustomerUser, {
+        serviceId: 5,
+        customerAddressId: mockAddress.id,
+        scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+        bookingMode: 'OFFLINE',
+        plan: 'basic',
+      });
+
+      expect(res).toBeDefined();
+      expect(res.bookingId).toBe(999);
+    });
+
+    it('rejects createBooking when customer address city does not match service city', async () => {
+      const service = createPlanService({
+        cities: [{ name: 'Bangalore Urban', state: 'Karnataka' } as any],
+      });
+      mockServiceRepo.findOne.mockResolvedValue(service);
+      mockAddressRepo.findOne.mockResolvedValue({
+        ...mockAddress,
+        city: 'Bhopal',
+      });
+
+      await expect(
+        bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        }),
+      ).rejects.toThrow('Selected service is not available in the booking city.');
+    });
+
+    it('allows createBookingByAdmin when customer address has "Bangalore" and service has "Bangalore Urban"', async () => {
+      const service = createPlanService({
+        cities: [{ name: 'Bangalore Urban', state: 'Karnataka' } as any],
+      });
+      mockServiceRepo.findOne.mockResolvedValue(service);
+      mockAddressRepo.findOne.mockResolvedValue({
+        ...mockAddress,
+        city: 'Bangalore',
+      });
+      mockUserRepo.findOne.mockResolvedValue(mockCustomerUser);
+
+      const adminUser = {
+        id: 99,
+        role: USER_ROLE.ADMIN,
+        status: USER_STATUS.ACTIVE,
+      } as User;
+
+      const res = await bookingService.createBookingByAdmin(adminUser, {
+        customerId: mockCustomerUser.id,
+        serviceId: 5,
+        customerAddressId: mockAddress.id,
+        scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+        bookingMode: 'OFFLINE',
+        plan: 'basic',
+      });
+
+      expect(res).toBeDefined();
+      expect(res.bookingId).toBe(999);
+    });
+
+    it('allows createBooking bidirectionally when customer address has "Bangalore Urban" and service has "Bengaluru"', async () => {
+      const service = createPlanService({
+        cities: [{ name: 'Bengaluru', state: 'Karnataka' } as any],
+      });
+      mockServiceRepo.findOne.mockResolvedValue(service);
+      mockAddressRepo.findOne.mockResolvedValue({
+        ...mockAddress,
+        city: 'Bangalore Urban',
+      });
+
+      const res = await bookingService.createBooking(mockCustomerUser, {
+        serviceId: 5,
+        customerAddressId: mockAddress.id,
+        scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+        bookingMode: 'OFFLINE',
+        plan: 'basic',
+      });
+
+      expect(res).toBeDefined();
+      expect(res.bookingId).toBe(999);
+    });
+
+    it('rejects createBooking when cities have stem/substring collision (Indore vs Dindori)', async () => {
+      const service = createPlanService({
+        cities: [{ name: 'Dindori', state: 'Madhya Pradesh' } as any],
+      });
+      mockServiceRepo.findOne.mockResolvedValue(service);
+      mockAddressRepo.findOne.mockResolvedValue({
+        ...mockAddress,
+        city: 'Indore',
+      });
+
+      await expect(
+        bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        }),
+      ).rejects.toThrow('Selected service is not available in the booking city.');
+    });
+
+    it('rejects createBooking for distinct administrative regions (Delhi vs New Delhi)', async () => {
+      const service = createPlanService({
+        cities: [{ name: 'New Delhi', state: 'Delhi' } as any],
+      });
+      mockServiceRepo.findOne.mockResolvedValue(service);
+      mockAddressRepo.findOne.mockResolvedValue({
+        ...mockAddress,
+        city: 'Delhi',
+      });
+
+      await expect(
+        bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        }),
+      ).rejects.toThrow('Selected service is not available in the booking city.');
+    });
+
+    it('rejects createBooking for distinct administrative regions (Mumbai City vs Mumbai Suburban)', async () => {
+      const service = createPlanService({
+        cities: [{ name: 'Mumbai Suburban', state: 'Maharashtra' } as any],
+      });
+      mockServiceRepo.findOne.mockResolvedValue(service);
+      mockAddressRepo.findOne.mockResolvedValue({
+        ...mockAddress,
+        city: 'Mumbai City',
+      });
+
+      await expect(
+        bookingService.createBooking(mockCustomerUser, {
+          serviceId: 5,
+          customerAddressId: mockAddress.id,
+          scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+          bookingMode: 'OFFLINE',
+          plan: 'basic',
+        }),
+      ).rejects.toThrow('Selected service is not available in the booking city.');
+    });
+  });
 });
