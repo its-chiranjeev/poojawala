@@ -537,4 +537,87 @@ describe('ComplaintService - Booking and General Complaints', () => {
       ).rejects.toThrow(ForbiddenException);
     });
   });
+
+  describe('updateComplaintStatus - Status Transitions', () => {
+    const testAdmin = {
+      id: 900,
+      email: 'admin@test.com',
+      role: 'ADMIN',
+    } as any;
+
+    it('should allow status transition from UNDER_REVIEW to CLOSED without resolutionNotes', async () => {
+      const existingComplaint = {
+        id: 601,
+        complaintNumber: 'CMP-601',
+        raisedById: testCustomer.id,
+        status: COMPLAINT_STATUS.UNDER_REVIEW,
+      };
+      mockComplaintRepository.findComplaintById.mockResolvedValueOnce(
+        existingComplaint,
+      );
+      mockComplaintRepository.save.mockImplementationOnce(async (c) => c);
+
+      const res = await service.updateComplaintStatus(testAdmin, 601, {
+        status: COMPLAINT_STATUS.CLOSED,
+      });
+
+      expect(res.message).toBe('Complaint status updated successfully');
+      expect(res.data.status).toBe(COMPLAINT_STATUS.CLOSED);
+      expect(res.data.resolvedById).toBe(testAdmin.id);
+      expect(res.data.resolvedAt).toBeInstanceOf(Date);
+      expect(mockAuditLogService.createAuditLog).toHaveBeenCalled();
+      expect(mockNotificationService.createNotification).toHaveBeenCalled();
+    });
+
+    it('should persist trimmed resolutionNotes when transitioning from UNDER_REVIEW to CLOSED', async () => {
+      const existingComplaint = {
+        id: 602,
+        complaintNumber: 'CMP-602',
+        raisedById: testCustomer.id,
+        status: COMPLAINT_STATUS.UNDER_REVIEW,
+      };
+      mockComplaintRepository.findComplaintById.mockResolvedValueOnce(
+        existingComplaint,
+      );
+      mockComplaintRepository.save.mockImplementationOnce(async (c) => c);
+
+      const res = await service.updateComplaintStatus(testAdmin, 602, {
+        status: COMPLAINT_STATUS.CLOSED,
+        resolutionNotes: '  Closed after review  ',
+      });
+
+      expect(res.data.status).toBe(COMPLAINT_STATUS.CLOSED);
+      expect(res.data.resolutionNotes).toBe('Closed after review');
+      expect(res.data.resolvedById).toBe(testAdmin.id);
+      expect(res.data.resolvedAt).toBeInstanceOf(Date);
+    });
+
+    it('should reject invalid transitions such as OPEN to CLOSED and CLOSED to UNDER_REVIEW', async () => {
+      mockComplaintRepository.findComplaintById.mockResolvedValueOnce({
+        id: 603,
+        status: COMPLAINT_STATUS.OPEN,
+      });
+
+      await expect(
+        service.updateComplaintStatus(testAdmin, 603, {
+          status: COMPLAINT_STATUS.CLOSED,
+        }),
+      ).rejects.toThrow(
+        `Complaint status cannot be changed from ${COMPLAINT_STATUS.OPEN} to ${COMPLAINT_STATUS.CLOSED}`,
+      );
+
+      mockComplaintRepository.findComplaintById.mockResolvedValueOnce({
+        id: 604,
+        status: COMPLAINT_STATUS.CLOSED,
+      });
+
+      await expect(
+        service.updateComplaintStatus(testAdmin, 604, {
+          status: COMPLAINT_STATUS.UNDER_REVIEW,
+        }),
+      ).rejects.toThrow(
+        `Complaint status cannot be changed from ${COMPLAINT_STATUS.CLOSED} to ${COMPLAINT_STATUS.UNDER_REVIEW}`,
+      );
+    });
+  });
 });
