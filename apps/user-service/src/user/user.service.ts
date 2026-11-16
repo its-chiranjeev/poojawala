@@ -7625,12 +7625,15 @@ export class UserService {
       await Promise.all([
         this.bookingRepository.getAdminDashboardStats(),
         this.getOrderDashboardStats(),
-        this.userRepository.count({
-          where: {
-            role: USER_ROLE.PUROHIT,
-            status: USER_STATUS.ACTIVE,
-          },
-        }),
+        typeof this.purohitProfileRepository?.countActiveApprovedPurohits ===
+        'function'
+          ? this.purohitProfileRepository.countActiveApprovedPurohits()
+          : this.userRepository.count({
+              where: {
+                role: USER_ROLE.PUROHIT,
+                status: USER_STATUS.ACTIVE,
+              },
+            }),
         this.userRepository.count({
           where: {
             role: USER_ROLE.CUSTOMER,

@@ -967,7 +967,16 @@ export class BookingRepository extends BaseRepository<Booking> {
   }> {
     const query = this.bookingRepo
       .createQueryBuilder('booking')
-      .select('COUNT(*)', 'totalBookings')
+      .select(
+        `COUNT(
+          CASE 
+            WHEN booking.status != :createdStatus 
+             AND booking."paymentStatus" != :pendingPaymentStatus 
+            THEN 1 
+          END
+        )`,
+        'totalBookings',
+      )
       .addSelect(
         `COALESCE(
           SUM(
@@ -1002,6 +1011,8 @@ export class BookingRepository extends BaseRepository<Booking> {
 
     const result = await query
       .setParameters({
+        createdStatus: BOOKING_STATUS.CREATED,
+        pendingPaymentStatus: BOOKING_PAYMENT_STATUS.PENDING,
         cancelled: BOOKING_STATUS.CANCELLED,
         eligiblePaymentStatuses: [
           BOOKING_PAYMENT_STATUS.PAID,

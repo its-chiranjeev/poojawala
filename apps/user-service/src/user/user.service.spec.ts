@@ -5499,6 +5499,58 @@ describe('UserService - Purohit Verification Rework', () => {
     });
   });
 
+  describe('getAdminDashboardStats', () => {
+    it('throws ForbiddenException if caller is not ADMIN', async () => {
+      await expect(service.getAdminDashboardStats(testUser)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('returns dashboard stats including active approved purohits and filtered bookings', async () => {
+      jest.spyOn<any, any>(service, 'getOrderDashboardStats').mockResolvedValue({
+        totalOrderCount: 0,
+        totalOrderRevenue: 0,
+      });
+
+      mockBookingRepo.getAdminDashboardStats = jest.fn().mockResolvedValue({
+        totalBookings: 54,
+        totalRevenue: 25000,
+      });
+
+      mockPurohitProfileRepo.countActiveApprovedPurohits = jest
+        .fn()
+        .mockResolvedValue(15);
+
+      mockUserRepo.count = jest.fn().mockImplementation(({ where }: any) => {
+        if (where?.role === USER_ROLE.CUSTOMER && where?.status === USER_STATUS.ACTIVE) {
+          return Promise.resolve(42);
+        }
+        return Promise.resolve(0);
+      });
+
+      const stats = await service.getAdminDashboardStats(testAdmin);
+
+      expect(mockBookingRepo.getAdminDashboardStats).toHaveBeenCalled();
+      expect(mockPurohitProfileRepo.countActiveApprovedPurohits).toHaveBeenCalled();
+      expect(mockUserRepo.count).toHaveBeenCalledWith({
+        where: {
+          role: USER_ROLE.CUSTOMER,
+          status: USER_STATUS.ACTIVE,
+        },
+      });
+
+      expect(stats).toEqual({
+        totalRevenue: 25000,
+        totalBookingRevenue: 25000,
+        totalOrderRevenue: 0,
+        totalBookingCount: 54,
+        totalOrderCount: 0,
+        activePurohits: 15,
+        activeCustomers: 42,
+      });
+    });
+  });
+
 });
 
 
