@@ -23,6 +23,7 @@ import { CreateServiceDto, CreatePurohitServiceDto, CreateCategoryDto, UpdateCat
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { GetServicesQueryDto } from '@poojawala/dtos/service/get.services.query.dto';
 import { UpdateServiceDto, UpdatePurohitServiceDto, UpdateServiceStatusDto } from '@poojawala/dtos/service/update.service.dto';
+import { CheckServiceAvailabilityDto } from '@poojawala/dtos';
 @Controller('service')
 export class ServiceController {
   constructor(private readonly serviceService: ServiceService) { }
@@ -232,6 +233,18 @@ export class ServiceController {
   ) {
     const user = (req as any).user;
     return this.serviceService.deleteCategory(id, user.id);
+  }
+
+  // ─── Service Availability (Guest accessible) ──────────────────────────────────
+
+  @Get(':id/availability')
+  @UseGuards(OptionalJwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async checkServiceAvailability(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: CheckServiceAvailabilityDto,
+  ) {
+    return this.serviceService.checkServiceAvailability(id, query);
   }
 
   // ─── Service by ID / Delete ──────────────────────────────────────────────────

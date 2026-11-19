@@ -85,4 +85,5 @@ export * from './temple/temple-service.dto';
 export * from './service/create.service.dto';
 export * from './service/update.service.dto';
 export * from './service/get.services.query.dto';
+export * from './service/check-service-availability.dto';
 export * from './astrologer';

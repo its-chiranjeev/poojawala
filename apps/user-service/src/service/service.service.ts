@@ -10,6 +10,7 @@ import {
   UpdateServiceDto,
   UpdatePurohitServiceDto,
 } from '@poojawala/dtos/service/update.service.dto';
+import { CheckServiceAvailabilityDto } from '@poojawala/dtos';
 import {
   ServiceRepository,
   CategoryRepository,
@@ -24,6 +25,7 @@ import {
   ConflictException,
   ForbiddenException,
   HttpException,
+  HttpStatus,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -51,7 +53,7 @@ import {
   SERVICE_FEATURE_PLAN,
   SERVICE_FEATURE_TYPE,
 } from '@poojawala/entities';
-import { AuditLogService, generateUniqueSlug } from '@poojawala/common';
+import { AuditLogService, generateUniqueSlug, validateServiceAvailability } from '@poojawala/common';
 import { NotificationService } from '@poojawala/notification';
 import { EmailService } from '@poojawala/email-services';
 
@@ -1657,6 +1659,39 @@ export class ServiceService {
       success: true,
       message: updateMessage,
       data: updated,
+    };
+  }
+
+  async checkServiceAvailability(id: number, query: CheckServiceAvailabilityDto) {
+    const service = await this.serviceRepository.findOne({
+      where: { id },
+      relations: { temple: true },
+    });
+
+    if (!service) {
+      throw new NotFoundException('Service not found');
+    }
+
+    const availability = validateServiceAvailability(service, {
+      mode: query.mode,
+      city: query.city,
+      state: query.state,
+    });
+
+    return {
+      success: true,
+      statusCode: HttpStatus.OK,
+      message: availability.isAvailable
+        ? 'Service is available'
+        : (availability.reason ?? 'Service is not available'),
+      data: {
+        serviceId: service.id,
+        isAvailable: availability.isAvailable,
+        mode: query.mode,
+        city: query.city ?? null,
+        state: query.state ?? null,
+        ...(availability.reason && { reason: availability.reason }),
+      },
     };
   }
 

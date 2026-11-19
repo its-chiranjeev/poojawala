@@ -78,6 +78,7 @@ import {
   AuditLogService,
   normalizeCityName,
   isCityMatch,
+  validateServiceAvailability,
   buildAstrologyTransparencyNotices,
   AstrologyTransparencyData,
 } from '@poojawala/common';
@@ -455,32 +456,6 @@ export class BookingService {
           throw new NotFoundException('Service not found');
         }
 
-        if (!service.isActive) {
-          throw new BadRequestException('Service is currently inactive');
-        }
-
-        if (service.templeId) {
-          if (
-            !service.temple ||
-            service.temple.deletedAt ||
-            !service.temple.isActive ||
-            (service.temple.verificationStatus &&
-              service.temple.verificationStatus !== TEMPLE_VERIFICATION_STATUS.APPROVED)
-          ) {
-            throw new BadRequestException(
-              'The temple associated with this service is not approved or available for booking',
-            );
-          }
-        }
-
-        if (isOnlineBooking && !service.isOnline) {
-          throw new BadRequestException('This service is not available for online booking');
-        }
-
-        if (!isOnlineBooking && !service.isOffline) {
-          throw new BadRequestException('This service is not available for offline booking');
-        }
-
         let customerPincode: string | undefined = undefined;
 
         if (!isOnlineBooking) {
@@ -490,7 +465,7 @@ export class BookingService {
             );
           }
 
-          // Validate Service is available in customer address booking city
+          // Validate customer address contains a valid city for offline booking
           const bookingCity = customerAddress.city?.trim();
           if (!bookingCity) {
             throw new BadRequestException(
@@ -498,18 +473,14 @@ export class BookingService {
             );
           }
 
-          if (!service.isGlobal) {
-            const serviceCities = Array.isArray(service.cities) ? service.cities : [];
-            const isCityAvailable = serviceCities.some((c) => {
-              const cityName = typeof c === 'string' ? c : c?.name;
-              return cityName ? isCityMatch(cityName, bookingCity) : false;
-            });
+          const availability = validateServiceAvailability(service, {
+            mode: dto.bookingMode,
+            city: bookingCity,
+            state: customerAddress.state,
+          });
 
-            if (!isCityAvailable) {
-              throw new BadRequestException(
-                'Selected service is not available in the booking city.',
-              );
-            }
+          if (!availability.isAvailable) {
+            throw new BadRequestException(availability.reason);
           }
 
           customerPincode = customerAddress.pincode?.trim();
@@ -547,9 +518,19 @@ export class BookingService {
               'Selected customer address does not have a valid longitude',
             );
           }
-        } else if (customerAddress) {
+        } else {
           // ONLINE booking: address is optional, city validation does not apply (worldwide)
-          customerPincode = customerAddress.pincode?.trim() || undefined;
+          const availability = validateServiceAvailability(service, {
+            mode: dto.bookingMode,
+          });
+
+          if (!availability.isAvailable) {
+            throw new BadRequestException(availability.reason);
+          }
+
+          if (customerAddress) {
+            customerPincode = customerAddress.pincode?.trim() || undefined;
+          }
         }
 
         /*
@@ -5934,34 +5915,27 @@ export class BookingService {
           throw new NotFoundException('Service not found');
         }
 
-        if (!service.isActive) {
-          throw new BadRequestException('Service is currently inactive');
-        }
+        if (!isOnlineAdminBooking) {
+          if (!customerAddress) {
+            throw new NotFoundException('Customer address is required for offline booking');
+          }
 
-        if (service.templeId) {
-          if (
-            !service.temple ||
-            service.temple.deletedAt ||
-            !service.temple.isActive ||
-            (service.temple.verificationStatus &&
-              service.temple.verificationStatus !== TEMPLE_VERIFICATION_STATUS.APPROVED)
-          ) {
+          const bookingCity = customerAddress.city?.trim();
+          if (!bookingCity) {
             throw new BadRequestException(
-              'The temple associated with this service is not approved or available for booking',
+              'Selected customer address does not contain a valid city',
             );
           }
         }
 
-        if (isOnlineAdminBooking && !service.isOnline) {
-          throw new BadRequestException('This service is not available for online booking');
-        }
+        const adminAvailability = validateServiceAvailability(service, {
+          mode: isOnlineAdminBooking ? BOOKING_MODE.ONLINE : BOOKING_MODE.OFFLINE,
+          city: isOnlineAdminBooking ? undefined : customerAddress?.city,
+          state: isOnlineAdminBooking ? undefined : customerAddress?.state,
+        });
 
-        if (!isOnlineAdminBooking && !service.isOffline) {
-          throw new BadRequestException('This service is not available for offline booking');
-        }
-
-        if (!isOnlineAdminBooking && !customerAddress) {
-          throw new NotFoundException('Customer address is required for offline booking');
+        if (!adminAvailability.isAvailable) {
+          throw new BadRequestException(adminAvailability.reason);
         }
 
         const purohitProfileRepository = manager.getRepository(PurohitProfile);
@@ -6043,30 +6017,6 @@ export class BookingService {
             assignedPurohitProfile.id,
             scheduledAt,
           );
-        }
-
-        if (!isOnlineAdminBooking && customerAddress) {
-          // Validate Service availability in the booking city for offline booking
-          const bookingCity = customerAddress.city?.trim();
-          if (!bookingCity) {
-            throw new BadRequestException(
-              'Selected customer address does not contain a valid city',
-            );
-          }
-
-          if (!service.isGlobal) {
-            const serviceCities = Array.isArray(service.cities) ? service.cities : [];
-            const isCityAvailable = serviceCities.some((c) => {
-              const cityName = typeof c === 'string' ? c : c?.name;
-              return cityName ? isCityMatch(cityName, bookingCity) : false;
-            });
-
-            if (!isCityAvailable) {
-              throw new BadRequestException(
-                'Selected service is not available in the booking city.',
-              );
-            }
-          }
         }
 
         // Validate customer cannot book the same service within 24 hours

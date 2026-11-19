@@ -17,6 +17,7 @@ export * from './types/jwt-payload.type';
 export * from './audit/audit-log.service';
 export * from './context/request-context';
 export * from './utils/city.util';
+export * from './utils/service-availability.util';
 export * from './utils/otp.util';
 export * from './utils/astrology-transparency.util';
 export * from './utils/slug.util';
